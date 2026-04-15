@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Agrovibes",
+    "slug": "agrovibes",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["android", "ios", "web"],
+    "assetBundlePatterns": ["**/*"],
+    "scheme": "agrovibes",
+    "android": {
+      "package": "com.agrovibes.app"
+    },
+    "ios": {
+      "bundleIdentifier": "com.agrovibes.app"
+    }
+  }
+}
