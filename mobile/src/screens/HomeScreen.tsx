@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ResizeMode, Video } from "expo-av";
 import { AppTopBar } from "../components/AppTopBar";
 import { fetchHomePosts, fetchHomeStories, HomePost, HomeStory } from "../services/api";
 
@@ -14,6 +15,48 @@ const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [isStoryOpen, setStoryOpen] = useState(false);
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const progress = useRef(new Animated.Value(0)).current;
+
+  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl), [stories]);
+  const activeStory = playableStories[activeStoryIndex];
+
+  const closeStory = () => {
+    setStoryOpen(false);
+    progress.stopAnimation();
+    progress.setValue(0);
+  };
+
+  const nextStory = () => {
+    if (activeStoryIndex >= playableStories.length - 1) {
+      closeStory();
+      return;
+    }
+    progress.stopAnimation();
+    progress.setValue(0);
+    setActiveStoryIndex((v) => v + 1);
+  };
+
+  const prevStory = () => {
+    if (activeStoryIndex <= 0) return;
+    progress.stopAnimation();
+    progress.setValue(0);
+    setActiveStoryIndex((v) => v - 1);
+  };
+
+  useEffect(() => {
+    if (!isStoryOpen) return;
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: 7000,
+      useNativeDriver: false
+    }).start(({ finished }) => {
+      if (finished) nextStory();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStoryOpen, activeStoryIndex]);
 
   useEffect(() => {
     let mounted = true;
@@ -77,7 +120,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRow}>
         {stories.map((story) => (
-          <Pressable key={story.id} style={styles.storyItem} onPress={() => onOpenCreate?.()}>
+          <Pressable
+            key={story.id}
+            style={styles.storyItem}
+            onPress={() => {
+              if (story.videoUrl) {
+                const idx = playableStories.findIndex((s) => s.id === story.id);
+                setActiveStoryIndex(Math.max(idx, 0));
+                setStoryOpen(true);
+              } else {
+                onOpenCreate?.();
+              }
+            }}
+          >
             <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
               <View style={styles.storyInner}>
                 <View style={styles.storyAvatarFill}>
@@ -89,6 +144,65 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           </Pressable>
         ))}
       </ScrollView>
+
+      <Modal visible={isStoryOpen} animationType="fade" onRequestClose={closeStory}>
+        <View style={styles.storyViewerRoot}>
+          <View style={styles.storyProgressRow}>
+            {playableStories.map((s, idx) => {
+              const isPast = idx < activeStoryIndex;
+              const isActive = idx === activeStoryIndex;
+              const width = isActive
+                ? progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] })
+                : "100%";
+              return (
+                <View key={s.id} style={styles.storyProgressTrack}>
+                  <Animated.View
+                    style={[
+                      styles.storyProgressFill,
+                      {
+                        width,
+                        opacity: isPast || isActive ? 1 : 0.35
+                      }
+                    ]}
+                  />
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.storyViewerTopRow}>
+            <View style={styles.storyViewerUser}>
+              <View style={styles.storyViewerAvatar}>
+                <Text style={styles.storyViewerAvatarText}>{activeStory?.avatarLabel ?? "U"}</Text>
+              </View>
+              <View>
+                <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
+                <Text style={styles.storyViewerSub}>{activeStory?.district ?? ""}</Text>
+              </View>
+            </View>
+            <Pressable onPress={closeStory} hitSlop={10}>
+              <Ionicons name="close" size={26} color="#fff" />
+            </Pressable>
+          </View>
+
+          <View style={styles.storyViewerBody}>
+            {activeStory?.videoUrl ? (
+              <Video
+                style={styles.storyVideo}
+                source={{ uri: activeStory.videoUrl }}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay
+                isLooping={false}
+              />
+            ) : null}
+
+            <View style={styles.storyTapZones}>
+              <Pressable style={styles.storyTapZone} onPress={prevStory} />
+              <Pressable style={styles.storyTapZone} onPress={nextStory} />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ScrollView contentContainerStyle={styles.feedBottom}>
         {posts.map((post, index) => (
@@ -105,7 +219,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </View>
 
             <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
-              <Ionicons name="play-circle-outline" size={48} color="#fff" />
+              {post.videoUrl ? (
+                <Video
+                  style={styles.video}
+                  source={{ uri: post.videoUrl }}
+                  useNativeControls
+                  resizeMode={ResizeMode.COVER}
+                  isLooping
+                />
+              ) : (
+                <Ionicons name="play-circle-outline" size={48} color="#fff" />
+              )}
             </View>
 
             <View style={styles.postActions}>
@@ -215,6 +339,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  video: {
+    width: "100%",
+    height: "100%"
+  },
+  storyViewerRoot: { flex: 1, backgroundColor: "#000" },
+  storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
+  storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
+  storyProgressFill: { height: "100%", backgroundColor: "#fff" },
+  storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
+  storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
+  storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
+  storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
+  storyViewerName: { color: "#fff", fontWeight: "800" },
+  storyViewerSub: { color: "rgba(255,255,255,0.75)", marginTop: 1, fontSize: 12 },
+  storyViewerBody: { flex: 1, marginTop: 10 },
+  storyVideo: { width: "100%", height: "100%" },
+  storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
+  storyTapZone: { flex: 1 },
   postActions: {
     flexDirection: "row",
     justifyContent: "space-between",

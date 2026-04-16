@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { createHomePost, createHomeStory } from "../services/api";
+import { createHomePost, createHomeStory, uploadVideoFile } from "../services/api";
 
 interface CreateModalProps {
   visible: boolean;
@@ -27,6 +27,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
+  const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
 
@@ -41,6 +42,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setCreateType(initialType);
     setErrorText("");
     setPickedStoryVideoUri("");
+    setPickedPostVideoUri("");
   }, [visible, initialType]);
 
   const handleClose = () => {
@@ -60,22 +62,29 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
+        const uploaded = await uploadVideoFile(pickedStoryVideoUri);
         await createHomeStory({
           userName: userName.trim() || "Farmer",
           district: location.trim() || "Unknown",
-          videoUrl: pickedStoryVideoUri
+          videoUrl: uploaded.url
         });
       } else {
-        if (!caption.trim() || !videoUrl.trim()) {
-          setErrorText("Caption and video URL are required.");
+        if (!caption.trim()) {
+          setErrorText("Caption is required.");
           setSubmitting(false);
           return;
         }
+        if (!pickedPostVideoUri && !videoUrl.trim()) {
+          setErrorText("Please record or upload a reel/video.");
+          setSubmitting(false);
+          return;
+        }
+        const finalVideoUrl = pickedPostVideoUri ? (await uploadVideoFile(pickedPostVideoUri)).url : videoUrl.trim();
         await createHomePost({
           userName: userName.trim() || "Farmer",
           location: location.trim() || "Unknown",
           caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-          videoUrl: videoUrl.trim(),
+          videoUrl: finalVideoUrl,
           thumbnailUrl: thumbnailUrl.trim() || undefined
         });
       }
@@ -183,7 +192,52 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <TextInput value={userName} onChangeText={setUserName} style={styles.input} placeholder="Your name" />
                   <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder="Location" />
                   <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder="Caption" />
-                  <TextInput value={videoUrl} onChangeText={setVideoUrl} style={styles.input} placeholder="Video URL (.mp4)" autoCapitalize="none" />
+                  <View style={styles.storyActionRow}>
+                    <Pressable
+                      style={styles.storyActionBtn}
+                      onPress={async () => {
+                        setErrorText("");
+                        const perm = await ImagePicker.requestCameraPermissionsAsync();
+                        if (!perm.granted) {
+                          setErrorText("Camera permission is required.");
+                          return;
+                        }
+                        const result = await ImagePicker.launchCameraAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+                          quality: 0.9
+                        });
+                        if (!result.canceled) {
+                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={styles.storyActionText}>Tap to record</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.storyActionBtn}
+                      onPress={async () => {
+                        setErrorText("");
+                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!perm.granted) {
+                          setErrorText("Media library permission is required.");
+                          return;
+                        }
+                        const result = await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+                          quality: 1
+                        });
+                        if (!result.canceled) {
+                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={styles.storyActionText}>Upload video</Text>
+                    </Pressable>
+                  </View>
+                  {pickedPostVideoUri ? <Text style={styles.selectedText}>Selected: {pickedPostVideoUri}</Text> : null}
+                  <TextInput value={videoUrl} onChangeText={setVideoUrl} style={styles.input} placeholder="Or paste video URL (optional)" autoCapitalize="none" />
                   <TextInput value={thumbnailUrl} onChangeText={setThumbnailUrl} style={styles.input} placeholder="Thumbnail URL (optional)" autoCapitalize="none" />
                 </>
               )}
