@@ -44,6 +44,7 @@ export interface HomeStory {
   avatarLabel: string;
   hasNew: boolean;
   viewed: boolean;
+  videoUrl?: string | null;
 }
 
 export interface HomePost {
@@ -82,7 +83,7 @@ export async function fetchHomeStories() {
   return (await response.json()) as { stories: HomeStory[] };
 }
 
-export async function createHomeStory(payload: { userName: string; district: string }) {
+export async function createHomeStory(payload: { userName: string; district: string; videoUrl?: string }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/stories`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
