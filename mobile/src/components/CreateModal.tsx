@@ -1,14 +1,16 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { createHomePost, createHomeStory } from "../services/api";
 
 interface CreateModalProps {
   visible: boolean;
   onClose: () => void;
   onVideoPosted?: () => void;
+  initialType?: CreateType | null;
 }
 
-type CreateType = "reel" | "story" | "upload" | "camera";
+export type CreateType = "reel" | "story" | "upload" | "camera";
 
 const createItems: { type: CreateType; title: string; subtitle: string; icon: string }[] = [
   { type: "reel", title: "Post Reel", subtitle: "Create a short reel", icon: "🎬" },
@@ -17,15 +19,29 @@ const createItems: { type: CreateType; title: string; subtitle: string; icon: st
   { type: "camera", title: "Camera", subtitle: "Record now", icon: "📷" }
 ];
 
-export function CreateModal({ visible, onClose, onVideoPosted }: CreateModalProps) {
+export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [userName, setUserName] = useState("Ramesh Patel");
   const [location, setLocation] = useState("Nashik");
   const [caption, setCaption] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
+  const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
+
+  const isStory = createType === "story";
+  const storyHint = useMemo(() => {
+    if (!isStory) return "";
+    return pickedStoryVideoUri ? "Video selected." : "Choose how you want to add a story video.";
+  }, [isStory, pickedStoryVideoUri]);
+
+  React.useEffect(() => {
+    if (!visible) return;
+    setCreateType(initialType);
+    setErrorText("");
+    setPickedStoryVideoUri("");
+  }, [visible, initialType]);
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -39,14 +55,15 @@ export function CreateModal({ visible, onClose, onVideoPosted }: CreateModalProp
     setErrorText("");
     try {
       if (createType === "story") {
-        if (!userName.trim() || !location.trim()) {
-          setErrorText("Name and district are required for story.");
+        if (!pickedStoryVideoUri) {
+          setErrorText("Please record or upload a story video.");
           setSubmitting(false);
           return;
         }
         await createHomeStory({
-          userName: userName.trim(),
-          district: location.trim()
+          userName: userName.trim() || "Farmer",
+          district: location.trim() || "Unknown",
+          videoUrl: pickedStoryVideoUri
         });
       } else {
         if (!caption.trim() || !videoUrl.trim()) {
@@ -105,21 +122,71 @@ export function CreateModal({ visible, onClose, onVideoPosted }: CreateModalProp
                 {createType === "reel" ? "Post Reel" : createType === "story" ? "Create Story" : createType === "upload" ? "Upload Video" : "Record from Camera"}
               </Text>
               <Text style={styles.helperText}>
-                {createType === "camera"
-                  ? "Paste video URL captured from your camera workflow."
-                  : createType === "upload"
-                    ? "Paste uploaded gallery video URL."
-                    : "Add details and publish to Home feed."}
+                {createType === "story"
+                  ? storyHint
+                  : createType === "camera"
+                    ? "Paste video URL captured from your camera workflow."
+                    : createType === "upload"
+                      ? "Paste uploaded gallery video URL."
+                      : "Add details and publish to Home feed."}
               </Text>
-              <TextInput value={userName} onChangeText={setUserName} style={styles.input} placeholder="Your name" />
-              <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder="Location" />
-              {createType !== "story" ? (
+              {createType === "story" ? (
                 <>
+                  <View style={styles.storyActionRow}>
+                    <Pressable
+                      style={styles.storyActionBtn}
+                      onPress={async () => {
+                        setErrorText("");
+                        const perm = await ImagePicker.requestCameraPermissionsAsync();
+                        if (!perm.granted) {
+                          setErrorText("Camera permission is required.");
+                          return;
+                        }
+                        const result = await ImagePicker.launchCameraAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+                          quality: 0.9
+                        });
+                        if (!result.canceled) {
+                          setPickedStoryVideoUri(result.assets[0]?.uri ?? "");
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={styles.storyActionText}>Tap to record</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.storyActionBtn}
+                      onPress={async () => {
+                        setErrorText("");
+                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!perm.granted) {
+                          setErrorText("Media library permission is required.");
+                          return;
+                        }
+                        const result = await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+                          quality: 1
+                        });
+                        if (!result.canceled) {
+                          setPickedStoryVideoUri(result.assets[0]?.uri ?? "");
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={styles.storyActionText}>Upload video</Text>
+                    </Pressable>
+                  </View>
+                  {pickedStoryVideoUri ? <Text style={styles.selectedText}>Selected: {pickedStoryVideoUri}</Text> : null}
+                </>
+              ) : (
+                <>
+                  <TextInput value={userName} onChangeText={setUserName} style={styles.input} placeholder="Your name" />
+                  <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder="Location" />
                   <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder="Caption" />
                   <TextInput value={videoUrl} onChangeText={setVideoUrl} style={styles.input} placeholder="Video URL (.mp4)" autoCapitalize="none" />
                   <TextInput value={thumbnailUrl} onChangeText={setThumbnailUrl} style={styles.input} placeholder="Thumbnail URL (optional)" autoCapitalize="none" />
                 </>
-              ) : null}
+              )}
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
               <View style={styles.actionsRow}>
                 <Pressable style={styles.secondaryBtn} onPress={() => setCreateType(null)} disabled={isSubmitting}>
@@ -149,6 +216,10 @@ const styles = StyleSheet.create({
   modalItemTitle: { color: "#1b2422", fontWeight: "700", fontSize: 14 },
   modalItemSub: { color: "#697774", marginTop: 2, fontSize: 12 },
   helperText: { color: "#6b7976", textAlign: "center", marginBottom: 2 },
+  storyActionRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  storyActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 12, alignItems: "center" },
+  storyActionText: { color: "#1b2422", fontWeight: "700" },
+  selectedText: { marginTop: 8, color: "#4d5f5a", fontSize: 12 },
   input: {
     marginTop: 8,
     backgroundColor: "#f8faf9",

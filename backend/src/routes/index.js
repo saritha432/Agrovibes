@@ -36,10 +36,13 @@ async function ensureHomeStoriesTable() {
       avatar_label TEXT NOT NULL,
       has_new BOOLEAN NOT NULL DEFAULT true,
       viewed BOOLEAN NOT NULL DEFAULT false,
+      video_url TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     `
   );
+  // Lightweight migration for older deployments.
+  await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS video_url TEXT`);
   homeStoriesTableReady = true;
 }
 
@@ -156,7 +159,8 @@ router.get("/v1/home/stories", async (_req, res) => {
         district,
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
-        viewed
+        viewed,
+        video_url AS "videoUrl"
       FROM home_stories
       ORDER BY created_at DESC
       LIMIT 40
@@ -192,7 +196,7 @@ router.get("/v1/home/stories", async (_req, res) => {
 router.post("/v1/home/stories", async (req, res) => {
   try {
     await ensureHomeStoriesTable();
-    const { userName, district } = req.body || {};
+    const { userName, district, videoUrl } = req.body || {};
     if (!userName || !district) {
       res.status(400).json({ message: "userName and district are required" });
       return;
@@ -201,17 +205,18 @@ router.post("/v1/home/stories", async (req, res) => {
     const avatarLabel = String(userName).trim().charAt(0).toUpperCase() || "U";
     const result = await query(
       `
-      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed)
-      VALUES ($1, $2, $3, true, false)
+      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url)
+      VALUES ($1, $2, $3, true, false, $4)
       RETURNING
         id,
         user_name AS "userName",
         district,
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
-        viewed
+        viewed,
+        video_url AS "videoUrl"
       `,
-      [userName, district, avatarLabel]
+      [userName, district, avatarLabel, videoUrl || null]
     );
 
     res.status(201).json({ story: result.rows[0] });
