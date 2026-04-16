@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { createHomePost, createHomeStory, uploadVideoFile } from "../services/api";
@@ -42,6 +42,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [isSubmitting, setSubmitting] = useState(false);
 
   async function validateVideoSize(uri: string, maxMb: number) {
+    if (Platform.OS === "web") return;
     const info = await FileSystem.getInfoAsync(uri, { size: true });
     const bytes = (info as { size?: number }).size ?? 0;
     if (!bytes) return;
