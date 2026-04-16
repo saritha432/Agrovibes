@@ -1,105 +1,229 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState } from "react";
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
+import { fetchHomePosts, fetchHomeStories, HomePost, HomeStory } from "../services/api";
 
-const reels = [
-  { id: "1", title: "Tomato Harvest", kind: "content", linked: false },
-  { id: "2", title: "Organic Onion Lot", kind: "product", linked: true },
-  { id: "3", title: "Soybean Sorting", kind: "content", linked: false }
-];
+interface HomeScreenProps {
+  refreshToken?: number;
+}
 
-export function HomeScreen() {
-  const [cartOpen, setCartOpen] = useState(false);
+const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
+
+export function HomeScreen({ refreshToken = 0 }: HomeScreenProps) {
+  const [stories, setStories] = useState<HomeStory[]>([]);
+  const [posts, setPosts] = useState<HomePost[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchHomeStories()
+      .then((data) => {
+        if (!mounted) return;
+        setStories(data.stories);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setStories([
+          { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
+          { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false },
+          { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false }
+        ]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [refreshToken]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchHomePosts()
+      .then((data) => {
+        if (!mounted) return;
+        setPosts(data.posts);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setPosts([
+          {
+            id: 1,
+            userName: "Ramesh Patel",
+            location: "Nashik",
+            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
+            likesCount: 1284,
+            commentsCount: 92,
+            videoUrl: "https://example.com/video.mp4",
+            thumbnailUrl: "",
+            createdAt: new Date().toISOString()
+          }
+        ]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [refreshToken]);
 
   return (
     <View style={styles.screen}>
       <AppTopBar />
-      <ScrollView stickyHeaderIndices={[0]} contentContainerStyle={styles.scrollBottom}>
-        <View style={styles.stickySearchWrap}>
-          <View style={styles.searchWrap}>
-            <TextInput placeholder="Search crops, farmers, districts" style={styles.searchInput} />
-            <Pressable style={styles.iconButton}><Ionicons name="mic-outline" size={18} color="#fff" /></Pressable>
-            <Pressable style={styles.iconButton}><Ionicons name="search-outline" size={18} color="#fff" /></Pressable>
-          </View>
-        </View>
 
-        {reels.map((reel) => (
-          <View key={reel.id} style={[styles.reelCard, reel.linked ? styles.reelCardLinked : null]}>
-            <Ionicons name="play-circle-outline" size={38} color="#fff" />
-            <Text style={styles.reelTitle}>{reel.title}</Text>
-            <Text style={styles.reelMeta}>{reel.kind === "product" ? "Reel linked product" : "Pure content reel"}</Text>
-            {reel.linked ? (
-              <Pressable style={styles.buyNow}><Text style={styles.buyNowText}>Buy Now</Text></Pressable>
-            ) : null}
+      <View style={styles.appHeader}>
+        <Text style={styles.appTitle}>AgroGram</Text>
+        <View style={styles.headerIcons}>
+          <Pressable style={styles.iconBtn}><Ionicons name="heart-outline" size={22} color="#1f2c29" /></Pressable>
+          <Pressable style={styles.iconBtn}><Ionicons name="chatbubble-outline" size={21} color="#1f2c29" /></Pressable>
+        </View>
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRow}>
+        {stories.map((story) => (
+          <View key={story.id} style={styles.storyItem}>
+            <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
+              <View style={styles.storyInner}>
+                <View style={styles.storyAvatarFill}>
+                  <Text style={styles.storyInitial}>{story.avatarLabel}</Text>
+                </View>
+              </View>
+            </View>
+            <Text style={styles.storyName} numberOfLines={1}>{story.userName}</Text>
           </View>
         ))}
-
-        <View style={styles.quickActions}>
-          <Action icon="heart-outline" label="Like" />
-          <Action icon="chatbubble-outline" label="Chat" />
-          <Action icon="cart-outline" label="Add Cart" onPress={() => setCartOpen(true)} />
-          <Action icon="add-circle-outline" label="Add Reel" />
-        </View>
       </ScrollView>
 
-      <Pressable style={styles.exploreBtn}><Text style={styles.exploreText}>Explore Marketplace</Text></Pressable>
+      <ScrollView contentContainerStyle={styles.feedBottom}>
+        {posts.map((post, index) => (
+          <View key={post.id} style={styles.postCard}>
+            <View style={styles.postTop}>
+              <View style={styles.postUserRow}>
+                <View style={styles.userAvatar}><Text style={styles.userAvatarText}>{post.userName[0]}</Text></View>
+                <View>
+                  <Text style={styles.userName}>{post.userName} <Text style={styles.timeText}>• 13h</Text></Text>
+                  <Text style={styles.userLoc}>{post.location}</Text>
+                </View>
+              </View>
+              <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+            </View>
 
-      <Modal visible={cartOpen} transparent animationType="slide" onRequestClose={() => setCartOpen(false)}>
-        <Pressable style={styles.drawerBackdrop} onPress={() => setCartOpen(false)}>
-          <View style={styles.drawer}>
-            <Text style={styles.drawerTitle}>Mini Drawer Cart</Text>
-            <Text style={styles.drawerItem}>Tomato crate - Rs 980 - Escrow</Text>
-            <Text style={styles.drawerItem}>Onion bag - Rs 740 - Escrow</Text>
-            <Pressable style={styles.checkoutBtn}><Text style={styles.checkoutText}>Proceed to Checkout</Text></Pressable>
-            <Pressable onPress={() => setCartOpen(false)}><Text style={styles.continueText}>Continue Browsing</Text></Pressable>
+            <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
+              <Ionicons name="play-circle-outline" size={48} color="#fff" />
+            </View>
+
+            <View style={styles.postActions}>
+              <View style={styles.postActionsLeft}>
+                <Ionicons name="heart-outline" size={24} color="#1f2c29" />
+                <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
+                <Ionicons name="paper-plane-outline" size={22} color="#1f2c29" />
+              </View>
+              <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
+            </View>
+
+            <Text style={styles.likes}>{post.likesCount} likes</Text>
+            <Text style={styles.caption}><Text style={styles.captionUser}>{post.userName}</Text> {post.caption}</Text>
+            <Text style={styles.comments}>View all {post.commentsCount} comments</Text>
           </View>
-        </Pressable>
-      </Modal>
+        ))}
+      </ScrollView>
     </View>
   );
 }
 
-function Action({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress?: () => void }) {
-  return (
-    <Pressable style={styles.actionBtn} onPress={onPress}>
-      <Ionicons name={icon} size={18} color="#1f2b28" />
-      <Text style={styles.actionText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f2f5f4" },
-  scrollBottom: { paddingBottom: 110 },
-  stickySearchWrap: { backgroundColor: "#f2f5f4", paddingTop: 8 },
-  searchWrap: { marginHorizontal: 12, marginBottom: 8, flexDirection: "row", alignItems: "center", gap: 8 },
-  searchInput: { flex: 1, backgroundColor: "#f2f0eb", borderRadius: 10, borderWidth: 1, borderColor: "#e4e6df", paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
-  iconButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#0a9f46", alignItems: "center", justifyContent: "center" },
-  reelCard: { marginHorizontal: 12, marginBottom: 10, borderRadius: 16, minHeight: 190, backgroundColor: "#07803a", alignItems: "center", justifyContent: "center" },
-  reelCardLinked: { backgroundColor: "#c6425d" },
-  reelTitle: { color: "#fff", fontSize: 24, fontWeight: "700", marginTop: 8 },
-  reelMeta: { color: "#e2f4e8", marginTop: 4 },
-  buyNow: { marginTop: 10, backgroundColor: "#f2ae00", paddingHorizontal: 13, paddingVertical: 6, borderRadius: 18 },
-  buyNowText: { color: "#1f2524", fontWeight: "700", fontSize: 12 },
-  quickActions: { marginHorizontal: 12, marginTop: 4, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#d9e2df", flexDirection: "row", justifyContent: "space-around", paddingVertical: 10 },
-  actionBtn: { alignItems: "center", gap: 4 },
-  actionText: { fontSize: 11, fontWeight: "600", color: "#31403d" },
-  exploreBtn: { position: "absolute", right: 14, bottom: 96, backgroundColor: "#0a9f46", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
-  exploreText: { color: "#fff", fontWeight: "700" },
-  drawerBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.25)" },
-  drawer: { backgroundColor: "#fff", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 14, gap: 8 },
-  drawerTitle: { fontSize: 16, fontWeight: "700", color: "#1f2b28" },
-  drawerItem: { color: "#4a5b57" },
-  checkoutBtn: { marginTop: 8, backgroundColor: "#0a9f46", borderRadius: 10, alignItems: "center", paddingVertical: 11 },
-  checkoutText: { color: "#fff", fontWeight: "700" },
-  continueText: { textAlign: "center", color: "#0a9f46", fontWeight: "600", marginTop: 2 }
+  screen: { flex: 1, backgroundColor: "#f5f7f6" },
+  appHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    marginBottom: 4
+  },
+  appTitle: { fontSize: 26, fontWeight: "700", color: "#1a2522" },
+  headerIcons: { flexDirection: "row", gap: 14, alignItems: "center" },
+  iconBtn: { padding: 2 },
+  storyRow: {
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 10,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e8ecea",
+    backgroundColor: "#fff"
+  },
+  storyItem: { alignItems: "center", width: 70 },
+  storyRing: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyRingNew: { backgroundColor: "#16a34a" },
+  storyRingViewed: { backgroundColor: "#9ca3af" },
+  storyInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyAvatarFill: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#d4dce0",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyInitial: { fontSize: 18, fontWeight: "700", color: "#1f2c29" },
+  storyName: { fontSize: 12, color: "#2f3e3a", marginTop: 6, fontWeight: "500", textAlign: "center", width: "100%" },
+  feedBottom: { paddingBottom: 100 },
+  postCard: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#dfe5e3",
+    borderRadius: 8,
+    overflow: "hidden",
+    marginHorizontal: 10,
+    marginTop: 10,
+    paddingBottom: 10,
+    marginBottom: 2
+  },
+  postTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8
+  },
+  postUserRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  userAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#22c55e",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  userAvatarText: { color: "#fff", fontWeight: "700" },
+  userName: { color: "#1f2c29", fontWeight: "700", fontSize: 14 },
+  timeText: { color: "#6d7d79", fontWeight: "500" },
+  userLoc: { color: "#687975", fontSize: 12 },
+  postMedia: {
+    height: 360,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  postActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingTop: 10
+  },
+  postActionsLeft: { flexDirection: "row", gap: 14, alignItems: "center" },
+  likes: { marginTop: 8, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29" },
+  caption: { marginTop: 6, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20 },
+  captionUser: { fontWeight: "700" },
+  comments: { marginTop: 6, paddingHorizontal: 10, color: "#637571" }
 });
