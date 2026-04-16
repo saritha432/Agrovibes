@@ -138,12 +138,25 @@ export async function uploadVideoFile(fileUri: string) {
   };
 
   const form = new FormData();
-  form.append("file", {
-    // @ts-ignore React Native file type
-    uri: fileUri,
-    name: `video-${Date.now()}.mp4`,
-    type: "video/mp4"
-  });
+  const filename = `video-${Date.now()}.mp4`;
+
+  // RN web can't append `{ uri }` objects reliably; it needs a real Blob/File.
+  if (Platform.OS === "web") {
+    const res = await fetch(fileUri);
+    const blob = await res.blob();
+    (form as any).append("file", blob, filename);
+  } else {
+    (form as any).append(
+      "file",
+      {
+        // @ts-ignore React Native FormData file type shape
+        uri: fileUri,
+        name: filename,
+        type: "video/mp4"
+      } as any
+    );
+  }
+
   form.append("api_key", sign.apiKey);
   form.append("timestamp", String(sign.timestamp));
   form.append("folder", sign.folder);
