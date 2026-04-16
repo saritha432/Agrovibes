@@ -14,12 +14,16 @@ function resolveApiBaseUrl() {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
+export type MarketplaceListingType = "produce" | "machinery" | "knowledge" | "services";
+
 export interface MarketplaceListing {
   id: number;
   cropName: string;
   district: string;
   pricePerKg: number;
   verifiedOnly: boolean;
+  /** From API; older responses may omit — treated as produce */
+  listingType?: MarketplaceListingType;
 }
 
 export interface CommunityQuestion {

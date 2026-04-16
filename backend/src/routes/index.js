@@ -28,7 +28,8 @@ router.get("/v1/marketplace/listings", async (_req, res) => {
         l.crop_name AS "cropName",
         COALESCE(d.name, 'Unknown') AS district,
         l.price_per_kg AS "pricePerKg",
-        l.verified_only AS "verifiedOnly"
+        l.verified_only AS "verifiedOnly",
+        'produce' AS "listingType"
       FROM listings l
       LEFT JOIN districts d ON d.id = l.district_id
       ORDER BY l.created_at DESC
@@ -40,9 +41,9 @@ router.get("/v1/marketplace/listings", async (_req, res) => {
   } catch (error) {
     res.json({
       listings: [
-        { id: 1, cropName: "Tomato", district: "Nashik", pricePerKg: 28, verifiedOnly: true },
-        { id: 2, cropName: "Onion", district: "Nagpur", pricePerKg: 25, verifiedOnly: true },
-        { id: 3, cropName: "Soybean", district: "Indore", pricePerKg: 42, verifiedOnly: false }
+        { id: 1, cropName: "Tomato", district: "Nashik", pricePerKg: 28, verifiedOnly: true, listingType: "produce" },
+        { id: 2, cropName: "Onion", district: "Nagpur", pricePerKg: 25, verifiedOnly: true, listingType: "produce" },
+        { id: 3, cropName: "Soybean", district: "Indore", pricePerKg: 42, verifiedOnly: false, listingType: "produce" }
       ],
       source: "fallback",
       message: error.message

@@ -4,14 +4,30 @@
     "slug": "agrovibes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "platforms": ["android", "ios", "web"],
-    "assetBundlePatterns": ["**/*"],
+    "platforms": [
+      "android",
+      "ios",
+      "web"
+    ],
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "scheme": "agrovibes",
     "android": {
       "package": "com.agrovibes.app"
     },
     "ios": {
       "bundleIdentifier": "com.agrovibes.app"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "03e098eb-cfad-496b-8385-dab904b3d946"
+      }
+    },
+    "owner": "saritha-s"
   }
 }
