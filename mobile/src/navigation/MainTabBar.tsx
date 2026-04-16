@@ -15,10 +15,10 @@ function tabIcon(routeName: string, focused: boolean): keyof typeof Ionicons.gly
       return focused ? "home" : "home-outline";
     case "Marketplace":
       return focused ? "storefront" : "storefront-outline";
-    case "Services":
-      return focused ? "grid" : "grid-outline";
-    case "Community":
-      return focused ? "people" : "people-outline";
+    case "Learn":
+      return focused ? "book" : "book-outline";
+    case "Profile":
+      return focused ? "person" : "person-outline";
     default:
       return "ellipse-outline";
   }
@@ -33,7 +33,6 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
     if (!route) return null;
     const index = state.routes.indexOf(route);
     const isFocused = state.index === index;
-    const label = route.name;
 
     const onPress = () => {
       const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
@@ -47,11 +46,11 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
         style={styles.tabItem}
         accessibilityRole="button"
         accessibilityState={{ selected: isFocused }}
-        accessibilityLabel={label}
+        accessibilityLabel={route.name}
       >
         <Ionicons name={tabIcon(route.name, isFocused)} size={22} color={isFocused ? GREEN : MUTED} />
         <Text style={[styles.tabLabel, isFocused ? styles.tabLabelActive : null]} numberOfLines={1}>
-          {label}
+          {route.name}
         </Text>
       </Pressable>
     );
@@ -68,8 +67,8 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
           </Pressable>
           <Text style={styles.fabLabel}>Create+</Text>
         </View>
-        {renderTab("Services")}
-        {renderTab("Community")}
+        {renderTab("Learn")}
+        {renderTab("Profile")}
       </View>
     </View>
   );
