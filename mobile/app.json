@@ -18,7 +18,8 @@
     ],
     "scheme": "agrovibes",
     "android": {
-      "package": "com.agrovibes.app"
+      "package": "com.agrovibes.app",
+      "versionCode": 1
     },
     "ios": {
       "bundleIdentifier": "com.agrovibes.app"
