@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { createHomePost, createHomeStory, uploadVideoFile } from "../services/api";
 
 interface CreateModalProps {
@@ -19,6 +20,15 @@ const createItems: { type: CreateType; title: string; subtitle: string; icon: st
   { type: "camera", title: "Camera", subtitle: "Record now", icon: "📷" }
 ];
 
+function formatSelectedLabel(uri: string) {
+  if (!uri) return "";
+  const clean = uri.split("?")[0];
+  const last = clean.split("/").pop() || clean;
+  // If it looks like a massive data/blob string, shorten it.
+  if (last.length > 40) return `${last.slice(0, 18)}…${last.slice(-12)}`;
+  return last;
+}
+
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [userName, setUserName] = useState("Ramesh Patel");
@@ -30,6 +40,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
+
+  async function validateVideoSize(uri: string, maxMb: number) {
+    const info = await FileSystem.getInfoAsync(uri, { size: true });
+    const bytes = (info as { size?: number }).size ?? 0;
+    if (!bytes) return;
+    const mb = bytes / (1024 * 1024);
+    if (mb > maxMb) {
+      throw new Error(`Video is ${mb.toFixed(1)}MB. Please select a video under ${maxMb}MB.`);
+    }
+  }
 
   const isStory = createType === "story";
   const storyHint = useMemo(() => {
@@ -62,6 +82,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
+        await validateVideoSize(pickedStoryVideoUri, 30);
         const uploaded = await uploadVideoFile(pickedStoryVideoUri);
         await createHomeStory({
           userName: userName.trim() || "Farmer",
@@ -79,6 +100,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
+        if (pickedPostVideoUri) {
+          await validateVideoSize(pickedPostVideoUri, 80);
+        }
         const finalVideoUrl = pickedPostVideoUri ? (await uploadVideoFile(pickedPostVideoUri)).url : videoUrl.trim();
         await createHomePost({
           userName: userName.trim() || "Farmer",
@@ -95,7 +119,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       onVideoPosted?.();
       onClose();
     } catch (error) {
-      setErrorText("Failed to publish video. Please check backend/API URL.");
+      setErrorText(error instanceof Error ? error.message : "Failed to publish video.");
     } finally {
       setSubmitting(false);
     }
@@ -185,7 +209,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       <Text style={styles.storyActionText}>Upload video</Text>
                     </Pressable>
                   </View>
-                  {pickedStoryVideoUri ? <Text style={styles.selectedText}>Selected: {pickedStoryVideoUri}</Text> : null}
+                  {pickedStoryVideoUri ? (
+                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
+                      Selected: {formatSelectedLabel(pickedStoryVideoUri)}
+                    </Text>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -236,7 +264,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       <Text style={styles.storyActionText}>Upload video</Text>
                     </Pressable>
                   </View>
-                  {pickedPostVideoUri ? <Text style={styles.selectedText}>Selected: {pickedPostVideoUri}</Text> : null}
+                  {pickedPostVideoUri ? (
+                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
+                      Selected: {formatSelectedLabel(pickedPostVideoUri)}
+                    </Text>
+                  ) : null}
                   <TextInput value={videoUrl} onChangeText={setVideoUrl} style={styles.input} placeholder="Or paste video URL (optional)" autoCapitalize="none" />
                   <TextInput value={thumbnailUrl} onChangeText={setThumbnailUrl} style={styles.input} placeholder="Thumbnail URL (optional)" autoCapitalize="none" />
                 </>

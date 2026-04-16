@@ -3,6 +3,7 @@ const { query } = require("../db");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
+const crypto = require("crypto");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -89,6 +90,41 @@ router.post("/v1/uploads/video", upload.single("file"), async (req, res) => {
     res.status(201).json({ url: publicUrl });
   } catch (error) {
     res.status(500).json({ message: "Upload failed", error: error.message });
+  }
+});
+
+router.post("/v1/media/cloudinary-sign", async (req, res) => {
+  try {
+    const { folder = "agrovibes" } = req.body || {};
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      res.status(500).json({ message: "Cloudinary env vars missing" });
+      return;
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Cloudinary signature: sort params, then sha1(paramString + api_secret)
+    const params = { folder: String(folder), timestamp };
+    const paramString = Object.keys(params)
+      .sort()
+      .map((k) => `${k}=${params[k]}`)
+      .join("&");
+
+    const signature = crypto.createHash("sha1").update(`${paramString}${apiSecret}`).digest("hex");
+
+    res.json({
+      cloudName,
+      apiKey,
+      timestamp,
+      folder: params.folder,
+      signature
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to sign upload", error: error.message });
   }
 });
 
@@ -283,22 +319,10 @@ router.get("/v1/home/posts", async (_req, res) => {
       `
     );
 
+    // If there are no posts yet, return an empty list.
+    // The mobile app should only attempt playback when a real uploaded URL exists.
     if (result.rows.length === 0) {
-      res.json({
-        posts: [
-          {
-            id: 1,
-            userName: "Ramesh Patel",
-            location: "Nashik",
-            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-            likesCount: 1284,
-            commentsCount: 92,
-            videoUrl: "https://example.com/video/tomato.mp4",
-            thumbnailUrl: null,
-            createdAt: new Date().toISOString()
-          }
-        ]
-      });
+      res.json({ posts: [] });
       return;
     }
 

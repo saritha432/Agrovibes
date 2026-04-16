@@ -87,19 +87,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       })
       .catch(() => {
         if (!mounted) return;
-        setPosts([
-          {
-            id: 1,
-            userName: "Ramesh Patel",
-            location: "Nashik",
-            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-            likesCount: 1284,
-            commentsCount: 92,
-            videoUrl: "https://example.com/video.mp4",
-            thumbnailUrl: "",
-            createdAt: new Date().toISOString()
-          }
-        ]);
+        setPosts([]);
       });
     return () => {
       mounted = false;
