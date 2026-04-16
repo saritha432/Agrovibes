@@ -120,3 +120,24 @@ export async function createHomePost(payload: {
   }
   return (await response.json()) as { post: HomePost };
 }
+
+export async function uploadVideoFile(fileUri: string) {
+  const form = new FormData();
+  const name = `video-${Date.now()}.mp4`;
+  form.append("file", {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore - React Native FormData file shape
+    uri: fileUri,
+    name,
+    type: "video/mp4"
+  });
+
+  const response = await fetch(`${API_BASE_URL}/v1/uploads/video`, {
+    method: "POST",
+    body: form
+  });
+  if (!response.ok) {
+    throw new Error("Failed to upload video");
+  }
+  return (await response.json()) as { url: string };
+}
