@@ -6,9 +6,10 @@ interface CreateModalProps {
   visible: boolean;
   onClose: () => void;
   onVideoPosted?: () => void;
+  initialType?: CreateType | null;
 }
 
-type CreateType = "reel" | "story" | "upload" | "camera";
+export type CreateType = "reel" | "story" | "upload" | "camera";
 
 const createItems: { type: CreateType; title: string; subtitle: string; icon: string }[] = [
   { type: "reel", title: "Post Reel", subtitle: "Create a short reel", icon: "🎬" },
@@ -17,7 +18,7 @@ const createItems: { type: CreateType; title: string; subtitle: string; icon: st
   { type: "camera", title: "Camera", subtitle: "Record now", icon: "📷" }
 ];
 
-export function CreateModal({ visible, onClose, onVideoPosted }: CreateModalProps) {
+export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [userName, setUserName] = useState("Ramesh Patel");
   const [location, setLocation] = useState("Nashik");
@@ -26,6 +27,12 @@ export function CreateModal({ visible, onClose, onVideoPosted }: CreateModalProp
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (!visible) return;
+    setCreateType(initialType);
+    setErrorText("");
+  }, [visible, initialType]);
 
   const handleClose = () => {
     if (isSubmitting) return;

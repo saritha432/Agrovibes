@@ -6,11 +6,12 @@ import { fetchHomePosts, fetchHomeStories, HomePost, HomeStory } from "../servic
 
 interface HomeScreenProps {
   refreshToken?: number;
+  onOpenCreate?: () => void;
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 
-export function HomeScreen({ refreshToken = 0 }: HomeScreenProps) {
+export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
 
@@ -76,7 +77,7 @@ export function HomeScreen({ refreshToken = 0 }: HomeScreenProps) {
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRow}>
         {stories.map((story) => (
-          <View key={story.id} style={styles.storyItem}>
+          <Pressable key={story.id} style={styles.storyItem} onPress={() => onOpenCreate?.()}>
             <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
               <View style={styles.storyInner}>
                 <View style={styles.storyAvatarFill}>
@@ -85,7 +86,7 @@ export function HomeScreen({ refreshToken = 0 }: HomeScreenProps) {
               </View>
             </View>
             <Text style={styles.storyName} numberOfLines={1}>{story.userName}</Text>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
 

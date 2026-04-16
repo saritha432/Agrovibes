@@ -7,27 +7,52 @@ import { HomeScreen } from "../screens/HomeScreen";
 import { MarketplaceScreen } from "../screens/MarketplaceScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { MainTabBar } from "./MainTabBar";
+import type { CreateType } from "../components/CreateModal";
 
 const Tab = createBottomTabNavigator();
 
 export function AppNavigator() {
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [homeRefreshToken, setHomeRefreshToken] = useState(0);
+  const [createPresetType, setCreatePresetType] = useState<CreateType | null>(null);
 
   return (
     <View style={styles.root}>
       <Tab.Navigator
         screenOptions={{ headerShown: false, tabBarShowLabel: false }}
-        tabBar={(props) => <MainTabBar {...props} onCreatePress={() => setCreateOpen(true)} />}
+        tabBar={(props) => (
+          <MainTabBar
+            {...props}
+            onCreatePress={() => {
+              setCreatePresetType(null);
+              setCreateOpen(true);
+            }}
+          />
+        )}
       >
-        <Tab.Screen name="Home">{() => <HomeScreen refreshToken={homeRefreshToken} />}</Tab.Screen>
+        <Tab.Screen
+          name="Home"
+          children={() => (
+            <HomeScreen
+              refreshToken={homeRefreshToken}
+              onOpenCreate={() => {
+                setCreatePresetType(null);
+                setCreateOpen(true);
+              }}
+            />
+          )}
+        />
         <Tab.Screen name="Marketplace" component={MarketplaceScreen} />
         <Tab.Screen name="Learn" component={CommunityScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
       <CreateModal
         visible={isCreateOpen}
-        onClose={() => setCreateOpen(false)}
+        initialType={createPresetType}
+        onClose={() => {
+          setCreatePresetType(null);
+          setCreateOpen(false);
+        }}
         onVideoPosted={() => setHomeRefreshToken((v) => v + 1)}
       />
     </View>
