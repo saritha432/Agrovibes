@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, ScrollView, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Pressable, ScrollView, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import { fetchMarketplaceListings, MarketplaceListing } from "../services/api";
 
 type Category =
@@ -40,6 +40,7 @@ export function MarketplaceScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState<Category>("All");
+  const [selected, setSelected] = useState<{ item: MarketplaceListing; index: number } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -159,7 +160,10 @@ export function MarketplaceScreen() {
           const discount = index % 2 === 0 ? "-10%" : "-5%";
           const tag = item.verifiedOnly ? (index % 2 ? "Top Rated" : "Bestseller") : "Trusted Brand";
           return (
-            <View style={styles.card}>
+            <Pressable
+              onPress={() => setSelected({ item, index })}
+              style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }, styles.card]}
+            >
               <View style={styles.badgeRow}>
                 <View style={styles.smallBadge}>
                   <Text style={styles.smallBadgeText}>{discount}</Text>
@@ -190,10 +194,101 @@ export function MarketplaceScreen() {
                   <Ionicons name="cart" size={16} color="#fff" />
                 </Pressable>
               </View>
-            </View>
+            </Pressable>
           );
         }}
       />
+
+      <Modal
+        visible={!!selected}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setSelected(null)}
+      >
+        {selected ? (
+          <ProductDetail
+            item={selected.item}
+            index={selected.index}
+            onClose={() => setSelected(null)}
+          />
+        ) : null}
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+function ProductDetail({
+  item,
+  index,
+  onClose
+}: {
+  item: MarketplaceListing;
+  index: number;
+  onClose: () => void;
+}) {
+  const discount = index % 2 === 0 ? "-10% OFF" : "-5%";
+  const tag = item.verifiedOnly ? (index % 2 ? "Bestseller" : "Verified Store") : "Trusted Brand";
+  const rating = ratingFromId(item.id);
+
+  return (
+    <SafeAreaView style={styles.detailScreen}>
+      <View style={styles.detailTopBar}>
+        <Pressable onPress={onClose} style={styles.detailBackBtn}>
+          <Text style={styles.detailBackText}>←</Text>
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        <Pressable style={styles.detailCartTiny} accessibilityLabel="Cart">
+          <Ionicons name="cart-outline" size={18} color="#0a9f46" />
+        </Pressable>
+      </View>
+
+      <View style={styles.detailHeader}>
+        <Text style={styles.detailBreadcrumb}>📍 {item.district}</Text>
+        <Text style={styles.detailProductTag}>{discount} • {tag}</Text>
+      </View>
+
+      <View style={[styles.detailHero, { backgroundColor: index % 2 === 0 ? "#d1fae5" : "#dbeafe" }]}>
+        <View style={styles.detailHeroIconWrap}>
+          <Ionicons name={index % 2 === 0 ? "leaf-outline" : "flask-outline"} size={54} color="#0a9f46" />
+        </View>
+      </View>
+
+      <View style={styles.detailBody}>
+        <View style={styles.detailPriceRow}>
+          <Text style={styles.detailPrice}>{rupee(item.pricePerKg)}</Text>
+          <Text style={styles.detailUnit}>/50g pack</Text>
+        </View>
+
+        <View style={styles.detailRatingRow}>
+          <Ionicons name="star" size={16} color="#f59e0b" />
+          <Text style={styles.detailRatingText}>{rating} ({218} reviews)</Text>
+        </View>
+
+        <Text style={styles.detailSellerLine}>
+          {item.verifiedOnly ? "Verified Seller" : "Seller"} • Quality checked
+        </Text>
+
+        <View style={styles.detailButtonsRow}>
+          <Pressable style={styles.detailPrimaryBtn} onPress={() => {}}>
+            <Text style={styles.detailPrimaryBtnText}>View Store</Text>
+          </Pressable>
+          <Pressable style={styles.detailSecondaryBtn} onPress={() => {}}>
+            <Text style={styles.detailSecondaryBtnText}>Add</Text>
+          </Pressable>
+        </View>
+
+        <Text style={styles.detailSectionTitle}>About this product</Text>
+        <Text style={styles.detailSectionText}>
+          High-quality {item.cropName} with trusted supply and fast availability. Delivery timeline depends on district.
+        </Text>
+
+        <Text style={styles.detailSectionTitle}>Customer Reviews</Text>
+        <View style={styles.reviewCard}>
+          <Text style={styles.reviewName}>Ganesh Throat</Text>
+          <Text style={styles.reviewText}>Excellent product, exactly as described. Delivery was fast and packaging was intact.</Text>
+          <Text style={styles.reviewMeta}>Apr 2026 • Helpful</Text>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -234,4 +329,34 @@ const styles = StyleSheet.create({
   price: { fontWeight: "900", color: "#1f2c29", fontSize: 16 },
   unit: { color: "#6b7976", fontWeight: "700", fontSize: 11, marginTop: 1 },
   cartBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#ef4444", alignItems: "center", justifyContent: "center" }
+  ,
+  // Product detail modal/screen
+  detailScreen: { flex: 1, backgroundColor: "#f6f1ed" },
+  detailTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingTop: 6 },
+  detailBackBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#fff", borderWidth: 1, borderColor: "#eadfd6", alignItems: "center", justifyContent: "center" },
+  detailBackText: { fontSize: 18, fontWeight: "700", color: "#0a9f46" },
+  detailCartTiny: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#fff", borderWidth: 1, borderColor: "#eadfd6", alignItems: "center", justifyContent: "center" },
+  detailHeader: { paddingHorizontal: 12, marginTop: 8 },
+  detailBreadcrumb: { color: "#2b3634", fontWeight: "700" },
+  detailProductTag: { marginTop: 6, color: "#0a9f46", fontWeight: "800" },
+  detailHero: { marginHorizontal: 12, marginTop: 10, borderRadius: 16, height: 180, alignItems: "center", justifyContent: "center" },
+  detailHeroIconWrap: { width: 120, height: 120, borderRadius: 60, backgroundColor: "rgba(255,255,255,0.55)", alignItems: "center", justifyContent: "center" },
+  detailBody: { paddingHorizontal: 12, paddingTop: 14 },
+  detailPriceRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
+  detailPrice: { fontWeight: "900", color: "#1f2c29", fontSize: 24 },
+  detailUnit: { fontWeight: "700", color: "#6b7976", fontSize: 12 },
+  detailRatingRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 },
+  detailRatingText: { color: "#1f2c29", fontWeight: "700" },
+  detailSellerLine: { marginTop: 8, color: "#6b7976", fontWeight: "600" },
+  detailButtonsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
+  detailPrimaryBtn: { flex: 1, backgroundColor: "#0a9f46", borderRadius: 10, alignItems: "center", justifyContent: "center", paddingVertical: 12 },
+  detailPrimaryBtnText: { color: "#fff", fontWeight: "900" },
+  detailSecondaryBtn: { width: 86, backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: "#0a9f46", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
+  detailSecondaryBtnText: { color: "#0a9f46", fontWeight: "900" },
+  detailSectionTitle: { marginTop: 16, fontWeight: "900", color: "#1f2c29" },
+  detailSectionText: { marginTop: 6, color: "#4b5a56", lineHeight: 20 },
+  reviewCard: { marginTop: 10, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#eadfd6", padding: 12 },
+  reviewName: { fontWeight: "900", color: "#1f2c29" },
+  reviewText: { marginTop: 6, color: "#4b5a56", lineHeight: 18 },
+  reviewMeta: { marginTop: 8, color: "#6b7976", fontWeight: "600", fontSize: 12 }
 });
