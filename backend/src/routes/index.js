@@ -7,10 +7,6 @@ const cloudinary = require("cloudinary").v2;
 const { query } = require("../db");
 const bcrypt = require("bcryptjs");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
-const fs = require("fs");
-const path = require("path");
-const multer = require("multer");
-const crypto = require("crypto");
 
 const router = express.Router();
 const hasCloudinaryConfig =
