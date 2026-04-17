@@ -6,6 +6,7 @@ import { CommunityScreen } from "../screens/CommunityScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { MarketplaceScreen } from "../screens/MarketplaceScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
+import { ServicesScreen } from "../screens/ServicesScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
 import { LearnStackNavigator } from "./LearnStackNavigator";
@@ -43,8 +44,9 @@ export function AppNavigator() {
             />
           )}
         />
-        <Tab.Screen name="Marketplace" component={MarketplaceScreen} />
-        <Tab.Screen name="Learn" component={LearnStackNavigator} />
+        <Tab.Screen name="Market" component={MarketplaceScreen} />
+        <Tab.Screen name="Learn" component={CommunityScreen} />
+        <Tab.Screen name="Services" component={ServicesScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
       <CreateModal

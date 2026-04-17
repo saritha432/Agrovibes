@@ -1,6 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Animated,
+  FlatList,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type ViewToken
+} from "react-native";
+import { ResizeMode, Video } from "expo-av";
 import { AppTopBar } from "../components/AppTopBar";
 import { fetchHomePosts, fetchHomeStories, HomePost, HomeStory } from "../services/api";
 
@@ -14,6 +25,87 @@ const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [playingPostId, setPlayingPostId] = useState<number | null>(null);
+  const [activePost, setActivePost] = useState<HomePost | null>(null);
+  const [isStoryOpen, setStoryOpen] = useState(false);
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const progress = useRef(new Animated.Value(0)).current;
+
+  const viewabilityConfig = useMemo(
+    () => ({ itemVisiblePercentThreshold: 65, minimumViewTime: 200 }),
+    []
+  );
+
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const ordered = viewableItems
+        .filter((v) => v.isViewable && v.item != null)
+        .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
+        .sort((a, b) => a.index - b.index);
+      const withVideo = ordered.find((c) => !!c.post.videoUrl);
+      setPlayingPostId(withVideo ? withVideo.post.id : null);
+    },
+    []
+  );
+
+  const viewabilityCallbackRef = useRef(onViewableItemsChanged);
+  viewabilityCallbackRef.current = onViewableItemsChanged;
+
+  const onViewableItemsChangedRef = useRef(
+    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      viewabilityCallbackRef.current(info);
+    }
+  );
+
+  useEffect(() => {
+    if (posts.length === 0) {
+      setPlayingPostId(null);
+      return;
+    }
+    setPlayingPostId((current) => {
+      if (current != null && posts.some((p) => p.id === current)) return current;
+      return posts.find((p) => p.videoUrl)?.id ?? null;
+    });
+  }, [posts]);
+
+  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl), [stories]);
+  const activeStory = playableStories[activeStoryIndex];
+
+  const closeStory = () => {
+    setStoryOpen(false);
+    progress.stopAnimation();
+    progress.setValue(0);
+  };
+
+  const nextStory = () => {
+    if (activeStoryIndex >= playableStories.length - 1) {
+      closeStory();
+      return;
+    }
+    progress.stopAnimation();
+    progress.setValue(0);
+    setActiveStoryIndex((v) => v + 1);
+  };
+
+  const prevStory = () => {
+    if (activeStoryIndex <= 0) return;
+    progress.stopAnimation();
+    progress.setValue(0);
+    setActiveStoryIndex((v) => v - 1);
+  };
+
+  useEffect(() => {
+    if (!isStoryOpen) return;
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: 7000,
+      useNativeDriver: false
+    }).start(({ finished }) => {
+      if (finished) nextStory();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStoryOpen, activeStoryIndex]);
 
   useEffect(() => {
     let mounted = true;
@@ -44,109 +136,224 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       })
       .catch(() => {
         if (!mounted) return;
-        setPosts([
-          {
-            id: 1,
-            userName: "Ramesh Patel",
-            location: "Nashik",
-            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-            likesCount: 1284,
-            commentsCount: 92,
-            videoUrl: "https://example.com/video.mp4",
-            thumbnailUrl: "",
-            createdAt: new Date().toISOString()
-          }
-        ]);
+        setPosts([]);
       });
     return () => {
       mounted = false;
     };
   }, [refreshToken]);
 
+  const listHeader = useMemo(
+    () => (
+      <>
+        <AppTopBar />
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.storyRowWrap}
+          contentContainerStyle={styles.storyRow}
+        >
+          {stories.map((story) => (
+            <Pressable
+              key={story.id}
+              style={styles.storyItem}
+              onPress={() => {
+                if (story.videoUrl) {
+                  const idx = playableStories.findIndex((s) => s.id === story.id);
+                  setActiveStoryIndex(Math.max(idx, 0));
+                  setStoryOpen(true);
+                } else {
+                  onOpenCreate?.();
+                }
+              }}
+            >
+              <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
+                <View style={styles.storyInner}>
+                  <View style={styles.storyAvatarFill}>
+                    <Text style={styles.storyInitial}>{story.avatarLabel}</Text>
+                  </View>
+                </View>
+              </View>
+              <Text style={styles.storyName} numberOfLines={1}>
+                {story.userName}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </>
+    ),
+    [onOpenCreate, playableStories, stories]
+  );
+
+  const renderPost = useCallback(
+    ({ item: post, index }: { item: HomePost; index: number }) => {
+      const isActive = playingPostId === post.id && !!post.videoUrl;
+      return (
+        <Pressable style={styles.postCard} onPress={() => setActivePost(post)}>
+          <View style={styles.postTop}>
+            <View style={styles.postUserRow}>
+              <View style={styles.userAvatar}>
+                <Text style={styles.userAvatarText}>{post.userName[0]}</Text>
+              </View>
+              <View>
+                <Text style={styles.userName}>
+                  {post.userName} <Text style={styles.timeText}>• 13h</Text>
+                </Text>
+                <Text style={styles.userLoc}>{post.location}</Text>
+              </View>
+            </View>
+            <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+          </View>
+
+          <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
+            {post.videoUrl ? (
+              <Video
+                style={styles.video}
+                source={{ uri: post.videoUrl }}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={isActive}
+                isLooping
+                isMuted
+                useNativeControls={false}
+              />
+            ) : (
+              <Ionicons name="play-circle-outline" size={48} color="#fff" />
+            )}
+          </View>
+
+          <View style={styles.postActions}>
+            <View style={styles.postActionsLeft}>
+              <Ionicons name="heart-outline" size={24} color="#1f2c29" />
+              <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
+              <Ionicons name="paper-plane-outline" size={22} color="#1f2c29" />
+            </View>
+            <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
+          </View>
+
+          <Text style={styles.likes}>{post.likesCount} likes</Text>
+          <Text style={styles.caption}>
+            <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
+          </Text>
+          <Text style={styles.comments}>View all {post.commentsCount} comments</Text>
+        </Pressable>
+      );
+    },
+    [playingPostId]
+  );
+
   return (
     <View style={styles.screen}>
-      <AppTopBar />
+      <FlatList
+        data={posts}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderPost}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={styles.feedBottom}
+        onViewableItemsChanged={onViewableItemsChangedRef.current}
+        viewabilityConfig={viewabilityConfig}
+      />
 
-      <View style={styles.appHeader}>
-        <Text style={styles.appTitle}>AgroGram</Text>
-        <View style={styles.headerIcons}>
-          <Pressable style={styles.iconBtn}><Ionicons name="heart-outline" size={22} color="#1f2c29" /></Pressable>
-          <Pressable style={styles.iconBtn}><Ionicons name="chatbubble-outline" size={21} color="#1f2c29" /></Pressable>
-        </View>
-      </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRow}>
-        {stories.map((story) => (
-          <Pressable key={story.id} style={styles.storyItem} onPress={() => onOpenCreate?.()}>
-            <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
-              <View style={styles.storyInner}>
-                <View style={styles.storyAvatarFill}>
-                  <Text style={styles.storyInitial}>{story.avatarLabel}</Text>
+      <Modal visible={isStoryOpen} animationType="fade" onRequestClose={closeStory}>
+        <View style={styles.storyViewerRoot}>
+          <View style={styles.storyProgressRow}>
+            {playableStories.map((s, idx) => {
+              const isPast = idx < activeStoryIndex;
+              const isActive = idx === activeStoryIndex;
+              const width = isActive
+                ? progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] })
+                : "100%";
+              return (
+                <View key={s.id} style={styles.storyProgressTrack}>
+                  <Animated.View
+                    style={[
+                      styles.storyProgressFill,
+                      {
+                        width,
+                        opacity: isPast || isActive ? 1 : 0.35
+                      }
+                    ]}
+                  />
                 </View>
-              </View>
-            </View>
-            <Text style={styles.storyName} numberOfLines={1}>{story.userName}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      <ScrollView contentContainerStyle={styles.feedBottom}>
-        {posts.map((post, index) => (
-          <View key={post.id} style={styles.postCard}>
-            <View style={styles.postTop}>
-              <View style={styles.postUserRow}>
-                <View style={styles.userAvatar}><Text style={styles.userAvatarText}>{post.userName[0]}</Text></View>
-                <View>
-                  <Text style={styles.userName}>{post.userName} <Text style={styles.timeText}>• 13h</Text></Text>
-                  <Text style={styles.userLoc}>{post.location}</Text>
-                </View>
-              </View>
-              <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
-            </View>
-
-            <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
-              <Ionicons name="play-circle-outline" size={48} color="#fff" />
-            </View>
-
-            <View style={styles.postActions}>
-              <View style={styles.postActionsLeft}>
-                <Ionicons name="heart-outline" size={24} color="#1f2c29" />
-                <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
-                <Ionicons name="paper-plane-outline" size={22} color="#1f2c29" />
-              </View>
-              <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
-            </View>
-
-            <Text style={styles.likes}>{post.likesCount} likes</Text>
-            <Text style={styles.caption}><Text style={styles.captionUser}>{post.userName}</Text> {post.caption}</Text>
-            <Text style={styles.comments}>View all {post.commentsCount} comments</Text>
+              );
+            })}
           </View>
-        ))}
-      </ScrollView>
+
+          <View style={styles.storyViewerTopRow}>
+            <View style={styles.storyViewerUser}>
+              <View style={styles.storyViewerAvatar}>
+                <Text style={styles.storyViewerAvatarText}>{activeStory?.avatarLabel ?? "U"}</Text>
+              </View>
+              <View>
+                <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
+                <Text style={styles.storyViewerSub}>{activeStory?.district ?? ""}</Text>
+              </View>
+            </View>
+            <Pressable onPress={closeStory} hitSlop={10}>
+              <Ionicons name="close" size={26} color="#fff" />
+            </Pressable>
+          </View>
+
+          <View style={styles.storyViewerBody}>
+            {activeStory?.videoUrl ? (
+              <Video
+                style={styles.storyVideo}
+                source={{ uri: activeStory.videoUrl }}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay
+                isLooping={false}
+              />
+            ) : null}
+
+            <View style={styles.storyTapZones}>
+              <Pressable style={styles.storyTapZone} onPress={prevStory} />
+              <Pressable style={styles.storyTapZone} onPress={nextStory} />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!activePost} animationType="fade" onRequestClose={() => setActivePost(null)}>
+        <View style={styles.postViewerRoot}>
+          <View style={styles.postViewerTop}>
+            <Pressable onPress={() => setActivePost(null)} hitSlop={10}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </Pressable>
+          </View>
+          {activePost?.videoUrl ? (
+            <Video
+              style={styles.postViewerVideo}
+              source={{ uri: activePost.videoUrl }}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isMuted={false}
+              isLooping
+              useNativeControls
+            />
+          ) : (
+            <View style={styles.postViewerFallback}>
+              <Ionicons name="play-circle-outline" size={62} color="#fff" />
+              <Text style={styles.postViewerFallbackText}>No video available for this post</Text>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f5f7f6" },
-  appHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    marginBottom: 4
-  },
-  appTitle: { fontSize: 26, fontWeight: "700", color: "#1a2522" },
-  headerIcons: { flexDirection: "row", gap: 14, alignItems: "center" },
-  iconBtn: { padding: 2 },
   storyRow: {
     paddingHorizontal: 10,
-    paddingTop: 8,
+    paddingTop: 0,
     paddingBottom: 10,
-    gap: 12,
+    gap: 12
+  },
+  storyRowWrap: {
+    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e8ecea",
-    backgroundColor: "#fff"
+    borderBottomColor: "#e8ecea"
   },
   storyItem: { alignItems: "center", width: 70 },
   storyRing: {
@@ -215,6 +422,34 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  video: {
+    width: "100%",
+    height: "100%"
+  },
+  storyViewerRoot: { flex: 1, backgroundColor: "#000" },
+  storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
+  storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
+  storyProgressFill: { height: "100%", backgroundColor: "#fff" },
+  storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
+  storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
+  storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
+  storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
+  storyViewerName: { color: "#fff", fontWeight: "800" },
+  storyViewerSub: { color: "rgba(255,255,255,0.75)", marginTop: 1, fontSize: 12 },
+  storyViewerBody: { flex: 1, marginTop: 10 },
+  storyVideo: { width: "100%", height: "100%" },
+  storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
+  storyTapZone: { flex: 1 },
+  postViewerRoot: { flex: 1, backgroundColor: "#000" },
+  postViewerTop: {
+    position: "absolute",
+    top: 44,
+    right: 14,
+    zIndex: 10
+  },
+  postViewerVideo: { width: "100%", height: "100%" },
+  postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
+  postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
   postActions: {
     flexDirection: "row",
     justifyContent: "space-between",

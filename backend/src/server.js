@@ -56,9 +56,15 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" }
   })
 );
-app.use(express.json({ limit: "2mb" }));
+// NOTE: JSON is for metadata only (URLs, captions, etc).
+// If you later upload actual video files, use multipart/form-data (multer) instead of JSON.
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(morgan("dev"));
 app.use("/uploads", express.static(path.resolve(__dirname, "../uploads")));
+
+// Serve uploaded media files.
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 app.use("/api", apiRoutes);
 

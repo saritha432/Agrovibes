@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { createHomePost, createHomeStory } from "../services/api";
+import * as FileSystem from "expo-file-system";
+import { createHomePost, createHomeStory, uploadVideoFile } from "../services/api";
 
 interface CreateModalProps {
   visible: boolean;
@@ -10,14 +11,23 @@ interface CreateModalProps {
   initialType?: CreateType | null;
 }
 
-export type CreateType = "reel" | "story" | "upload" | "camera";
+export type CreateType = "reel" | "post" | "story" | "live";
 
 const createItems: { type: CreateType; title: string; subtitle: string; icon: string }[] = [
-  { type: "reel", title: "Post Reel", subtitle: "Create a short reel", icon: "🎬" },
-  { type: "story", title: "Story", subtitle: "Share a quick update", icon: "🟣" },
-  { type: "upload", title: "Upload Video", subtitle: "Upload from gallery", icon: "📤" },
-  { type: "camera", title: "Camera", subtitle: "Record now", icon: "📷" }
+  { type: "reel", title: "Reel", subtitle: "Create a short reel", icon: "🎬" },
+  { type: "post", title: "Post", subtitle: "Share video post", icon: "📝" },
+  { type: "story", title: "Story", subtitle: "Share quick update", icon: "🟣" },
+  { type: "live", title: "Live", subtitle: "Go live now", icon: "🔴" }
 ];
+
+function formatSelectedLabel(uri: string) {
+  if (!uri) return "";
+  const clean = uri.split("?")[0];
+  const last = clean.split("/").pop() || clean;
+  // If it looks like a massive data/blob string, shorten it.
+  if (last.length > 40) return `${last.slice(0, 18)}…${last.slice(-12)}`;
+  return last;
+}
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
@@ -26,11 +36,26 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [caption, setCaption] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
+  const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
+  const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
 
+  async function validateVideoSize(uri: string, maxMb: number) {
+    if (Platform.OS === "web") return;
+    const info = await FileSystem.getInfoAsync(uri, { size: true });
+    const bytes = (info as { size?: number }).size ?? 0;
+    if (!bytes) return;
+    const mb = bytes / (1024 * 1024);
+    if (mb > maxMb) {
+      throw new Error(`Video is ${mb.toFixed(1)}MB. Please select a video under ${maxMb}MB.`);
+    }
+  }
+
   const isStory = createType === "story";
+  const isLive = createType === "live";
+  const isReel = createType === "reel";
   const storyHint = useMemo(() => {
     if (!isStory) return "";
     return pickedStoryVideoUri ? "Video selected." : "Choose how you want to add a story video.";
@@ -41,6 +66,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setCreateType(initialType);
     setErrorText("");
     setPickedStoryVideoUri("");
+    setPickedPostVideoUri("");
+    setLiveMode(null);
   }, [visible, initialType]);
 
   const handleClose = () => {
@@ -54,28 +81,49 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setSubmitting(true);
     setErrorText("");
     try {
-      if (createType === "story") {
+      if (createType === "live") {
+        if (!liveMode) {
+          setErrorText("Choose an option to continue.");
+          setSubmitting(false);
+          return;
+        }
+        Alert.alert(
+          "Live selected",
+          liveMode === "now"
+            ? "Start live selected. Connect livestream backend to continue."
+            : "Schedule live selected. Add scheduling flow next."
+        );
+      } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
           setErrorText("Please record or upload a story video.");
           setSubmitting(false);
           return;
         }
+        await validateVideoSize(pickedStoryVideoUri, 30);
+        const uploaded = await uploadVideoFile(pickedStoryVideoUri);
         await createHomeStory({
           userName: userName.trim() || "Farmer",
           district: location.trim() || "Unknown",
-          videoUrl: pickedStoryVideoUri
+          videoUrl: uploaded.url
         });
       } else {
-        if (!caption.trim() || !videoUrl.trim()) {
-          setErrorText("Caption and video URL are required.");
+        if (!caption.trim()) {
+          setErrorText("Caption is required.");
           setSubmitting(false);
           return;
         }
+        if (!pickedPostVideoUri) {
+          setErrorText("Please record or upload a reel video.");
+          setSubmitting(false);
+          return;
+        }
+        await validateVideoSize(pickedPostVideoUri, 80);
+        const finalVideoUrl = (await uploadVideoFile(pickedPostVideoUri)).url;
         await createHomePost({
-          userName: userName.trim() || "Farmer",
-          location: location.trim() || "Unknown",
+          userName: "Farmer",
+          location: "Unknown",
           caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-          videoUrl: videoUrl.trim(),
+          videoUrl: finalVideoUrl,
           thumbnailUrl: thumbnailUrl.trim() || undefined
         });
       }
@@ -86,7 +134,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       onVideoPosted?.();
       onClose();
     } catch (error) {
-      setErrorText("Failed to publish video. Please check backend/API URL.");
+      setErrorText(error instanceof Error ? error.message : "Failed to publish video.");
     } finally {
       setSubmitting(false);
     }
@@ -95,7 +143,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <Pressable style={styles.modalBackdrop} onPress={handleClose}>
-        <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+        <Pressable
+          style={styles.modalCard}
+          onStartShouldSetResponder={() => true}
+          // Prevent backdrop-close when user taps inside the sheet (especially TextInput on web).
+          onPress={(e) => {
+            e.stopPropagation?.();
+          }}
+        >
           {!createType ? (
             <>
               <View style={styles.sheetHandle} />
@@ -119,16 +174,20 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           ) : (
             <>
               <Text style={styles.modalTitle}>
-                {createType === "reel" ? "Post Reel" : createType === "story" ? "Create Story" : createType === "upload" ? "Upload Video" : "Record from Camera"}
+                {createType === "reel"
+                  ? "Create Reel"
+                  : createType === "post"
+                    ? "Create Post"
+                    : createType === "story"
+                      ? "Create Story"
+                      : "Create Live"}
               </Text>
               <Text style={styles.helperText}>
                 {createType === "story"
                   ? storyHint
-                  : createType === "camera"
-                    ? "Paste video URL captured from your camera workflow."
-                    : createType === "upload"
-                      ? "Paste uploaded gallery video URL."
-                      : "Add details and publish to Home feed."}
+                  : createType === "live"
+                    ? "Choose how you want to go live."
+                    : "Add details and publish to Home feed."}
               </Text>
               {createType === "story" ? (
                 <>
@@ -176,15 +235,92 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       <Text style={styles.storyActionText}>Upload video</Text>
                     </Pressable>
                   </View>
-                  {pickedStoryVideoUri ? <Text style={styles.selectedText}>Selected: {pickedStoryVideoUri}</Text> : null}
+                  {pickedStoryVideoUri ? (
+                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
+                      Selected: {formatSelectedLabel(pickedStoryVideoUri)}
+                    </Text>
+                  ) : null}
                 </>
+              ) : createType === "live" ? (
+                <View style={styles.storyActionRow}>
+                  <Pressable
+                    style={[styles.storyActionBtn, liveMode === "now" ? styles.storyActionBtnActive : null]}
+                    onPress={() => {
+                      setErrorText("");
+                      setLiveMode("now");
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.storyActionText}>Start live now</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.storyActionBtn, liveMode === "schedule" ? styles.storyActionBtnActive : null]}
+                    onPress={() => {
+                      setErrorText("");
+                      setLiveMode("schedule");
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.storyActionText}>Schedule live</Text>
+                  </Pressable>
+                </View>
               ) : (
                 <>
-                  <TextInput value={userName} onChangeText={setUserName} style={styles.input} placeholder="Your name" />
-                  <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder="Location" />
-                  <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder="Caption" />
-                  <TextInput value={videoUrl} onChangeText={setVideoUrl} style={styles.input} placeholder="Video URL (.mp4)" autoCapitalize="none" />
-                  <TextInput value={thumbnailUrl} onChangeText={setThumbnailUrl} style={styles.input} placeholder="Thumbnail URL (optional)" autoCapitalize="none" />
+                  <TextInput
+                    value={caption}
+                    onChangeText={setCaption}
+                    style={styles.input}
+                    placeholder={isReel ? "Reel caption" : "Post caption"}
+                  />
+                  <View style={styles.storyActionRow}>
+                    <Pressable
+                      style={styles.storyActionBtn}
+                      onPress={async () => {
+                        setErrorText("");
+                        const perm = await ImagePicker.requestCameraPermissionsAsync();
+                        if (!perm.granted) {
+                          setErrorText("Camera permission is required.");
+                          return;
+                        }
+                        const result = await ImagePicker.launchCameraAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+                          quality: 0.9
+                        });
+                        if (!result.canceled) {
+                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={styles.storyActionText}>{isReel ? "Record reel" : "Record post"}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.storyActionBtn}
+                      onPress={async () => {
+                        setErrorText("");
+                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                        if (!perm.granted) {
+                          setErrorText("Media library permission is required.");
+                          return;
+                        }
+                        const result = await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+                          quality: 1
+                        });
+                        if (!result.canceled) {
+                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Text style={styles.storyActionText}>{isReel ? "Upload reel" : "Upload post"}</Text>
+                    </Pressable>
+                  </View>
+                  {pickedPostVideoUri ? (
+                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
+                      Selected: {formatSelectedLabel(pickedPostVideoUri)}
+                    </Text>
+                  ) : null}
                 </>
               )}
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
@@ -193,12 +329,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <Text style={styles.secondaryBtnText}>Back</Text>
                 </Pressable>
                 <Pressable style={styles.primaryBtn} onPress={submitPostVideo} disabled={isSubmitting}>
-                  {isSubmitting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.primaryBtnText}>Publish</Text>}
+                  {isSubmitting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>{isLive ? "Continue" : "Publish"}</Text>
+                  )}
                 </Pressable>
               </View>
             </>
           )}
-        </View>
+        </Pressable>
       </Pressable>
     </Modal>
   );
@@ -218,6 +358,7 @@ const styles = StyleSheet.create({
   helperText: { color: "#6b7976", textAlign: "center", marginBottom: 2 },
   storyActionRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   storyActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 12, alignItems: "center" },
+  storyActionBtnActive: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
   storyActionText: { color: "#1b2422", fontWeight: "700" },
   selectedText: { marginTop: 8, color: "#4d5f5a", fontSize: 12 },
   input: {

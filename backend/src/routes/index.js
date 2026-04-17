@@ -7,6 +7,10 @@ const cloudinary = require("cloudinary").v2;
 const { query } = require("../db");
 const bcrypt = require("bcryptjs");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
+const fs = require("fs");
+const path = require("path");
+const multer = require("multer");
+const crypto = require("crypto");
 
 const router = express.Router();
 const hasCloudinaryConfig =
@@ -316,12 +320,81 @@ async function ensureHomeStoriesTable() {
   homeStoriesTableReady = true;
 }
 
+const uploadsDir = path.join(__dirname, "..", "..", "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const safeName = `${Date.now()}-${Math.random().toString(16).slice(2)}${path.extname(file.originalname || "")}`;
+      cb(null, safeName);
+    }
+  }),
+  limits: {
+    fileSize: 60 * 1024 * 1024 // 60MB
+  }
+});
+
 router.get("/health", async (_req, res) => {
   try {
     await query("SELECT 1");
     res.json({ status: "ok", db: "connected" });
   } catch (error) {
     res.status(500).json({ status: "error", db: "disconnected", message: error.message });
+  }
+});
+
+router.post("/v1/uploads/video", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ message: "file is required" });
+      return;
+    }
+    // Note: when deployed behind a proxy, rely on x-forwarded-proto/host.
+    const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+    const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString();
+    const publicUrl = `${proto}://${host}/uploads/${req.file.filename}`;
+    res.status(201).json({ url: publicUrl });
+  } catch (error) {
+    res.status(500).json({ message: "Upload failed", error: error.message });
+  }
+});
+
+router.post("/v1/media/cloudinary-sign", async (req, res) => {
+  try {
+    const { folder = "agrovibes" } = req.body || {};
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+    if (!cloudName || !apiKey || !apiSecret) {
+      res.status(500).json({ message: "Cloudinary env vars missing" });
+      return;
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Cloudinary signature: sort params, then sha1(paramString + api_secret)
+    const params = { folder: String(folder), timestamp };
+    const paramString = Object.keys(params)
+      .sort()
+      .map((k) => `${k}=${params[k]}`)
+      .join("&");
+
+    const signature = crypto.createHash("sha1").update(`${paramString}${apiSecret}`).digest("hex");
+
+    res.json({
+      cloudName,
+      apiKey,
+      timestamp,
+      folder: params.folder,
+      signature
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to sign upload", error: error.message });
   }
 });
 
@@ -594,22 +667,10 @@ router.get("/v1/home/posts", async (_req, res) => {
       `
     );
 
+    // If there are no posts yet, return an empty list.
+    // The mobile app should only attempt playback when a real uploaded URL exists.
     if (result.rows.length === 0) {
-      res.json({
-        posts: [
-          {
-            id: 1,
-            userName: "Ramesh Patel",
-            location: "Nashik",
-            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-            likesCount: 1284,
-            commentsCount: 92,
-            videoUrl: "https://example.com/video/tomato.mp4",
-            thumbnailUrl: null,
-            createdAt: new Date().toISOString()
-          }
-        ]
-      });
+      res.json({ posts: [] });
       return;
     }
 

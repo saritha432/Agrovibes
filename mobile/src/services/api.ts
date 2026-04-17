@@ -303,3 +303,55 @@ export async function createHomePost(payload: {
   }
   return (await response.json()) as { post: HomePost };
 }
+
+export async function uploadVideoFile(fileUri: string) {
+  // Upload to Cloudinary via backend-signed signature.
+  const signRes = await fetch(`${API_BASE_URL}/v1/media/cloudinary-sign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder: "agrovibes" })
+  });
+  if (!signRes.ok) throw new Error("Failed to sign upload");
+  const sign = (await signRes.json()) as {
+    cloudName: string;
+    apiKey: string;
+    timestamp: number;
+    folder: string;
+    signature: string;
+  };
+
+  const form = new FormData();
+  const filename = `video-${Date.now()}.mp4`;
+
+  // RN web can't append `{ uri }` objects reliably; it needs a real Blob/File.
+  if (Platform.OS === "web") {
+    const res = await fetch(fileUri);
+    const blob = await res.blob();
+    (form as any).append("file", blob, filename);
+  } else {
+    (form as any).append(
+      "file",
+      {
+        // @ts-ignore React Native FormData file type shape
+        uri: fileUri,
+        name: filename,
+        type: "video/mp4"
+      } as any
+    );
+  }
+
+  form.append("api_key", sign.apiKey);
+  form.append("timestamp", String(sign.timestamp));
+  form.append("folder", sign.folder);
+  form.append("signature", sign.signature);
+
+  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/video/upload`, {
+    method: "POST",
+    body: form
+  });
+  if (!uploadRes.ok) throw new Error("Cloud upload failed");
+  const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
+  const url = uploaded.secure_url ?? uploaded.url;
+  if (!url) throw new Error("Cloud upload missing URL");
+  return { url };
+}
