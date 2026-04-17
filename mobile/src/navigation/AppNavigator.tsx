@@ -9,6 +9,7 @@ import { ProfileScreen } from "../screens/ProfileScreen";
 import { ServicesScreen } from "../screens/ServicesScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
+import { LearnStackNavigator } from "./LearnStackNavigator";
 
 const Tab = createBottomTabNavigator();
 

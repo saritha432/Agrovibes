@@ -134,3 +134,86 @@ CREATE INDEX IF NOT EXISTS idx_listings_district ON listings(district_id);
 CREATE INDEX IF NOT EXISTS idx_listings_crop ON listings(crop_name);
 CREATE INDEX IF NOT EXISTS idx_reels_created_at ON reels(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_id);
+
+-- ---------------------------------------------------------------------------
+-- Learn module + mobile auth (mirrors backend/src/routes/index.js DDL)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS learn_users (
+  id SERIAL PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'student',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS learn_courses (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL,
+  tags JSONB NOT NULL DEFAULT '[]',
+  level TEXT NOT NULL,
+  rating NUMERIC NOT NULL DEFAULT 0,
+  learners_count INT NOT NULL DEFAULT 0,
+  duration_label TEXT NOT NULL,
+  is_free BOOLEAN NOT NULL DEFAULT false,
+  hero_gradient JSONB NOT NULL DEFAULT '[]',
+  instructor JSONB NOT NULL DEFAULT '{}',
+  syllabus JSONB NOT NULL DEFAULT '[]',
+  lessons JSONB NOT NULL DEFAULT '[]',
+  reviews_preview JSONB NOT NULL DEFAULT '[]',
+  created_by_user_id INT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS learn_enrollments (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+  course_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  is_paid BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, course_id)
+);
+
+CREATE TABLE IF NOT EXISTS learn_progress (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+  course_id TEXT NOT NULL,
+  lesson_id TEXT NOT NULL,
+  completed BOOLEAN NOT NULL DEFAULT false,
+  last_watched_seconds INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, course_id, lesson_id)
+);
+
+CREATE TABLE IF NOT EXISTS home_posts (
+  id SERIAL PRIMARY KEY,
+  user_name TEXT NOT NULL,
+  location TEXT NOT NULL,
+  caption TEXT NOT NULL,
+  likes_count INT NOT NULL DEFAULT 0,
+  comments_count INT NOT NULL DEFAULT 0,
+  video_url TEXT NOT NULL,
+  thumbnail_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS home_stories (
+  id SERIAL PRIMARY KEY,
+  user_name TEXT NOT NULL,
+  district TEXT NOT NULL,
+  avatar_label TEXT NOT NULL,
+  has_new BOOLEAN NOT NULL DEFAULT true,
+  viewed BOOLEAN NOT NULL DEFAULT false,
+  video_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_learn_courses_updated ON learn_courses(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_learn_enrollments_user ON learn_enrollments(user_id);
+CREATE INDEX IF NOT EXISTS idx_learn_progress_user_course ON learn_progress(user_id, course_id);
+CREATE INDEX IF NOT EXISTS idx_home_posts_created ON home_posts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_home_stories_created ON home_stories(created_at DESC);
