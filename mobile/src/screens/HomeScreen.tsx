@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type ViewToken
 } from "react-native";
@@ -24,7 +25,16 @@ interface HomeScreenProps {
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 
+function postImageGallery(post: HomePost | null | undefined): string[] {
+  if (!post) return [];
+  if (post.imageUrls?.length) return post.imageUrls;
+  if (post.imageUrl) return [post.imageUrl];
+  return [];
+}
+
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
+  const { width: windowWidth } = useWindowDimensions();
+  const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
@@ -234,6 +244,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const isActive = playingPostId === post.id && !!post.videoUrl;
+      const gallery = postImageGallery(post);
+      const isCarousel = !post.videoUrl && gallery.length > 1;
       return (
         <Pressable style={styles.postCard} onPress={() => setActivePost(post)}>
           <View style={styles.postTop}>
@@ -262,11 +274,31 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 isMuted
                 useNativeControls={false}
               />
-            ) : post.imageUrl ? (
-              <Image style={styles.video} source={{ uri: post.imageUrl }} resizeMode="cover" />
+            ) : isCarousel ? (
+              <FlatList
+                data={gallery}
+                horizontal
+                pagingEnabled
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
+                style={{ width: feedMediaWidth, height: 360 }}
+                renderItem={({ item: uri }) => (
+                  <Image style={{ width: feedMediaWidth, height: 360 }} source={{ uri }} resizeMode="cover" />
+                )}
+              />
+            ) : gallery[0] ? (
+              <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
             ) : (
               <Ionicons name="play-circle-outline" size={48} color="#fff" />
             )}
+            {isCarousel ? (
+              <View style={styles.postCarouselDots} pointerEvents="none">
+                {gallery.map((_, i) => (
+                  <View key={i} style={styles.postCarouselDot} />
+                ))}
+              </View>
+            ) : null}
             <View style={styles.postActionsRail}>
               <Ionicons name="heart-outline" size={24} color="#1f2c29" />
               <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
@@ -283,7 +315,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </Pressable>
       );
     },
-    [playingPostId]
+    [playingPostId, feedMediaWidth]
   );
 
   return (
@@ -388,8 +420,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               isLooping
               useNativeControls
             />
-          ) : activePost?.imageUrl ? (
-            <Image style={styles.postViewerVideo} source={{ uri: activePost.imageUrl }} resizeMode="contain" />
+          ) : postImageGallery(activePost).length > 1 ? (
+            <FlatList
+              data={postImageGallery(activePost)}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(uri, i) => `pv-${activePost!.id}-${i}-${uri.slice(-32)}`}
+              style={{ flex: 1 }}
+              renderItem={({ item: uri }) => (
+                <View style={{ width: windowWidth, flex: 1, justifyContent: "center" }}>
+                  <Image style={styles.postViewerVideo} source={{ uri }} resizeMode="contain" />
+                </View>
+              )}
+            />
+          ) : postImageGallery(activePost)[0] ? (
+            <Image style={styles.postViewerVideo} source={{ uri: postImageGallery(activePost)[0] }} resizeMode="contain" />
           ) : (
             <View style={styles.postViewerFallback}>
               <Ionicons name="play-circle-outline" size={62} color="#fff" />
@@ -507,6 +553,21 @@ const styles = StyleSheet.create({
     bottom: 16,
     gap: 14,
     alignItems: "center"
+  },
+  postCarouselDots: {
+    position: "absolute",
+    bottom: 10,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 5
+  },
+  postCarouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.85)"
   },
   storyViewerRoot: { flex: 1, backgroundColor: "#000" },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },

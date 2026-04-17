@@ -102,6 +102,8 @@ export interface HomePost {
   commentsCount: number;
   videoUrl?: string | null;
   imageUrl?: string | null;
+  /** Present when the post is a multi-image carousel (2+ photos). */
+  imageUrls?: string[];
   thumbnailUrl?: string;
   createdAt: string;
 }
@@ -294,6 +296,7 @@ export async function createHomePost(payload: {
   caption: string;
   videoUrl?: string;
   imageUrl?: string;
+  imageUrls?: string[];
   thumbnailUrl?: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
