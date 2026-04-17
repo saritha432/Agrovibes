@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   FlatList,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -25,6 +26,7 @@ const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [isStoryOpen, setStoryOpen] = useState(false);
@@ -69,7 +71,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   }, [posts]);
 
   const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl), [stories]);
+  const otherStories = useMemo(
+    () => stories.filter((s) => s.userName.trim().toLowerCase() !== "you"),
+    [stories]
+  );
   const activeStory = playableStories[activeStoryIndex];
+
+  const applyViewedStories = useCallback(
+    (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
+    [viewedStoryIds]
+  );
 
   const closeStory = () => {
     setStoryOpen(false);
@@ -112,20 +123,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     fetchHomeStories()
       .then((data) => {
         if (!mounted) return;
-        setStories(data.stories);
+        setStories(applyViewedStories(data.stories));
       })
       .catch(() => {
         if (!mounted) return;
-        setStories([
+        setStories(
+          applyViewedStories([
           { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
           { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false },
           { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false }
-        ]);
+          ])
+        );
       });
     return () => {
       mounted = false;
     };
-  }, [refreshToken]);
+  }, [applyViewedStories, refreshToken]);
+
+  useEffect(() => {
+    if (!activeStory?.id || !isStoryOpen) return;
+    setViewedStoryIds((prev) => {
+      if (prev.has(activeStory.id)) return prev;
+      const next = new Set(prev);
+      next.add(activeStory.id);
+      return next;
+    });
+    setStories((prev) => prev.map((s) => (s.id === activeStory.id ? { ...s, viewed: true } : s)));
+  }, [activeStory?.id, isStoryOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -154,18 +178,38 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           style={styles.storyRowWrap}
           contentContainerStyle={styles.storyRow}
         >
-          {stories.map((story) => (
+          <Pressable style={styles.storyItem} onPress={onOpenCreate}>
+            <View style={[styles.storyRing, styles.storyRingViewed]}>
+              <View style={styles.storyInner}>
+                <View style={styles.storyAvatarFill}>
+                  <Text style={styles.storyInitial}>Y</Text>
+                </View>
+                <View style={styles.yourStoryPlusBadge}>
+                  <Ionicons name="add" size={12} color="#fff" />
+                </View>
+              </View>
+            </View>
+            <Text style={styles.storyName} numberOfLines={1}>
+              Your story
+            </Text>
+          </Pressable>
+
+          {otherStories.map((story) => (
             <Pressable
               key={story.id}
               style={styles.storyItem}
               onPress={() => {
-                if (story.videoUrl) {
-                  const idx = playableStories.findIndex((s) => s.id === story.id);
-                  setActiveStoryIndex(Math.max(idx, 0));
-                  setStoryOpen(true);
-                } else {
-                  onOpenCreate?.();
-                }
+                if (!story.videoUrl) return;
+                setViewedStoryIds((prev) => {
+                  if (prev.has(story.id)) return prev;
+                  const next = new Set(prev);
+                  next.add(story.id);
+                  return next;
+                });
+                setStories((prev) => prev.map((s) => (s.id === story.id ? { ...s, viewed: true } : s)));
+                const idx = playableStories.findIndex((s) => s.id === story.id);
+                setActiveStoryIndex(Math.max(idx, 0));
+                setStoryOpen(true);
               }}
             >
               <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
@@ -183,7 +227,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </ScrollView>
       </>
     ),
-    [onOpenCreate, playableStories, stories]
+    [onOpenCreate, otherStories, playableStories]
   );
 
   const renderPost = useCallback(
@@ -217,18 +261,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 isMuted
                 useNativeControls={false}
               />
+            ) : post.imageUrl ? (
+              <Image style={styles.video} source={{ uri: post.imageUrl }} resizeMode="cover" />
             ) : (
               <Ionicons name="play-circle-outline" size={48} color="#fff" />
             )}
-          </View>
-
-          <View style={styles.postActions}>
-            <View style={styles.postActionsLeft}>
+            <View style={styles.postActionsRail}>
               <Ionicons name="heart-outline" size={24} color="#1f2c29" />
               <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
               <Ionicons name="paper-plane-outline" size={22} color="#1f2c29" />
+              <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
             </View>
-            <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
           </View>
 
           <Text style={styles.likes}>{post.likesCount} likes</Text>
@@ -330,6 +373,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               isLooping
               useNativeControls
             />
+          ) : activePost?.imageUrl ? (
+            <Image style={styles.postViewerVideo} source={{ uri: activePost.imageUrl }} resizeMode="contain" />
           ) : (
             <View style={styles.postViewerFallback}>
               <Ionicons name="play-circle-outline" size={62} color="#fff" />
@@ -372,7 +417,8 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     backgroundColor: "#fff",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "visible"
   },
   storyAvatarFill: {
     width: 56,
@@ -383,6 +429,19 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   storyInitial: { fontSize: 18, fontWeight: "700", color: "#1f2c29" },
+  yourStoryPlusBadge: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#0a9f46",
+    borderWidth: 2,
+    borderColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center"
+  },
   storyName: { fontSize: 12, color: "#2f3e3a", marginTop: 6, fontWeight: "500", textAlign: "center", width: "100%" },
   feedBottom: { paddingBottom: 100 },
   postCard: {
@@ -420,11 +479,19 @@ const styles = StyleSheet.create({
   postMedia: {
     height: 360,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    position: "relative"
   },
   video: {
     width: "100%",
     height: "100%"
+  },
+  postActionsRail: {
+    position: "absolute",
+    right: 10,
+    bottom: 16,
+    gap: 14,
+    alignItems: "center"
   },
   storyViewerRoot: { flex: 1, backgroundColor: "#000" },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
@@ -450,14 +517,6 @@ const styles = StyleSheet.create({
   postViewerVideo: { width: "100%", height: "100%" },
   postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
-  postActions: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingTop: 10
-  },
-  postActionsLeft: { flexDirection: "row", gap: 14, alignItems: "center" },
   likes: { marginTop: 8, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29" },
   caption: { marginTop: 6, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20 },
   captionUser: { fontWeight: "700" },

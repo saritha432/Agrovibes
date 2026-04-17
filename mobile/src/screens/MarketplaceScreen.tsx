@@ -147,7 +147,6 @@ export function MarketplaceScreen() {
         })}
       </ScrollView>
 
-      <Text style={styles.countText}>{filtered.length} products found</Text>
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
       <FlatList
@@ -305,10 +304,21 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: "800", color: "#1f2c29", paddingHorizontal: 12, marginTop: 8 },
   searchRow: { marginHorizontal: 12, marginTop: 10, backgroundColor: "#fff", borderWidth: 1, borderColor: "#eadfd6", borderRadius: 12, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 8 },
   searchInput: { flex: 1, paddingVertical: 10, fontSize: 14, color: "#1f2c29" },
-  categoryRow: { gap: 8, paddingHorizontal: 12, marginTop: 10, alignItems: "center" },
-  catChip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#fff", borderWidth: 1, borderColor: "#eadfd6" },
+  categoryRow: { gap: 8, paddingHorizontal: 12, marginTop: 10, paddingVertical: 6, alignItems: "center" },
+  catChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    height: 32,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#eadfd6"
+  },
   catChipOn: { backgroundColor: "#ef4444", borderColor: "#ef4444" },
-  catText: { fontWeight: "700", color: "#4d5f5a", fontSize: 12 },
+  catText: { fontWeight: "700", color: "#4d5f5a", fontSize: 12, lineHeight: 14 },
   catTextOn: { color: "#fff" },
   countText: { paddingHorizontal: 12, marginTop: 10, color: "#4d5f5a", fontWeight: "700" },
   errorText: { paddingHorizontal: 12, marginTop: 4, color: "#b45309", fontWeight: "700" },

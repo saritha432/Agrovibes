@@ -4,14 +4,16 @@
     "slug": "agrovibes",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/logo.png",
     "platforms": [
       "android",
       "ios",
       "web"
     ],
     "splash": {
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#1f1f1f"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -19,10 +21,17 @@
     "scheme": "agrovibes",
     "android": {
       "package": "com.agrovibes.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#1f1f1f"
+      },
       "versionCode": 1
     },
     "ios": {
       "bundleIdentifier": "com.agrovibes.app"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
     },
     "extra": {
       "eas": {

@@ -20,12 +20,16 @@ async function ensureHomePostsTable() {
       caption TEXT NOT NULL,
       likes_count INT NOT NULL DEFAULT 0,
       comments_count INT NOT NULL DEFAULT 0,
-      video_url TEXT NOT NULL,
+      video_url TEXT,
+      image_url TEXT,
       thumbnail_url TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     `
   );
+  // Lightweight migrations for older deployments.
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_url TEXT`);
+  await query(`ALTER TABLE home_posts ALTER COLUMN video_url DROP NOT NULL`);
   homePostsTableReady = true;
 }
 
@@ -311,6 +315,7 @@ router.get("/v1/home/posts", async (_req, res) => {
         likes_count AS "likesCount",
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
+        image_url AS "imageUrl",
         thumbnail_url AS "thumbnailUrl",
         created_at AS "createdAt"
       FROM home_posts
@@ -335,17 +340,17 @@ router.get("/v1/home/posts", async (_req, res) => {
 router.post("/v1/home/posts", async (req, res) => {
   try {
     await ensureHomePostsTable();
-    const { userName, location, caption, videoUrl, thumbnailUrl } = req.body || {};
+    const { userName, location, caption, videoUrl, imageUrl, thumbnailUrl } = req.body || {};
 
-    if (!userName || !location || !caption || !videoUrl) {
-      res.status(400).json({ message: "userName, location, caption and videoUrl are required" });
+    if (!userName || !location || !caption || (!videoUrl && !imageUrl)) {
+      res.status(400).json({ message: "userName, location, caption and one of videoUrl/imageUrl are required" });
       return;
     }
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_name, location, caption, video_url, thumbnail_url)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO home_posts (user_name, location, caption, video_url, image_url, thumbnail_url)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
         id,
         user_name AS "userName",
@@ -354,10 +359,11 @@ router.post("/v1/home/posts", async (req, res) => {
         likes_count AS "likesCount",
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
+        image_url AS "imageUrl",
         thumbnail_url AS "thumbnailUrl",
         created_at AS "createdAt"
       `,
-      [userName, location, caption, videoUrl, thumbnailUrl || null]
+      [userName, location, caption, videoUrl || null, imageUrl || null, thumbnailUrl || null]
     );
 
     res.status(201).json({ post: result.rows[0] });
