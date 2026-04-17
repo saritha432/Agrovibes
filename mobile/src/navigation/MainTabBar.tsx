@@ -98,16 +98,14 @@ const styles = StyleSheet.create({
   tabItem: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 0, minWidth: 0 },
   tabLabel: { marginTop: 2, fontSize: 10, lineHeight: 12, fontWeight: "600", color: MUTED },
   tabLabelActive: { color: GREEN },
-  fabColumn: { width: 76, alignItems: "center", justifyContent: "center", marginHorizontal: 2 },
+  fabColumn: { flex: 1, alignItems: "center", justifyContent: "center", minWidth: 0 },
   fab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: GREEN,
     alignItems: "center",
     justifyContent: "center",
-    // Web layout can compress; move FAB slightly more so it stays centered.
-    transform: [{ translateY: Platform.OS === "web" ? -22 : -18 }],
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
@@ -115,7 +113,7 @@ const styles = StyleSheet.create({
     elevation: 8
   },
   fabLabel: {
-    marginTop: 4,
+    marginTop: 2,
     fontSize: Platform.OS === "web" ? 10 : 11,
     fontWeight: "700",
     color: GREEN

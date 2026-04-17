@@ -102,7 +102,8 @@ export interface HomePost {
   caption: string;
   likesCount: number;
   commentsCount: number;
-  videoUrl: string;
+  videoUrl?: string | null;
+  imageUrl?: string | null;
   thumbnailUrl?: string;
   createdAt: string;
 }
@@ -260,7 +261,8 @@ export async function createHomePost(payload: {
   userName: string;
   location: string;
   caption: string;
-  videoUrl: string;
+  videoUrl?: string;
+  imageUrl?: string;
   thumbnailUrl?: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
@@ -272,6 +274,22 @@ export async function createHomePost(payload: {
     throw new Error("Failed to create post");
   }
   return (await response.json()) as { post: HomePost };
+}
+
+async function signCloudinaryUpload(folder = "agrovibes") {
+  const signRes = await fetch(`${API_BASE_URL}/v1/media/cloudinary-sign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder })
+  });
+  if (!signRes.ok) throw new Error("Failed to sign upload");
+  return (await signRes.json()) as {
+    cloudName: string;
+    apiKey: string;
+    timestamp: number;
+    folder: string;
+    signature: string;
+  };
 }
 
 export async function uploadVideoFile(fileUri: string) {
@@ -299,4 +317,42 @@ export async function uploadVideoFile(fileUri: string) {
     body: form as any
   });
   return (await parseJsonOrThrow(response)) as { url: string; filename: string; mimeType: string; size: number };
+}
+
+export async function uploadImageFile(fileUri: string) {
+  const sign = await signCloudinaryUpload();
+
+  const form = new FormData();
+  const filename = `image-${Date.now()}.jpg`;
+
+  if (Platform.OS === "web") {
+    const res = await fetch(fileUri);
+    const blob = await res.blob();
+    (form as any).append("file", blob, filename);
+  } else {
+    (form as any).append(
+      "file",
+      {
+        // @ts-ignore React Native FormData file type shape
+        uri: fileUri,
+        name: filename,
+        type: "image/jpeg"
+      } as any
+    );
+  }
+
+  form.append("api_key", sign.apiKey);
+  form.append("timestamp", String(sign.timestamp));
+  form.append("folder", sign.folder);
+  form.append("signature", sign.signature);
+
+  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/image/upload`, {
+    method: "POST",
+    body: form
+  });
+  if (!uploadRes.ok) throw new Error("Image upload failed");
+  const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
+  const url = uploaded.secure_url ?? uploaded.url;
+  if (!url) throw new Error("Image upload missing URL");
+  return { url };
 }
