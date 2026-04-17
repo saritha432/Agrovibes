@@ -331,8 +331,27 @@ function mimeFromUri(uri: string, fallback: string) {
   if (clean.endsWith(".png")) return "image/png";
   if (clean.endsWith(".webp")) return "image/webp";
   if (clean.endsWith(".gif")) return "image/gif";
+  if (clean.endsWith(".heic")) return "image/heic";
   if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
   return fallback;
+}
+
+/** When expo-image-picker omits `type` (common on Android/web), infer from mime or file path. */
+export function shouldUseImageUpload(
+  uri: string,
+  asset?: { type?: string | null; mimeType?: string | null; uri?: string | null } | null
+): boolean {
+  if (asset?.type === "image") return true;
+  const mime = String(asset?.mimeType || "").toLowerCase();
+  if (mime.startsWith("image/")) return true;
+  const path = (uri || asset?.uri || "").split("?")[0];
+  return /\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(path);
+}
+
+function imageFilenameFromUri(uri: string) {
+  const m = uri.split("?")[0].match(/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i);
+  const ext = m ? m[0].toLowerCase() : ".jpg";
+  return `image-${Date.now()}${ext}`;
 }
 
 async function throwCloudinaryError(uploadRes: Response, label: string) {
@@ -346,11 +365,12 @@ async function throwCloudinaryError(uploadRes: Response, label: string) {
   throw new Error(`${label}: ${detail}`);
 }
 
-/**
- * Signed upload via `auto` resource type so Cloudinary detects image vs video.
- * Using `/video/upload` with a non-video or odd MIME often returns 400.
- */
-async function uploadToCloudinaryAuto(fileUri: string, filename: string, nativeMimeFallback: string) {
+async function uploadToCloudinary(
+  fileUri: string,
+  filename: string,
+  nativeMimeFallback: string,
+  resource: "image" | "video"
+) {
   const sign = await signCloudinaryUpload();
   const form = new FormData();
   const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
@@ -376,7 +396,7 @@ async function uploadToCloudinaryAuto(fileUri: string, filename: string, nativeM
   form.append("folder", sign.folder);
   form.append("signature", sign.signature);
 
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/auto/upload`, {
+  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/${resource}/upload`, {
     method: "POST",
     body: form
   });
@@ -388,9 +408,13 @@ async function uploadToCloudinaryAuto(fileUri: string, filename: string, nativeM
 }
 
 export async function uploadVideoFile(fileUri: string) {
-  return uploadToCloudinaryAuto(fileUri, `video-${Date.now()}.mp4`, "video/mp4");
+  const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
+  const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
+  return uploadToCloudinary(fileUri, `video-${Date.now()}${ext}`, "video/mp4", "video");
 }
 
 export async function uploadImageFile(fileUri: string) {
-  return uploadToCloudinaryAuto(fileUri, `image-${Date.now()}.jpg`, "image/jpeg");
+  const filename = imageFilenameFromUri(fileUri);
+  const mime = mimeFromUri(fileUri, "image/jpeg");
+  return uploadToCloudinary(fileUri, filename, mime, "image");
 }

@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, StyleSheet
 import * as ImagePicker from "expo-image-picker";
 import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system";
-import { createHomePost, createHomeStory, uploadImageFile, uploadVideoFile } from "../services/api";
+import { createHomePost, createHomeStory, shouldUseImageUpload, uploadImageFile, uploadVideoFile } from "../services/api";
 
 interface CreateModalProps {
   visible: boolean;
@@ -94,16 +94,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const applyPickedMediaToFlow = (asset?: ImagePicker.ImagePickerAsset) => {
     const uri = asset?.uri ?? "";
     if (!uri) return;
-    if (entryType === "story") {
+       if (entryType === "story") {
       setPickedStoryVideoUri(uri);
-      setPickedStoryMediaType(asset?.type === "image" ? "image" : "video");
+      setPickedStoryMediaType(shouldUseImageUpload(uri, asset) ? "image" : "video");
       setCreateType("story");
       setCreateStep("preview");
       return;
     }
     if (entryType === "reel" || entryType === "post") {
       setPickedPostVideoUri(uri);
-      setPickedPostMediaType(asset?.type === "image" ? "image" : "video");
+      setPickedPostMediaType(shouldUseImageUpload(uri, asset) ? "image" : "video");
       setCreateType(entryType);
       setCreateStep("preview");
       return;
@@ -173,7 +173,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        if (pickedStoryMediaType === "image") {
+        const storyIsImage = pickedStoryMediaType === "image" || shouldUseImageUpload(pickedStoryVideoUri);
+        if (storyIsImage) {
           const uploaded = await uploadImageFile(pickedStoryVideoUri);
           await createHomeStory({
             userName: userName.trim() || "Farmer",
@@ -200,7 +201,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        if (pickedPostMediaType !== "image") {
+        const postIsImage = pickedPostMediaType === "image" || shouldUseImageUpload(pickedPostVideoUri);
+        if (!postIsImage) {
           await validateVideoSize(pickedPostVideoUri, 80);
           const finalVideoUrl = (await uploadVideoFile(pickedPostVideoUri)).url;
           await createHomePost({
@@ -237,7 +239,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostVideoUri;
-  const isSelectedVideo = createType === "story" ? pickedStoryMediaType !== "image" : pickedPostMediaType !== "image";
+  const isSelectedVideo =
+    createType === "story"
+      ? !(pickedStoryMediaType === "image" || shouldUseImageUpload(pickedStoryVideoUri))
+      : !(pickedPostMediaType === "image" || shouldUseImageUpload(pickedPostVideoUri));
   const canProceedFromPreview = !!selectedUri || createType === "live";
   const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
 
