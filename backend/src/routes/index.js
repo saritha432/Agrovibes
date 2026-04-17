@@ -289,7 +289,32 @@ async function ensureHomePostsTable() {
   // Lightweight migrations for older deployments.
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_url TEXT`);
   await query(`ALTER TABLE home_posts ALTER COLUMN video_url DROP NOT NULL`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_urls TEXT`);
   homePostsTableReady = true;
+}
+
+function normalizeHomePostRow(row) {
+  const base = { ...row };
+  let list = null;
+  if (base.image_urls) {
+    try {
+      const parsed = JSON.parse(base.image_urls);
+      if (Array.isArray(parsed) && parsed.length) list = parsed.filter((u) => typeof u === "string" && u);
+    } catch (_e) {
+      list = null;
+    }
+  }
+  if (!list || list.length === 0) {
+    if (base.imageUrl) list = [base.imageUrl];
+  }
+  delete base.image_urls;
+  if (list && list.length > 1) {
+    base.imageUrls = list;
+    base.imageUrl = base.imageUrl || list[0] || null;
+  } else if (list && list.length === 1) {
+    base.imageUrl = base.imageUrl || list[0];
+  }
+  return base;
 }
 
 async function ensureHomeStoriesTable() {
@@ -304,12 +329,14 @@ async function ensureHomeStoriesTable() {
       has_new BOOLEAN NOT NULL DEFAULT true,
       viewed BOOLEAN NOT NULL DEFAULT false,
       video_url TEXT,
+      image_url TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     `
   );
   // Lightweight migration for older deployments.
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS video_url TEXT`);
+  await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS image_url TEXT`);
   homeStoriesTableReady = true;
 }
 
@@ -504,7 +531,8 @@ router.get("/v1/home/stories", async (_req, res) => {
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
-        video_url AS "videoUrl"
+        video_url AS "videoUrl",
+        image_url AS "imageUrl"
       FROM home_stories
       ORDER BY created_at DESC
       LIMIT 40
@@ -541,17 +569,21 @@ router.get("/v1/home/stories", async (_req, res) => {
 router.post("/v1/home/stories", async (req, res) => {
   try {
     await ensureHomeStoriesTable();
-    const { userName, district, videoUrl } = req.body || {};
+    const { userName, district, videoUrl, imageUrl } = req.body || {};
     if (!userName || !district) {
       res.status(400).json({ message: "userName and district are required" });
+      return;
+    }
+    if (!videoUrl && !imageUrl) {
+      res.status(400).json({ message: "one of videoUrl/imageUrl is required" });
       return;
     }
 
     const avatarLabel = String(userName).trim().charAt(0).toUpperCase() || "U";
     const result = await query(
       `
-      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url)
-      VALUES ($1, $2, $3, true, false, $4)
+      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url, image_url)
+      VALUES ($1, $2, $3, true, false, $4, $5)
       RETURNING
         id,
         user_name AS "userName",
@@ -559,9 +591,10 @@ router.post("/v1/home/stories", async (req, res) => {
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
-        video_url AS "videoUrl"
+        video_url AS "videoUrl",
+        image_url AS "imageUrl"
       `,
-      [userName, district, avatarLabel, videoUrl || null]
+      [userName, district, avatarLabel, videoUrl || null, imageUrl || null]
     );
 
     res.status(201).json({ story: result.rows[0] });
@@ -584,6 +617,7 @@ router.get("/v1/home/posts", async (_req, res) => {
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         image_url AS "imageUrl",
+        image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
         created_at AS "createdAt"
       FROM home_posts
@@ -611,7 +645,7 @@ router.get("/v1/home/posts", async (_req, res) => {
       return;
     }
 
-    res.json({ posts: result.rows });
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
   } catch (error) {
     res.json({
       posts: [
@@ -636,17 +670,27 @@ router.get("/v1/home/posts", async (_req, res) => {
 router.post("/v1/home/posts", async (req, res) => {
   try {
     await ensureHomePostsTable();
-    const { userName, location, caption, videoUrl, imageUrl, thumbnailUrl } = req.body || {};
+    const { userName, location, caption, videoUrl, imageUrl, imageUrls, thumbnailUrl } = req.body || {};
 
-    if (!userName || !location || !caption || (!videoUrl && !imageUrl)) {
-      res.status(400).json({ message: "userName, location, caption and one of videoUrl/imageUrl are required" });
+    const urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
+    const primaryImage = urlList[0] || (typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null);
+    const imageUrlsJson = urlList.length > 1 ? JSON.stringify(urlList) : null;
+    const hasVideo = !!(videoUrl && String(videoUrl).trim());
+    const hasImage = !!primaryImage;
+
+    if (!userName || !location || !caption || (!hasVideo && !hasImage)) {
+      res.status(400).json({ message: "userName, location, caption and one of videoUrl/imageUrl/imageUrls are required" });
+      return;
+    }
+    if (hasVideo && hasImage) {
+      res.status(400).json({ message: "Send either a video or images for one post, not both" });
       return;
     }
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_name, location, caption, video_url, image_url, thumbnail_url)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO home_posts (user_name, location, caption, video_url, image_url, image_urls, thumbnail_url)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING
         id,
         user_name AS "userName",
@@ -656,13 +700,14 @@ router.post("/v1/home/posts", async (req, res) => {
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         image_url AS "imageUrl",
+        image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
         created_at AS "createdAt"
       `,
-      [userName, location, caption, videoUrl || null, imageUrl || null, thumbnailUrl || null]
+      [userName, location, caption, videoUrl || null, primaryImage, imageUrlsJson, thumbnailUrl || null]
     );
 
-    res.status(201).json({ post: result.rows[0] });
+    res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
   }

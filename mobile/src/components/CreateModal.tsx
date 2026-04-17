@@ -1,10 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system";
-import { createHomePost, createHomeStory, uploadImageFile, uploadVideoFile } from "../services/api";
+import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
 
 interface CreateModalProps {
   visible: boolean;
@@ -21,15 +35,6 @@ const createModes: { key: CreateType; label: string }[] = [
   { key: "live", label: "LIVE" }
 ];
 
-function formatSelectedLabel(uri: string) {
-  if (!uri) return "";
-  const clean = uri.split("?")[0];
-  const last = clean.split("/").pop() || clean;
-  // If it looks like a massive data/blob string, shorten it.
-  if (last.length > 40) return `${last.slice(0, 18)}…${last.slice(-12)}`;
-  return last;
-}
-
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
@@ -41,8 +46,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
-  const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
-  const [pickedPostMediaType, setPickedPostMediaType] = useState<"image" | "video" | null>(null);
+  const [pickedStoryAsset, setPickedStoryAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [pickedStoryMediaType, setPickedStoryMediaType] = useState<"image" | "video" | null>(null);
+  /** Post / reel picks (reel always length 1). */
+  const [pickedPostAssets, setPickedPostAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
 
@@ -72,8 +79,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setEntryType(initialType ?? "story");
     setErrorText("");
     setPickedStoryVideoUri("");
-    setPickedPostVideoUri("");
-    setPickedPostMediaType(null);
+    setPickedStoryAsset(null);
+    setPickedStoryMediaType(null);
+    setPickedPostAssets([]);
     setLiveMode(null);
   }, [visible, initialType]);
 
@@ -85,28 +93,41 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const mediaTypeForEntry = () => {
-    if (entryType === "post") return ImagePicker.MediaTypeOptions.All;
     if (entryType === "live") return ImagePicker.MediaTypeOptions.All;
-    return ImagePicker.MediaTypeOptions.Videos;
+    return ImagePicker.MediaTypeOptions.All;
   };
 
-  const applyPickedMediaToFlow = (asset?: ImagePicker.ImagePickerAsset) => {
-    const uri = asset?.uri ?? "";
+  const applyPickedMediaToFlow = (assets: ImagePicker.ImagePickerAsset[]) => {
+    if (!assets.length) return;
+    const first = assets[0];
+    const uri = first.uri ?? "";
     if (!uri) return;
     if (entryType === "story") {
       setPickedStoryVideoUri(uri);
+      setPickedStoryAsset(first);
+      setPickedStoryMediaType(shouldUseImageUpload(uri, first) ? "image" : "video");
       setCreateType("story");
       setCreateStep("preview");
       return;
     }
-    if (entryType === "reel" || entryType === "post") {
-      setPickedPostVideoUri(uri);
-      setPickedPostMediaType(asset?.type === "image" ? "image" : "video");
-      setCreateType(entryType);
+    if (entryType === "reel") {
+      setPickedPostAssets([first]);
+      setCreateType("reel");
       setCreateStep("preview");
       return;
     }
-    setCreateType("live");
+    if (entryType === "post") {
+      if (assets.length > 1) {
+        const allImg = assets.every((a) => shouldUseImageUpload(a.uri, a));
+        if (!allImg) {
+          setErrorText("Photo carousels can only include pictures. Pick one video for a video post.");
+          return;
+        }
+      }
+      setPickedPostAssets(assets);
+      setCreateType("post");
+      setCreateStep("preview");
+    }
   };
 
   const openEntryCamera = async () => {
@@ -124,8 +145,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       mediaTypes: mediaTypeForEntry(),
       quality: 0.9
     });
-    if (!result.canceled) {
-      applyPickedMediaToFlow(result.assets[0]);
+    if (!result.canceled && result.assets[0]) {
+      applyPickedMediaToFlow([result.assets[0]]);
     }
   };
 
@@ -140,12 +161,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setErrorText("Media library permission is required.");
       return;
     }
+    const allowMulti = entryType === "post";
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: mediaTypeForEntry(),
+      allowsMultipleSelection: allowMulti,
+      selectionLimit: allowMulti ? 10 : 1,
       quality: 1
     });
-    if (!result.canceled) {
-      applyPickedMediaToFlow(result.assets[0]);
+    if (!result.canceled && result.assets.length) {
+      setErrorText("");
+      applyPickedMediaToFlow(result.assets);
     }
   };
 
@@ -167,16 +192,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         );
       } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
-          setErrorText("Please record or upload a story video.");
+          setErrorText("Please record or upload story media.");
           setSubmitting(false);
           return;
         }
-        await validateVideoSize(pickedStoryVideoUri, 30);
-        const uploaded = await uploadVideoFile(pickedStoryVideoUri);
+        const storyIsImage = shouldUseImageUpload(pickedStoryVideoUri, pickedStoryAsset);
+        if (!storyIsImage) await validateVideoSize(pickedStoryVideoUri, 30);
+        const { url: storyUrl } = await uploadPickedMedia(pickedStoryVideoUri, pickedStoryAsset ?? undefined);
         await createHomeStory({
           userName: userName.trim() || "Farmer",
           district: location.trim() || "Unknown",
-          videoUrl: uploaded.url
+          ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
         });
       } else {
         if (!caption.trim()) {
@@ -184,28 +210,57 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        if (!pickedPostVideoUri) {
+        const assets = pickedPostAssets;
+        if (!assets.length) {
           setErrorText(createType === "reel" ? "Please record or upload a reel video." : "Please add media for your post.");
           setSubmitting(false);
           return;
         }
-        if (createType === "reel" || pickedPostMediaType !== "image") {
-          await validateVideoSize(pickedPostVideoUri, 80);
-          const finalVideoUrl = (await uploadVideoFile(pickedPostVideoUri)).url;
+        if (createType === "reel" && assets.length > 1) {
+          setErrorText("A reel is a single video or photo.");
+          setSubmitting(false);
+          return;
+        }
+        const images = assets.filter((a) => shouldUseImageUpload(a.uri, a));
+        const videos = assets.filter((a) => !shouldUseImageUpload(a.uri, a));
+        if (images.length && videos.length) {
+          setErrorText("Use either one video or multiple photos — not both.");
+          setSubmitting(false);
+          return;
+        }
+        if (videos.length > 1) {
+          setErrorText("Only one video per post.");
+          setSubmitting(false);
+          return;
+        }
+        if (videos.length === 1) {
+          const v = videos[0];
+          await validateVideoSize(v.uri, 80);
+          const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           await createHomePost({
             userName: "Farmer",
             location: "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-            videoUrl: finalVideoUrl,
+            videoUrl: mediaUrl,
             thumbnailUrl: thumbnailUrl.trim() || undefined
           });
         } else {
-          const finalImageUrl = (await uploadImageFile(pickedPostVideoUri)).url;
+          const urls: string[] = [];
+          for (const im of images) {
+            const { url } = await uploadPickedMedia(im.uri, im);
+            urls.push(url);
+          }
+          if (!urls.length) {
+            setErrorText("Could not upload images.");
+            setSubmitting(false);
+            return;
+          }
           await createHomePost({
             userName: "Farmer",
             location: "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-            imageUrl: finalImageUrl
+            imageUrl: urls[0],
+            ...(urls.length > 1 ? { imageUrls: urls } : {})
           });
         }
       }
@@ -214,7 +269,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setCaption("");
       setVideoUrl("");
       setThumbnailUrl("");
-      setPickedPostMediaType(null);
+      setPickedStoryMediaType(null);
+      setPickedStoryAsset(null);
+      setPickedPostAssets([]);
       onVideoPosted?.();
       onClose();
     } catch (error) {
@@ -224,9 +281,15 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
   };
 
-  const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostVideoUri;
-  const isSelectedVideo = createType === "story" || pickedPostMediaType !== "image";
-  const canProceedFromPreview = !!selectedUri || createType === "live";
+  const previewWidth = Dimensions.get("window").width - 32;
+  const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostAssets[0]?.uri ?? "";
+  const postFirst = pickedPostAssets[0];
+  const isSelectedVideo =
+    createType === "story"
+      ? !shouldUseImageUpload(pickedStoryVideoUri, pickedStoryAsset ?? undefined)
+      : pickedPostAssets.length === 1 && !!postFirst && !shouldUseImageUpload(postFirst.uri, postFirst);
+  const canProceedFromPreview =
+    (createType === "story" ? !!selectedUri : pickedPostAssets.length > 0) || createType === "live";
   const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
 
   return (
@@ -295,7 +358,36 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               </Pressable>
             </View>
             <View style={styles.igMediaPreviewWrap}>
-              {selectedUri ? (
+              {createType === "story" ? (
+                selectedUri ? (
+                  isSelectedVideo ? (
+                    <Video style={styles.igMediaPreview} source={{ uri: selectedUri }} shouldPlay isLooping resizeMode={ResizeMode.CONTAIN} />
+                  ) : (
+                    <Image style={styles.igMediaPreview} source={{ uri: selectedUri }} resizeMode="contain" />
+                  )
+                ) : (
+                  <View style={styles.igEmptyPreview}>
+                    <Ionicons name="image-outline" size={42} color="rgba(255,255,255,0.7)" />
+                    <Text style={styles.igEmptyPreviewText}>Select media from camera or gallery</Text>
+                  </View>
+                )
+              ) : pickedPostAssets.length > 1 ? (
+                <FlatList
+                  data={pickedPostAssets}
+                  keyExtractor={(a, i) => `${i}-${a.uri}`}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  style={[styles.igPreviewCarousel, { width: previewWidth }]}
+                  snapToInterval={previewWidth}
+                  decelerationRate="fast"
+                  renderItem={({ item }) => (
+                    <View style={[styles.igPreviewCarouselPage, { width: previewWidth }]}>
+                      <Image style={styles.igMediaPreview} source={{ uri: item.uri }} resizeMode="contain" />
+                    </View>
+                  )}
+                />
+              ) : pickedPostAssets.length === 1 ? (
                 isSelectedVideo ? (
                   <Video style={styles.igMediaPreview} source={{ uri: selectedUri }} shouldPlay isLooping resizeMode={ResizeMode.CONTAIN} />
                 ) : (
@@ -308,6 +400,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
               )}
             </View>
+            {createType === "post" || createType === "reel" ? (
+              <Text style={styles.igPreviewHint}>Tap Next to add a caption, then Share.</Text>
+            ) : null}
             {errorText ? <Text style={styles.igErrorText}>{errorText}</Text> : null}
           </>
         ) : (
@@ -321,23 +416,43 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 {isSubmitting ? <ActivityIndicator size="small" color="#0a9f46" /> : <Text style={styles.igComposeShare}>Share</Text>}
               </Pressable>
             </View>
-            <View style={styles.igComposeMediaRow}>
-              {selectedUri ? (
-                isSelectedVideo ? (
-                  <Video style={styles.igComposeThumb} source={{ uri: selectedUri }} shouldPlay={false} resizeMode={ResizeMode.COVER} />
-                ) : (
-                  <Image style={styles.igComposeThumb} source={{ uri: selectedUri }} resizeMode="cover" />
-                )
-              ) : null}
-              <TextInput
-                value={caption}
-                onChangeText={setCaption}
-                style={styles.igComposeCaptionInput}
-                placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
-                multiline
-                placeholderTextColor="#7f8b88"
-              />
-            </View>
+            {pickedPostAssets.length > 1 ? (
+              <View style={styles.igComposeBody}>
+                <Text style={styles.igComposeSectionLabel}>Photos</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.igComposeThumbStripInner}>
+                  {pickedPostAssets.map((a, i) => (
+                    <Image key={`${i}-${a.uri}`} style={styles.igComposeThumbSmall} source={{ uri: a.uri }} resizeMode="cover" />
+                  ))}
+                </ScrollView>
+                <Text style={styles.igComposeSectionLabel}>Caption</Text>
+                <TextInput
+                  value={caption}
+                  onChangeText={setCaption}
+                  style={styles.igComposeCaptionInputFull}
+                  placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                  multiline
+                  placeholderTextColor="#7f8b88"
+                />
+              </View>
+            ) : (
+              <View style={styles.igComposeMediaRow}>
+                {selectedUri ? (
+                  isSelectedVideo ? (
+                    <Video style={styles.igComposeThumb} source={{ uri: selectedUri }} shouldPlay={false} resizeMode={ResizeMode.COVER} />
+                  ) : (
+                    <Image style={styles.igComposeThumb} source={{ uri: selectedUri }} resizeMode="cover" />
+                  )
+                ) : null}
+                <TextInput
+                  value={caption}
+                  onChangeText={setCaption}
+                  style={styles.igComposeCaptionInput}
+                  placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                  multiline
+                  placeholderTextColor="#7f8b88"
+                />
+              </View>
+            )}
             {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
           </>
         )}
@@ -353,151 +468,30 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           }}
         >
           <>
-              <Text style={styles.modalTitle}>
-                {createType === "reel"
-                  ? "Create Reel"
-                  : createType === "post"
-                    ? "Create Post"
-                    : createType === "story"
-                      ? "Create Story"
-                      : "Create Live"}
-              </Text>
-              <Text style={styles.helperText}>
-                {createType === "story"
-                  ? storyHint
-                  : createType === "live"
-                    ? "Choose how you want to go live."
-                    : "Add details and publish to Home feed."}
-              </Text>
-              {createType === "story" ? (
-                <>
-                  <View style={styles.storyActionRow}>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestCameraPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Camera permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchCameraAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 0.9
-                        });
-                        if (!result.canceled) {
-                          setPickedStoryVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>Tap to record</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Media library permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchImageLibraryAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 1
-                        });
-                        if (!result.canceled) {
-                          setPickedStoryVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>Upload video</Text>
-                    </Pressable>
-                  </View>
-                  {pickedStoryVideoUri ? (
-                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
-                      Selected: {formatSelectedLabel(pickedStoryVideoUri)}
-                    </Text>
-                  ) : null}
-                </>
-              ) : createType === "live" ? (
-                <View style={styles.storyActionRow}>
-                  <Pressable
-                    style={[styles.storyActionBtn, liveMode === "now" ? styles.storyActionBtnActive : null]}
-                    onPress={() => {
-                      setErrorText("");
-                      setLiveMode("now");
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <Text style={styles.storyActionText}>Start live now</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.storyActionBtn, liveMode === "schedule" ? styles.storyActionBtnActive : null]}
-                    onPress={() => {
-                      setErrorText("");
-                      setLiveMode("schedule");
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <Text style={styles.storyActionText}>Schedule live</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <>
-                  <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder={isReel ? "Reel caption" : "Post caption"} />
-                  <View style={styles.storyActionRow}>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestCameraPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Camera permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchCameraAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 0.9
-                        });
-                        if (!result.canceled) {
-                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>{isReel ? "Record reel" : "Record post"}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Media library permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchImageLibraryAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 1
-                        });
-                        if (!result.canceled) {
-                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>{isReel ? "Upload reel" : "Upload post"}</Text>
-                    </Pressable>
-                  </View>
-                  {pickedPostVideoUri ? (
-                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
-                      Selected: {formatSelectedLabel(pickedPostVideoUri)} {pickedPostMediaType ? `(${pickedPostMediaType})` : ""}
-                    </Text>
-                  ) : null}
-                </>
-              )}
+              <Text style={styles.modalTitle}>Create Live</Text>
+              <Text style={styles.helperText}>Choose how you want to go live.</Text>
+              <View style={styles.storyActionRow}>
+                <Pressable
+                  style={[styles.storyActionBtn, liveMode === "now" ? styles.storyActionBtnActive : null]}
+                  onPress={() => {
+                    setErrorText("");
+                    setLiveMode("now");
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.storyActionText}>Start live now</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.storyActionBtn, liveMode === "schedule" ? styles.storyActionBtnActive : null]}
+                  onPress={() => {
+                    setErrorText("");
+                    setLiveMode("schedule");
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.storyActionText}>Schedule live</Text>
+                </Pressable>
+              </View>
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
               <View style={styles.actionsRow}>
                 <Pressable style={styles.secondaryBtn} onPress={() => setCreateType(null)} disabled={isSubmitting}>
@@ -507,7 +501,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   {isSubmitting ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={styles.primaryBtnText}>{isLive ? "Continue" : "Publish"}</Text>
+                    <Text style={styles.primaryBtnText}>Continue</Text>
                   )}
                 </Pressable>
               </View>
@@ -564,16 +558,54 @@ const styles = StyleSheet.create({
   igPreviewAction: { color: "#4da6ff", fontWeight: "700", fontSize: 16 },
   igPreviewActionDisabled: { color: "rgba(77,166,255,0.5)" },
   igMediaPreviewWrap: { flex: 1, borderRadius: 14, overflow: "hidden", backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
+  igPreviewCarousel: { flex: 1, alignSelf: "center" },
+  igPreviewCarouselPage: { justifyContent: "center", alignItems: "center" },
   igMediaPreview: { width: "100%", height: "100%" },
   igEmptyPreview: { alignItems: "center", gap: 8 },
   igEmptyPreviewText: { color: "rgba(255,255,255,0.7)" },
   igErrorText: { color: "#fecaca", textAlign: "center", marginTop: 10, fontWeight: "600" },
+  igPreviewHint: {
+    color: "rgba(255,255,255,0.55)",
+    textAlign: "center",
+    fontSize: 13,
+    marginTop: 8,
+    paddingHorizontal: 12
+  },
   igComposeTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 8, backgroundColor: "#fff" },
   igComposeTitle: { color: "#1b2422", fontWeight: "700", fontSize: 16 },
   igComposeShare: { color: "#0a9f46", fontWeight: "700", fontSize: 16 },
   igComposeMediaRow: { backgroundColor: "#fff", flexDirection: "row", padding: 12, gap: 10, borderTopWidth: 1, borderTopColor: "#edf1ef" },
   igComposeThumb: { width: 76, height: 76, borderRadius: 8, backgroundColor: "#e7ece9" },
+  igComposeThumbStripInner: { flexDirection: "row", gap: 6, paddingRight: 6, alignItems: "center" },
+  igComposeThumbSmall: { width: 56, height: 56, borderRadius: 8, backgroundColor: "#e7ece9" },
   igComposeCaptionInput: { flex: 1, minHeight: 76, textAlignVertical: "top", color: "#1b2422" },
+  igComposeBody: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#edf1ef",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 16,
+    minHeight: 200
+  },
+  igComposeSectionLabel: { color: "#697774", fontSize: 12, fontWeight: "700", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.6 },
+  igComposeCaptionInputFull: {
+    width: "100%",
+    minHeight: 120,
+    maxHeight: 220,
+    textAlignVertical: "top",
+    color: "#1b2422",
+    fontSize: 16,
+    lineHeight: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#f8faf9",
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    borderRadius: 10,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as const) : null)
+  },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0, 0, 0, 0.30)", padding: 16 },
   modalCard: { backgroundColor: "#fff", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#e5ece8", marginBottom: 72 },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#d8dfdc", alignSelf: "center", marginBottom: 10 },

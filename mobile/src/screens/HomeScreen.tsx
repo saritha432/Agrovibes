@@ -5,10 +5,12 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type ViewToken
 } from "react-native";
@@ -23,7 +25,16 @@ interface HomeScreenProps {
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 
+function postImageGallery(post: HomePost | null | undefined): string[] {
+  if (!post) return [];
+  if (post.imageUrls?.length) return post.imageUrls;
+  if (post.imageUrl) return [post.imageUrl];
+  return [];
+}
+
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
+  const { width: windowWidth } = useWindowDimensions();
+  const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
@@ -70,7 +81,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     });
   }, [posts]);
 
-  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl), [stories]);
+  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
   const otherStories = useMemo(
     () => stories.filter((s) => s.userName.trim().toLowerCase() !== "you"),
     [stories]
@@ -199,7 +210,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               key={story.id}
               style={styles.storyItem}
               onPress={() => {
-                if (!story.videoUrl) return;
+                if (!story.videoUrl && !story.imageUrl) return;
                 setViewedStoryIds((prev) => {
                   if (prev.has(story.id)) return prev;
                   const next = new Set(prev);
@@ -233,6 +244,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const isActive = playingPostId === post.id && !!post.videoUrl;
+      const gallery = postImageGallery(post);
+      const isCarousel = !post.videoUrl && gallery.length > 1;
       return (
         <Pressable style={styles.postCard} onPress={() => setActivePost(post)}>
           <View style={styles.postTop}>
@@ -255,17 +268,37 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Video
                 style={styles.video}
                 source={{ uri: post.videoUrl }}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay={isActive}
                 isLooping
                 isMuted
                 useNativeControls={false}
               />
-            ) : post.imageUrl ? (
-              <Image style={styles.video} source={{ uri: post.imageUrl }} resizeMode="cover" />
+            ) : isCarousel ? (
+              <FlatList
+                data={gallery}
+                horizontal
+                pagingEnabled
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
+                style={{ width: feedMediaWidth, height: 360 }}
+                renderItem={({ item: uri }) => (
+                  <Image style={{ width: feedMediaWidth, height: 360 }} source={{ uri }} resizeMode="cover" />
+                )}
+              />
+            ) : gallery[0] ? (
+              <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
             ) : (
               <Ionicons name="play-circle-outline" size={48} color="#fff" />
             )}
+            {isCarousel ? (
+              <View style={styles.postCarouselDots} pointerEvents="none">
+                {gallery.map((_, i) => (
+                  <View key={i} style={styles.postCarouselDot} />
+                ))}
+              </View>
+            ) : null}
             <View style={styles.postActionsRail}>
               <Ionicons name="heart-outline" size={24} color="#1f2c29" />
               <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
@@ -282,7 +315,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </Pressable>
       );
     },
-    [playingPostId]
+    [playingPostId, feedMediaWidth]
   );
 
   return (
@@ -297,7 +330,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         viewabilityConfig={viewabilityConfig}
       />
 
-      <Modal visible={isStoryOpen} animationType="fade" onRequestClose={closeStory}>
+      <Modal
+        visible={isStoryOpen}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={closeStory}
+      >
         <View style={styles.storyViewerRoot}>
           <View style={styles.storyProgressRow}>
             {playableStories.map((s, idx) => {
@@ -342,10 +381,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Video
                 style={styles.storyVideo}
                 source={{ uri: activeStory.videoUrl }}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay
                 isLooping={false}
               />
+            ) : activeStory?.imageUrl ? (
+              <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="contain" />
             ) : null}
 
             <View style={styles.storyTapZones}>
@@ -356,7 +397,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </Modal>
 
-      <Modal visible={!!activePost} animationType="fade" onRequestClose={() => setActivePost(null)}>
+      <Modal
+        visible={!!activePost}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setActivePost(null)}
+      >
         <View style={styles.postViewerRoot}>
           <View style={styles.postViewerTop}>
             <Pressable onPress={() => setActivePost(null)} hitSlop={10}>
@@ -373,8 +420,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               isLooping
               useNativeControls
             />
-          ) : activePost?.imageUrl ? (
-            <Image style={styles.postViewerVideo} source={{ uri: activePost.imageUrl }} resizeMode="contain" />
+          ) : postImageGallery(activePost).length > 1 ? (
+            <FlatList
+              data={postImageGallery(activePost)}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(uri, i) => `pv-${activePost!.id}-${i}-${uri.slice(-32)}`}
+              style={{ flex: 1 }}
+              renderItem={({ item: uri }) => (
+                <View style={{ width: windowWidth, flex: 1, justifyContent: "center" }}>
+                  <Image style={styles.postViewerVideo} source={{ uri }} resizeMode="contain" />
+                </View>
+              )}
+            />
+          ) : postImageGallery(activePost)[0] ? (
+            <Image style={styles.postViewerVideo} source={{ uri: postImageGallery(activePost)[0] }} resizeMode="contain" />
           ) : (
             <View style={styles.postViewerFallback}>
               <Ionicons name="play-circle-outline" size={62} color="#fff" />
@@ -493,6 +554,21 @@ const styles = StyleSheet.create({
     gap: 14,
     alignItems: "center"
   },
+  postCarouselDots: {
+    position: "absolute",
+    bottom: 10,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 5
+  },
+  postCarouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.85)"
+  },
   storyViewerRoot: { flex: 1, backgroundColor: "#000" },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
   storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
@@ -503,8 +579,21 @@ const styles = StyleSheet.create({
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
   storyViewerName: { color: "#fff", fontWeight: "800" },
   storyViewerSub: { color: "rgba(255,255,255,0.75)", marginTop: 1, fontSize: 12 },
-  storyViewerBody: { flex: 1, marginTop: 10 },
-  storyVideo: { width: "100%", height: "100%" },
+  storyViewerBody: {
+    flex: 1,
+    marginTop: 10,
+    minHeight: 0,
+    width: "100%",
+    alignSelf: "stretch",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#000"
+  },
+  storyVideo: {
+    width: "100%",
+    height: "100%",
+    ...(Platform.OS === "web" ? ({ maxWidth: "100%" } as const) : null)
+  },
   storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
   storyTapZone: { flex: 1 },
   postViewerRoot: { flex: 1, backgroundColor: "#000" },

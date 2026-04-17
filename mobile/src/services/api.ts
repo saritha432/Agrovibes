@@ -93,6 +93,7 @@ export interface HomeStory {
   hasNew: boolean;
   viewed: boolean;
   videoUrl?: string | null;
+  imageUrl?: string | null;
 }
 
 export interface HomePost {
@@ -104,6 +105,8 @@ export interface HomePost {
   commentsCount: number;
   videoUrl?: string | null;
   imageUrl?: string | null;
+  /** Present when the post is a multi-image carousel (2+ photos). */
+  imageUrls?: string[];
   thumbnailUrl?: string;
   createdAt: string;
 }
@@ -179,7 +182,7 @@ export async function fetchHomeStories() {
   return (await response.json()) as { stories: HomeStory[] };
 }
 
-export async function createHomeStory(payload: { userName: string; district: string; videoUrl?: string }) {
+export async function createHomeStory(payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/stories`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -263,6 +266,7 @@ export async function createHomePost(payload: {
   caption: string;
   videoUrl?: string;
   imageUrl?: string;
+  imageUrls?: string[];
   thumbnailUrl?: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
@@ -292,42 +296,111 @@ async function signCloudinaryUpload(folder = "agrovibes") {
   };
 }
 
-export async function uploadVideoFile(fileUri: string) {
-  const form = new FormData();
-  const normalizedUri = String(fileUri || "").trim();
-  const inferredName = normalizedUri.split("?")[0].split("/").pop() || `video-${Date.now()}.mp4`;
-  const safeName = inferredName.includes(".") ? inferredName : `${inferredName}.mp4`;
-  const ext = safeName.split(".").pop()?.toLowerCase() || "mp4";
-  const mimeType = ext === "mov" ? "video/quicktime" : ext === "webm" ? "video/webm" : "video/mp4";
-
-  if (Platform.OS === "web") {
-    const webResp = await fetch(normalizedUri);
-    const blob = await webResp.blob();
-    (form as any).append("video", blob, safeName);
-  } else {
-    form.append("video", {
-      uri: normalizedUri,
-      name: safeName,
-      type: mimeType
-    } as any);
-  }
-
-  const response = await fetch(`${API_BASE_URL}/v1/uploads/video`, {
-    method: "POST",
-    body: form as any
-  });
-  return (await parseJsonOrThrow(response)) as { url: string; filename: string; mimeType: string; size: number };
+function mimeFromUri(uri: string, fallback: string) {
+  const clean = uri.split("?")[0].toLowerCase();
+  if (clean.endsWith(".mp4")) return "video/mp4";
+  if (clean.endsWith(".mov") || clean.endsWith(".qt")) return "video/quicktime";
+  if (clean.endsWith(".webm")) return "video/webm";
+  if (clean.endsWith(".png")) return "image/png";
+  if (clean.endsWith(".webp")) return "image/webp";
+  if (clean.endsWith(".gif")) return "image/gif";
+  if (clean.endsWith(".heic")) return "image/heic";
+  if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+  return fallback;
 }
 
-export async function uploadImageFile(fileUri: string) {
-  const sign = await signCloudinaryUpload();
+export type PickerAssetMeta = {
+  type?: string | null;
+  mimeType?: string | null;
+  uri?: string | null;
+  fileName?: string | null;
+  /** Expo: video duration in ms; images often 0 or undefined */
+  duration?: number | null;
+};
 
+/**
+ * True → use Cloudinary `image/upload`. False → `video/upload`.
+ * Android `content://` and web `blob:` URIs usually have no file extension — do not rely on uri alone.
+ */
+export function shouldUseImageUpload(uri: string, asset?: PickerAssetMeta | null): boolean {
+  if (asset?.type === "video") return false;
+  if (asset?.type === "image") return true;
+
+  const mime = String(asset?.mimeType || "").toLowerCase();
+  if (mime.startsWith("video/")) return false;
+  if (mime.startsWith("image/")) return true;
+
+  if (asset && asset.duration != null && Number(asset.duration) > 0) return false;
+
+  const fn = String(asset?.fileName || "").toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(fn)) return true;
+  if (/\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(fn)) return false;
+
+  const raw = uri || asset?.uri || "";
+  const path = decodeURIComponent(raw.split("?")[0] || "").toLowerCase();
+
+  if (path.startsWith("data:image/")) return true;
+  if (path.startsWith("data:video/")) return false;
+  if (/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(path)) return true;
+  if (/\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(path)) return false;
+
+  if (path.startsWith("content://")) {
+    if (path.includes("/images/") || path.includes("/image/")) return true;
+    if (path.includes("/video/")) return false;
+    if (path.includes("image%3a") || path.includes("image:")) return true;
+    if (path.includes("video%3a") || path.includes("video:")) return false;
+    if (path.includes("/document/image")) return true;
+    if (path.includes("/document/video")) return false;
+  }
+
+  if (path.startsWith("blob:")) {
+    if (mime.startsWith("video/")) return false;
+    if (mime.startsWith("image/")) return true;
+    return true;
+  }
+
+  if (path.startsWith("file://")) {
+    return /\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(path);
+  }
+
+  if (path.startsWith("ph://") || path.startsWith("assets-library://")) {
+    if (asset && asset.duration != null && Number(asset.duration) > 0) return false;
+    return true;
+  }
+
+  return false;
+}
+
+function imageFilenameFromUri(uri: string) {
+  const m = uri.split("?")[0].match(/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i);
+  const ext = m ? m[0].toLowerCase() : ".jpg";
+  return `image-${Date.now()}${ext}`;
+}
+
+async function throwCloudinaryError(uploadRes: Response, label: string) {
+  let detail = `${uploadRes.status} ${uploadRes.statusText}`;
+  try {
+    const body = (await uploadRes.json()) as { error?: { message?: string } };
+    if (body?.error?.message) detail = body.error.message;
+  } catch {
+    // ignore
+  }
+  throw new Error(`${label}: ${detail}`);
+}
+
+async function uploadToCloudinary(
+  fileUri: string,
+  filename: string,
+  nativeMimeFallback: string,
+  resource: "image" | "video"
+) {
+  const sign = await signCloudinaryUpload();
   const form = new FormData();
-  const filename = `image-${Date.now()}.jpg`;
+  const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
 
   if (Platform.OS === "web") {
-    const res = await fetch(fileUri);
-    const blob = await res.blob();
+    const webResp = await fetch(fileUri);
+    const blob = await webResp.blob();
     (form as any).append("file", blob, filename);
   } else {
     (form as any).append(
@@ -336,7 +409,7 @@ export async function uploadImageFile(fileUri: string) {
         // @ts-ignore React Native FormData file type shape
         uri: fileUri,
         name: filename,
-        type: "image/jpeg"
+        type: nativeMime
       } as any
     );
   }
@@ -346,15 +419,33 @@ export async function uploadImageFile(fileUri: string) {
   form.append("folder", sign.folder);
   form.append("signature", sign.signature);
 
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/image/upload`, {
+  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/${resource}/upload`, {
     method: "POST",
-    body: form
+    body: form as any
   });
-  if (!uploadRes.ok) throw new Error("Image upload failed");
+
+  if (!uploadRes.ok) await throwCloudinaryError(uploadRes, "Cloudinary upload failed");
   const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
   const url = uploaded.secure_url ?? uploaded.url;
-  if (!url) throw new Error("Image upload missing URL");
+  if (!url) throw new Error("Cloud upload missing URL");
   return { url };
+}
+
+export async function uploadVideoFile(fileUri: string) {
+  const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
+  const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
+  return uploadToCloudinary(fileUri, `video-${Date.now()}${ext}`, "video/mp4", "video");
+}
+
+export async function uploadImageFile(fileUri: string) {
+  const filename = imageFilenameFromUri(fileUri);
+  const mime = mimeFromUri(fileUri, "image/jpeg");
+  return uploadToCloudinary(fileUri, filename, mime, "image");
+}
+
+/** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
+export async function uploadPickedMedia(uri: string, asset?: PickerAssetMeta | null) {
+  return shouldUseImageUpload(uri, asset) ? uploadImageFile(uri) : uploadVideoFile(uri);
 }
 
 export type RazorpayOrderPayload = {
