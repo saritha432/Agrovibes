@@ -70,7 +70,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     });
   }, [posts]);
 
-  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl), [stories]);
+  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
   const otherStories = useMemo(
     () => stories.filter((s) => s.userName.trim().toLowerCase() !== "you"),
     [stories]
@@ -199,7 +199,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               key={story.id}
               style={styles.storyItem}
               onPress={() => {
-                if (!story.videoUrl) return;
+                if (!story.videoUrl && !story.imageUrl) return;
                 setViewedStoryIds((prev) => {
                   if (prev.has(story.id)) return prev;
                   const next = new Set(prev);
@@ -346,6 +346,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 shouldPlay
                 isLooping={false}
               />
+            ) : activeStory?.imageUrl ? (
+              <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="cover" />
             ) : null}
 
             <View style={styles.storyTapZones}>

@@ -311,12 +311,14 @@ async function ensureHomeStoriesTable() {
       has_new BOOLEAN NOT NULL DEFAULT true,
       viewed BOOLEAN NOT NULL DEFAULT false,
       video_url TEXT,
+      image_url TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     `
   );
   // Lightweight migration for older deployments.
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS video_url TEXT`);
+  await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS image_url TEXT`);
   homeStoriesTableReady = true;
 }
 
@@ -580,7 +582,8 @@ router.get("/v1/home/stories", async (_req, res) => {
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
-        video_url AS "videoUrl"
+        video_url AS "videoUrl",
+        image_url AS "imageUrl"
       FROM home_stories
       ORDER BY created_at DESC
       LIMIT 40
@@ -617,17 +620,21 @@ router.get("/v1/home/stories", async (_req, res) => {
 router.post("/v1/home/stories", async (req, res) => {
   try {
     await ensureHomeStoriesTable();
-    const { userName, district, videoUrl } = req.body || {};
+    const { userName, district, videoUrl, imageUrl } = req.body || {};
     if (!userName || !district) {
       res.status(400).json({ message: "userName and district are required" });
+      return;
+    }
+    if (!videoUrl && !imageUrl) {
+      res.status(400).json({ message: "one of videoUrl/imageUrl is required" });
       return;
     }
 
     const avatarLabel = String(userName).trim().charAt(0).toUpperCase() || "U";
     const result = await query(
       `
-      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url)
-      VALUES ($1, $2, $3, true, false, $4)
+      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url, image_url)
+      VALUES ($1, $2, $3, true, false, $4, $5)
       RETURNING
         id,
         user_name AS "userName",
@@ -635,9 +642,10 @@ router.post("/v1/home/stories", async (req, res) => {
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
-        video_url AS "videoUrl"
+        video_url AS "videoUrl",
+        image_url AS "imageUrl"
       `,
-      [userName, district, avatarLabel, videoUrl || null]
+      [userName, district, avatarLabel, videoUrl || null, imageUrl || null]
     );
 
     res.status(201).json({ story: result.rows[0] });

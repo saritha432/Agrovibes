@@ -41,6 +41,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
+  const [pickedStoryMediaType, setPickedStoryMediaType] = useState<"image" | "video" | null>(null);
   const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
   const [pickedPostMediaType, setPickedPostMediaType] = useState<"image" | "video" | null>(null);
   const [errorText, setErrorText] = useState("");
@@ -72,6 +73,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setEntryType(initialType ?? "story");
     setErrorText("");
     setPickedStoryVideoUri("");
+    setPickedStoryMediaType(null);
     setPickedPostVideoUri("");
     setPickedPostMediaType(null);
     setLiveMode(null);
@@ -85,9 +87,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const mediaTypeForEntry = () => {
-    if (entryType === "post") return ImagePicker.MediaTypeOptions.All;
     if (entryType === "live") return ImagePicker.MediaTypeOptions.All;
-    return ImagePicker.MediaTypeOptions.Videos;
+    return ImagePicker.MediaTypeOptions.All;
   };
 
   const applyPickedMediaToFlow = (asset?: ImagePicker.ImagePickerAsset) => {
@@ -95,6 +96,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     if (!uri) return;
     if (entryType === "story") {
       setPickedStoryVideoUri(uri);
+      setPickedStoryMediaType(asset?.type === "image" ? "image" : "video");
       setCreateType("story");
       setCreateStep("preview");
       return;
@@ -167,17 +169,26 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         );
       } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
-          setErrorText("Please record or upload a story video.");
+          setErrorText("Please record or upload story media.");
           setSubmitting(false);
           return;
         }
-        await validateVideoSize(pickedStoryVideoUri, 30);
-        const uploaded = await uploadVideoFile(pickedStoryVideoUri);
-        await createHomeStory({
-          userName: userName.trim() || "Farmer",
-          district: location.trim() || "Unknown",
-          videoUrl: uploaded.url
-        });
+        if (pickedStoryMediaType === "image") {
+          const uploaded = await uploadImageFile(pickedStoryVideoUri);
+          await createHomeStory({
+            userName: userName.trim() || "Farmer",
+            district: location.trim() || "Unknown",
+            imageUrl: uploaded.url
+          });
+        } else {
+          await validateVideoSize(pickedStoryVideoUri, 30);
+          const uploaded = await uploadVideoFile(pickedStoryVideoUri);
+          await createHomeStory({
+            userName: userName.trim() || "Farmer",
+            district: location.trim() || "Unknown",
+            videoUrl: uploaded.url
+          });
+        }
       } else {
         if (!caption.trim()) {
           setErrorText("Caption is required.");
@@ -189,7 +200,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        if (createType === "reel" || pickedPostMediaType !== "image") {
+        if (pickedPostMediaType !== "image") {
           await validateVideoSize(pickedPostVideoUri, 80);
           const finalVideoUrl = (await uploadVideoFile(pickedPostVideoUri)).url;
           await createHomePost({
@@ -214,6 +225,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setCaption("");
       setVideoUrl("");
       setThumbnailUrl("");
+      setPickedStoryMediaType(null);
       setPickedPostMediaType(null);
       onVideoPosted?.();
       onClose();
@@ -225,7 +237,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostVideoUri;
-  const isSelectedVideo = createType === "story" || pickedPostMediaType !== "image";
+  const isSelectedVideo = createType === "story" ? pickedStoryMediaType !== "image" : pickedPostMediaType !== "image";
   const canProceedFromPreview = !!selectedUri || createType === "live";
   const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
 
