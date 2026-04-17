@@ -5,6 +5,7 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -255,7 +256,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Video
                 style={styles.video}
                 source={{ uri: post.videoUrl }}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay={isActive}
                 isLooping
                 isMuted
@@ -297,7 +298,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         viewabilityConfig={viewabilityConfig}
       />
 
-      <Modal visible={isStoryOpen} animationType="fade" onRequestClose={closeStory}>
+      <Modal
+        visible={isStoryOpen}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={closeStory}
+      >
         <View style={styles.storyViewerRoot}>
           <View style={styles.storyProgressRow}>
             {playableStories.map((s, idx) => {
@@ -342,12 +349,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Video
                 style={styles.storyVideo}
                 source={{ uri: activeStory.videoUrl }}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay
                 isLooping={false}
               />
             ) : activeStory?.imageUrl ? (
-              <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="cover" />
+              <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="contain" />
             ) : null}
 
             <View style={styles.storyTapZones}>
@@ -358,7 +365,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </Modal>
 
-      <Modal visible={!!activePost} animationType="fade" onRequestClose={() => setActivePost(null)}>
+      <Modal
+        visible={!!activePost}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setActivePost(null)}
+      >
         <View style={styles.postViewerRoot}>
           <View style={styles.postViewerTop}>
             <Pressable onPress={() => setActivePost(null)} hitSlop={10}>
@@ -505,8 +518,21 @@ const styles = StyleSheet.create({
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
   storyViewerName: { color: "#fff", fontWeight: "800" },
   storyViewerSub: { color: "rgba(255,255,255,0.75)", marginTop: 1, fontSize: 12 },
-  storyViewerBody: { flex: 1, marginTop: 10 },
-  storyVideo: { width: "100%", height: "100%" },
+  storyViewerBody: {
+    flex: 1,
+    marginTop: 10,
+    minHeight: 0,
+    width: "100%",
+    alignSelf: "stretch",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#000"
+  },
+  storyVideo: {
+    width: "100%",
+    height: "100%",
+    ...(Platform.OS === "web" ? ({ maxWidth: "100%" } as const) : null)
+  },
   storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
   storyTapZone: { flex: 1 },
   postViewerRoot: { flex: 1, backgroundColor: "#000" },
