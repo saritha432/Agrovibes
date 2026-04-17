@@ -336,16 +336,71 @@ function mimeFromUri(uri: string, fallback: string) {
   return fallback;
 }
 
-/** When expo-image-picker omits `type` (common on Android/web), infer from mime or file path. */
-export function shouldUseImageUpload(
-  uri: string,
-  asset?: { type?: string | null; mimeType?: string | null; uri?: string | null } | null
-): boolean {
+export type PickerAssetMeta = {
+  type?: string | null;
+  mimeType?: string | null;
+  uri?: string | null;
+  fileName?: string | null;
+  /** Expo: video duration in ms; images often 0 or undefined */
+  duration?: number | null;
+};
+
+/**
+ * True → use Cloudinary `image/upload`. False → `video/upload`.
+ * Android `content://` and web `blob:` URIs usually have no file extension — do not rely on uri alone.
+ */
+export function shouldUseImageUpload(uri: string, asset?: PickerAssetMeta | null): boolean {
+  if (asset?.type === "video") return false;
   if (asset?.type === "image") return true;
+
   const mime = String(asset?.mimeType || "").toLowerCase();
+  if (mime.startsWith("video/")) return false;
   if (mime.startsWith("image/")) return true;
-  const path = (uri || asset?.uri || "").split("?")[0];
-  return /\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(path);
+
+  if (asset && asset.duration != null && Number(asset.duration) > 0) return false;
+
+  const fn = String(asset?.fileName || "").toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(fn)) return true;
+  if (/\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(fn)) return false;
+
+  const raw = uri || asset?.uri || "";
+  const path = decodeURIComponent(raw.split("?")[0] || "").toLowerCase();
+
+  if (path.startsWith("data:image/")) return true;
+  if (path.startsWith("data:video/")) return false;
+  if (/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(path)) return true;
+  if (/\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(path)) return false;
+
+  if (path.startsWith("content://")) {
+    if (path.includes("/images/") || path.includes("/image/")) return true;
+    if (path.includes("/video/")) return false;
+    if (path.includes("image%3a") || path.includes("image:")) return true;
+    if (path.includes("video%3a") || path.includes("video:")) return false;
+    if (path.includes("/document/image")) return true;
+    if (path.includes("/document/video")) return false;
+  }
+
+  if (path.startsWith("blob:")) {
+    if (mime.startsWith("video/")) return false;
+    if (mime.startsWith("image/")) return true;
+    return true;
+  }
+
+  if (path.startsWith("file://")) {
+    return /\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i.test(path);
+  }
+
+  if (path.startsWith("ph://") || path.startsWith("assets-library://")) {
+    if (asset && asset.duration != null && Number(asset.duration) > 0) return false;
+    return true;
+  }
+
+  return false;
+}
+
+/** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
+export async function uploadPickedMedia(uri: string, asset?: PickerAssetMeta | null) {
+  return shouldUseImageUpload(uri, asset) ? uploadImageFile(uri) : uploadVideoFile(uri);
 }
 
 function imageFilenameFromUri(uri: string) {

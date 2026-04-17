@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, StyleSheet
 import * as ImagePicker from "expo-image-picker";
 import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system";
-import { createHomePost, createHomeStory, shouldUseImageUpload, uploadImageFile, uploadVideoFile } from "../services/api";
+import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
 
 interface CreateModalProps {
   visible: boolean;
@@ -41,8 +41,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
+  const [pickedStoryAsset, setPickedStoryAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [pickedStoryMediaType, setPickedStoryMediaType] = useState<"image" | "video" | null>(null);
   const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
+  const [pickedPostAsset, setPickedPostAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [pickedPostMediaType, setPickedPostMediaType] = useState<"image" | "video" | null>(null);
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
@@ -73,8 +75,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setEntryType(initialType ?? "story");
     setErrorText("");
     setPickedStoryVideoUri("");
+    setPickedStoryAsset(null);
     setPickedStoryMediaType(null);
     setPickedPostVideoUri("");
+    setPickedPostAsset(null);
     setPickedPostMediaType(null);
     setLiveMode(null);
   }, [visible, initialType]);
@@ -94,8 +98,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const applyPickedMediaToFlow = (asset?: ImagePicker.ImagePickerAsset) => {
     const uri = asset?.uri ?? "";
     if (!uri) return;
-       if (entryType === "story") {
+    if (entryType === "story") {
       setPickedStoryVideoUri(uri);
+      setPickedStoryAsset(asset ?? null);
       setPickedStoryMediaType(shouldUseImageUpload(uri, asset) ? "image" : "video");
       setCreateType("story");
       setCreateStep("preview");
@@ -103,6 +108,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
     if (entryType === "reel" || entryType === "post") {
       setPickedPostVideoUri(uri);
+      setPickedPostAsset(asset ?? null);
       setPickedPostMediaType(shouldUseImageUpload(uri, asset) ? "image" : "video");
       setCreateType(entryType);
       setCreateStep("preview");
@@ -173,23 +179,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        const storyIsImage = pickedStoryMediaType === "image" || shouldUseImageUpload(pickedStoryVideoUri);
-        if (storyIsImage) {
-          const uploaded = await uploadImageFile(pickedStoryVideoUri);
-          await createHomeStory({
-            userName: userName.trim() || "Farmer",
-            district: location.trim() || "Unknown",
-            imageUrl: uploaded.url
-          });
-        } else {
-          await validateVideoSize(pickedStoryVideoUri, 30);
-          const uploaded = await uploadVideoFile(pickedStoryVideoUri);
-          await createHomeStory({
-            userName: userName.trim() || "Farmer",
-            district: location.trim() || "Unknown",
-            videoUrl: uploaded.url
-          });
-        }
+        const storyIsImage = shouldUseImageUpload(pickedStoryVideoUri, pickedStoryAsset);
+        if (!storyIsImage) await validateVideoSize(pickedStoryVideoUri, 30);
+        const { url: storyUrl } = await uploadPickedMedia(pickedStoryVideoUri, pickedStoryAsset ?? undefined);
+        await createHomeStory({
+          userName: userName.trim() || "Farmer",
+          district: location.trim() || "Unknown",
+          ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
+        });
       } else {
         if (!caption.trim()) {
           setErrorText("Caption is required.");
@@ -201,26 +198,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        const postIsImage = pickedPostMediaType === "image" || shouldUseImageUpload(pickedPostVideoUri);
-        if (!postIsImage) {
-          await validateVideoSize(pickedPostVideoUri, 80);
-          const finalVideoUrl = (await uploadVideoFile(pickedPostVideoUri)).url;
-          await createHomePost({
-            userName: "Farmer",
-            location: "Unknown",
-            caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-            videoUrl: finalVideoUrl,
-            thumbnailUrl: thumbnailUrl.trim() || undefined
-          });
-        } else {
-          const finalImageUrl = (await uploadImageFile(pickedPostVideoUri)).url;
-          await createHomePost({
-            userName: "Farmer",
-            location: "Unknown",
-            caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-            imageUrl: finalImageUrl
-          });
-        }
+        const postIsImage = shouldUseImageUpload(pickedPostVideoUri, pickedPostAsset);
+        if (!postIsImage) await validateVideoSize(pickedPostVideoUri, 80);
+        const { url: mediaUrl } = await uploadPickedMedia(pickedPostVideoUri, pickedPostAsset ?? undefined);
+        await createHomePost({
+          userName: "Farmer",
+          location: "Unknown",
+          caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
+          ...(postIsImage
+            ? { imageUrl: mediaUrl }
+            : { videoUrl: mediaUrl, thumbnailUrl: thumbnailUrl.trim() || undefined })
+        });
       }
       setCreateType(null);
       setCreateStep("preview");
@@ -228,7 +216,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setVideoUrl("");
       setThumbnailUrl("");
       setPickedStoryMediaType(null);
+      setPickedStoryAsset(null);
       setPickedPostMediaType(null);
+      setPickedPostAsset(null);
       onVideoPosted?.();
       onClose();
     } catch (error) {
@@ -241,8 +231,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostVideoUri;
   const isSelectedVideo =
     createType === "story"
-      ? !(pickedStoryMediaType === "image" || shouldUseImageUpload(pickedStoryVideoUri))
-      : !(pickedPostMediaType === "image" || shouldUseImageUpload(pickedPostVideoUri));
+      ? !shouldUseImageUpload(pickedStoryVideoUri, pickedStoryAsset ?? undefined)
+      : !shouldUseImageUpload(pickedPostVideoUri, pickedPostAsset ?? undefined);
   const canProceedFromPreview = !!selectedUri || createType === "live";
   const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
 
