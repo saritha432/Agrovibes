@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
+const path = require("path");
 const apiRoutes = require("./routes");
 
 const app = express();
@@ -49,9 +50,15 @@ app.use(
     }
   })
 );
-app.use(helmet());
+app.use(
+  helmet({
+    // Required so the web app (different origin/port) can render uploaded video files.
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  })
+);
 app.use(express.json({ limit: "2mb" }));
 app.use(morgan("dev"));
+app.use("/uploads", express.static(path.resolve(__dirname, "../uploads")));
 
 app.use("/api", apiRoutes);
 

@@ -8,6 +8,7 @@ import { MarketplaceScreen } from "../screens/MarketplaceScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
+import { LearnStackNavigator } from "./LearnStackNavigator";
 
 const Tab = createBottomTabNavigator();
 
@@ -43,7 +44,7 @@ export function AppNavigator() {
           )}
         />
         <Tab.Screen name="Marketplace" component={MarketplaceScreen} />
-        <Tab.Screen name="Learn" component={CommunityScreen} />
+        <Tab.Screen name="Learn" component={LearnStackNavigator} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
       <CreateModal
