@@ -96,18 +96,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        if (!pickedPostVideoUri && !videoUrl.trim()) {
-          setErrorText("Please record or upload a reel/video.");
+        if (!pickedPostVideoUri) {
+          setErrorText("Please record or upload a reel video.");
           setSubmitting(false);
           return;
         }
-        if (pickedPostVideoUri) {
-          await validateVideoSize(pickedPostVideoUri, 80);
-        }
-        const finalVideoUrl = pickedPostVideoUri ? (await uploadVideoFile(pickedPostVideoUri)).url : videoUrl.trim();
+        await validateVideoSize(pickedPostVideoUri, 80);
+        const finalVideoUrl = (await uploadVideoFile(pickedPostVideoUri)).url;
         await createHomePost({
-          userName: userName.trim() || "Farmer",
-          location: location.trim() || "Unknown",
+          userName: "Farmer",
+          location: "Unknown",
           caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
           videoUrl: finalVideoUrl,
           thumbnailUrl: thumbnailUrl.trim() || undefined
@@ -129,7 +127,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <Pressable style={styles.modalBackdrop} onPress={handleClose}>
-        <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+        <Pressable
+          style={styles.modalCard}
+          onStartShouldSetResponder={() => true}
+          // Prevent backdrop-close when user taps inside the sheet (especially TextInput on web).
+          onPress={(e) => {
+            e.stopPropagation?.();
+          }}
+        >
           {!createType ? (
             <>
               <View style={styles.sheetHandle} />
@@ -218,8 +223,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </>
               ) : (
                 <>
-                  <TextInput value={userName} onChangeText={setUserName} style={styles.input} placeholder="Your name" />
-                  <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder="Location" />
                   <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder="Caption" />
                   <View style={styles.storyActionRow}>
                     <Pressable
@@ -270,8 +273,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       Selected: {formatSelectedLabel(pickedPostVideoUri)}
                     </Text>
                   ) : null}
-                  <TextInput value={videoUrl} onChangeText={setVideoUrl} style={styles.input} placeholder="Or paste video URL (optional)" autoCapitalize="none" />
-                  <TextInput value={thumbnailUrl} onChangeText={setThumbnailUrl} style={styles.input} placeholder="Thumbnail URL (optional)" autoCapitalize="none" />
                 </>
               )}
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
@@ -285,7 +286,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               </View>
             </>
           )}
-        </View>
+        </Pressable>
       </Pressable>
     </Modal>
   );
