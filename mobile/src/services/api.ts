@@ -29,7 +29,10 @@ async function parseJsonOrThrow(response: Response) {
   }
   if (!response.ok) {
     const msg = parsed?.message || `Request failed (${response.status})`;
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = response.status;
+    err.payload = parsed;
+    throw err;
   }
   return parsed;
 }
@@ -200,9 +203,7 @@ export async function fetchHomePosts() {
 }
 
 export async function fetchLearnCourses() {
-  const response = await fetch(`${API_BASE_URL}/v1/learn/courses`, {
-    headers: { "Cache-Control": "no-cache" }
-  });
+  const response = await fetch(`${API_BASE_URL}/v1/learn/courses`);
   if (!response.ok) {
     throw new Error("Failed to load courses");
   }
@@ -210,9 +211,7 @@ export async function fetchLearnCourses() {
 }
 
 export async function fetchLearnCourseById(courseId: string) {
-  const response = await fetch(`${API_BASE_URL}/v1/learn/courses/${encodeURIComponent(courseId)}`, {
-    headers: { "Cache-Control": "no-cache" }
-  });
+  const response = await fetch(`${API_BASE_URL}/v1/learn/courses/${encodeURIComponent(courseId)}`);
   if (!response.ok) {
     throw new Error("Failed to load course");
   }
@@ -259,35 +258,6 @@ export async function updateCourse(token: string, courseId: string, payload: Cou
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { ok: boolean };
-}
-
-export async function uploadCourseVideo(
-  token: string,
-  file: { uri?: string; name?: string; type?: string; file?: Blob }
-) {
-  const form = new FormData();
-  const formAny = form as any;
-  const fileName = file.name || `lesson-${Date.now()}.mp4`;
-  if (file.file) {
-    // Web requires passing a Blob/File directly.
-    formAny.append("video", file.file, fileName);
-  } else {
-    formAny.append("video", {
-      uri: file.uri,
-      name: fileName,
-      type: file.type || "video/mp4"
-    } as any);
-  }
-
-  const response = await fetch(`${API_BASE_URL}/v1/learn/videos/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    },
-    body: form
-  });
-
-  return (await parseJsonOrThrow(response)) as { videoUrl: string; fileName: string; size: number };
 }
 
 export async function createHomePost(payload: {
@@ -401,11 +371,6 @@ export function shouldUseImageUpload(uri: string, asset?: PickerAssetMeta | null
   return false;
 }
 
-/** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
-export async function uploadPickedMedia(uri: string, asset?: PickerAssetMeta | null) {
-  return shouldUseImageUpload(uri, asset) ? uploadImageFile(uri) : uploadVideoFile(uri);
-}
-
 function imageFilenameFromUri(uri: string) {
   const m = uri.split("?")[0].match(/\.(jpe?g|png|gif|webp|heic|bmp|avif)$/i);
   const ext = m ? m[0].toLowerCase() : ".jpg";
@@ -434,8 +399,8 @@ async function uploadToCloudinary(
   const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
 
   if (Platform.OS === "web") {
-    const res = await fetch(fileUri);
-    const blob = await res.blob();
+    const webResp = await fetch(fileUri);
+    const blob = await webResp.blob();
     (form as any).append("file", blob, filename);
   } else {
     (form as any).append(
@@ -456,8 +421,9 @@ async function uploadToCloudinary(
 
   const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/${resource}/upload`, {
     method: "POST",
-    body: form
+    body: form as any
   });
+
   if (!uploadRes.ok) await throwCloudinaryError(uploadRes, "Cloudinary upload failed");
   const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
   const url = uploaded.secure_url ?? uploaded.url;
@@ -475,4 +441,42 @@ export async function uploadImageFile(fileUri: string) {
   const filename = imageFilenameFromUri(fileUri);
   const mime = mimeFromUri(fileUri, "image/jpeg");
   return uploadToCloudinary(fileUri, filename, mime, "image");
+}
+
+/** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
+export async function uploadPickedMedia(uri: string, asset?: PickerAssetMeta | null) {
+  return shouldUseImageUpload(uri, asset) ? uploadImageFile(uri) : uploadVideoFile(uri);
+}
+
+export type RazorpayOrderPayload = {
+  id: string;
+  amount: number;
+  currency: string;
+  receipt?: string;
+};
+
+export type RazorpayCreateOrderResult =
+  | { mock: true; keyId: string; order: RazorpayOrderPayload; message?: string }
+  | { mock: false; keyId: string; order: RazorpayOrderPayload };
+
+export async function createRazorpayOrder(payload: { amountPaise: number; receipt?: string }) {
+  const response = await fetch(`${API_BASE_URL}/v1/payments/razorpay/create-order`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amountPaise: payload.amountPaise, receipt: payload.receipt })
+  });
+  return (await parseJsonOrThrow(response)) as RazorpayCreateOrderResult;
+}
+
+export async function verifyRazorpayPayment(body: {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/v1/payments/razorpay/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  return (await parseJsonOrThrow(response)) as { ok: boolean; mock?: boolean };
 }

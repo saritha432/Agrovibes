@@ -102,11 +102,18 @@ export function LearnScreen() {
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
             >
-              <Text style={[styles.segmentCount, active ? styles.segmentCountActive : null]}>{formatCompact(s.count)}+</Text>
               <Text style={[styles.segmentLabel, active ? styles.segmentLabelActive : null]}>{s.label}</Text>
             </Pressable>
           );
         })}
+      </View>
+      <View style={styles.statsStrip}>
+        {segments.map((s) => (
+          <View key={s.id} style={styles.statItem}>
+            <Text style={styles.statCount}>{formatCompact(s.count)}+</Text>
+            <Text style={styles.statLabel}>{s.label}</Text>
+          </View>
+        ))}
       </View>
 
       {segment !== "courses" ? (
@@ -124,7 +131,7 @@ export function LearnScreen() {
             ))}
           </View>
 
-          <Text style={styles.sectionTitle}>Featured Course</Text>
+          <Text style={styles.sectionTitle}>FEATURED COURSE</Text>
           {loading ? (
             <View style={styles.loadingCard}>
               <ActivityIndicator color={GREEN} />
@@ -165,6 +172,7 @@ export function LearnScreen() {
                 <Text style={styles.featuredTitle} numberOfLines={2}>
                   {featured.title}
                 </Text>
+                <Text style={styles.featuredAuthor}>{featured.instructor.name}</Text>
                 <View style={styles.featuredMetaRow}>
                   <Ionicons name="star" size={14} color="#f59e0b" />
                   <Text style={styles.metaText}>{Number(featured.rating).toFixed(1)}</Text>
@@ -180,7 +188,7 @@ export function LearnScreen() {
           )}
 
           <View style={styles.sectionRow}>
-            <Text style={styles.sectionTitle}>All Courses</Text>
+            <Text style={styles.sectionTitle}>ALL COURSES</Text>
             <Text style={styles.sectionCount}>{courses.length}</Text>
           </View>
 
@@ -210,6 +218,7 @@ export function LearnScreen() {
                 <Text style={styles.bigCourseTitle} numberOfLines={2}>
                   {c.title}
                 </Text>
+                <Text style={styles.bigCourseAuthor}>{c.instructor.name}</Text>
                 <View style={styles.bigMetaRow}>
                   <Ionicons name="star" size={14} color="#f59e0b" />
                   <Text style={styles.metaText}>{Number(c.rating).toFixed(1)}</Text>
@@ -226,7 +235,7 @@ export function LearnScreen() {
                   accessibilityRole="button"
                 >
                   <Ionicons name="play-circle" size={18} color="#fff" />
-                  <Text style={styles.bigStartBtnText}>Start Learning</Text>
+                  <Text style={styles.bigStartBtnText}>Start Learning - Free</Text>
                 </Pressable>
               </View>
             </Pressable>
@@ -238,59 +247,81 @@ export function LearnScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f2f5f4" },
+  screen: { flex: 1, backgroundColor: "#f4f1ec" },
   scrollBottom: { paddingBottom: 110 },
-  header: { paddingHorizontal: 12, paddingVertical: 10 },
-  title: { fontSize: 26, fontWeight: "800", color: "#121716" },
-  sub: { color: "#4b5a56", marginTop: 3, fontWeight: "600" },
+  header: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },
+  title: { fontSize: 22, fontWeight: "800", color: "#121716" },
+  sub: { color: "#7a8581", marginTop: 1, fontWeight: "500", fontSize: 11 },
 
-  segmentRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 10 },
-  segmentItem: { flex: 1, backgroundColor: "#ffffff", borderWidth: 1, borderColor: BORDER, borderRadius: 14, paddingVertical: 10, alignItems: "center" },
-  segmentActive: { borderColor: "#bfe3cf", backgroundColor: "#eef8f1" },
-  segmentCount: { fontSize: 16, fontWeight: "900", color: "#1f2b28" },
-  segmentCountActive: { color: GREEN },
-  segmentLabel: { marginTop: 2, fontSize: 12, fontWeight: "700", color: "#5b6966" },
-  segmentLabelActive: { color: GREEN },
+  segmentRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 0 },
+  segmentItem: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e4e8e7",
+    borderRadius: 12,
+    paddingVertical: 9,
+    alignItems: "center"
+  },
+  segmentActive: { borderColor: "#f2c7bf", backgroundColor: "#f8e5e1" },
+  segmentLabel: { fontSize: 12, fontWeight: "700", color: "#5b6966" },
+  segmentLabelActive: { color: "#ad473a" },
+  statsStrip: {
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 8,
+    flexDirection: "row",
+    backgroundColor: "#f8d9d2",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#f0c7bf",
+    paddingVertical: 6
+  },
+  statItem: { flex: 1, alignItems: "center" },
+  statCount: { fontWeight: "800", color: "#ba4d42", fontSize: 12 },
+  statLabel: { fontWeight: "600", color: "#91544e", fontSize: 10, marginTop: 1 },
 
   placeholderCard: { marginHorizontal: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 14, padding: 12, flexDirection: "row", gap: 10, alignItems: "center" },
   placeholderText: { color: "#4b5a56", fontWeight: "600", flex: 1 },
 
-  chipRow: { flexDirection: "row", gap: 8, paddingHorizontal: 12, marginTop: 6, marginBottom: 10, flexWrap: "wrap" },
-  chip: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 18, borderWidth: 1, borderColor: "#c7d5cf", backgroundColor: "#fff" },
-  chipActive: { backgroundColor: "#121716", borderColor: "#121716" },
-  chipText: { color: "#425652", fontWeight: "700", fontSize: 12 },
+  chipRow: { flexDirection: "row", gap: 6, paddingHorizontal: 12, marginTop: 2, marginBottom: 8, flexWrap: "wrap" },
+  chip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 16, borderWidth: 1, borderColor: "#e0e6e3", backgroundColor: "#fff" },
+  chipActive: { backgroundColor: "#e74d3d", borderColor: "#e74d3d" },
+  chipText: { color: "#425652", fontWeight: "600", fontSize: 10 },
   chipTextActive: { color: "#fff" },
 
-  sectionTitle: { marginTop: 8, marginHorizontal: 12, color: "#22312d", fontWeight: "800", fontSize: 17 },
+  sectionTitle: { marginTop: 8, marginHorizontal: 12, color: "#6d7a76", fontWeight: "700", fontSize: 10, letterSpacing: 0.8 },
 
   featuredWrap: { marginHorizontal: 12, marginTop: 8 },
-  featuredCard: { borderRadius: 18, padding: 12, borderWidth: 1, borderColor: "#e7dfdc", overflow: "hidden" },
+  featuredCard: { borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#e7dfdc", overflow: "hidden" },
   badgeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   hotBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#111827", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   hotBadgeText: { color: "#fff", fontWeight: "800", fontSize: 11 },
   levelPill: { backgroundColor: "rgba(255,255,255,0.85)", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   levelPillText: { color: "#22312d", fontWeight: "800", fontSize: 11 },
-  heroIconWrap: { alignItems: "center", marginTop: 16, marginBottom: 10 },
-  heroIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(10,159,70,0.25)" },
-  featuredTitle: { marginTop: 4, color: "#111616", fontSize: 16, fontWeight: "900" },
-  featuredMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" },
-  metaText: { color: "#33443f", fontWeight: "700", fontSize: 12 },
+  heroIconWrap: { alignItems: "center", marginTop: 8, marginBottom: 8 },
+  heroIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(10,159,70,0.25)" },
+  featuredTitle: { marginTop: 3, color: "#111616", fontSize: 14, fontWeight: "800" },
+  featuredAuthor: { marginTop: 2, color: "#7a867f", fontSize: 11, fontWeight: "600" },
+  featuredMetaRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6, flexWrap: "wrap" },
+  metaText: { color: "#33443f", fontWeight: "600", fontSize: 11 },
   metaDot: { color: "#7b8b86", fontWeight: "900" },
 
   sectionRow: { marginTop: 8, marginHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionCount: { color: "#5b6966", fontWeight: "800" },
+  sectionCount: { color: "#5b6966", fontWeight: "700", fontSize: 10 },
 
-  bigCourseWrap: { marginHorizontal: 12, marginTop: 10, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: BORDER, overflow: "hidden" },
-  bigCourseHero: { height: 130, padding: 10, borderBottomWidth: 1, borderBottomColor: "#e7dfdc" },
+  bigCourseWrap: { marginHorizontal: 12, marginTop: 10, backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: BORDER, overflow: "hidden" },
+  bigCourseHero: { height: 120, padding: 10, borderBottomWidth: 1, borderBottomColor: "#e7dfdc" },
   bigBadgeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   bigHeroCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
-  freePill: { backgroundColor: GREEN, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
+  freePill: { backgroundColor: GREEN, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
   freePillText: { color: "#fff", fontWeight: "900", fontSize: 11 },
-  bigCourseBody: { padding: 12 },
-  bigCourseTitle: { color: "#111616", fontWeight: "900", fontSize: 16 },
-  bigMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" },
-  bigStartBtn: { marginTop: 12, backgroundColor: GREEN, borderRadius: 14, paddingVertical: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
-  bigStartBtnText: { color: "#fff", fontWeight: "900", fontSize: 14 }
+  bigCourseBody: { padding: 10 },
+  bigCourseTitle: { color: "#111616", fontWeight: "800", fontSize: 13 },
+  bigCourseAuthor: { marginTop: 2, color: "#7a867f", fontSize: 11, fontWeight: "600" },
+  bigMetaRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6, flexWrap: "wrap" },
+  bigStartBtn: { marginTop: 10, backgroundColor: GREEN, borderRadius: 8, paddingVertical: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+  bigStartBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 }
   ,
   loadingCard: {
     marginHorizontal: 12,
