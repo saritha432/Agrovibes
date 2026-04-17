@@ -353,151 +353,30 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           }}
         >
           <>
-              <Text style={styles.modalTitle}>
-                {createType === "reel"
-                  ? "Create Reel"
-                  : createType === "post"
-                    ? "Create Post"
-                    : createType === "story"
-                      ? "Create Story"
-                      : "Create Live"}
-              </Text>
-              <Text style={styles.helperText}>
-                {createType === "story"
-                  ? storyHint
-                  : createType === "live"
-                    ? "Choose how you want to go live."
-                    : "Add details and publish to Home feed."}
-              </Text>
-              {createType === "story" ? (
-                <>
-                  <View style={styles.storyActionRow}>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestCameraPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Camera permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchCameraAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 0.9
-                        });
-                        if (!result.canceled) {
-                          setPickedStoryVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>Tap to record</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Media library permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchImageLibraryAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 1
-                        });
-                        if (!result.canceled) {
-                          setPickedStoryVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>Upload video</Text>
-                    </Pressable>
-                  </View>
-                  {pickedStoryVideoUri ? (
-                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
-                      Selected: {formatSelectedLabel(pickedStoryVideoUri)}
-                    </Text>
-                  ) : null}
-                </>
-              ) : createType === "live" ? (
-                <View style={styles.storyActionRow}>
-                  <Pressable
-                    style={[styles.storyActionBtn, liveMode === "now" ? styles.storyActionBtnActive : null]}
-                    onPress={() => {
-                      setErrorText("");
-                      setLiveMode("now");
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <Text style={styles.storyActionText}>Start live now</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.storyActionBtn, liveMode === "schedule" ? styles.storyActionBtnActive : null]}
-                    onPress={() => {
-                      setErrorText("");
-                      setLiveMode("schedule");
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    <Text style={styles.storyActionText}>Schedule live</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <>
-                  <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder={isReel ? "Reel caption" : "Post caption"} />
-                  <View style={styles.storyActionRow}>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestCameraPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Camera permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchCameraAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 0.9
-                        });
-                        if (!result.canceled) {
-                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>{isReel ? "Record reel" : "Record post"}</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.storyActionBtn}
-                      onPress={async () => {
-                        setErrorText("");
-                        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                        if (!perm.granted) {
-                          setErrorText("Media library permission is required.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchImageLibraryAsync({
-                          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                          quality: 1
-                        });
-                        if (!result.canceled) {
-                          setPickedPostVideoUri(result.assets[0]?.uri ?? "");
-                        }
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      <Text style={styles.storyActionText}>{isReel ? "Upload reel" : "Upload post"}</Text>
-                    </Pressable>
-                  </View>
-                  {pickedPostVideoUri ? (
-                    <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
-                      Selected: {formatSelectedLabel(pickedPostVideoUri)} {pickedPostMediaType ? `(${pickedPostMediaType})` : ""}
-                    </Text>
-                  ) : null}
-                </>
-              )}
+              <Text style={styles.modalTitle}>Create Live</Text>
+              <Text style={styles.helperText}>Choose how you want to go live.</Text>
+              <View style={styles.storyActionRow}>
+                <Pressable
+                  style={[styles.storyActionBtn, liveMode === "now" ? styles.storyActionBtnActive : null]}
+                  onPress={() => {
+                    setErrorText("");
+                    setLiveMode("now");
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.storyActionText}>Start live now</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.storyActionBtn, liveMode === "schedule" ? styles.storyActionBtnActive : null]}
+                  onPress={() => {
+                    setErrorText("");
+                    setLiveMode("schedule");
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.storyActionText}>Schedule live</Text>
+                </Pressable>
+              </View>
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
               <View style={styles.actionsRow}>
                 <Pressable style={styles.secondaryBtn} onPress={() => setCreateType(null)} disabled={isSubmitting}>
@@ -507,7 +386,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   {isSubmitting ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={styles.primaryBtnText}>{isLive ? "Continue" : "Publish"}</Text>
+                    <Text style={styles.primaryBtnText}>Continue</Text>
                   )}
                 </Pressable>
               </View>
