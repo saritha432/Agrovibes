@@ -323,14 +323,38 @@ async function signCloudinaryUpload(folder = "agrovibes") {
   };
 }
 
-export async function uploadVideoFile(fileUri: string) {
-  // Upload to Cloudinary via backend-signed signature.
+function mimeFromUri(uri: string, fallback: string) {
+  const clean = uri.split("?")[0].toLowerCase();
+  if (clean.endsWith(".mp4")) return "video/mp4";
+  if (clean.endsWith(".mov") || clean.endsWith(".qt")) return "video/quicktime";
+  if (clean.endsWith(".webm")) return "video/webm";
+  if (clean.endsWith(".png")) return "image/png";
+  if (clean.endsWith(".webp")) return "image/webp";
+  if (clean.endsWith(".gif")) return "image/gif";
+  if (clean.endsWith(".jpg") || clean.endsWith(".jpeg")) return "image/jpeg";
+  return fallback;
+}
+
+async function throwCloudinaryError(uploadRes: Response, label: string) {
+  let detail = `${uploadRes.status} ${uploadRes.statusText}`;
+  try {
+    const body = (await uploadRes.json()) as { error?: { message?: string } };
+    if (body?.error?.message) detail = body.error.message;
+  } catch {
+    // ignore
+  }
+  throw new Error(`${label}: ${detail}`);
+}
+
+/**
+ * Signed upload via `auto` resource type so Cloudinary detects image vs video.
+ * Using `/video/upload` with a non-video or odd MIME often returns 400.
+ */
+async function uploadToCloudinaryAuto(fileUri: string, filename: string, nativeMimeFallback: string) {
   const sign = await signCloudinaryUpload();
-
   const form = new FormData();
-  const filename = `video-${Date.now()}.mp4`;
+  const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
 
-  // RN web can't append `{ uri }` objects reliably; it needs a real Blob/File.
   if (Platform.OS === "web") {
     const res = await fetch(fileUri);
     const blob = await res.blob();
@@ -342,7 +366,7 @@ export async function uploadVideoFile(fileUri: string) {
         // @ts-ignore React Native FormData file type shape
         uri: fileUri,
         name: filename,
-        type: "video/mp4"
+        type: nativeMime
       } as any
     );
   }
@@ -352,51 +376,21 @@ export async function uploadVideoFile(fileUri: string) {
   form.append("folder", sign.folder);
   form.append("signature", sign.signature);
 
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/video/upload`, {
+  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/auto/upload`, {
     method: "POST",
     body: form
   });
-  if (!uploadRes.ok) throw new Error("Cloud upload failed");
+  if (!uploadRes.ok) await throwCloudinaryError(uploadRes, "Cloudinary upload failed");
   const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
   const url = uploaded.secure_url ?? uploaded.url;
   if (!url) throw new Error("Cloud upload missing URL");
   return { url };
 }
 
+export async function uploadVideoFile(fileUri: string) {
+  return uploadToCloudinaryAuto(fileUri, `video-${Date.now()}.mp4`, "video/mp4");
+}
+
 export async function uploadImageFile(fileUri: string) {
-  const sign = await signCloudinaryUpload();
-
-  const form = new FormData();
-  const filename = `image-${Date.now()}.jpg`;
-
-  if (Platform.OS === "web") {
-    const res = await fetch(fileUri);
-    const blob = await res.blob();
-    (form as any).append("file", blob, filename);
-  } else {
-    (form as any).append(
-      "file",
-      {
-        // @ts-ignore React Native FormData file type shape
-        uri: fileUri,
-        name: filename,
-        type: "image/jpeg"
-      } as any
-    );
-  }
-
-  form.append("api_key", sign.apiKey);
-  form.append("timestamp", String(sign.timestamp));
-  form.append("folder", sign.folder);
-  form.append("signature", sign.signature);
-
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/image/upload`, {
-    method: "POST",
-    body: form
-  });
-  if (!uploadRes.ok) throw new Error("Image upload failed");
-  const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
-  const url = uploaded.secure_url ?? uploaded.url;
-  if (!url) throw new Error("Image upload missing URL");
-  return { url };
+  return uploadToCloudinaryAuto(fileUri, `image-${Date.now()}.jpg`, "image/jpeg");
 }
