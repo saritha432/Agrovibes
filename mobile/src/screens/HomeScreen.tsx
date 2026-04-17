@@ -26,6 +26,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
+  const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
@@ -147,19 +148,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       <>
         <AppTopBar />
 
-        <View style={styles.appHeader}>
-          <Text style={styles.appTitle}>AgroGram</Text>
-          <View style={styles.headerIcons}>
-            <Pressable style={styles.iconBtn}>
-              <Ionicons name="heart-outline" size={22} color="#1f2c29" />
-            </Pressable>
-            <Pressable style={styles.iconBtn}>
-              <Ionicons name="chatbubble-outline" size={21} color="#1f2c29" />
-            </Pressable>
-          </View>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.storyRowWrap}
+          contentContainerStyle={styles.storyRow}
+        >
           {stories.map((story) => (
             <Pressable
               key={story.id}
@@ -196,7 +190,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const isActive = playingPostId === post.id && !!post.videoUrl;
       return (
-        <View style={styles.postCard}>
+        <Pressable style={styles.postCard} onPress={() => setActivePost(post)}>
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
               <View style={styles.userAvatar}>
@@ -242,7 +236,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
           </Text>
           <Text style={styles.comments}>View all {post.commentsCount} comments</Text>
-        </View>
+        </Pressable>
       );
     },
     [playingPostId]
@@ -318,30 +312,48 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           </View>
         </View>
       </Modal>
+
+      <Modal visible={!!activePost} animationType="fade" onRequestClose={() => setActivePost(null)}>
+        <View style={styles.postViewerRoot}>
+          <View style={styles.postViewerTop}>
+            <Pressable onPress={() => setActivePost(null)} hitSlop={10}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </Pressable>
+          </View>
+          {activePost?.videoUrl ? (
+            <Video
+              style={styles.postViewerVideo}
+              source={{ uri: activePost.videoUrl }}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isMuted={false}
+              isLooping
+              useNativeControls
+            />
+          ) : (
+            <View style={styles.postViewerFallback}>
+              <Ionicons name="play-circle-outline" size={62} color="#fff" />
+              <Text style={styles.postViewerFallbackText}>No video available for this post</Text>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f5f7f6" },
-  appHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    marginBottom: 4
-  },
-  appTitle: { fontSize: 26, fontWeight: "700", color: "#1a2522" },
-  headerIcons: { flexDirection: "row", gap: 14, alignItems: "center" },
-  iconBtn: { padding: 2 },
   storyRow: {
     paddingHorizontal: 10,
-    paddingTop: 8,
+    paddingTop: 0,
     paddingBottom: 10,
-    gap: 12,
+    gap: 12
+  },
+  storyRowWrap: {
+    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e8ecea",
-    backgroundColor: "#fff"
+    borderBottomColor: "#e8ecea"
   },
   storyItem: { alignItems: "center", width: 70 },
   storyRing: {
@@ -428,6 +440,16 @@ const styles = StyleSheet.create({
   storyVideo: { width: "100%", height: "100%" },
   storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
   storyTapZone: { flex: 1 },
+  postViewerRoot: { flex: 1, backgroundColor: "#000" },
+  postViewerTop: {
+    position: "absolute",
+    top: 44,
+    right: 14,
+    zIndex: 10
+  },
+  postViewerVideo: { width: "100%", height: "100%" },
+  postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
+  postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
   postActions: {
     flexDirection: "row",
     justifyContent: "space-between",

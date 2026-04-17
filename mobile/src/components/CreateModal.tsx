@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { createHomePost, createHomeStory, uploadVideoFile } from "../services/api";
@@ -11,13 +11,13 @@ interface CreateModalProps {
   initialType?: CreateType | null;
 }
 
-export type CreateType = "reel" | "story" | "upload" | "camera";
+export type CreateType = "reel" | "post" | "story" | "live";
 
 const createItems: { type: CreateType; title: string; subtitle: string; icon: string }[] = [
-  { type: "reel", title: "Post Reel", subtitle: "Create a short reel", icon: "🎬" },
-  { type: "story", title: "Story", subtitle: "Share a quick update", icon: "🟣" },
-  { type: "upload", title: "Upload Video", subtitle: "Upload from gallery", icon: "📤" },
-  { type: "camera", title: "Camera", subtitle: "Record now", icon: "📷" }
+  { type: "reel", title: "Reel", subtitle: "Create a short reel", icon: "🎬" },
+  { type: "post", title: "Post", subtitle: "Share video post", icon: "📝" },
+  { type: "story", title: "Story", subtitle: "Share quick update", icon: "🟣" },
+  { type: "live", title: "Live", subtitle: "Go live now", icon: "🔴" }
 ];
 
 function formatSelectedLabel(uri: string) {
@@ -36,6 +36,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [caption, setCaption] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
+  const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
   const [pickedPostVideoUri, setPickedPostVideoUri] = useState<string>("");
   const [errorText, setErrorText] = useState("");
@@ -53,6 +54,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   }
 
   const isStory = createType === "story";
+  const isLive = createType === "live";
+  const isReel = createType === "reel";
   const storyHint = useMemo(() => {
     if (!isStory) return "";
     return pickedStoryVideoUri ? "Video selected." : "Choose how you want to add a story video.";
@@ -64,6 +67,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setErrorText("");
     setPickedStoryVideoUri("");
     setPickedPostVideoUri("");
+    setLiveMode(null);
   }, [visible, initialType]);
 
   const handleClose = () => {
@@ -77,7 +81,19 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setSubmitting(true);
     setErrorText("");
     try {
-      if (createType === "story") {
+      if (createType === "live") {
+        if (!liveMode) {
+          setErrorText("Choose an option to continue.");
+          setSubmitting(false);
+          return;
+        }
+        Alert.alert(
+          "Live selected",
+          liveMode === "now"
+            ? "Start live selected. Connect livestream backend to continue."
+            : "Schedule live selected. Add scheduling flow next."
+        );
+      } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
           setErrorText("Please record or upload a story video.");
           setSubmitting(false);
@@ -158,16 +174,20 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           ) : (
             <>
               <Text style={styles.modalTitle}>
-                {createType === "reel" ? "Post Reel" : createType === "story" ? "Create Story" : createType === "upload" ? "Upload Video" : "Record from Camera"}
+                {createType === "reel"
+                  ? "Create Reel"
+                  : createType === "post"
+                    ? "Create Post"
+                    : createType === "story"
+                      ? "Create Story"
+                      : "Create Live"}
               </Text>
               <Text style={styles.helperText}>
                 {createType === "story"
                   ? storyHint
-                  : createType === "camera"
-                    ? "Paste video URL captured from your camera workflow."
-                    : createType === "upload"
-                      ? "Paste uploaded gallery video URL."
-                      : "Add details and publish to Home feed."}
+                  : createType === "live"
+                    ? "Choose how you want to go live."
+                    : "Add details and publish to Home feed."}
               </Text>
               {createType === "story" ? (
                 <>
@@ -221,9 +241,37 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     </Text>
                   ) : null}
                 </>
+              ) : createType === "live" ? (
+                <View style={styles.storyActionRow}>
+                  <Pressable
+                    style={[styles.storyActionBtn, liveMode === "now" ? styles.storyActionBtnActive : null]}
+                    onPress={() => {
+                      setErrorText("");
+                      setLiveMode("now");
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.storyActionText}>Start live now</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.storyActionBtn, liveMode === "schedule" ? styles.storyActionBtnActive : null]}
+                    onPress={() => {
+                      setErrorText("");
+                      setLiveMode("schedule");
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.storyActionText}>Schedule live</Text>
+                  </Pressable>
+                </View>
               ) : (
                 <>
-                  <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder="Caption" />
+                  <TextInput
+                    value={caption}
+                    onChangeText={setCaption}
+                    style={styles.input}
+                    placeholder={isReel ? "Reel caption" : "Post caption"}
+                  />
                   <View style={styles.storyActionRow}>
                     <Pressable
                       style={styles.storyActionBtn}
@@ -244,7 +292,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       }}
                       disabled={isSubmitting}
                     >
-                      <Text style={styles.storyActionText}>Tap to record</Text>
+                      <Text style={styles.storyActionText}>{isReel ? "Record reel" : "Record post"}</Text>
                     </Pressable>
                     <Pressable
                       style={styles.storyActionBtn}
@@ -265,7 +313,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       }}
                       disabled={isSubmitting}
                     >
-                      <Text style={styles.storyActionText}>Upload video</Text>
+                      <Text style={styles.storyActionText}>{isReel ? "Upload reel" : "Upload post"}</Text>
                     </Pressable>
                   </View>
                   {pickedPostVideoUri ? (
@@ -281,7 +329,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <Text style={styles.secondaryBtnText}>Back</Text>
                 </Pressable>
                 <Pressable style={styles.primaryBtn} onPress={submitPostVideo} disabled={isSubmitting}>
-                  {isSubmitting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.primaryBtnText}>Publish</Text>}
+                  {isSubmitting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>{isLive ? "Continue" : "Publish"}</Text>
+                  )}
                 </Pressable>
               </View>
             </>
@@ -306,6 +358,7 @@ const styles = StyleSheet.create({
   helperText: { color: "#6b7976", textAlign: "center", marginBottom: 2 },
   storyActionRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   storyActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 12, alignItems: "center" },
+  storyActionBtnActive: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
   storyActionText: { color: "#1b2422", fontWeight: "700" },
   selectedText: { marginTop: 8, color: "#4d5f5a", fontSize: 12 },
   input: {
