@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StyleSheet, View } from "react-native";
 import { CreateModal } from "../components/CreateModal";
-import { CommunityScreen } from "../screens/CommunityScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { MarketplaceScreen } from "../screens/MarketplaceScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
@@ -45,7 +44,7 @@ export function AppNavigator() {
           )}
         />
         <Tab.Screen name="Market" component={MarketplaceScreen} />
-        <Tab.Screen name="Learn" component={CommunityScreen} />
+        <Tab.Screen name="Learn" component={LearnStackNavigator} />
         <Tab.Screen name="Services" component={ServicesScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>

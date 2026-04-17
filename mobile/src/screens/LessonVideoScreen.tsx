@@ -17,10 +17,9 @@ type Rt = RouteProp<LearnStackParamList, "LessonVideo">;
 const GREEN = "#0a9f46";
 const BORDER = "#dce3e1";
 
-function isProbablyPlayableLessonUrl(url: string) {
+function isProbablyMp4Url(url: string) {
   const u = String(url || "").trim().toLowerCase();
-  const isHttp = u.startsWith("http://") || u.startsWith("https://");
-  return isHttp && (/\.mp4(\?|#|$)/.test(u) || u.includes("/uploads/learn-videos/"));
+  return u.startsWith("http://") || u.startsWith("https://");
 }
 
 export function LessonVideoScreen() {
@@ -101,7 +100,7 @@ export function LessonVideoScreen() {
         ) : null}
 
         {lesson?.videoUrl && !lesson.locked ? (
-          isProbablyPlayableLessonUrl(lesson.videoUrl) ? (
+          isProbablyMp4Url(lesson.videoUrl) ? (
           <View style={styles.videoCard}>
             <Video
               source={{ uri: lesson.videoUrl }}
@@ -154,7 +153,7 @@ export function LessonVideoScreen() {
           ) : (
             <View style={styles.videoCard}>
               <Text style={styles.invalidVideoText}>Video URL is not playable.</Text>
-              <Text style={styles.invalidVideoTextSub}>Use an app-uploaded lesson video URL.</Text>
+              <Text style={styles.invalidVideoTextSub}>Provide a direct reachable video file URL.</Text>
             </View>
           )
         ) : null}

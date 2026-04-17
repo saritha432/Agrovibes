@@ -52,19 +52,13 @@ app.use(
 );
 app.use(
   helmet({
-    // Required so the web app (different origin/port) can render uploaded video files.
+    // Allow media files from API origin to be played in web app origin.
     crossOriginResourcePolicy: { policy: "cross-origin" }
   })
 );
-// NOTE: JSON is for metadata only (URLs, captions, etc).
-// If you later upload actual video files, use multipart/form-data (multer) instead of JSON.
-app.use(express.json({ limit: "25mb" }));
-app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+app.use(express.json({ limit: "2mb" }));
 app.use(morgan("dev"));
-app.use("/uploads", express.static(path.resolve(__dirname, "../uploads")));
-
-// Serve uploaded media files.
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.use("/api", apiRoutes);
 

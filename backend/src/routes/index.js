@@ -1,58 +1,46 @@
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const multer = require("multer");
-const cloudinary = require("cloudinary").v2;
 const { query } = require("../db");
 const bcrypt = require("bcryptjs");
-const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
-const crypto = require("crypto");
+const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 
 const router = express.Router();
-const hasCloudinaryConfig =
-  Boolean(process.env.CLOUDINARY_CLOUD_NAME) &&
-  Boolean(process.env.CLOUDINARY_API_KEY) &&
-  Boolean(process.env.CLOUDINARY_API_SECRET);
-if (hasCloudinaryConfig) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-  });
-}
-const uploadsRoot = path.resolve(__dirname, "../../uploads/learn-videos");
-if (!fs.existsSync(uploadsRoot)) {
-  fs.mkdirSync(uploadsRoot, { recursive: true });
-}
-const videoUpload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadsRoot),
-    filename: (_req, file, cb) => {
-      const safeExt = String(path.extname(file.originalname || "") || ".mp4").toLowerCase();
-      cb(null, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
-    }
-  }),
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
-  fileFilter: (_req, file, cb) => {
-    const isVideoMime = String(file.mimetype || "").startsWith("video/");
-    const isMp4Name = /\.mp4$/i.test(String(file.originalname || ""));
-    if (!isVideoMime && !isMp4Name) {
-      cb(new Error("Only video files are allowed"));
-      return;
-    }
-    cb(null, true);
-  }
-});
 let homePostsTableReady = false;
 let homeStoriesTableReady = false;
 let learnCoursesTableReady = false;
 let learnUsersTableReady = false;
 let learnEnrollmentsReady = false;
 let learnProgressReady = false;
+
+const uploadsRootDir = path.join(process.cwd(), "uploads");
+const videoUploadDir = path.join(uploadsRootDir, "videos");
+if (!fs.existsSync(videoUploadDir)) {
+  fs.mkdirSync(videoUploadDir, { recursive: true });
+}
+const uploadVideo = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, videoUploadDir),
+    filename: (_req, file, cb) => {
+      const safeBase = String(file.originalname || "video")
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[^a-zA-Z0-9-_]+/g, "-")
+        .slice(0, 40) || "video";
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeBase}.mp4`);
+    }
+  }),
+  limits: { fileSize: 120 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const type = String(file.mimetype || "").toLowerCase();
+    const name = String(file.originalname || "").toLowerCase();
+    if (type.includes("video") || name.endsWith(".mp4") || name.endsWith(".mov") || name.endsWith(".m4v") || name.endsWith(".webm")) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Only video files are allowed"));
+  }
+});
 
 async function ensureLearnUsersTable() {
   if (learnUsersTableReady) return;
@@ -320,81 +308,12 @@ async function ensureHomeStoriesTable() {
   homeStoriesTableReady = true;
 }
 
-const uploadsDir = path.join(__dirname, "..", "..", "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, uploadsDir),
-    filename: (_req, file, cb) => {
-      const safeName = `${Date.now()}-${Math.random().toString(16).slice(2)}${path.extname(file.originalname || "")}`;
-      cb(null, safeName);
-    }
-  }),
-  limits: {
-    fileSize: 60 * 1024 * 1024 // 60MB
-  }
-});
-
 router.get("/health", async (_req, res) => {
   try {
     await query("SELECT 1");
     res.json({ status: "ok", db: "connected" });
   } catch (error) {
     res.status(500).json({ status: "error", db: "disconnected", message: error.message });
-  }
-});
-
-router.post("/v1/uploads/video", upload.single("file"), async (req, res) => {
-  try {
-    if (!req.file) {
-      res.status(400).json({ message: "file is required" });
-      return;
-    }
-    // Note: when deployed behind a proxy, rely on x-forwarded-proto/host.
-    const proto = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
-    const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString();
-    const publicUrl = `${proto}://${host}/uploads/${req.file.filename}`;
-    res.status(201).json({ url: publicUrl });
-  } catch (error) {
-    res.status(500).json({ message: "Upload failed", error: error.message });
-  }
-});
-
-router.post("/v1/media/cloudinary-sign", async (req, res) => {
-  try {
-    const { folder = "agrovibes" } = req.body || {};
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey = process.env.CLOUDINARY_API_KEY;
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
-
-    if (!cloudName || !apiKey || !apiSecret) {
-      res.status(500).json({ message: "Cloudinary env vars missing" });
-      return;
-    }
-
-    const timestamp = Math.floor(Date.now() / 1000);
-
-    // Cloudinary signature: sort params, then sha1(paramString + api_secret)
-    const params = { folder: String(folder), timestamp };
-    const paramString = Object.keys(params)
-      .sort()
-      .map((k) => `${k}=${params[k]}`)
-      .join("&");
-
-    const signature = crypto.createHash("sha1").update(`${paramString}${apiSecret}`).digest("hex");
-
-    res.json({
-      cloudName,
-      apiKey,
-      timestamp,
-      folder: params.folder,
-      signature
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to sign upload", error: error.message });
   }
 });
 
@@ -667,10 +586,22 @@ router.get("/v1/home/posts", async (_req, res) => {
       `
     );
 
-    // If there are no posts yet, return an empty list.
-    // The mobile app should only attempt playback when a real uploaded URL exists.
     if (result.rows.length === 0) {
-      res.json({ posts: [] });
+      res.json({
+        posts: [
+          {
+            id: 1,
+            userName: "Ramesh Patel",
+            location: "Nashik",
+            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
+            likesCount: 1284,
+            commentsCount: 92,
+            videoUrl: "https://example.com/video/tomato.mp4",
+            thumbnailUrl: null,
+            createdAt: new Date().toISOString()
+          }
+        ]
+      });
       return;
     }
 
@@ -730,6 +661,27 @@ router.post("/v1/home/posts", async (req, res) => {
   }
 });
 
+router.post("/v1/uploads/video", (req, res) => {
+  uploadVideo.single("video")(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ message: err.message || "Invalid upload request" });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ message: "video file is required" });
+      return;
+    }
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const url = `${baseUrl}/uploads/videos/${encodeURIComponent(req.file.filename)}`;
+    res.status(201).json({
+      url,
+      filename: req.file.filename,
+      mimeType: req.file.mimetype,
+      size: req.file.size
+    });
+  });
+});
+
 router.get("/v1/learn/courses", async (_req, res) => {
   try {
     await seedLearnCoursesIfEmpty();
@@ -761,49 +713,6 @@ router.get("/v1/learn/courses", async (_req, res) => {
   }
 });
 
-router.post("/v1/learn/videos/upload", authRequired, requireRole(["instructor", "admin"]), (req, res) => {
-  videoUpload.single("video")(req, res, async (err) => {
-    if (err) {
-      res.status(400).json({ message: err.message || "Video upload failed" });
-      return;
-    }
-    if (!req.file) {
-      res.status(400).json({ message: "video file is required" });
-      return;
-    }
-    try {
-      if (hasCloudinaryConfig) {
-        const uploaded = await cloudinary.uploader.upload(req.file.path, {
-          resource_type: "video",
-          folder: "agrovibes/learn-videos",
-          use_filename: true,
-          unique_filename: true,
-          overwrite: false
-        });
-        try {
-          fs.unlinkSync(req.file.path);
-        } catch (_e) {
-          // ignore local cleanup failures
-        }
-        res.status(201).json({
-          videoUrl: uploaded.secure_url,
-          fileName: uploaded.public_id,
-          size: req.file.size,
-          provider: "cloudinary"
-        });
-        return;
-      }
-
-      const explicitBaseUrl = String(process.env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
-      const origin = explicitBaseUrl || `${req.protocol}://${req.get("host")}`;
-      const videoUrl = `${origin}/uploads/learn-videos/${encodeURIComponent(req.file.filename)}`;
-      res.status(201).json({ videoUrl, fileName: req.file.filename, size: req.file.size, provider: "local" });
-    } catch (uploadError) {
-      res.status(500).json({ message: "Video upload failed", error: uploadError.message || String(uploadError) });
-    }
-  });
-});
-
 router.post("/v1/learn/courses", authRequired, requireRole(["instructor", "admin"]), async (req, res) => {
   try {
     await ensureLearnCoursesTable();
@@ -828,18 +737,17 @@ router.post("/v1/learn/courses", authRequired, requireRole(["instructor", "admin
       return;
     }
 
-    const isProbablyPlayableLessonUrl = (url) => {
+    const isProbablyMp4Url = (url) => {
       const u = String(url || "").trim().toLowerCase();
-      const isHttp = u.startsWith("http://") || u.startsWith("https://");
-      return isHttp && (/\.mp4(\?|#|$)/.test(u) || u.includes("/uploads/learn-videos/"));
+      return (u.startsWith("http://") || u.startsWith("https://")) && /\.mp4(\?|#|$)/.test(u);
     };
 
     if (lessons.length > 0) {
       for (const l of lessons) {
         const videoUrl = l?.videoUrl;
-        if (!isProbablyPlayableLessonUrl(videoUrl)) {
+        if (!isProbablyMp4Url(videoUrl)) {
           res.status(400).json({
-            message: "Lesson videoUrl must be a direct video URL."
+            message: "Lesson videoUrl must be a direct .mp4 URL (Google search links will not play)."
           });
           return;
         }
@@ -906,17 +814,16 @@ router.put("/v1/learn/courses/:id", authRequired, requireRole(["instructor", "ad
       reviewsPreview: payload.reviewsPreview
     };
 
-    const isProbablyPlayableLessonUrl = (url) => {
+    const isProbablyMp4Url = (url) => {
       const u = String(url || "").trim().toLowerCase();
-      const isHttp = u.startsWith("http://") || u.startsWith("https://");
-      return isHttp && (/\.mp4(\?|#|$)/.test(u) || u.includes("/uploads/learn-videos/"));
+      return (u.startsWith("http://") || u.startsWith("https://")) && /\.mp4(\?|#|$)/.test(u);
     };
 
     if (Array.isArray(patch.lessons)) {
       for (const l of patch.lessons) {
         const videoUrl = l?.videoUrl;
-        if (!isProbablyPlayableLessonUrl(videoUrl)) {
-          res.status(400).json({ message: "Lesson videoUrl must be a direct video URL" });
+        if (!isProbablyMp4Url(videoUrl)) {
+          res.status(400).json({ message: "Lesson videoUrl must be a direct .mp4 URL" });
           return;
         }
       }
@@ -1024,7 +931,7 @@ router.post("/v1/learn/courses/:id/enroll", authRequired, async (req, res) => {
       INSERT INTO learn_enrollments (user_id, course_id, status, is_paid)
       VALUES ($1, $2, 'active', $3)
       ON CONFLICT (user_id, course_id)
-      DO UPDATE SET status='active', is_paid = (learn_enrollments.is_paid OR EXCLUDED.is_paid)
+      DO UPDATE SET status='active', is_paid = GREATEST(learn_enrollments.is_paid::INT, EXCLUDED.is_paid::INT)::BOOLEAN
       RETURNING id, course_id AS "courseId", status, is_paid AS "isPaid"
       `,
       [req.user.userId, courseId, isPaid]

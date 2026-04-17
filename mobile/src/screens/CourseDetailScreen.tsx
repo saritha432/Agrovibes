@@ -147,7 +147,6 @@ export function CourseDetailScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your instructor</Text>
           <View style={styles.instructorCard}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
@@ -167,7 +166,7 @@ export function CourseDetailScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Course syllabus</Text>
+          <Text style={styles.sectionTitle}>COURSE SYLLABUS</Text>
           {course.syllabus.map((s, idx) => (
             <View key={s.id} style={styles.syllabusRow}>
               <View style={styles.syllabusLeft}>
@@ -178,17 +177,39 @@ export function CourseDetailScreen() {
                   <Text style={styles.syllabusTitle} numberOfLines={2}>
                     {s.title}
                   </Text>
-                  {s.durationLabel ? <Text style={styles.syllabusSub}>{s.durationLabel}</Text> : null}
                 </View>
               </View>
-              <Ionicons name={s.locked ? "lock-closed-outline" : "play-circle-outline"} size={18} color={s.locked ? "#9aa8a4" : GREEN} />
+              {idx === 0 && !s.locked ? (
+                <View style={styles.previewPill}>
+                  <Text style={styles.previewPillText}>Preview</Text>
+                </View>
+              ) : (
+                <Ionicons name={s.locked ? "lock-closed-outline" : "play-circle-outline"} size={16} color={s.locked ? "#9aa8a4" : GREEN} />
+              )}
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>WHAT YOU'LL LEARN</Text>
+          {[
+            "Practical field-tested techniques",
+            "Reduce input costs significantly",
+            "Improve crop yield and quality",
+            "Access government schemes & subsidies",
+            "Connect with expert community",
+            "Downloadable study material"
+          ].map((item) => (
+            <View key={item} style={styles.learnRow}>
+              <Ionicons name="checkmark-circle" size={14} color={GREEN} />
+              <Text style={styles.learnText}>{item}</Text>
             </View>
           ))}
         </View>
 
         {course.reviewsPreview?.length ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Student reviews</Text>
+            <Text style={styles.sectionTitle}>STUDENT REVIEWS</Text>
             {course.reviewsPreview.slice(0, 3).map((r) => (
               <View key={r.name} style={styles.reviewRow}>
                 <View style={styles.reviewAvatar}>
@@ -203,25 +224,6 @@ export function CourseDetailScreen() {
                 </View>
               </View>
             ))}
-            <Pressable
-              style={styles.bottomCta}
-              accessibilityRole="button"
-              onPress={async () => {
-                if (!user || !token) {
-                  navigation.navigate("Auth" as any);
-                  return;
-                }
-                try {
-                  await enrollInCourse(route.params.courseId, token, !course.isFree);
-                } catch {
-                  // ignore
-                }
-                navigation.navigate("CoursePlayer", { courseId: route.params.courseId });
-              }}
-            >
-              <Ionicons name="play-circle" size={18} color="#fff" />
-              <Text style={styles.bottomCtaText}>Start Learning Now — It’s Free!</Text>
-            </Pressable>
           </View>
         ) : null}
           </>
@@ -232,58 +234,59 @@ export function CourseDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f2f5f4" },
+  screen: { flex: 1, backgroundColor: "#f5f2ee" },
   scrollBottom: { paddingBottom: 120 },
 
-  headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, backgroundColor: "#f2f5f4" },
-  backBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, alignItems: "center", justifyContent: "center" },
-  headerTitle: { flex: 1, marginHorizontal: 10, fontWeight: "900", color: "#22312d", fontSize: 14 },
+  headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, backgroundColor: "#f5f2ee" },
+  backBtn: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  headerTitle: { flex: 1, marginHorizontal: 6, fontWeight: "700", color: "#22312d", fontSize: 11 },
 
-  hero: { marginHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: "#e7dfdc", overflow: "hidden", padding: 12 },
+  hero: { marginHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: "#e7dfdc", overflow: "hidden", padding: 12, minHeight: 130 },
   heroChips: { flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 4, flexWrap: "wrap" },
-  heroPill: { backgroundColor: "rgba(255,255,255,0.85)", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
-  heroPillText: { color: "#22312d", fontWeight: "900", fontSize: 11 },
-  heroIconWrap: { alignItems: "center", paddingVertical: 26 },
-  heroIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(10,159,70,0.25)" },
+  heroPill: { backgroundColor: "rgba(255,255,255,0.9)", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
+  heroPillText: { color: "#22312d", fontWeight: "700", fontSize: 9 },
+  heroIconWrap: { alignItems: "center", paddingVertical: 12 },
+  heroIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(10,159,70,0.25)" },
 
   body: { paddingHorizontal: 12, paddingTop: 12 },
-  courseTitle: { fontSize: 20, fontWeight: "900", color: "#111616" },
+  courseTitle: { fontSize: 28, fontWeight: "900", color: "#111616", lineHeight: 34 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, flexWrap: "wrap" },
-  metaText: { color: "#5b6966", fontWeight: "800", fontSize: 12 },
+  metaText: { color: "#5b6966", fontWeight: "600", fontSize: 11 },
   dot: { color: "#7b8b86", fontWeight: "900" },
 
-  priceCard: { marginTop: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 12 },
+  priceCard: { marginTop: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12 },
   priceTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  priceLabel: { fontWeight: "900", color: GREEN, fontSize: 18 },
-  priceSub: { marginTop: 4, color: "#5b6966", fontWeight: "700" },
-  cta: { marginTop: 10, backgroundColor: GREEN, borderRadius: 14, paddingVertical: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
-  ctaText: { color: "#fff", fontWeight: "900", fontSize: 14 },
+  priceLabel: { fontWeight: "900", color: GREEN, fontSize: 34, lineHeight: 38 },
+  priceSub: { marginTop: 0, color: "#5b6966", fontWeight: "500", fontSize: 11 },
+  cta: { marginTop: 10, backgroundColor: GREEN, borderRadius: 8, paddingVertical: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  ctaText: { color: "#fff", fontWeight: "800", fontSize: 12 },
 
-  section: { marginTop: 14 },
-  sectionTitle: { fontSize: 16, fontWeight: "900", color: "#22312d", marginBottom: 8 },
+  section: { marginTop: 12 },
+  sectionTitle: { fontSize: 10, fontWeight: "700", color: "#7f8a87", marginBottom: 8, letterSpacing: 0.8 },
 
-  instructorCard: { backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 12, flexDirection: "row", gap: 10 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#eef8f1", borderWidth: 1, borderColor: "#cde9d9", alignItems: "center", justifyContent: "center" },
+  instructorCard: { borderBottomWidth: 1, borderBottomColor: "#e8e1da", paddingBottom: 10, flexDirection: "row", gap: 10 },
+  avatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: "#f5d3c4", borderWidth: 1, borderColor: "#efbfa6", alignItems: "center", justifyContent: "center" },
   avatarText: { color: GREEN, fontWeight: "900" },
-  instructorName: { color: "#111616", fontWeight: "900" },
-  instructorTitle: { marginTop: 2, color: "#5b6966", fontWeight: "800" },
-  instructorBio: { marginTop: 8, color: "#33443f", fontWeight: "600", lineHeight: 18 },
+  instructorName: { color: "#111616", fontWeight: "800", fontSize: 11 },
+  instructorTitle: { marginTop: 1, color: "#7a857f", fontWeight: "600", fontSize: 10 },
+  instructorBio: { marginTop: 4, color: "#495955", fontWeight: "500", lineHeight: 16, fontSize: 10 },
 
-  syllabusRow: { backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 12, marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  syllabusRow: { backgroundColor: "#f8f6f2", borderWidth: 1, borderColor: "#ece4dc", borderRadius: 8, padding: 10, marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   syllabusLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  stepCircle: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#f2f5f4", borderWidth: 1, borderColor: "#d7dfdc", alignItems: "center", justifyContent: "center" },
-  stepText: { fontWeight: "900", color: "#22312d", fontSize: 12 },
-  syllabusTitle: { color: "#111616", fontWeight: "900" },
-  syllabusSub: { marginTop: 2, color: "#7b8b86", fontWeight: "800", fontSize: 12 },
+  stepCircle: { width: 20, height: 20, borderRadius: 10, backgroundColor: "#f1e6de", alignItems: "center", justifyContent: "center" },
+  stepText: { fontWeight: "800", color: "#9f5f4d", fontSize: 10 },
+  syllabusTitle: { color: "#111616", fontWeight: "600", fontSize: 10, lineHeight: 14 },
+  previewPill: { backgroundColor: "#d6f8d9", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  previewPillText: { color: "#118247", fontWeight: "700", fontSize: 9 },
 
-  reviewRow: { backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 12, marginTop: 8, flexDirection: "row", gap: 10 },
-  reviewAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#f2f5f4", borderWidth: 1, borderColor: "#d7dfdc", alignItems: "center", justifyContent: "center" },
-  reviewAvatarText: { color: "#33443f", fontWeight: "900", fontSize: 12 },
-  reviewName: { fontWeight: "900", color: "#22312d" },
-  reviewText: { marginTop: 6, color: "#33443f", fontWeight: "600", lineHeight: 18 },
-  bottomCta: { marginTop: 12, backgroundColor: GREEN, borderRadius: 14, paddingVertical: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
-  bottomCtaText: { color: "#fff", fontWeight: "900", fontSize: 14 }
-  ,
+  learnRow: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 7 },
+  learnText: { color: "#33443f", fontWeight: "500", fontSize: 11 },
+
+  reviewRow: { backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10, marginTop: 8, flexDirection: "row", gap: 8 },
+  reviewAvatar: { width: 24, height: 24, borderRadius: 12, backgroundColor: "#f8dfd2", alignItems: "center", justifyContent: "center" },
+  reviewAvatarText: { color: "#7c4937", fontWeight: "800", fontSize: 9 },
+  reviewName: { fontWeight: "700", color: "#22312d", fontSize: 10 },
+  reviewText: { marginTop: 4, color: "#33443f", fontWeight: "500", lineHeight: 15, fontSize: 10 },
   stateCard: { marginBottom: 10, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 12, flexDirection: "row", gap: 10, alignItems: "center" },
   stateText: { color: "#4b5a56", fontWeight: "700", flex: 1 }
 });

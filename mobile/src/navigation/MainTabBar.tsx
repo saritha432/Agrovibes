@@ -39,7 +39,16 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
 
     const onPress = () => {
       const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
-      if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+      if (event.defaultPrevented) return;
+      if (route.name === "Learn") {
+        navigation.navigate({
+          name: "Learn",
+          params: { screen: "LearnHome" },
+          merge: false
+        } as never);
+        return;
+      }
+      if (!isFocused) navigation.navigate(route.name);
     };
 
     return (

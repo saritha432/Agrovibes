@@ -19,9 +19,8 @@ const BORDER = "#dce3e1";
 
 function lessonIsPlayable(lesson: CourseLesson) {
   const u = String(lesson.videoUrl || "").trim().toLowerCase();
-  const isHttp = u.startsWith("http://") || u.startsWith("https://");
-  const isPlayableUrl = isHttp && (/\.mp4(\?|#|$)/.test(u) || u.includes("/uploads/learn-videos/"));
-  return !lesson.locked && isPlayableUrl;
+  const hasRemoteUrl = u.startsWith("http://") || u.startsWith("https://");
+  return !lesson.locked && hasRemoteUrl;
 }
 
 export function CoursePlayerScreen() {

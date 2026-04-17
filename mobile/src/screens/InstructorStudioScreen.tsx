@@ -1,17 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import * as ImagePicker from "expo-image-picker";
 import { useAuth } from "../auth/AuthContext";
 import type { Course } from "../services/api";
 import { createCourse } from "../services/api";
 import { updateCourse } from "../services/api";
-import { uploadCourseVideo } from "../services/api";
+import { uploadVideoFile } from "../services/api";
 
 const GREEN = "#0a9f46";
 const BORDER = "#dce3e1";
+type DraftLesson = {
+  id: string;
+  title: string;
+  durationLabel: string;
+  locked: boolean;
+  videoUri: string;
+};
 
 function slugify(input: string) {
   return input
@@ -21,16 +29,12 @@ function slugify(input: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-function formatDurationLabel(totalSeconds: number) {
-  const seconds = Math.max(0, Math.floor(totalSeconds || 0));
-  const mm = Math.floor(seconds / 60);
-  const ss = seconds % 60;
-  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
-}
-
-function isProbablyMp4(url: string) {
-  const u = String(url || "").trim().toLowerCase();
-  return (u.startsWith("http://") || u.startsWith("https://")) && (u.includes(".mp4") || u.includes("/uploads/learn-videos/"));
+function formatSelectedLabel(uri: string) {
+  if (!uri) return "";
+  const clean = uri.split("?")[0];
+  const last = clean.split("/").pop() || clean;
+  if (last.length > 40) return `${last.slice(0, 18)}…${last.slice(-12)}`;
+  return last;
 }
 
 export function InstructorStudioScreen() {
@@ -41,12 +45,10 @@ export function InstructorStudioScreen() {
   const [courseId, setCourseId] = React.useState("");
   const [category, setCategory] = React.useState("General");
   const [isFree, setIsFree] = React.useState(true);
-  const [video1, setVideo1] = React.useState("");
-  const [video2, setVideo2] = React.useState("");
-  const [video1DurationLabel, setVideo1DurationLabel] = React.useState("05:00");
-  const [video2DurationLabel, setVideo2DurationLabel] = React.useState("10:00");
-  const [uploadingVideo1, setUploadingVideo1] = React.useState(false);
-  const [uploadingVideo2, setUploadingVideo2] = React.useState(false);
+  const [lessons, setLessons] = React.useState<DraftLesson[]>([
+    { id: "1", title: "Introduction", durationLabel: "05:00", locked: false, videoUri: "" },
+    { id: "2", title: "Lesson 2", durationLabel: "10:00", locked: true, videoUri: "" }
+  ]);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -55,56 +57,68 @@ export function InstructorStudioScreen() {
     if (!courseId && title) setCourseId(slugify(title));
   }, [title]);
 
-  const pickAndUploadVideo = async (lessonIndex: 1 | 2) => {
+  async function validateVideoSize(uri: string, maxMb: number) {
+    if (Platform.OS === "web") return;
+    const info = await FileSystem.getInfoAsync(uri, { size: true });
+    const bytes = (info as { size?: number }).size ?? 0;
+    if (!bytes) return;
+    const mb = bytes / (1024 * 1024);
+    if (mb > maxMb) {
+      throw new Error(`Video is ${mb.toFixed(1)}MB. Please select a video under ${maxMb}MB.`);
+    }
+  }
+
+  async function pickLessonVideo(lessonId: string, source: "camera" | "gallery") {
     setError(null);
-    if (!token) {
-      setError("Please login first.");
+    const permission =
+      source === "camera"
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError(source === "camera" ? "Camera permission is required." : "Media library permission is required.");
       return;
     }
-    const setUploading = lessonIndex === 1 ? setUploadingVideo1 : setUploadingVideo2;
-    const setUrl = lessonIndex === 1 ? setVideo1 : setVideo2;
-    setUploading(true);
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        setError("Media library permission is required to upload videos.");
-        return;
-      }
-      const picked = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsMultipleSelection: false,
-        quality: 1
-      });
-      if (picked.canceled || !picked.assets?.[0]) return;
-      const asset = picked.assets[0];
-      let webFile: Blob | undefined = undefined;
-      if (Platform.OS === "web") {
-        const directFile = (asset as any).file as Blob | undefined;
-        if (directFile) {
-          webFile = directFile;
-        } else if (asset.uri) {
-          // Expo web may not expose `asset.file`; fetch the blob from the local object URL.
-          const blobRes = await fetch(asset.uri);
-          webFile = await blobRes.blob();
-        }
-      }
-      const durationSeconds = Number((asset as any).duration || 0) / 1000;
-      const resolvedDurationLabel = durationSeconds > 0 ? formatDurationLabel(durationSeconds) : lessonIndex === 1 ? "05:00" : "10:00";
-      const uploaded = await uploadCourseVideo(token, {
-        uri: asset.uri,
-        name: asset.fileName || `lesson-${lessonIndex}-${Date.now()}.mp4`,
-        type: asset.mimeType || "video/mp4",
-        file: webFile
-      });
-      setUrl(uploaded.videoUrl);
-      if (lessonIndex === 1) setVideo1DurationLabel(resolvedDurationLabel);
-      if (lessonIndex === 2) setVideo2DurationLabel(resolvedDurationLabel);
-      setSuccess(`Lesson ${lessonIndex} video uploaded.`);
-    } catch (e: any) {
-      setError(e?.message || `Failed to upload lesson ${lessonIndex} video`);
-    } finally {
-      setUploading(false);
+    const result =
+      source === "camera"
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+            quality: 0.9
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+            quality: 1
+          });
+    if (!result.canceled) {
+      const uri = result.assets[0]?.uri ?? "";
+      setLessons((prev) => prev.map((l) => (l.id === lessonId ? { ...l, videoUri: uri } : l)));
     }
+  }
+
+  const updateLesson = (lessonId: string, patch: Partial<DraftLesson>) => {
+    setLessons((prev) => prev.map((l) => (l.id === lessonId ? { ...l, ...patch } : l)));
+  };
+
+  const addLesson = () => {
+    setLessons((prev) => {
+      const nextNum = prev.length + 1;
+      return [
+        ...prev,
+        {
+          id: String(nextNum),
+          title: `Lesson ${nextNum}`,
+          durationLabel: "10:00",
+          locked: !isFree && nextNum > 1,
+          videoUri: ""
+        }
+      ];
+    });
+  };
+
+  const removeLesson = (lessonId: string) => {
+    setLessons((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((l) => l.id !== lessonId).map((l, idx) => ({ ...l, id: String(idx + 1) }));
+    });
   };
 
   const submit = async () => {
@@ -118,12 +132,30 @@ export function InstructorStudioScreen() {
       setError("Course id and title are required.");
       return;
     }
-    if (!isProbablyMp4(video1) || !isProbablyMp4(video2)) {
-      setError("Upload both lesson videos before publishing.");
+    if (lessons.length === 0) {
+      setError("Please add at least one lesson.");
+      return;
+    }
+    const invalidLesson = lessons.find((l) => !l.title.trim() || !l.durationLabel.trim() || !l.videoUri);
+    if (invalidLesson) {
+      setError("Each lesson needs title, duration and video upload.");
       return;
     }
     setLoading(true);
     try {
+      let publishedCourseId = courseId;
+      for (const lesson of lessons) {
+        await validateVideoSize(lesson.videoUri, 120);
+      }
+      const uploadedUrls = await Promise.all(lessons.map((lesson) => uploadVideoFile(lesson.videoUri)));
+      const lessonPayload = lessons.map((lesson, idx) => ({
+        id: String(idx + 1),
+        title: lesson.title.trim(),
+        durationLabel: lesson.durationLabel.trim(),
+        locked: idx === 0 ? false : isFree ? false : Boolean(lesson.locked),
+        videoUrl: uploadedUrls[idx].url
+      }));
+
       const payload: Course = {
         id: courseId,
         title,
@@ -140,36 +172,45 @@ export function InstructorStudioScreen() {
           title: "Instructor",
           bio: "Created in Instructor Studio"
         },
-        syllabus: [
-          { id: "1", title: "Introduction", durationLabel: video1DurationLabel, locked: false },
-          { id: "2", title: "Lesson 2", durationLabel: video2DurationLabel, locked: !isFree }
-        ],
-        lessons: [
-          { id: "1", title: "Introduction", durationLabel: video1DurationLabel, locked: false, videoUrl: video1 },
-          { id: "2", title: "Lesson 2", durationLabel: video2DurationLabel, locked: !isFree, videoUrl: video2 }
-        ],
+        syllabus: lessonPayload.map((l) => ({
+          id: l.id,
+          title: l.title,
+          durationLabel: l.durationLabel,
+          locked: l.locked
+        })),
+        lessons: lessonPayload,
         reviewsPreview: []
       };
 
-      // Create first to avoid expected 404 noise from "update-then-create" flow.
+      // Update first; create only when course does not exist (404).
       try {
-        const res = await createCourse(token, payload);
-        setSuccess(`Created course: ${res.courseId}`);
-      } catch (createErr: any) {
-        const msg = String(createErr?.message || "");
-        if (msg.toLowerCase().includes("already exists") || msg.includes("409")) {
-          await updateCourse(token, courseId, payload);
-          setSuccess(`Updated course: ${courseId}`);
+        await updateCourse(token, courseId, payload);
+        setSuccess(`Updated course: ${courseId}`);
+      } catch (e: any) {
+        if (Number(e?.status) === 404) {
+          const res = await createCourse(token, payload);
+          publishedCourseId = res.courseId;
+          setSuccess(`Created course: ${res.courseId}`);
         } else {
-          throw createErr;
+          throw e;
         }
       }
       setTitle("");
       setCourseId("");
-      setVideo1("");
-      setVideo2("");
-      setVideo1DurationLabel("05:00");
-      setVideo2DurationLabel("10:00");
+      setLessons([
+        { id: "1", title: "Introduction", durationLabel: "05:00", locked: false, videoUri: "" },
+        { id: "2", title: "Lesson 2", durationLabel: "10:00", locked: true, videoUri: "" }
+      ]);
+      navigation.replace(
+        "Main" as never,
+        {
+          screen: "Learn",
+          params: {
+            screen: "CoursePlayer",
+            params: { courseId: publishedCourseId }
+          }
+        } as never
+      );
     } catch (e: any) {
       setError(e?.message || "Failed to create course");
     } finally {
@@ -207,27 +248,63 @@ export function InstructorStudioScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.label}>Lesson 1 video</Text>
-        <Pressable
-          onPress={() => pickAndUploadVideo(1)}
-          disabled={uploadingVideo1 || loading}
-          style={[styles.uploadBtn, uploadingVideo1 ? styles.btnDisabled : null]}
-        >
-          <Ionicons name="cloud-upload-outline" size={16} color="#22312d" />
-          <Text style={styles.uploadBtnText}>{uploadingVideo1 ? "Uploading..." : "Pick and upload from device"}</Text>
-        </Pressable>
-        <Text style={styles.uploadMeta}>{video1 ? "Uploaded" : "Not uploaded"}</Text>
-
-        <Text style={styles.label}>Lesson 2 video</Text>
-        <Pressable
-          onPress={() => pickAndUploadVideo(2)}
-          disabled={uploadingVideo2 || loading}
-          style={[styles.uploadBtn, uploadingVideo2 ? styles.btnDisabled : null]}
-        >
-          <Ionicons name="cloud-upload-outline" size={16} color="#22312d" />
-          <Text style={styles.uploadBtnText}>{uploadingVideo2 ? "Uploading..." : "Pick and upload from device"}</Text>
-        </Pressable>
-        <Text style={styles.uploadMeta}>{video2 ? "Uploaded" : "Not uploaded"}</Text>
+        <View style={styles.lessonHeaderRow}>
+          <Text style={styles.label}>Lessons</Text>
+          <Pressable onPress={addLesson} style={styles.addLessonBtn} disabled={loading}>
+            <Ionicons name="add" size={15} color="#fff" />
+            <Text style={styles.addLessonText}>Add lesson</Text>
+          </Pressable>
+        </View>
+        {lessons.map((lesson, idx) => (
+          <View key={lesson.id} style={styles.lessonCard}>
+            <View style={styles.lessonTitleRow}>
+              <Text style={styles.lessonTitle}>Lesson {idx + 1}</Text>
+              {lessons.length > 1 ? (
+                <Pressable onPress={() => removeLesson(lesson.id)} disabled={loading}>
+                  <Ionicons name="trash-outline" size={16} color="#b42318" />
+                </Pressable>
+              ) : null}
+            </View>
+            <TextInput
+              value={lesson.title}
+              onChangeText={(v) => updateLesson(lesson.id, { title: v })}
+              style={styles.input}
+              placeholder={`Lesson ${idx + 1} title`}
+            />
+            <TextInput
+              value={lesson.durationLabel}
+              onChangeText={(v) => updateLesson(lesson.id, { durationLabel: v })}
+              style={styles.input}
+              placeholder="Duration (e.g. 10:00)"
+            />
+            {idx > 0 ? (
+              <Pressable
+                onPress={() => updateLesson(lesson.id, { locked: !lesson.locked })}
+                style={[styles.lockPill, lesson.locked ? styles.lockPillActive : null]}
+                disabled={loading || isFree}
+              >
+                <Text style={[styles.lockPillText, lesson.locked ? styles.lockPillTextActive : null]}>
+                  {isFree ? "Unlocked (free course)" : lesson.locked ? "Locked lesson" : "Unlocked lesson"}
+                </Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.firstLessonHint}>First lesson stays unlocked for preview.</Text>
+            )}
+            <View style={styles.videoActionRow}>
+              <Pressable style={styles.videoActionBtn} onPress={() => pickLessonVideo(lesson.id, "camera")} disabled={loading}>
+                <Text style={styles.videoActionText}>Record</Text>
+              </Pressable>
+              <Pressable style={styles.videoActionBtn} onPress={() => pickLessonVideo(lesson.id, "gallery")} disabled={loading}>
+                <Text style={styles.videoActionText}>Upload</Text>
+              </Pressable>
+            </View>
+            {lesson.videoUri ? (
+              <Text style={styles.selectedText} numberOfLines={1} ellipsizeMode="middle">
+                Selected: {formatSelectedLabel(lesson.videoUri)}
+              </Text>
+            ) : null}
+          </View>
+        ))}
 
         {error ? (
           <View style={styles.msgRow}>
@@ -260,20 +337,22 @@ const styles = StyleSheet.create({
   hint: { color: "#4b5a56", fontWeight: "700", lineHeight: 18 },
   label: { marginTop: 10, fontWeight: "900", color: "#22312d" },
   input: { marginTop: 6, borderWidth: 1, borderColor: BORDER, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontWeight: "700", color: "#111616" },
-  uploadBtn: {
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8
-  },
-  uploadBtnText: { fontWeight: "800", color: "#22312d" },
-  uploadMeta: { marginTop: 6, color: "#4b5a56", fontWeight: "700" },
   row: { flexDirection: "row", gap: 8, marginTop: 10 },
+  lessonHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10 },
+  addLessonBtn: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: GREEN, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
+  addLessonText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+  lessonCard: { marginTop: 8, borderWidth: 1, borderColor: "#e4ebe8", borderRadius: 12, padding: 10, backgroundColor: "#f9fbfa" },
+  lessonTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 2 },
+  lessonTitle: { fontWeight: "900", color: "#1d2b27" },
+  lockPill: { marginTop: 8, borderRadius: 999, borderWidth: 1, borderColor: BORDER, paddingVertical: 7, alignItems: "center", backgroundColor: "#fff" },
+  lockPillActive: { backgroundColor: "#111827", borderColor: "#111827" },
+  lockPillText: { color: "#425652", fontWeight: "700", fontSize: 12 },
+  lockPillTextActive: { color: "#fff" },
+  firstLessonHint: { marginTop: 8, color: "#5b6966", fontWeight: "600", fontSize: 12 },
+  videoActionRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  videoActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 10, alignItems: "center" },
+  videoActionText: { color: "#1b2422", fontWeight: "700" },
+  selectedText: { marginTop: 6, color: "#4d5f5a", fontSize: 12 },
   pill: { flex: 1, borderRadius: 999, borderWidth: 1, borderColor: BORDER, paddingVertical: 10, alignItems: "center" },
   pillActive: { backgroundColor: "#111827", borderColor: "#111827" },
   pillText: { fontWeight: "900", color: "#5b6966" },

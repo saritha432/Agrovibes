@@ -29,7 +29,10 @@ async function parseJsonOrThrow(response: Response) {
   }
   if (!response.ok) {
     const msg = parsed?.message || `Request failed (${response.status})`;
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = response.status;
+    err.payload = parsed;
+    throw err;
   }
   return parsed;
 }
@@ -196,9 +199,7 @@ export async function fetchHomePosts() {
 }
 
 export async function fetchLearnCourses() {
-  const response = await fetch(`${API_BASE_URL}/v1/learn/courses`, {
-    headers: { "Cache-Control": "no-cache" }
-  });
+  const response = await fetch(`${API_BASE_URL}/v1/learn/courses`);
   if (!response.ok) {
     throw new Error("Failed to load courses");
   }
@@ -206,9 +207,7 @@ export async function fetchLearnCourses() {
 }
 
 export async function fetchLearnCourseById(courseId: string) {
-  const response = await fetch(`${API_BASE_URL}/v1/learn/courses/${encodeURIComponent(courseId)}`, {
-    headers: { "Cache-Control": "no-cache" }
-  });
+  const response = await fetch(`${API_BASE_URL}/v1/learn/courses/${encodeURIComponent(courseId)}`);
   if (!response.ok) {
     throw new Error("Failed to load course");
   }
@@ -257,35 +256,6 @@ export async function updateCourse(token: string, courseId: string, payload: Cou
   })) as { ok: boolean };
 }
 
-export async function uploadCourseVideo(
-  token: string,
-  file: { uri?: string; name?: string; type?: string; file?: Blob }
-) {
-  const form = new FormData();
-  const formAny = form as any;
-  const fileName = file.name || `lesson-${Date.now()}.mp4`;
-  if (file.file) {
-    // Web requires passing a Blob/File directly.
-    formAny.append("video", file.file, fileName);
-  } else {
-    formAny.append("video", {
-      uri: file.uri,
-      name: fileName,
-      type: file.type || "video/mp4"
-    } as any);
-  }
-
-  const response = await fetch(`${API_BASE_URL}/v1/learn/videos/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    },
-    body: form
-  });
-
-  return (await parseJsonOrThrow(response)) as { videoUrl: string; fileName: string; size: number };
-}
-
 export async function createHomePost(payload: {
   userName: string;
   location: string;
@@ -305,53 +275,28 @@ export async function createHomePost(payload: {
 }
 
 export async function uploadVideoFile(fileUri: string) {
-  // Upload to Cloudinary via backend-signed signature.
-  const signRes = await fetch(`${API_BASE_URL}/v1/media/cloudinary-sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder: "agrovibes" })
-  });
-  if (!signRes.ok) throw new Error("Failed to sign upload");
-  const sign = (await signRes.json()) as {
-    cloudName: string;
-    apiKey: string;
-    timestamp: number;
-    folder: string;
-    signature: string;
-  };
-
   const form = new FormData();
-  const filename = `video-${Date.now()}.mp4`;
+  const normalizedUri = String(fileUri || "").trim();
+  const inferredName = normalizedUri.split("?")[0].split("/").pop() || `video-${Date.now()}.mp4`;
+  const safeName = inferredName.includes(".") ? inferredName : `${inferredName}.mp4`;
+  const ext = safeName.split(".").pop()?.toLowerCase() || "mp4";
+  const mimeType = ext === "mov" ? "video/quicktime" : ext === "webm" ? "video/webm" : "video/mp4";
 
-  // RN web can't append `{ uri }` objects reliably; it needs a real Blob/File.
   if (Platform.OS === "web") {
-    const res = await fetch(fileUri);
-    const blob = await res.blob();
-    (form as any).append("file", blob, filename);
+    const webResp = await fetch(normalizedUri);
+    const blob = await webResp.blob();
+    (form as any).append("video", blob, safeName);
   } else {
-    (form as any).append(
-      "file",
-      {
-        // @ts-ignore React Native FormData file type shape
-        uri: fileUri,
-        name: filename,
-        type: "video/mp4"
-      } as any
-    );
+    form.append("video", {
+      uri: normalizedUri,
+      name: safeName,
+      type: mimeType
+    } as any);
   }
 
-  form.append("api_key", sign.apiKey);
-  form.append("timestamp", String(sign.timestamp));
-  form.append("folder", sign.folder);
-  form.append("signature", sign.signature);
-
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/video/upload`, {
+  const response = await fetch(`${API_BASE_URL}/v1/uploads/video`, {
     method: "POST",
-    body: form
+    body: form as any
   });
-  if (!uploadRes.ok) throw new Error("Cloud upload failed");
-  const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
-  const url = uploaded.secure_url ?? uploaded.url;
-  if (!url) throw new Error("Cloud upload missing URL");
-  return { url };
+  return (await parseJsonOrThrow(response)) as { url: string; filename: string; mimeType: string; size: number };
 }
