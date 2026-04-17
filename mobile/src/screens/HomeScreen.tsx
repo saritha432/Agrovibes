@@ -1,105 +1,465 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  View
+  View,
+  type ViewToken
 } from "react-native";
+import { ResizeMode, Video } from "expo-av";
 import { AppTopBar } from "../components/AppTopBar";
+import { fetchHomePosts, fetchHomeStories, HomePost, HomeStory } from "../services/api";
 
-const reels = [
-  { id: "1", title: "Tomato Harvest", kind: "content", linked: false },
-  { id: "2", title: "Organic Onion Lot", kind: "product", linked: true },
-  { id: "3", title: "Soybean Sorting", kind: "content", linked: false }
-];
+interface HomeScreenProps {
+  refreshToken?: number;
+  onOpenCreate?: () => void;
+}
 
-export function HomeScreen() {
-  const [cartOpen, setCartOpen] = useState(false);
+const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
+
+export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
+  const [stories, setStories] = useState<HomeStory[]>([]);
+  const [posts, setPosts] = useState<HomePost[]>([]);
+  const [playingPostId, setPlayingPostId] = useState<number | null>(null);
+  const [activePost, setActivePost] = useState<HomePost | null>(null);
+  const [isStoryOpen, setStoryOpen] = useState(false);
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const progress = useRef(new Animated.Value(0)).current;
+
+  const viewabilityConfig = useMemo(
+    () => ({ itemVisiblePercentThreshold: 65, minimumViewTime: 200 }),
+    []
+  );
+
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const ordered = viewableItems
+        .filter((v) => v.isViewable && v.item != null)
+        .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
+        .sort((a, b) => a.index - b.index);
+      const withVideo = ordered.find((c) => !!c.post.videoUrl);
+      setPlayingPostId(withVideo ? withVideo.post.id : null);
+    },
+    []
+  );
+
+  const viewabilityCallbackRef = useRef(onViewableItemsChanged);
+  viewabilityCallbackRef.current = onViewableItemsChanged;
+
+  const onViewableItemsChangedRef = useRef(
+    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      viewabilityCallbackRef.current(info);
+    }
+  );
+
+  useEffect(() => {
+    if (posts.length === 0) {
+      setPlayingPostId(null);
+      return;
+    }
+    setPlayingPostId((current) => {
+      if (current != null && posts.some((p) => p.id === current)) return current;
+      return posts.find((p) => p.videoUrl)?.id ?? null;
+    });
+  }, [posts]);
+
+  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl), [stories]);
+  const activeStory = playableStories[activeStoryIndex];
+
+  const closeStory = () => {
+    setStoryOpen(false);
+    progress.stopAnimation();
+    progress.setValue(0);
+  };
+
+  const nextStory = () => {
+    if (activeStoryIndex >= playableStories.length - 1) {
+      closeStory();
+      return;
+    }
+    progress.stopAnimation();
+    progress.setValue(0);
+    setActiveStoryIndex((v) => v + 1);
+  };
+
+  const prevStory = () => {
+    if (activeStoryIndex <= 0) return;
+    progress.stopAnimation();
+    progress.setValue(0);
+    setActiveStoryIndex((v) => v - 1);
+  };
+
+  useEffect(() => {
+    if (!isStoryOpen) return;
+    progress.setValue(0);
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: 7000,
+      useNativeDriver: false
+    }).start(({ finished }) => {
+      if (finished) nextStory();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStoryOpen, activeStoryIndex]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchHomeStories()
+      .then((data) => {
+        if (!mounted) return;
+        setStories(data.stories);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setStories([
+          { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
+          { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false },
+          { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false }
+        ]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [refreshToken]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchHomePosts()
+      .then((data) => {
+        if (!mounted) return;
+        setPosts(data.posts);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setPosts([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [refreshToken]);
+
+  const listHeader = useMemo(
+    () => (
+      <>
+        <AppTopBar />
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.storyRowWrap}
+          contentContainerStyle={styles.storyRow}
+        >
+          {stories.map((story) => (
+            <Pressable
+              key={story.id}
+              style={styles.storyItem}
+              onPress={() => {
+                if (story.videoUrl) {
+                  const idx = playableStories.findIndex((s) => s.id === story.id);
+                  setActiveStoryIndex(Math.max(idx, 0));
+                  setStoryOpen(true);
+                } else {
+                  onOpenCreate?.();
+                }
+              }}
+            >
+              <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
+                <View style={styles.storyInner}>
+                  <View style={styles.storyAvatarFill}>
+                    <Text style={styles.storyInitial}>{story.avatarLabel}</Text>
+                  </View>
+                </View>
+              </View>
+              <Text style={styles.storyName} numberOfLines={1}>
+                {story.userName}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </>
+    ),
+    [onOpenCreate, playableStories, stories]
+  );
+
+  const renderPost = useCallback(
+    ({ item: post, index }: { item: HomePost; index: number }) => {
+      const isActive = playingPostId === post.id && !!post.videoUrl;
+      return (
+        <Pressable style={styles.postCard} onPress={() => setActivePost(post)}>
+          <View style={styles.postTop}>
+            <View style={styles.postUserRow}>
+              <View style={styles.userAvatar}>
+                <Text style={styles.userAvatarText}>{post.userName[0]}</Text>
+              </View>
+              <View>
+                <Text style={styles.userName}>
+                  {post.userName} <Text style={styles.timeText}>• 13h</Text>
+                </Text>
+                <Text style={styles.userLoc}>{post.location}</Text>
+              </View>
+            </View>
+            <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+          </View>
+
+          <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
+            {post.videoUrl ? (
+              <Video
+                style={styles.video}
+                source={{ uri: post.videoUrl }}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay={isActive}
+                isLooping
+                isMuted
+                useNativeControls={false}
+              />
+            ) : (
+              <Ionicons name="play-circle-outline" size={48} color="#fff" />
+            )}
+          </View>
+
+          <View style={styles.postActions}>
+            <View style={styles.postActionsLeft}>
+              <Ionicons name="heart-outline" size={24} color="#1f2c29" />
+              <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
+              <Ionicons name="paper-plane-outline" size={22} color="#1f2c29" />
+            </View>
+            <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
+          </View>
+
+          <Text style={styles.likes}>{post.likesCount} likes</Text>
+          <Text style={styles.caption}>
+            <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
+          </Text>
+          <Text style={styles.comments}>View all {post.commentsCount} comments</Text>
+        </Pressable>
+      );
+    },
+    [playingPostId]
+  );
 
   return (
     <View style={styles.screen}>
-      <AppTopBar />
-      <ScrollView stickyHeaderIndices={[0]} contentContainerStyle={styles.scrollBottom}>
-        <View style={styles.stickySearchWrap}>
-          <View style={styles.searchWrap}>
-            <TextInput placeholder="Search crops, farmers, districts" style={styles.searchInput} />
-            <Pressable style={styles.iconButton}><Ionicons name="mic-outline" size={18} color="#fff" /></Pressable>
-            <Pressable style={styles.iconButton}><Ionicons name="search-outline" size={18} color="#fff" /></Pressable>
-          </View>
-        </View>
+      <FlatList
+        data={posts}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderPost}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={styles.feedBottom}
+        onViewableItemsChanged={onViewableItemsChangedRef.current}
+        viewabilityConfig={viewabilityConfig}
+      />
 
-        {reels.map((reel) => (
-          <View key={reel.id} style={[styles.reelCard, reel.linked ? styles.reelCardLinked : null]}>
-            <Ionicons name="play-circle-outline" size={38} color="#fff" />
-            <Text style={styles.reelTitle}>{reel.title}</Text>
-            <Text style={styles.reelMeta}>{reel.kind === "product" ? "Reel linked product" : "Pure content reel"}</Text>
-            {reel.linked ? (
-              <Pressable style={styles.buyNow}><Text style={styles.buyNowText}>Buy Now</Text></Pressable>
+      <Modal visible={isStoryOpen} animationType="fade" onRequestClose={closeStory}>
+        <View style={styles.storyViewerRoot}>
+          <View style={styles.storyProgressRow}>
+            {playableStories.map((s, idx) => {
+              const isPast = idx < activeStoryIndex;
+              const isActive = idx === activeStoryIndex;
+              const width = isActive
+                ? progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] })
+                : "100%";
+              return (
+                <View key={s.id} style={styles.storyProgressTrack}>
+                  <Animated.View
+                    style={[
+                      styles.storyProgressFill,
+                      {
+                        width,
+                        opacity: isPast || isActive ? 1 : 0.35
+                      }
+                    ]}
+                  />
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.storyViewerTopRow}>
+            <View style={styles.storyViewerUser}>
+              <View style={styles.storyViewerAvatar}>
+                <Text style={styles.storyViewerAvatarText}>{activeStory?.avatarLabel ?? "U"}</Text>
+              </View>
+              <View>
+                <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
+                <Text style={styles.storyViewerSub}>{activeStory?.district ?? ""}</Text>
+              </View>
+            </View>
+            <Pressable onPress={closeStory} hitSlop={10}>
+              <Ionicons name="close" size={26} color="#fff" />
+            </Pressable>
+          </View>
+
+          <View style={styles.storyViewerBody}>
+            {activeStory?.videoUrl ? (
+              <Video
+                style={styles.storyVideo}
+                source={{ uri: activeStory.videoUrl }}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay
+                isLooping={false}
+              />
             ) : null}
-          </View>
-        ))}
 
-        <View style={styles.quickActions}>
-          <Action icon="heart-outline" label="Like" />
-          <Action icon="chatbubble-outline" label="Chat" />
-          <Action icon="cart-outline" label="Add Cart" onPress={() => setCartOpen(true)} />
-          <Action icon="add-circle-outline" label="Add Reel" />
+            <View style={styles.storyTapZones}>
+              <Pressable style={styles.storyTapZone} onPress={prevStory} />
+              <Pressable style={styles.storyTapZone} onPress={nextStory} />
+            </View>
+          </View>
         </View>
-      </ScrollView>
+      </Modal>
 
-      <Pressable style={styles.exploreBtn}><Text style={styles.exploreText}>Explore Marketplace</Text></Pressable>
-
-      <Modal visible={cartOpen} transparent animationType="slide" onRequestClose={() => setCartOpen(false)}>
-        <Pressable style={styles.drawerBackdrop} onPress={() => setCartOpen(false)}>
-          <View style={styles.drawer}>
-            <Text style={styles.drawerTitle}>Mini Drawer Cart</Text>
-            <Text style={styles.drawerItem}>Tomato crate - Rs 980 - Escrow</Text>
-            <Text style={styles.drawerItem}>Onion bag - Rs 740 - Escrow</Text>
-            <Pressable style={styles.checkoutBtn}><Text style={styles.checkoutText}>Proceed to Checkout</Text></Pressable>
-            <Pressable onPress={() => setCartOpen(false)}><Text style={styles.continueText}>Continue Browsing</Text></Pressable>
+      <Modal visible={!!activePost} animationType="fade" onRequestClose={() => setActivePost(null)}>
+        <View style={styles.postViewerRoot}>
+          <View style={styles.postViewerTop}>
+            <Pressable onPress={() => setActivePost(null)} hitSlop={10}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </Pressable>
           </View>
-        </Pressable>
+          {activePost?.videoUrl ? (
+            <Video
+              style={styles.postViewerVideo}
+              source={{ uri: activePost.videoUrl }}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isMuted={false}
+              isLooping
+              useNativeControls
+            />
+          ) : (
+            <View style={styles.postViewerFallback}>
+              <Ionicons name="play-circle-outline" size={62} color="#fff" />
+              <Text style={styles.postViewerFallbackText}>No video available for this post</Text>
+            </View>
+          )}
+        </View>
       </Modal>
     </View>
   );
 }
 
-function Action({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress?: () => void }) {
-  return (
-    <Pressable style={styles.actionBtn} onPress={onPress}>
-      <Ionicons name={icon} size={18} color="#1f2b28" />
-      <Text style={styles.actionText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f2f5f4" },
-  scrollBottom: { paddingBottom: 110 },
-  stickySearchWrap: { backgroundColor: "#f2f5f4", paddingTop: 8 },
-  searchWrap: { marginHorizontal: 12, marginBottom: 8, flexDirection: "row", alignItems: "center", gap: 8 },
-  searchInput: { flex: 1, backgroundColor: "#f2f0eb", borderRadius: 10, borderWidth: 1, borderColor: "#e4e6df", paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
-  iconButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#0a9f46", alignItems: "center", justifyContent: "center" },
-  reelCard: { marginHorizontal: 12, marginBottom: 10, borderRadius: 16, minHeight: 190, backgroundColor: "#07803a", alignItems: "center", justifyContent: "center" },
-  reelCardLinked: { backgroundColor: "#c6425d" },
-  reelTitle: { color: "#fff", fontSize: 24, fontWeight: "700", marginTop: 8 },
-  reelMeta: { color: "#e2f4e8", marginTop: 4 },
-  buyNow: { marginTop: 10, backgroundColor: "#f2ae00", paddingHorizontal: 13, paddingVertical: 6, borderRadius: 18 },
-  buyNowText: { color: "#1f2524", fontWeight: "700", fontSize: 12 },
-  quickActions: { marginHorizontal: 12, marginTop: 4, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: "#d9e2df", flexDirection: "row", justifyContent: "space-around", paddingVertical: 10 },
-  actionBtn: { alignItems: "center", gap: 4 },
-  actionText: { fontSize: 11, fontWeight: "600", color: "#31403d" },
-  exploreBtn: { position: "absolute", right: 14, bottom: 96, backgroundColor: "#0a9f46", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
-  exploreText: { color: "#fff", fontWeight: "700" },
-  drawerBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.25)" },
-  drawer: { backgroundColor: "#fff", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 14, gap: 8 },
-  drawerTitle: { fontSize: 16, fontWeight: "700", color: "#1f2b28" },
-  drawerItem: { color: "#4a5b57" },
-  checkoutBtn: { marginTop: 8, backgroundColor: "#0a9f46", borderRadius: 10, alignItems: "center", paddingVertical: 11 },
-  checkoutText: { color: "#fff", fontWeight: "700" },
-  continueText: { textAlign: "center", color: "#0a9f46", fontWeight: "600", marginTop: 2 }
+  screen: { flex: 1, backgroundColor: "#f5f7f6" },
+  storyRow: {
+    paddingHorizontal: 10,
+    paddingTop: 0,
+    paddingBottom: 10,
+    gap: 12
+  },
+  storyRowWrap: {
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e8ecea"
+  },
+  storyItem: { alignItems: "center", width: 70 },
+  storyRing: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyRingNew: { backgroundColor: "#16a34a" },
+  storyRingViewed: { backgroundColor: "#9ca3af" },
+  storyInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyAvatarFill: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#d4dce0",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyInitial: { fontSize: 18, fontWeight: "700", color: "#1f2c29" },
+  storyName: { fontSize: 12, color: "#2f3e3a", marginTop: 6, fontWeight: "500", textAlign: "center", width: "100%" },
+  feedBottom: { paddingBottom: 100 },
+  postCard: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#dfe5e3",
+    borderRadius: 8,
+    overflow: "hidden",
+    marginHorizontal: 10,
+    marginTop: 10,
+    paddingBottom: 10,
+    marginBottom: 2
+  },
+  postTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8
+  },
+  postUserRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  userAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#22c55e",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  userAvatarText: { color: "#fff", fontWeight: "700" },
+  userName: { color: "#1f2c29", fontWeight: "700", fontSize: 14 },
+  timeText: { color: "#6d7d79", fontWeight: "500" },
+  userLoc: { color: "#687975", fontSize: 12 },
+  postMedia: {
+    height: 360,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  video: {
+    width: "100%",
+    height: "100%"
+  },
+  storyViewerRoot: { flex: 1, backgroundColor: "#000" },
+  storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
+  storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
+  storyProgressFill: { height: "100%", backgroundColor: "#fff" },
+  storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
+  storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
+  storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
+  storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
+  storyViewerName: { color: "#fff", fontWeight: "800" },
+  storyViewerSub: { color: "rgba(255,255,255,0.75)", marginTop: 1, fontSize: 12 },
+  storyViewerBody: { flex: 1, marginTop: 10 },
+  storyVideo: { width: "100%", height: "100%" },
+  storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
+  storyTapZone: { flex: 1 },
+  postViewerRoot: { flex: 1, backgroundColor: "#000" },
+  postViewerTop: {
+    position: "absolute",
+    top: 44,
+    right: 14,
+    zIndex: 10
+  },
+  postViewerVideo: { width: "100%", height: "100%" },
+  postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
+  postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
+  postActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingTop: 10
+  },
+  postActionsLeft: { flexDirection: "row", gap: 14, alignItems: "center" },
+  likes: { marginTop: 8, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29" },
+  caption: { marginTop: 6, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20 },
+  captionUser: { fontWeight: "700" },
+  comments: { marginTop: 6, paddingHorizontal: 10, color: "#637571" }
 });
