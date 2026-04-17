@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import { createHomePost, createHomeStory, uploadImageFile, uploadVideoFile } from "../services/api";
 
@@ -31,6 +32,7 @@ function formatSelectedLabel(uri: string) {
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
+  const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
   const [entryType, setEntryType] = useState<CreateType>("story");
   const [userName, setUserName] = useState("Ramesh Patel");
   const [location, setLocation] = useState("Nashik");
@@ -66,6 +68,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   React.useEffect(() => {
     if (!visible) return;
     setCreateType(initialType);
+    setCreateStep("preview");
     setEntryType(initialType ?? "story");
     setErrorText("");
     setPickedStoryVideoUri("");
@@ -93,12 +96,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     if (entryType === "story") {
       setPickedStoryVideoUri(uri);
       setCreateType("story");
+      setCreateStep("preview");
       return;
     }
     if (entryType === "reel" || entryType === "post") {
       setPickedPostVideoUri(uri);
       setPickedPostMediaType(asset?.type === "image" ? "image" : "video");
       setCreateType(entryType);
+      setCreateStep("preview");
       return;
     }
     setCreateType("live");
@@ -205,6 +210,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         }
       }
       setCreateType(null);
+      setCreateStep("preview");
       setCaption("");
       setVideoUrl("");
       setThumbnailUrl("");
@@ -217,6 +223,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setSubmitting(false);
     }
   };
+
+  const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostVideoUri;
+  const isSelectedVideo = createType === "story" || pickedPostMediaType !== "image";
+  const canProceedFromPreview = !!selectedUri || createType === "live";
+  const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
 
   return (
     <Modal visible={visible} transparent={!createType} animationType={createType ? "fade" : "slide"} onRequestClose={handleClose}>
@@ -258,6 +269,79 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             ))}
           </View>
         </View>
+      ) : (
+      createType !== "live" ? (
+      <View style={styles.igFullScreen}>
+        {createStep === "preview" ? (
+          <>
+            <View style={styles.igPreviewTopBar}>
+              <Pressable onPress={() => setCreateType(null)} hitSlop={10}>
+                <Ionicons name="arrow-back" size={24} color="#fff" />
+              </Pressable>
+              <Text style={styles.igPreviewTitle}>{previewTitle}</Text>
+              <Pressable
+                onPress={() => {
+                  if (createType === "story") {
+                    submitPostVideo();
+                    return;
+                  }
+                  setCreateStep("compose");
+                }}
+                disabled={!canProceedFromPreview || isSubmitting}
+              >
+                <Text style={[styles.igPreviewAction, !canProceedFromPreview ? styles.igPreviewActionDisabled : null]}>
+                  {createType === "story" ? "Share" : "Next"}
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.igMediaPreviewWrap}>
+              {selectedUri ? (
+                isSelectedVideo ? (
+                  <Video style={styles.igMediaPreview} source={{ uri: selectedUri }} shouldPlay isLooping resizeMode={ResizeMode.CONTAIN} />
+                ) : (
+                  <Image style={styles.igMediaPreview} source={{ uri: selectedUri }} resizeMode="contain" />
+                )
+              ) : (
+                <View style={styles.igEmptyPreview}>
+                  <Ionicons name="image-outline" size={42} color="rgba(255,255,255,0.7)" />
+                  <Text style={styles.igEmptyPreviewText}>Select media from camera or gallery</Text>
+                </View>
+              )}
+            </View>
+            {errorText ? <Text style={styles.igErrorText}>{errorText}</Text> : null}
+          </>
+        ) : (
+          <>
+            <View style={styles.igComposeTopBar}>
+              <Pressable onPress={() => setCreateStep("preview")} hitSlop={10}>
+                <Ionicons name="arrow-back" size={24} color="#1b2422" />
+              </Pressable>
+              <Text style={styles.igComposeTitle}>New {createType === "reel" ? "Reel" : "Post"}</Text>
+              <Pressable onPress={submitPostVideo} disabled={isSubmitting}>
+                {isSubmitting ? <ActivityIndicator size="small" color="#0a9f46" /> : <Text style={styles.igComposeShare}>Share</Text>}
+              </Pressable>
+            </View>
+            <View style={styles.igComposeMediaRow}>
+              {selectedUri ? (
+                isSelectedVideo ? (
+                  <Video style={styles.igComposeThumb} source={{ uri: selectedUri }} shouldPlay={false} resizeMode={ResizeMode.COVER} />
+                ) : (
+                  <Image style={styles.igComposeThumb} source={{ uri: selectedUri }} resizeMode="cover" />
+                )
+              ) : null}
+              <TextInput
+                value={caption}
+                onChangeText={setCaption}
+                style={styles.igComposeCaptionInput}
+                placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                multiline
+                placeholderTextColor="#7f8b88"
+              />
+            </View>
+            {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+          </>
+        )}
+      </View>
       ) : (
       <Pressable style={styles.modalBackdrop} onPress={handleClose}>
         <Pressable
@@ -362,12 +446,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
               ) : (
                 <>
-                  <TextInput
-                    value={caption}
-                    onChangeText={setCaption}
-                    style={styles.input}
-                    placeholder={isReel ? "Reel caption" : "Post caption"}
-                  />
+                  <TextInput value={caption} onChangeText={setCaption} style={styles.input} placeholder={isReel ? "Reel caption" : "Post caption"} />
                   <View style={styles.storyActionRow}>
                     <Pressable
                       style={styles.storyActionBtn}
@@ -435,6 +514,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           </>
         </Pressable>
       </Pressable>
+      )
       )}
     </Modal>
   );
@@ -474,6 +554,26 @@ const styles = StyleSheet.create({
   igModeRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 18, marginBottom: 4 },
   igModeText: { color: "rgba(255,255,255,0.62)", fontWeight: "700", letterSpacing: 0.8 },
   igModeTextActive: { color: "#fff" },
+  igPreviewTopBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 12
+  },
+  igPreviewTitle: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  igPreviewAction: { color: "#4da6ff", fontWeight: "700", fontSize: 16 },
+  igPreviewActionDisabled: { color: "rgba(77,166,255,0.5)" },
+  igMediaPreviewWrap: { flex: 1, borderRadius: 14, overflow: "hidden", backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
+  igMediaPreview: { width: "100%", height: "100%" },
+  igEmptyPreview: { alignItems: "center", gap: 8 },
+  igEmptyPreviewText: { color: "rgba(255,255,255,0.7)" },
+  igErrorText: { color: "#fecaca", textAlign: "center", marginTop: 10, fontWeight: "600" },
+  igComposeTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 8, backgroundColor: "#fff" },
+  igComposeTitle: { color: "#1b2422", fontWeight: "700", fontSize: 16 },
+  igComposeShare: { color: "#0a9f46", fontWeight: "700", fontSize: 16 },
+  igComposeMediaRow: { backgroundColor: "#fff", flexDirection: "row", padding: 12, gap: 10, borderTopWidth: 1, borderTopColor: "#edf1ef" },
+  igComposeThumb: { width: 76, height: 76, borderRadius: 8, backgroundColor: "#e7ece9" },
+  igComposeCaptionInput: { flex: 1, minHeight: 76, textAlignVertical: "top", color: "#1b2422" },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0, 0, 0, 0.30)", padding: 16 },
   modalCard: { backgroundColor: "#fff", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#e5ece8", marginBottom: 72 },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#d8dfdc", alignSelf: "center", marginBottom: 10 },
