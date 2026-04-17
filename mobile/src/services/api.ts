@@ -356,3 +356,36 @@ export async function uploadImageFile(fileUri: string) {
   if (!url) throw new Error("Image upload missing URL");
   return { url };
 }
+
+export type RazorpayOrderPayload = {
+  id: string;
+  amount: number;
+  currency: string;
+  receipt?: string;
+};
+
+export type RazorpayCreateOrderResult =
+  | { mock: true; keyId: string; order: RazorpayOrderPayload; message?: string }
+  | { mock: false; keyId: string; order: RazorpayOrderPayload };
+
+export async function createRazorpayOrder(payload: { amountPaise: number; receipt?: string }) {
+  const response = await fetch(`${API_BASE_URL}/v1/payments/razorpay/create-order`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amountPaise: payload.amountPaise, receipt: payload.receipt })
+  });
+  return (await parseJsonOrThrow(response)) as RazorpayCreateOrderResult;
+}
+
+export async function verifyRazorpayPayment(body: {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/v1/payments/razorpay/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  return (await parseJsonOrThrow(response)) as { ok: boolean; mock?: boolean };
+}

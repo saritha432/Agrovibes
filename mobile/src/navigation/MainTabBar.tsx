@@ -48,6 +48,14 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
         } as never);
         return;
       }
+      if (route.name === "Market") {
+        navigation.navigate({
+          name: "Market",
+          params: { screen: "MarketplaceHome" },
+          merge: false
+        } as never);
+        return;
+      }
       if (!isFocused) navigation.navigate(route.name);
     };
 

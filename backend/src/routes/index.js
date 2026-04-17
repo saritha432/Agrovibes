@@ -3,6 +3,7 @@ const { query } = require("../db");
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const multer = require("multer");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 
@@ -1062,6 +1063,98 @@ router.get("/v1/learn/courses/:id", authOptional, async (req, res) => {
     }
     res.json({ course: fallback, source: "fallback", message: error.message });
   }
+});
+
+function getRazorpayClient() {
+  const key_id = process.env.RAZORPAY_KEY_ID;
+  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+  if (!key_id || !key_secret) return null;
+  try {
+    // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+    const Razorpay = require("razorpay");
+    return { instance: new Razorpay({ key_id, key_secret }), keyId: key_id };
+  } catch (_e) {
+    return null;
+  }
+}
+
+/** Create a Razorpay order (amount in paise). Returns mock data in non-production when keys are missing. */
+router.post("/v1/payments/razorpay/create-order", async (req, res) => {
+  const amountPaise = Number(req.body?.amountPaise);
+  const receipt = String(req.body?.receipt || `agro_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+  if (!Number.isFinite(amountPaise) || amountPaise < 100) {
+    res.status(400).json({ message: "amountPaise must be at least 100 (INR 1.00)" });
+    return;
+  }
+  if (amountPaise > 499_99_900) {
+    res.status(400).json({ message: "Amount exceeds allowed maximum" });
+    return;
+  }
+
+  const rz = getRazorpayClient();
+  if (!rz) {
+    if (process.env.NODE_ENV === "production") {
+      res.status(503).json({ message: "Online payments are not configured on this server." });
+      return;
+    }
+    const id = `mock_order_${Date.now()}_${Math.round(Math.random() * 1e6)}`;
+    res.json({
+      mock: true,
+      keyId: "rzp_test_xxxxxxxx",
+      order: { id, amount: amountPaise, currency: "INR", receipt },
+      message: "Mock order (set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET for live Razorpay)"
+    });
+    return;
+  }
+
+  try {
+    const order = await rz.instance.orders.create({
+      amount: amountPaise,
+      currency: "INR",
+      receipt,
+      payment_capture: 1
+    });
+    res.json({ mock: false, keyId: rz.keyId, order });
+  } catch (err) {
+    const desc = err.error?.description || err.description || err.message || "Razorpay error";
+    res.status(502).json({ message: desc });
+  }
+});
+
+/** Verify Razorpay payment signature after client checkout. */
+router.post("/v1/payments/razorpay/verify", (req, res) => {
+  const orderId = req.body?.razorpay_order_id;
+  const paymentId = req.body?.razorpay_payment_id;
+  const signature = req.body?.razorpay_signature;
+  const secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!orderId || !paymentId || !signature) {
+    res.status(400).json({ message: "Missing razorpay_order_id, razorpay_payment_id, or razorpay_signature" });
+    return;
+  }
+
+  if (String(orderId).startsWith("mock_order_")) {
+    if (process.env.NODE_ENV === "production") {
+      res.status(400).json({ message: "Invalid order id" });
+      return;
+    }
+    res.json({ ok: true, mock: true });
+    return;
+  }
+
+  if (!secret) {
+    res.status(503).json({ message: "Payment verification unavailable" });
+    return;
+  }
+
+  const body = `${orderId}|${paymentId}`;
+  const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  if (expected !== signature) {
+    res.status(400).json({ message: "Payment signature mismatch" });
+    return;
+  }
+
+  res.json({ ok: true, mock: false });
 });
 
 module.exports = router;

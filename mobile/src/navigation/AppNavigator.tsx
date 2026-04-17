@@ -3,7 +3,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StyleSheet, View } from "react-native";
 import { CreateModal } from "../components/CreateModal";
 import { HomeScreen } from "../screens/HomeScreen";
-import { MarketplaceScreen } from "../screens/MarketplaceScreen";
+import { MarketStackNavigator } from "./MarketStackNavigator";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { ServicesScreen } from "../screens/ServicesScreen";
 import { MainTabBar } from "./MainTabBar";
@@ -43,7 +43,7 @@ export function AppNavigator() {
             />
           )}
         />
-        <Tab.Screen name="Market" component={MarketplaceScreen} />
+        <Tab.Screen name="Market" component={MarketStackNavigator} />
         <Tab.Screen name="Learn" component={LearnStackNavigator} />
         <Tab.Screen name="Services" component={ServicesScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
