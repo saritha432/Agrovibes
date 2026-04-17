@@ -400,6 +400,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
               )}
             </View>
+            {createType === "post" || createType === "reel" ? (
+              <Text style={styles.igPreviewHint}>Tap Next to add a caption, then Share.</Text>
+            ) : null}
             {errorText ? <Text style={styles.igErrorText}>{errorText}</Text> : null}
           </>
         ) : (
@@ -413,29 +416,43 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 {isSubmitting ? <ActivityIndicator size="small" color="#0a9f46" /> : <Text style={styles.igComposeShare}>Share</Text>}
               </Pressable>
             </View>
-            <View style={styles.igComposeMediaRow}>
-              {pickedPostAssets.length > 1 ? (
+            {pickedPostAssets.length > 1 ? (
+              <View style={styles.igComposeBody}>
+                <Text style={styles.igComposeSectionLabel}>Photos</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.igComposeThumbStripInner}>
                   {pickedPostAssets.map((a, i) => (
                     <Image key={`${i}-${a.uri}`} style={styles.igComposeThumbSmall} source={{ uri: a.uri }} resizeMode="cover" />
                   ))}
                 </ScrollView>
-              ) : selectedUri ? (
-                isSelectedVideo ? (
-                  <Video style={styles.igComposeThumb} source={{ uri: selectedUri }} shouldPlay={false} resizeMode={ResizeMode.COVER} />
-                ) : (
-                  <Image style={styles.igComposeThumb} source={{ uri: selectedUri }} resizeMode="cover" />
-                )
-              ) : null}
-              <TextInput
-                value={caption}
-                onChangeText={setCaption}
-                style={styles.igComposeCaptionInput}
-                placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
-                multiline
-                placeholderTextColor="#7f8b88"
-              />
-            </View>
+                <Text style={styles.igComposeSectionLabel}>Caption</Text>
+                <TextInput
+                  value={caption}
+                  onChangeText={setCaption}
+                  style={styles.igComposeCaptionInputFull}
+                  placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                  multiline
+                  placeholderTextColor="#7f8b88"
+                />
+              </View>
+            ) : (
+              <View style={styles.igComposeMediaRow}>
+                {selectedUri ? (
+                  isSelectedVideo ? (
+                    <Video style={styles.igComposeThumb} source={{ uri: selectedUri }} shouldPlay={false} resizeMode={ResizeMode.COVER} />
+                  ) : (
+                    <Image style={styles.igComposeThumb} source={{ uri: selectedUri }} resizeMode="cover" />
+                  )
+                ) : null}
+                <TextInput
+                  value={caption}
+                  onChangeText={setCaption}
+                  style={styles.igComposeCaptionInput}
+                  placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                  multiline
+                  placeholderTextColor="#7f8b88"
+                />
+              </View>
+            )}
             {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
           </>
         )}
@@ -547,6 +564,13 @@ const styles = StyleSheet.create({
   igEmptyPreview: { alignItems: "center", gap: 8 },
   igEmptyPreviewText: { color: "rgba(255,255,255,0.7)" },
   igErrorText: { color: "#fecaca", textAlign: "center", marginTop: 10, fontWeight: "600" },
+  igPreviewHint: {
+    color: "rgba(255,255,255,0.55)",
+    textAlign: "center",
+    fontSize: 13,
+    marginTop: 8,
+    paddingHorizontal: 12
+  },
   igComposeTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 8, backgroundColor: "#fff" },
   igComposeTitle: { color: "#1b2422", fontWeight: "700", fontSize: 16 },
   igComposeShare: { color: "#0a9f46", fontWeight: "700", fontSize: 16 },
@@ -555,6 +579,33 @@ const styles = StyleSheet.create({
   igComposeThumbStripInner: { flexDirection: "row", gap: 6, paddingRight: 6, alignItems: "center" },
   igComposeThumbSmall: { width: 56, height: 56, borderRadius: 8, backgroundColor: "#e7ece9" },
   igComposeCaptionInput: { flex: 1, minHeight: 76, textAlignVertical: "top", color: "#1b2422" },
+  igComposeBody: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#edf1ef",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 16,
+    minHeight: 200
+  },
+  igComposeSectionLabel: { color: "#697774", fontSize: 12, fontWeight: "700", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.6 },
+  igComposeCaptionInputFull: {
+    width: "100%",
+    minHeight: 120,
+    maxHeight: 220,
+    textAlignVertical: "top",
+    color: "#1b2422",
+    fontSize: 16,
+    lineHeight: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#f8faf9",
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    borderRadius: 10,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as const) : null)
+  },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0, 0, 0, 0.30)", padding: 16 },
   modalCard: { backgroundColor: "#fff", borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#e5ece8", marginBottom: 72 },
   sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#d8dfdc", alignSelf: "center", marginBottom: 10 },
