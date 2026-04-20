@@ -257,7 +257,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Text style={styles.userName}>
                   {post.userName} <Text style={styles.timeText}>• 13h</Text>
                 </Text>
-                <Text style={styles.userLoc}>{post.location}</Text>
               </View>
             </View>
             <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
@@ -368,7 +367,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </View>
               <View>
                 <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
-                <Text style={styles.storyViewerSub}>{activeStory?.district ?? ""}</Text>
               </View>
             </View>
             <Pressable onPress={closeStory} hitSlop={10}>
@@ -536,7 +534,6 @@ const styles = StyleSheet.create({
   userAvatarText: { color: "#fff", fontWeight: "700" },
   userName: { color: "#1f2c29", fontWeight: "700", fontSize: 14 },
   timeText: { color: "#6d7d79", fontWeight: "500" },
-  userLoc: { color: "#687975", fontSize: 12 },
   postMedia: {
     height: 360,
     alignItems: "center",
@@ -578,7 +575,6 @@ const styles = StyleSheet.create({
   storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
   storyViewerName: { color: "#fff", fontWeight: "800" },
-  storyViewerSub: { color: "rgba(255,255,255,0.75)", marginTop: 1, fontSize: 12 },
   storyViewerBody: {
     flex: 1,
     marginTop: 10,
