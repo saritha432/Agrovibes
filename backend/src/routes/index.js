@@ -519,9 +519,13 @@ router.get("/v1/community/questions", async (_req, res) => {
   }
 });
 
+const STORY_TTL_SQL = "24 hours";
+
 router.get("/v1/home/stories", async (_req, res) => {
   try {
     await ensureHomeStoriesTable();
+    // Stories expire after 24 hours (Instagram-style). Remove expired rows so they no longer appear.
+    await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
     const result = await query(
       `
       SELECT
@@ -534,6 +538,7 @@ router.get("/v1/home/stories", async (_req, res) => {
         video_url AS "videoUrl",
         image_url AS "imageUrl"
       FROM home_stories
+      WHERE created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
       ORDER BY created_at DESC
       LIMIT 40
       `

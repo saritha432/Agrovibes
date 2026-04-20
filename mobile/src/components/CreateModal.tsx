@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,11 +13,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TextStyle,
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system";
+import { captureRef } from "react-native-view-shot";
 import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
 
 interface CreateModalProps {
@@ -35,6 +37,173 @@ const createModes: { key: CreateType; label: string }[] = [
   { key: "live", label: "LIVE" }
 ];
 
+type CreativeFilterId = "none" | "warm" | "cool" | "mono" | "vivid" | "sunset" | "noir";
+type CreativeFontId = "classic" | "modern" | "strong" | "neon";
+type CreativeTextColor = "white" | "black" | "yellow" | "pink" | "blue" | "green";
+
+const FILTER_OPTIONS: { id: CreativeFilterId; label: string }[] = [
+  { id: "none", label: "Normal" },
+  { id: "warm", label: "Warm" },
+  { id: "cool", label: "Cool" },
+  { id: "mono", label: "B&W" },
+  { id: "vivid", label: "Vivid" },
+  { id: "sunset", label: "Sunset" },
+  { id: "noir", label: "Noir" }
+];
+
+const STICKER_EMOJIS = ["🌾", "🚜", "🌿", "🍅", "☀️", "💧", "🐄", "🌻", "🌽", "🥕"];
+
+const TEXT_COLOR_OPTIONS: { id: CreativeTextColor; hex: string }[] = [
+  { id: "white", hex: "#FFFFFF" },
+  { id: "black", hex: "#111111" },
+  { id: "yellow", hex: "#FFE066" },
+  { id: "pink", hex: "#FF66C4" },
+  { id: "blue", hex: "#66D2FF" },
+  { id: "green", hex: "#86EFAC" }
+];
+
+function creativeTextColorHex(id: CreativeTextColor) {
+  return TEXT_COLOR_OPTIONS.find((c) => c.id === id)?.hex ?? "#FFFFFF";
+}
+
+function filterTint(id: CreativeFilterId): string | null {
+  switch (id) {
+    case "warm":
+      return "rgba(255, 190, 100, 0.25)";
+    case "cool":
+      return "rgba(100, 180, 255, 0.22)";
+    case "mono":
+      return "rgba(80, 80, 80, 0.35)";
+    case "vivid":
+      return "rgba(255, 60, 160, 0.15)";
+    case "sunset":
+      return "rgba(255, 120, 60, 0.28)";
+    case "noir":
+      return "rgba(0, 0, 0, 0.38)";
+    default:
+      return null;
+  }
+}
+
+function creativeFontStyle(font: CreativeFontId, textColor: CreativeTextColor, withBackground: boolean): TextStyle {
+  const color = creativeTextColorHex(textColor);
+  const bg = withBackground
+    ? textColor === "black"
+      ? "rgba(255,255,255,0.9)"
+      : "rgba(0,0,0,0.7)"
+    : "transparent";
+
+  switch (font) {
+    case "modern":
+      return {
+        fontSize: 22,
+        fontWeight: "700",
+        color,
+        backgroundColor: bg,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        overflow: "hidden",
+        alignSelf: "center",
+        letterSpacing: 0.4
+      };
+    case "strong":
+      return {
+        fontSize: 32,
+        fontWeight: "900",
+        color,
+        textShadowColor: "#000",
+        textShadowOffset: { width: 1, height: 2 },
+        textShadowRadius: 4,
+        backgroundColor: bg,
+        paddingVertical: withBackground ? 6 : 0,
+        paddingHorizontal: withBackground ? 12 : 0,
+        borderRadius: 8,
+        overflow: "hidden"
+      };
+    case "neon":
+      return {
+        fontSize: 26,
+        fontWeight: "800",
+        color,
+        textShadowColor: textColor === "black" ? "#ffffff" : "#0a5c45",
+        textShadowOffset: { width: 0, height: 0 },
+        textShadowRadius: 8,
+        backgroundColor: bg,
+        paddingVertical: withBackground ? 6 : 0,
+        paddingHorizontal: withBackground ? 12 : 0,
+        borderRadius: 8,
+        overflow: "hidden"
+      };
+    default:
+      return {
+        fontSize: 28,
+        fontWeight: "700",
+        color,
+        textShadowColor: withBackground ? "transparent" : "rgba(0,0,0,0.85)",
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 6,
+        backgroundColor: bg,
+        paddingVertical: withBackground ? 6 : 0,
+        paddingHorizontal: withBackground ? 12 : 0,
+        borderRadius: 8,
+        overflow: "hidden"
+      };
+  }
+}
+
+type MediaCreativeProps = {
+  uri: string;
+  isVideo: boolean;
+  filter: CreativeFilterId;
+  overlayText: string;
+  font: CreativeFontId;
+  textColor: CreativeTextColor;
+  textBackground: boolean;
+  shouldPlay?: boolean;
+};
+
+const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
+  { uri, isVideo, filter, overlayText, font, textColor, textBackground, shouldPlay = true },
+  ref
+) {
+  const tint = filterTint(filter);
+  return (
+    <View ref={ref} collapsable={false} style={{ flex: 1, width: "100%" }}>
+      <View style={StyleSheet.absoluteFillObject}>
+        {isVideo ? (
+          <Video
+            style={{ width: "100%", height: "100%" }}
+            source={{ uri }}
+            shouldPlay={shouldPlay}
+            isLooping
+            resizeMode={ResizeMode.CONTAIN}
+          />
+        ) : (
+          <Image style={{ width: "100%", height: "100%" }} source={{ uri }} resizeMode="contain" />
+        )}
+      </View>
+      {tint ? <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: tint }]} /> : null}
+      {overlayText.trim().length > 0 ? (
+        <Text
+          style={[
+            {
+              position: "absolute",
+              left: 12,
+              right: 12,
+              bottom: "16%",
+              textAlign: "center"
+            },
+            creativeFontStyle(font, textColor, textBackground)
+          ]}
+        >
+          {overlayText}
+        </Text>
+      ) : null}
+    </View>
+  );
+});
+
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
@@ -50,6 +219,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [pickedStoryMediaType, setPickedStoryMediaType] = useState<"image" | "video" | null>(null);
   /** Post / reel picks (reel always length 1). */
   const [pickedPostAssets, setPickedPostAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [creativeFilter, setCreativeFilter] = useState<CreativeFilterId>("none");
+  const [creativeText, setCreativeText] = useState("");
+  const [creativeFont, setCreativeFont] = useState<CreativeFontId>("classic");
+  const [creativeTextColor, setCreativeTextColor] = useState<CreativeTextColor>("white");
+  const [creativeTextBackground, setCreativeTextBackground] = useState(false);
+  const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
+  const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
+  const [showStickerPanel, setShowStickerPanel] = useState(false);
+  /** Snapshot of preview with text+filter for single-image post/reel (captured when leaving preview). */
+  const [composedImageUri, setComposedImageUri] = useState<string | null>(null);
+  const previewCaptureRef = useRef<View>(null);
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
 
@@ -73,7 +253,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   }, [isStory, pickedStoryVideoUri]);
 
   React.useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      setShowCreativeTextPanel(false);
+      setShowCreativeFilterPanel(false);
+      setShowStickerPanel(false);
+      return;
+    }
     setCreateType(initialType);
     setCreateStep("preview");
     setEntryType(initialType ?? "story");
@@ -83,14 +268,88 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setPickedStoryMediaType(null);
     setPickedPostAssets([]);
     setLiveMode(null);
+    setCreativeFilter("none");
+    setCreativeText("");
+    setCreativeFont("classic");
+    setCreativeTextColor("white");
+    setCreativeTextBackground(false);
+    setShowCreativeTextPanel(false);
+    setShowCreativeFilterPanel(false);
+    setShowStickerPanel(false);
+    setComposedImageUri(null);
   }, [visible, initialType]);
 
   const handleClose = () => {
     if (isSubmitting) return;
     setCreateType(null);
     setErrorText("");
+    setShowCreativeTextPanel(false);
+    setShowCreativeFilterPanel(false);
+    setShowStickerPanel(false);
     onClose();
   };
+
+  async function snapshotComposedImage(): Promise<string | null> {
+    if (!previewCaptureRef.current) return null;
+    try {
+      await new Promise((r) => setTimeout(r, Platform.OS === "web" ? 120 : 80));
+      const uri = await captureRef(previewCaptureRef, {
+        format: "jpg",
+        quality: 0.9,
+        result: "tmpfile"
+      });
+      return uri || null;
+    } catch {
+      return null;
+    }
+  }
+
+  const proceedToCompose = async () => {
+    let composed: string | null = null;
+    if (pickedPostAssets.length === 1) {
+      const a = pickedPostAssets[0];
+      if (shouldUseImageUpload(a.uri, a) && (creativeText.trim() || creativeFilter !== "none")) {
+        composed = await snapshotComposedImage();
+      }
+    }
+    setComposedImageUri(composed);
+    setCreateStep("compose");
+  };
+
+  const renderCreativeToolbar = () => (
+    <View style={[styles.igLeftTools, styles.igLeftToolsElevated]} pointerEvents="box-none">
+      <Pressable
+        onPress={() => {
+          setShowCreativeFilterPanel(false);
+          setShowStickerPanel(false);
+          setShowCreativeTextPanel(true);
+        }}
+        hitSlop={8}
+      >
+        <Text style={[styles.igLeftToolText, creativeText.trim().length > 0 ? styles.igLeftToolActive : null]}>Aa</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => {
+          setShowCreativeTextPanel(false);
+          setShowStickerPanel(false);
+          setShowCreativeFilterPanel(true);
+        }}
+        hitSlop={8}
+      >
+        <Ionicons name="infinite-outline" size={26} color={creativeFilter !== "none" ? "#7dd3fc" : "#fff"} />
+      </Pressable>
+      <Pressable
+        onPress={() => {
+          setShowCreativeTextPanel(false);
+          setShowCreativeFilterPanel(false);
+          setShowStickerPanel(true);
+        }}
+        hitSlop={8}
+      >
+        <Ionicons name="sparkles-outline" size={24} color="#fff" />
+      </Pressable>
+    </View>
+  );
 
   const mediaTypeForEntry = () => {
     if (entryType === "live") return ImagePicker.MediaTypeOptions.All;
@@ -197,8 +456,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           return;
         }
         const storyIsImage = shouldUseImageUpload(pickedStoryVideoUri, pickedStoryAsset);
-        if (!storyIsImage) await validateVideoSize(pickedStoryVideoUri, 30);
-        const { url: storyUrl } = await uploadPickedMedia(pickedStoryVideoUri, pickedStoryAsset ?? undefined);
+        let storyUri = pickedStoryVideoUri;
+        let storyAssetForUpload: ImagePicker.ImagePickerAsset | undefined = pickedStoryAsset ?? undefined;
+        if (storyIsImage && (creativeText.trim() || creativeFilter !== "none")) {
+          const snap = await snapshotComposedImage();
+          if (snap) {
+            storyUri = snap;
+            storyAssetForUpload = pickedStoryAsset ? { ...pickedStoryAsset, uri: snap } : ({ uri: snap } as ImagePicker.ImagePickerAsset);
+          }
+        }
+        if (!storyIsImage) await validateVideoSize(storyUri, 30);
+        const { url: storyUrl } = await uploadPickedMedia(storyUri, storyAssetForUpload);
         await createHomeStory({
           userName: userName.trim() || "Farmer",
           district: location.trim() || "Unknown",
@@ -246,8 +514,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           });
         } else {
           const urls: string[] = [];
-          for (const im of images) {
-            const { url } = await uploadPickedMedia(im.uri, im);
+          for (let i = 0; i < images.length; i++) {
+            const im = images[i];
+            const uri = i === 0 && composedImageUri ? composedImageUri : im.uri;
+            const meta = i === 0 && composedImageUri ? { ...im, uri: composedImageUri } : im;
+            const { url } = await uploadPickedMedia(uri, meta);
             urls.push(url);
           }
           if (!urls.length) {
@@ -272,6 +543,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setPickedStoryMediaType(null);
       setPickedStoryAsset(null);
       setPickedPostAssets([]);
+      setComposedImageUri(null);
       onVideoPosted?.();
       onClose();
     } catch (error) {
@@ -293,6 +565,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
 
   return (
+    <>
     <Modal visible={visible} transparent={!createType} animationType={createType ? "fade" : "slide"} onRequestClose={handleClose}>
       {!createType ? (
         <View style={styles.igFullScreen}>
@@ -306,11 +579,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             </View>
           </View>
 
-          <View style={styles.igLeftTools}>
-            <Text style={styles.igLeftToolText}>Aa</Text>
-            <Ionicons name="infinite-outline" size={26} color="#fff" />
-            <Ionicons name="sparkles-outline" size={24} color="#fff" />
-          </View>
+          {renderCreativeToolbar()}
 
           <View style={styles.igBottomControls}>
             <Pressable style={styles.igThumbPlaceholder} onPress={openEntryGallery}>
@@ -348,7 +617,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     submitPostVideo();
                     return;
                   }
-                  setCreateStep("compose");
+                  void proceedToCompose();
                 }}
                 disabled={!canProceedFromPreview || isSubmitting}
               >
@@ -357,13 +626,31 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </Text>
               </Pressable>
             </View>
+            {renderCreativeToolbar()}
             <View style={styles.igMediaPreviewWrap}>
               {createType === "story" ? (
                 selectedUri ? (
                   isSelectedVideo ? (
-                    <Video style={styles.igMediaPreview} source={{ uri: selectedUri }} shouldPlay isLooping resizeMode={ResizeMode.CONTAIN} />
+                    <MediaWithCreative
+                      uri={selectedUri}
+                      isVideo
+                      filter={creativeFilter}
+                      overlayText={creativeText}
+                      font={creativeFont}
+                      textColor={creativeTextColor}
+                      textBackground={creativeTextBackground}
+                    />
                   ) : (
-                    <Image style={styles.igMediaPreview} source={{ uri: selectedUri }} resizeMode="contain" />
+                    <MediaWithCreative
+                      ref={previewCaptureRef}
+                      uri={selectedUri}
+                      isVideo={false}
+                      filter={creativeFilter}
+                      overlayText={creativeText}
+                      font={creativeFont}
+                      textColor={creativeTextColor}
+                      textBackground={creativeTextBackground}
+                    />
                   )
                 ) : (
                   <View style={styles.igEmptyPreview}>
@@ -383,15 +670,40 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   decelerationRate="fast"
                   renderItem={({ item }) => (
                     <View style={[styles.igPreviewCarouselPage, { width: previewWidth }]}>
-                      <Image style={styles.igMediaPreview} source={{ uri: item.uri }} resizeMode="contain" />
+                      <MediaWithCreative
+                        uri={item.uri}
+                        isVideo={false}
+                        filter={creativeFilter}
+                        overlayText={creativeText}
+                        font={creativeFont}
+                        textColor={creativeTextColor}
+                        textBackground={creativeTextBackground}
+                      />
                     </View>
                   )}
                 />
               ) : pickedPostAssets.length === 1 ? (
                 isSelectedVideo ? (
-                  <Video style={styles.igMediaPreview} source={{ uri: selectedUri }} shouldPlay isLooping resizeMode={ResizeMode.CONTAIN} />
+                  <MediaWithCreative
+                    uri={selectedUri}
+                    isVideo
+                    filter={creativeFilter}
+                    overlayText={creativeText}
+                    font={creativeFont}
+                    textColor={creativeTextColor}
+                    textBackground={creativeTextBackground}
+                  />
                 ) : (
-                  <Image style={styles.igMediaPreview} source={{ uri: selectedUri }} resizeMode="contain" />
+                  <MediaWithCreative
+                    ref={previewCaptureRef}
+                    uri={selectedUri}
+                    isVideo={false}
+                    filter={creativeFilter}
+                    overlayText={creativeText}
+                    font={creativeFont}
+                    textColor={creativeTextColor}
+                    textBackground={creativeTextBackground}
+                  />
                 )
               ) : (
                 <View style={styles.igEmptyPreview}>
@@ -408,7 +720,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         ) : (
           <>
             <View style={styles.igComposeTopBar}>
-              <Pressable onPress={() => setCreateStep("preview")} hitSlop={10}>
+              <Pressable
+                onPress={() => {
+                  setComposedImageUri(null);
+                  setCreateStep("preview");
+                }}
+                hitSlop={10}
+              >
                 <Ionicons name="arrow-back" size={24} color="#1b2422" />
               </Pressable>
               <Text style={styles.igComposeTitle}>New {createType === "reel" ? "Reel" : "Post"}</Text>
@@ -511,6 +829,123 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       )
       )}
     </Modal>
+
+    <Modal visible={showCreativeTextPanel} transparent animationType="fade" onRequestClose={() => setShowCreativeTextPanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowCreativeTextPanel(false)}>
+        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <View style={styles.creativePanelTopRow}>
+            <Text style={styles.creativePanelTitle}>Edit text</Text>
+            <Pressable style={styles.creativePanelDoneGhost} onPress={() => setShowCreativeTextPanel(false)}>
+              <Text style={styles.creativePanelDoneGhostText}>Done</Text>
+            </Pressable>
+          </View>
+          <View style={styles.creativeLivePreviewBox}>
+            <Text style={[styles.creativeLivePreviewText, creativeFontStyle(creativeFont, creativeTextColor, creativeTextBackground)]}>
+              {creativeText.trim() || "Type text"}
+            </Text>
+          </View>
+          <TextInput
+            value={creativeText}
+            onChangeText={setCreativeText}
+            placeholder="Type something…"
+            placeholderTextColor="#9aa8a4"
+            style={styles.creativePanelInput}
+            multiline
+            maxLength={220}
+          />
+          <Text style={styles.creativePanelSub}>Font</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fontChipsRow}>
+            {(
+              [
+                ["classic", "Classic"],
+                ["modern", "Modern"],
+                ["strong", "Strong"],
+                ["neon", "Neon"]
+              ] as const
+            ).map(([id, label]) => (
+              <Pressable
+                key={id}
+                style={[styles.fontChip, creativeFont === id ? styles.fontChipOn : null]}
+                onPress={() => setCreativeFont(id)}
+              >
+                <Text style={creativeFont === id ? styles.fontChipTextOn : styles.fontChipText}>{label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Text style={styles.creativePanelSub}>Color</Text>
+          <View style={styles.textColorRow}>
+            {TEXT_COLOR_OPTIONS.map((c) => (
+              <Pressable
+                key={c.id}
+                style={[styles.textColorDot, { backgroundColor: c.hex }, creativeTextColor === c.id ? styles.textColorDotActive : null]}
+                onPress={() => setCreativeTextColor(c.id)}
+              />
+            ))}
+            <Pressable
+              style={[styles.textBackgroundToggle, creativeTextBackground ? styles.textBackgroundToggleActive : null]}
+              onPress={() => setCreativeTextBackground((v) => !v)}
+            >
+              <Text style={[styles.textBackgroundToggleText, creativeTextBackground ? styles.textBackgroundToggleActiveText : null]}>A</Text>
+            </Pressable>
+          </View>
+          <Pressable style={styles.creativePanelDone} onPress={() => setShowCreativeTextPanel(false)}>
+            <Text style={styles.creativePanelDoneText}>Apply</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={showCreativeFilterPanel} transparent animationType="fade" onRequestClose={() => setShowCreativeFilterPanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowCreativeFilterPanel(false)}>
+        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <Text style={styles.creativePanelTitle}>Filters</Text>
+          <View style={styles.filterGrid}>
+            {FILTER_OPTIONS.map((f) => (
+              <Pressable
+                key={f.id}
+                style={[styles.filterChip, creativeFilter === f.id ? styles.filterChipOn : null]}
+                onPress={() => setCreativeFilter(f.id)}
+              >
+                <View
+                  style={[
+                    styles.filterSwatch,
+                    f.id === "none" ? styles.filterSwatchNone : { backgroundColor: filterTint(f.id) ?? "transparent" }
+                  ]}
+                />
+                <Text style={styles.filterChipLabel}>{f.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable style={styles.creativePanelDone} onPress={() => setShowCreativeFilterPanel(false)}>
+            <Text style={styles.creativePanelDoneText}>Done</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={showStickerPanel} transparent animationType="fade" onRequestClose={() => setShowStickerPanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowStickerPanel(false)}>
+        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <Text style={styles.creativePanelTitle}>Stickers</Text>
+          <Text style={styles.creativePanelHint}>Tap to add to your text</Text>
+          <View style={styles.stickerGrid}>
+            {STICKER_EMOJIS.map((emoji) => (
+              <Pressable
+                key={emoji}
+                style={styles.stickerBtn}
+                onPress={() => setCreativeText((t) => (t ? `${t} ${emoji}` : emoji))}
+              >
+                <Text style={styles.stickerEmoji}>{emoji}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable style={styles.creativePanelDone} onPress={() => setShowStickerPanel(false)}>
+            <Text style={styles.creativePanelDoneText}>Done</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+    </>
   );
 }
 
@@ -519,7 +954,103 @@ const styles = StyleSheet.create({
   igTopControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   igTopRightControls: { flexDirection: "row", alignItems: "center", gap: 16 },
   igLeftTools: { position: "absolute", left: 16, top: 140, gap: 24, alignItems: "center" },
+  igLeftToolsElevated: { zIndex: 30 },
   igLeftToolText: { color: "#fff", fontSize: 34, fontWeight: "500" },
+  igLeftToolActive: { color: "#7dd3fc" },
+  creativePanelBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end",
+    padding: 16
+  },
+  creativePanelCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#e5ece8"
+  },
+  creativePanelTitle: { fontSize: 18, fontWeight: "800", color: "#1b2422" },
+  creativePanelTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  creativePanelDoneGhost: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 16, backgroundColor: "#e8f7ef" },
+  creativePanelDoneGhostText: { color: "#0a9f46", fontWeight: "800", fontSize: 12 },
+  creativeLivePreviewBox: {
+    minHeight: 70,
+    borderRadius: 10,
+    backgroundColor: "#111",
+    marginBottom: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10
+  },
+  creativeLivePreviewText: { textAlign: "center", lineHeight: 34 },
+  creativePanelSub: { fontSize: 12, fontWeight: "700", color: "#697774", marginTop: 12, marginBottom: 8 },
+  creativePanelHint: { fontSize: 12, color: "#697774", marginBottom: 10 },
+  creativePanelInput: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 16,
+    color: "#1b2422",
+    textAlignVertical: "top"
+  },
+  fontChipsRow: { flexDirection: "row", gap: 8, paddingRight: 6 },
+  fontChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    backgroundColor: "#f8faf9"
+  },
+  fontChipOn: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
+  fontChipText: { color: "#4d5f5a", fontWeight: "700", fontSize: 13 },
+  fontChipTextOn: { color: "#0a9f46", fontWeight: "800", fontSize: 13 },
+  creativePanelDone: {
+    marginTop: 16,
+    backgroundColor: "#0a9f46",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center"
+  },
+  creativePanelDoneText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  textColorRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 2 },
+  textColorDot: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: "#fff" },
+  textColorDotActive: { borderColor: "#0a9f46", transform: [{ scale: 1.08 }] },
+  textBackgroundToggle: {
+    marginLeft: "auto",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f8faf9"
+  },
+  textBackgroundToggleActive: { backgroundColor: "#111", borderColor: "#111" },
+  textBackgroundToggleText: { color: "#1b2422", fontWeight: "800" },
+  textBackgroundToggleActiveText: { color: "#fff" },
+  filterGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
+  filterChip: { width: "30%", alignItems: "center", marginBottom: 6 },
+  filterChipOn: { opacity: 1 },
+  filterSwatch: { width: 44, height: 44, borderRadius: 10, marginBottom: 4 },
+  filterSwatchNone: { backgroundColor: "#f3f4f6", borderWidth: 2, borderColor: "#d1d5db" },
+  filterChipLabel: { fontSize: 11, fontWeight: "600", color: "#4d5f5a", textAlign: "center" },
+  stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center" },
+  stickerBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#f8faf9",
+    borderWidth: 1,
+    borderColor: "#e5ece8",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  stickerEmoji: { fontSize: 26 },
   igBottomControls: {
     flexDirection: "row",
     alignItems: "center",
