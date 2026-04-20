@@ -17,7 +17,7 @@ import { fetchMarketplaceListings, MarketplaceListing } from "../services/api";
 import { useCart } from "../cart/CartContext";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
 
-type MarketCategory = "All" | "Dairy" | "InputsSupplies" | "Seeds" | "Fertilizers" | "Tools";
+type MarketCategory = "All" |"Vegetables" | "Fruits" | "Dairy" | "InputsSupplies" | "Seeds" | "Fertilizers" | "Tools";
 
 const TEAL = "#0d9488";
 /** Slightly deeper teal for quantity pill (matches marketplace accent) */
@@ -28,6 +28,8 @@ const RED = "#ef4444";
 
 const marketCategories: { id: MarketCategory; label: string }[] = [
   { id: "All", label: "All" },
+  { id: "Vegetables", label: "Vegetables" },
+  { id: "Fruits", label: "Fruits" },
   { id: "Dairy", label: "Dairy" },
   { id: "InputsSupplies", label: "Inputs & supplies" },
   { id: "Seeds", label: "Seeds" },
