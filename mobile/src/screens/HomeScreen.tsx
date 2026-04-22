@@ -4,12 +4,14 @@ import {
   Animated,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
   type ViewToken
@@ -24,6 +26,7 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
+const homeTopTabs = ["Feed", "Reels", "Friends", "live"] as const;
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
   if (!post) return [];
@@ -40,8 +43,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
+  const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentsByPost, setCommentsByPost] = useState<Record<number, { id: string; user: string; text: string; likes: number }[]>>({});
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
   const progress = useRef(new Animated.Value(0)).current;
 
   const viewabilityConfig = useMemo(
@@ -178,6 +185,36 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     };
   }, [refreshToken]);
 
+  const openCommentsForPost = useCallback((post: HomePost) => {
+    setActiveCommentsPost(post);
+    setCommentsByPost((prev) => {
+      if (prev[post.id]) return prev;
+      return {
+        ...prev,
+        [post.id]: [
+          { id: `seed-${post.id}-1`, user: "sowndherya", text: "Super post 👏", likes: 12 },
+          { id: `seed-${post.id}-2`, user: "AgroRoots", text: "Very useful info!", likes: 8 }
+        ]
+      };
+    });
+  }, []);
+
+  const submitComment = useCallback(() => {
+    const text = commentDraft.trim();
+    if (!text || !activeCommentsPost) return;
+    setCommentsByPost((prev) => {
+      const list = prev[activeCommentsPost.id] ?? [];
+      return {
+        ...prev,
+        [activeCommentsPost.id]: [
+          ...list,
+          { id: `c-${Date.now()}`, user: "You", text, likes: 0 }
+        ]
+      };
+    });
+    setCommentDraft("");
+  }, [activeCommentsPost, commentDraft]);
+
   const listHeader = useMemo(
     () => (
       <>
@@ -236,9 +273,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </Pressable>
           ))}
         </ScrollView>
+        <View style={styles.homeTopTabsRow}>
+          {homeTopTabs.map((tab) => (
+            <Pressable key={tab} onPress={() => setActiveHomeTab(tab)} style={styles.homeTopTabPressable}>
+              <View style={[styles.homeTopTabPill, activeHomeTab === tab ? styles.homeTopTabPillActive : null]}>
+                <Text style={[styles.homeTopTabText, activeHomeTab === tab ? styles.homeTopTabTextActive : null]}>{tab}</Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
       </>
     ),
-    [onOpenCreate, otherStories, playableStories]
+    [activeHomeTab, onOpenCreate, otherStories, playableStories]
   );
 
   const renderPost = useCallback(
@@ -246,8 +292,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const isActive = playingPostId === post.id && !!post.videoUrl;
       const gallery = postImageGallery(post);
       const isCarousel = !post.videoUrl && gallery.length > 1;
+      const postComments = commentsByPost[post.id] ?? [];
+      const shownCommentsCount = postComments.length > 0 ? postComments.length : post.commentsCount;
       return (
-        <Pressable style={styles.postCard} onPress={() => setActivePost(post)}>
+        <View style={styles.postCard}>
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
               <View style={styles.userAvatar}>
@@ -264,21 +312,24 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
             {post.videoUrl ? (
-              <Video
-                style={styles.video}
-                source={{ uri: post.videoUrl }}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={isActive}
-                isLooping
-                isMuted
-                useNativeControls={false}
-              />
+              <Pressable style={styles.videoTapArea} onPress={() => setActivePost(post)}>
+                <Video
+                  style={styles.video}
+                  source={{ uri: post.videoUrl }}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={isActive}
+                  isLooping
+                  isMuted
+                  useNativeControls={false}
+                />
+              </Pressable>
             ) : isCarousel ? (
               <FlatList
                 data={gallery}
                 horizontal
                 pagingEnabled
                 nestedScrollEnabled
+                scrollEnabled
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
                 style={{ width: feedMediaWidth, height: 360 }}
@@ -287,9 +338,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 )}
               />
             ) : gallery[0] ? (
-              <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
+              <Pressable style={styles.videoTapArea} onPress={() => setActivePost(post)}>
+                <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
+              </Pressable>
             ) : (
-              <Ionicons name="play-circle-outline" size={48} color="#fff" />
+              <Pressable style={styles.videoTapArea} onPress={() => setActivePost(post)}>
+                <Ionicons name="play-circle-outline" size={48} color="#fff" />
+              </Pressable>
             )}
             {isCarousel ? (
               <View style={styles.postCarouselDots} pointerEvents="none">
@@ -299,10 +354,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </View>
             ) : null}
             <View style={styles.postActionsRail}>
-              <Ionicons name="heart-outline" size={24} color="#1f2c29" />
-              <Ionicons name="chatbubble-outline" size={23} color="#1f2c29" />
-              <Ionicons name="paper-plane-outline" size={22} color="#1f2c29" />
-              <Ionicons name="bookmark-outline" size={22} color="#1f2c29" />
+              <View style={styles.postActionItem}>
+                <Ionicons name="heart-outline" size={22} color="#111" />
+                <Text style={styles.postActionCount}>{post.likesCount}</Text>
+              </View>
+              <Pressable style={styles.postActionItem} onPress={() => openCommentsForPost(post)}>
+                <Ionicons name="chatbubble-outline" size={21} color="#111" />
+                <Text style={styles.postActionCount}>{shownCommentsCount}</Text>
+              </Pressable>
+              <View style={styles.postActionItem}>
+                <Ionicons name="paper-plane-outline" size={20} color="#111" />
+              </View>
+              <View style={styles.postActionItem}>
+                <Ionicons name="ellipsis-horizontal" size={20} color="#111" />
+              </View>
             </View>
           </View>
 
@@ -310,11 +375,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <Text style={styles.caption}>
             <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
           </Text>
-          <Text style={styles.comments}>View all {post.commentsCount} comments</Text>
-        </Pressable>
+          <Pressable onPress={() => openCommentsForPost(post)}>
+            <Text style={styles.comments}>View all {shownCommentsCount} comments</Text>
+          </Pressable>
+        </View>
       );
     },
-    [playingPostId, feedMediaWidth]
+    [commentsByPost, feedMediaWidth, openCommentsForPost, playingPostId]
   );
 
   return (
@@ -442,22 +509,77 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           )}
         </View>
       </Modal>
+
+      <Modal visible={!!activeCommentsPost} transparent animationType="slide" onRequestClose={() => setActiveCommentsPost(null)}>
+        <Pressable style={styles.commentsBackdrop} onPress={() => setActiveCommentsPost(null)}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.commentsKeyboardWrap}>
+            <Pressable style={styles.commentsSheet} onPress={(e) => e.stopPropagation?.()}>
+              <View style={styles.commentsHandle} />
+              <Text style={styles.commentsTitle}>Comments</Text>
+
+              <ScrollView style={styles.commentsList} contentContainerStyle={styles.commentsListInner}>
+                {(activeCommentsPost ? commentsByPost[activeCommentsPost.id] ?? [] : []).length === 0 ? (
+                  <Text style={styles.noCommentsText}>No Comments</Text>
+                ) : (
+                  (activeCommentsPost ? commentsByPost[activeCommentsPost.id] ?? [] : []).map((c) => (
+                    <View key={c.id} style={styles.commentRow}>
+                      <View style={styles.commentAvatar}>
+                        <Text style={styles.commentAvatarText}>{c.user[0].toUpperCase()}</Text>
+                      </View>
+                      <View style={styles.commentBody}>
+                        <Text style={styles.commentUser}>{c.user}</Text>
+                        <Text style={styles.commentText}>{c.text}</Text>
+                      </View>
+                      <View style={styles.commentLikeWrap}>
+                        <Ionicons name="heart-outline" size={14} color="#9ca3af" />
+                        <Text style={styles.commentLikeCount}>{c.likes}</Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+
+              <View style={styles.emojiRow}>
+                {["😀", "😍", "🔥", "👏", "💯", "😅", "😎", "🥳"].map((emoji) => (
+                  <Pressable key={emoji} onPress={() => setCommentDraft((v) => `${v}${emoji}`)}>
+                    <Text style={styles.emojiText}>{emoji}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={styles.commentInputRow}>
+                <View style={styles.commentInputAvatar}>
+                  <Ionicons name="person" size={12} color="#0f172a" />
+                </View>
+                <TextInput
+                  value={commentDraft}
+                  onChangeText={setCommentDraft}
+                  placeholder="Add comment for PureFarm..."
+                  placeholderTextColor="#6b7280"
+                  style={styles.commentInput}
+                />
+                <Pressable style={styles.commentSendBtn} onPress={submitComment}>
+                  <Ionicons name="send" size={14} color="#111827" />
+                </Pressable>
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f5f7f6" },
+  screen: { flex: 1, backgroundColor: "#f2f3f5" },
   storyRow: {
-    paddingHorizontal: 10,
-    paddingTop: 0,
-    paddingBottom: 10,
-    gap: 12
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
+    gap: 10
   },
   storyRowWrap: {
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e8ecea"
+    backgroundColor: "#ffffff"
   },
   storyItem: { alignItems: "center", width: 70 },
   storyRing: {
@@ -501,7 +623,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  storyName: { fontSize: 12, color: "#2f3e3a", marginTop: 6, fontWeight: "500", textAlign: "center", width: "100%" },
+  storyName: { fontSize: 8, color: "#7f868a", marginTop: 5, fontWeight: "500", textAlign: "center", width: "100%" },
+  homeTopTabsRow: {
+    flexDirection: "row",
+    backgroundColor: "#f2f3f5",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    justifyContent: "space-between"
+  },
+  homeTopTabPressable: { flex: 1, alignItems: "center" },
+  homeTopTabPill: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 7
+  },
+  homeTopTabPillActive: { backgroundColor: "#303132" },
+  homeTopTabText: { fontSize: 14, color: "#374151", fontWeight: "500" },
+  homeTopTabTextActive: { color: "#C9FF35", fontWeight: "700" },
   feedBottom: { paddingBottom: 100 },
   postCard: {
     backgroundColor: "#fff",
@@ -544,13 +682,19 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%"
   },
+  videoTapArea: {
+    width: "100%",
+    height: "100%"
+  },
   postActionsRail: {
     position: "absolute",
     right: 10,
     bottom: 16,
-    gap: 14,
+    gap: 10,
     alignItems: "center"
   },
+  postActionItem: { alignItems: "center", justifyContent: "center" },
+  postActionCount: { marginTop: 2, fontSize: 10, color: "#111", fontWeight: "500" },
   postCarouselDots: {
     position: "absolute",
     bottom: 10,
@@ -606,4 +750,95 @@ const styles = StyleSheet.create({
   caption: { marginTop: 6, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20 },
   captionUser: { fontWeight: "700" },
   comments: { marginTop: 6, paddingHorizontal: 10, color: "#637571" }
+  ,
+  commentsBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end"
+  },
+  commentsKeyboardWrap: {
+    width: "100%"
+  },
+  commentsSheet: {
+    backgroundColor: "#1a1b1c",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    minHeight: 360,
+    maxHeight: "72%",
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 14
+  },
+  commentsHandle: {
+    width: 42,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#b7ff37",
+    alignSelf: "center",
+    marginBottom: 12
+  },
+  commentsTitle: {
+    color: "#b7ff37",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 10
+  },
+  commentsList: { flex: 1 },
+  commentsListInner: { paddingBottom: 10, gap: 10 },
+  noCommentsText: { color: "#b7ff37", textAlign: "center", marginTop: 40, fontWeight: "700" },
+  commentRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  commentAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#d1d5db",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  commentAvatarText: { color: "#111827", fontSize: 11, fontWeight: "700" },
+  commentBody: { flex: 1 },
+  commentUser: { color: "#f9fafb", fontSize: 11, fontWeight: "700" },
+  commentText: { color: "#d1d5db", fontSize: 11, marginTop: 1 },
+  commentLikeWrap: { alignItems: "center", minWidth: 24 },
+  commentLikeCount: { color: "#9ca3af", fontSize: 9, marginTop: 1 },
+  emojiRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#303236",
+    paddingTop: 8,
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  emojiText: { fontSize: 16 },
+  commentInputRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  commentInputAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#d1d5db",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  commentInput: {
+    flex: 1,
+    height: 28,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    backgroundColor: "#f9fafb",
+    color: "#111827",
+    fontSize: 11
+  },
+  commentSendBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#b7ff37",
+    alignItems: "center",
+    justifyContent: "center"
+  }
 });

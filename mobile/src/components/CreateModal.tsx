@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,9 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ResizeMode, Video } from "expo-av";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import { captureRef } from "react-native-view-shot";
 import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
 
@@ -163,6 +165,14 @@ type MediaCreativeProps = {
   shouldPlay?: boolean;
 };
 
+type RecentGridAsset = {
+  id: string;
+  uri: string;
+  mediaType: "image" | "video";
+  filename?: string;
+  duration?: number;
+};
+
 const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
   { uri, isVideo, filter, overlayText, font, textColor, textBackground, shouldPlay = true },
   ref
@@ -205,7 +215,12 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
 });
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
+  const insets = useSafeAreaInsets();
   const [createType, setCreateType] = useState<CreateType | null>(null);
+  const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.back);
+  const [entryFlashOn, setEntryFlashOn] = useState(false);
+  const [entryZoomLabel, setEntryZoomLabel] = useState<"1x" | "2x">("1x");
+  const [entryTimerOn, setEntryTimerOn] = useState(false);
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
   const [entryType, setEntryType] = useState<CreateType>("story");
   const [userName, setUserName] = useState("Ramesh Patel");
@@ -227,6 +242,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
   const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
   const [showStickerPanel, setShowStickerPanel] = useState(false);
+  const [recentGridAssets, setRecentGridAssets] = useState<RecentGridAsset[]>([]);
   /** Snapshot of preview with text+filter for single-image post/reel (captured when leaving preview). */
   const [composedImageUri, setComposedImageUri] = useState<string | null>(null);
   const previewCaptureRef = useRef<View>(null);
@@ -243,14 +259,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       throw new Error(`Video is ${mb.toFixed(1)}MB. Please select a video under ${maxMb}MB.`);
     }
   }
-
-  const isStory = createType === "story";
-  const isLive = createType === "live";
-  const isReel = createType === "reel";
-  const storyHint = useMemo(() => {
-    if (!isStory) return "";
-    return pickedStoryVideoUri ? "Video selected." : "Choose how you want to add a story video.";
-  }, [isStory, pickedStoryVideoUri]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -279,6 +287,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setComposedImageUri(null);
   }, [visible, initialType]);
 
+  React.useEffect(() => {
+    if (!visible || createType) return;
+    void loadRecentGridAssets();
+  }, [createType, visible]);
+
   const handleClose = () => {
     if (isSubmitting) return;
     setCreateType(null);
@@ -288,6 +301,36 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowStickerPanel(false);
     onClose();
   };
+
+  async function loadRecentGridAssets() {
+    if (Platform.OS === "web") {
+      setRecentGridAssets([]);
+      return;
+    }
+    try {
+      const perm = await MediaLibrary.requestPermissionsAsync();
+      if (!perm.granted) {
+        setRecentGridAssets([]);
+        return;
+      }
+      const result = await MediaLibrary.getAssetsAsync({
+        first: 24,
+        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        sortBy: [MediaLibrary.SortBy.creationTime]
+      });
+      setRecentGridAssets(
+        result.assets.map((a) => ({
+          id: a.id,
+          uri: a.uri,
+          mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "image",
+          filename: a.filename,
+          duration: a.duration
+        }))
+      );
+    } catch {
+      setRecentGridAssets([]);
+    }
+  }
 
   async function snapshotComposedImage(): Promise<string | null> {
     if (!previewCaptureRef.current) return null;
@@ -402,7 +445,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: mediaTypeForEntry(),
-      quality: 0.9
+      quality: 0.9,
+      cameraType: entryCameraFacing
     });
     if (!result.canceled && result.assets[0]) {
       applyPickedMediaToFlow([result.assets[0]]);
@@ -566,39 +610,152 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   return (
     <>
-    <Modal visible={visible} transparent={!createType} animationType={createType ? "fade" : "slide"} onRequestClose={handleClose}>
+    <Modal
+      visible={visible}
+      transparent={!createType || createType === "live"}
+      animationType={createType && createType !== "live" ? "fade" : "slide"}
+      onRequestClose={handleClose}
+    >
       {!createType ? (
-        <View style={styles.igFullScreen}>
-          <View style={styles.igTopControls}>
-            <Pressable onPress={handleClose} hitSlop={10}>
-              <Ionicons name="close" size={28} color="#fff" />
+        <View style={[styles.igCameraEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View style={styles.igCamTopRow}>
+            <Pressable style={styles.igCamIconSq} onPress={handleClose} hitSlop={10}>
+              <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
-            <View style={styles.igTopRightControls}>
-              <Ionicons name="flash-off-outline" size={24} color="#fff" />
-              <Ionicons name="settings-outline" size={24} color="#fff" />
+            <View style={styles.igCamTopCenter}>
+              <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
+                <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#b7ff37" />
+              </Pressable>
+              <Pressable
+                style={styles.igCamRoundControl}
+                onPress={() => setEntryZoomLabel((z) => (z === "1x" ? "2x" : "1x"))}
+              >
+                <Text style={styles.igCamZoomText}>{entryZoomLabel}</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRoundControl} onPress={() => setEntryTimerOn((v) => !v)}>
+                <Ionicons name="timer-outline" size={18} color={entryTimerOn ? "#b7ff37" : "#e8e8e8"} />
+              </Pressable>
+            </View>
+            <Pressable
+              style={styles.igCamIconSq}
+              onPress={() =>
+                Alert.alert("Settings", "Live and advanced camera options are available from the mode bar.", [
+                  { text: "Go Live", onPress: () => setEntryType("live") },
+                  { text: "OK", style: "cancel" }
+                ])
+              }
+            >
+              <Ionicons name="settings-sharp" size={19} color="#b7ff37" />
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.igAddAudioPill} onPress={() => Alert.alert("Audio", "Add music or audio after you capture — coming soon.")}>
+            <Ionicons name="musical-notes" size={16} color="#b7ff37" />
+            <Text style={styles.igAddAudioText}>Add Audio</Text>
+          </Pressable>
+
+          <View style={styles.igCamBody}>
+            <View style={styles.igCamLeftRail} pointerEvents="box-none">
+              <Pressable style={styles.igCamRailRow} onPress={() => Alert.alert("Audio", "Browse audio tracks — coming soon.")}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="musical-note" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Audio</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRailRow} onPress={() => setShowCreativeFilterPanel(true)}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="sparkles" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Effects</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRailRow} onPress={() => Alert.alert("Length", "Clip length presets — coming soon.")}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="time-outline" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Length</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRailRow} onPress={() => Alert.alert("Teleprompter", "Teleprompter — coming soon.")}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="document-text-outline" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Teleprompter</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRailRow} onPress={() => Alert.alert("Touch up", "Touch up tools — coming soon.")}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="color-wand-outline" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Touch Up</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.igCamViewfinder}>
+              <View style={styles.igCrosshair} pointerEvents="none">
+                <View style={styles.igCrosshairLineH} />
+                <View style={styles.igCrosshairLineV} />
+                <View style={styles.igCrosshairBurst}>
+                  <Ionicons name="sparkles" size={12} color="#38bdf8" />
+                </View>
+              </View>
             </View>
           </View>
 
-          {renderCreativeToolbar()}
+          {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
 
-          <View style={styles.igBottomControls}>
-            <Pressable style={styles.igThumbPlaceholder} onPress={openEntryGallery}>
-              <Ionicons name="image-outline" size={20} color="#fff" />
+          <View style={styles.igCamCaptureRow}>
+            <Pressable style={styles.igCamGalleryThumb} onPress={openEntryGallery}>
+              {recentGridAssets[0] ? (
+                <Image source={{ uri: recentGridAssets[0].uri }} style={styles.igCamGalleryThumbImg} resizeMode="cover" />
+              ) : (
+                <Ionicons name="images-outline" size={22} color="#b7ff37" />
+              )}
             </Pressable>
-            <Pressable style={styles.igCaptureBtn} onPress={openEntryCamera}>
-              <View style={styles.igCaptureInner} />
-            </Pressable>
-            <Pressable>
-              <Ionicons name="camera-reverse-outline" size={28} color="#fff" />
+            <View style={styles.igCamCaptureRowSpacer} />
+            <View style={styles.igCamCaptureCluster}>
+              <Pressable style={styles.igCamCaptureOuter} onPress={openEntryCamera}>
+                <View style={styles.igCamCaptureInner} />
+              </Pressable>
+              <View style={styles.igCamAuxDots}>
+                <View style={styles.igCamAuxDot} />
+                <View style={[styles.igCamAuxDot, styles.igCamAuxDotSm]} />
+              </View>
+            </View>
+            <View style={styles.igCamCaptureRowSpacer} />
+            <Pressable
+              style={styles.igCamFlipBtn}
+              onPress={() =>
+                setEntryCameraFacing((f) =>
+                  f === ImagePicker.CameraType.back ? ImagePicker.CameraType.front : ImagePicker.CameraType.back
+                )
+              }
+              hitSlop={8}
+            >
+              <Ionicons name="camera-reverse-outline" size={28} color="#b7ff37" />
             </Pressable>
           </View>
 
-          <View style={styles.igModeRow}>
-            {createModes.map((m) => (
-              <Pressable key={m.key} onPress={() => setEntryType(m.key)}>
-                <Text style={[styles.igModeText, entryType === m.key ? styles.igModeTextActive : null]}>{m.label}</Text>
-              </Pressable>
-            ))}
+          <View style={styles.igCamBottomModes}>
+            {createModes.map((m) => {
+              const label =
+                m.key === "reel" ? "ADD ITEM" : m.key === "live" ? "LIVE" : m.key === "post" ? "POST" : "STORY";
+              const emphasize = m.key === "story";
+              return (
+                <Pressable
+                  key={m.key}
+                  style={[styles.igCamModeItem, entryType === m.key ? styles.igCamModeItemOn : null]}
+                  onPress={() => setEntryType(m.key)}
+                >
+                  <Text
+                    style={[
+                      styles.igCamModeItemText,
+                      entryType === m.key ? styles.igCamModeItemTextOn : null,
+                      emphasize && entryType === m.key ? styles.igCamModeItemTextHero : null
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
       ) : (
@@ -950,6 +1107,232 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 }
 
 const styles = StyleSheet.create({
+  igCameraEntryRoot: {
+    flex: 1,
+    backgroundColor: "#8e8e93",
+    paddingHorizontal: 8
+  },
+  igCamTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 2,
+    marginBottom: 10
+  },
+  igCamIconSq: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamTopCenter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  igCamRoundControl: {
+    minWidth: 40,
+    height: 40,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamZoomText: {
+    color: "#b7ff37",
+    fontWeight: "800",
+    fontSize: 13
+  },
+  igAddAudioPill: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    marginBottom: 8
+  },
+  igAddAudioText: {
+    color: "#b7ff37",
+    fontWeight: "700",
+    fontSize: 14
+  },
+  igCamBody: {
+    flex: 1,
+    flexDirection: "row",
+    marginTop: 4,
+    minHeight: 280
+  },
+  igCamLeftRail: {
+    width: 112,
+    justifyContent: "center",
+    gap: 14,
+    paddingRight: 4,
+    zIndex: 2
+  },
+  igCamRailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  igCamRailIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamRailLabel: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+    flex: 1
+  },
+  igCamViewfinder: {
+    flex: 1,
+    marginLeft: -6,
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: "#9a9a9e"
+  },
+  igCrosshair: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCrosshairLineH: {
+    position: "absolute",
+    width: "72%",
+    height: 2,
+    backgroundColor: "rgba(56,189,248,0.9)",
+    borderRadius: 1
+  },
+  igCrosshairLineV: {
+    position: "absolute",
+    width: 2,
+    height: "58%",
+    backgroundColor: "rgba(56,189,248,0.9)",
+    borderRadius: 1
+  },
+  igCrosshairBurst: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamErrorBanner: {
+    color: "#7f1d1d",
+    backgroundColor: "rgba(255,255,255,0.92)",
+    textAlign: "center",
+    fontWeight: "700",
+    paddingVertical: 6,
+    marginHorizontal: 12,
+    marginTop: 6,
+    borderRadius: 8,
+    overflow: "hidden"
+  },
+  igCamCaptureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+    marginBottom: 10,
+    paddingHorizontal: 4
+  },
+  igCamGalleryThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#b7ff37",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  igCamGalleryThumbImg: { width: "100%", height: "100%" },
+  igCamCaptureRowSpacer: { flex: 1 },
+  igCamCaptureCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  igCamCaptureOuter: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 5,
+    borderColor: "#b7ff37",
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamCaptureInner: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#3a3a3c"
+  },
+  igCamAuxDots: {
+    justifyContent: "center",
+    gap: 10
+  },
+  igCamAuxDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#3a3a3c"
+  },
+  igCamAuxDotSm: {
+    width: 11,
+    height: 11,
+    borderRadius: 6
+  },
+  igCamFlipBtn: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamBottomModes: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    paddingBottom: 4
+  },
+  igCamModeItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8
+  },
+  igCamModeItemOn: {
+    backgroundColor: "rgba(0,0,0,0.35)"
+  },
+  igCamModeItemText: {
+    color: "rgba(255,255,255,0.72)",
+    fontWeight: "800",
+    fontSize: 11,
+    letterSpacing: 0.6
+  },
+  igCamModeItemTextOn: {
+    color: "#b7ff37"
+  },
+  igCamModeItemTextHero: {
+    fontSize: 13,
+    letterSpacing: 0.8
+  },
   igFullScreen: { flex: 1, backgroundColor: "#111", justifyContent: "space-between", paddingTop: 48, paddingBottom: 24, paddingHorizontal: 16 },
   igTopControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   igTopRightControls: { flexDirection: "row", alignItems: "center", gap: 16 },

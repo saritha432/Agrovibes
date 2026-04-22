@@ -8,13 +8,7 @@ export function AppTopBar() {
       <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
       <View style={styles.rightSide}>
         <Pressable style={styles.iconBadge}>
-          <Ionicons name="heart-outline" size={16} color="#1f2b28" />
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>3</Text>
-          </View>
-        </Pressable>
-        <Pressable style={styles.iconBadge}>
-          <Ionicons name="radio-outline" size={16} color="#1f2b28" />
+          <Ionicons name="notifications-outline" size={16} color="#d8ff37" />
           <View style={styles.badge}>
             <Text style={styles.badgeText}>1</Text>
           </View>
@@ -29,12 +23,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
-    backgroundColor: "#ffffff",
+    backgroundColor: "#262626",
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingTop: 10
   },
-  logoImage: { width: 112, height: 26 },
+  logoImage: { width: 86, height: 20 },
   rightSide: { flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" },
   iconBadge: {
     width: 24,
@@ -42,18 +36,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff"
+    backgroundColor: "transparent"
   },
   badge: {
     position: "absolute",
     right: -5,
     top: -4,
-    backgroundColor: "#ef4444",
+    backgroundColor: "#d8ff37",
     borderRadius: 7,
     minWidth: 12,
     height: 12,
     alignItems: "center",
     justifyContent: "center"
   },
-  badgeText: { color: "#fff", fontSize: 8, fontWeight: "700" }
+  badgeText: { color: "#1f2b28", fontSize: 8, fontWeight: "700" }
 });
