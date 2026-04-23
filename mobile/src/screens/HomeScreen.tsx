@@ -316,7 +316,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Video
                   style={styles.video}
                   source={{ uri: post.videoUrl }}
-                  resizeMode={ResizeMode.CONTAIN}
+                  resizeMode={ResizeMode.COVER}
                   shouldPlay={isActive}
                   isLooping
                   isMuted
@@ -332,9 +332,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 scrollEnabled
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
-                style={{ width: feedMediaWidth, height: 360 }}
+                style={{ width: feedMediaWidth, height: feedMediaWidth }}
                 renderItem={({ item: uri }) => (
-                  <Image style={{ width: feedMediaWidth, height: 360 }} source={{ uri }} resizeMode="cover" />
+                  <Image style={{ width: feedMediaWidth, height: feedMediaWidth }} source={{ uri }} resizeMode="cover" />
                 )}
               />
             ) : gallery[0] ? (
@@ -353,22 +353,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 ))}
               </View>
             ) : null}
-            <View style={styles.postActionsRail}>
-              <View style={styles.postActionItem}>
-                <Ionicons name="heart-outline" size={22} color="#111" />
-                <Text style={styles.postActionCount}>{post.likesCount}</Text>
-              </View>
-              <Pressable style={styles.postActionItem} onPress={() => openCommentsForPost(post)}>
-                <Ionicons name="chatbubble-outline" size={21} color="#111" />
-                <Text style={styles.postActionCount}>{shownCommentsCount}</Text>
+          </View>
+
+          <View style={styles.postActionsRow}>
+            <View style={styles.postActionsLeft}>
+              <Pressable style={styles.postActionIconBtn}>
+                <Ionicons name="heart-outline" size={25} color="#111" />
               </Pressable>
-              <View style={styles.postActionItem}>
-                <Ionicons name="paper-plane-outline" size={20} color="#111" />
-              </View>
-              <View style={styles.postActionItem}>
-                <Ionicons name="ellipsis-horizontal" size={20} color="#111" />
-              </View>
+              <Pressable style={styles.postActionIconBtn} onPress={() => openCommentsForPost(post)}>
+                <Ionicons name="chatbubble-outline" size={23} color="#111" />
+              </Pressable>
+              <Pressable style={styles.postActionIconBtn}>
+                <Ionicons name="paper-plane-outline" size={22} color="#111" />
+              </Pressable>
             </View>
+            <Pressable style={styles.postActionIconBtn}>
+              <Ionicons name="bookmark-outline" size={22} color="#111" />
+            </Pressable>
           </View>
 
           <Text style={styles.likes}>{post.likesCount} likes</Text>
@@ -643,14 +644,8 @@ const styles = StyleSheet.create({
   feedBottom: { paddingBottom: 100 },
   postCard: {
     backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#dfe5e3",
-    borderRadius: 8,
-    overflow: "hidden",
-    marginHorizontal: 10,
     marginTop: 10,
-    paddingBottom: 10,
-    marginBottom: 2
+    paddingBottom: 10
   },
   postTop: {
     flexDirection: "row",
@@ -673,7 +668,8 @@ const styles = StyleSheet.create({
   userName: { color: "#1f2c29", fontWeight: "700", fontSize: 14 },
   timeText: { color: "#6d7d79", fontWeight: "500" },
   postMedia: {
-    height: 360,
+    width: "100%",
+    aspectRatio: 1,
     alignItems: "center",
     justifyContent: "center",
     position: "relative"
@@ -686,15 +682,15 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%"
   },
-  postActionsRail: {
-    position: "absolute",
-    right: 10,
-    bottom: 16,
-    gap: 10,
-    alignItems: "center"
+  postActionsRow: {
+    marginTop: 10,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
   },
-  postActionItem: { alignItems: "center", justifyContent: "center" },
-  postActionCount: { marginTop: 2, fontSize: 10, color: "#111", fontWeight: "500" },
+  postActionsLeft: { flexDirection: "row", alignItems: "center" },
+  postActionIconBtn: { marginRight: 14 },
   postCarouselDots: {
     position: "absolute",
     bottom: 10,
@@ -746,10 +742,10 @@ const styles = StyleSheet.create({
   postViewerVideo: { width: "100%", height: "100%" },
   postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
-  likes: { marginTop: 8, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29" },
-  caption: { marginTop: 6, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20 },
+  likes: { marginTop: 6, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29", fontSize: 13 },
+  caption: { marginTop: 4, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20, fontSize: 13 },
   captionUser: { fontWeight: "700" },
-  comments: { marginTop: 6, paddingHorizontal: 10, color: "#637571" }
+  comments: { marginTop: 4, paddingHorizontal: 10, color: "#637571", fontSize: 13 }
   ,
   commentsBackdrop: {
     flex: 1,

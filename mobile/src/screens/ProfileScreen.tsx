@@ -44,7 +44,7 @@ export function ProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Welcome to AgroGram</Text>
           <Text style={styles.cardSub}>Login to enroll, enroll in courses, and track progress.</Text>
-          <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("Auth")}>
+          <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("AuthChoice")}>
             <Ionicons name="log-in-outline" size={18} color="#fff" />
             <Text style={styles.primaryBtnText}>Login / Register</Text>
           </Pressable>
