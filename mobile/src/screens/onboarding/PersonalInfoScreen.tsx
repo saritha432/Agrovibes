@@ -28,14 +28,14 @@ export function PersonalInfoScreen() {
       locationLabel: quickPrefs ? location.trim() || undefined : undefined
     });
     await setPersonalInfoCompleted();
-    navigation.navigate("RoleSelection");
+    navigation.reset({ index: 0, routes: [{ name: "Main" }] });
   };
 
   return (
     <OnboardingLayout
       title="About you"
       subtitle="We use this to personalize Agrovibes. You can edit it anytime in profile."
-      primaryLabel="Continue"
+      primaryLabel="Create account"
       onPrimary={submit}
       primaryDisabled={!(fullName.trim() || (user?.fullName ?? "").trim())}
       onBack={async () => {
