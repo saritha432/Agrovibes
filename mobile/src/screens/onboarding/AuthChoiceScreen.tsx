@@ -9,6 +9,14 @@ import { onboardingTheme } from "../../onboarding/OnboardingLayout";
 
 const { GREEN, BORDER } = onboardingTheme;
 
+function stableUserId(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return (hash % 900000) + 100000;
+}
+
 export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { signIn } = useAuth();
@@ -21,11 +29,12 @@ export function AuthChoiceScreen() {
   };
 
   const stubSocial = async (provider: string) => {
+    const email = `user.${provider.toLowerCase()}@agrovibes.app`;
     await signIn({
-      token: `social-${provider}-${Date.now()}`,
+      token: `social-${provider.toLowerCase()}`,
       user: {
-        id: Math.floor(Date.now() / 1000) % 1_000_000,
-        email: `user.${provider.toLowerCase()}@agrovibes.app`,
+        id: stableUserId(email),
+        email,
         fullName: `${provider} user`,
         role: "student"
       }

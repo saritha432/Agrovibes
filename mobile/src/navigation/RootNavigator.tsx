@@ -19,6 +19,7 @@ import { ExpertDomainScreen } from "../screens/onboarding/ExpertDomainScreen";
 import { ExpertCredentialsScreen } from "../screens/onboarding/ExpertCredentialsScreen";
 import { ExpertVerificationScreen } from "../screens/onboarding/ExpertVerificationScreen";
 import { SecurityVerificationScreen } from "../screens/onboarding/SecurityVerificationScreen";
+import { InitialSetupScreen } from "../screens/InitialSetupScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
 import type { LearnStackParamList } from "./LearnStackNavigator";
 
@@ -32,6 +33,7 @@ export type MainTabParamList = {
 
 export type RootStackParamList = {
   Splash: undefined;
+  InitialSetup: undefined;
   AuthChoice: undefined;
   AuthEmail: undefined;
   OtpVerify: { phone: string };
@@ -57,6 +59,7 @@ export function RootNavigator() {
   return (
     <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Splash" component={SplashScreen} />
+      <Stack.Screen name="InitialSetup" component={InitialSetupScreen} />
       <Stack.Screen name="AuthChoice" component={AuthChoiceScreen} />
       <Stack.Screen name="AuthEmail" component={AuthScreen} />
       <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />

@@ -26,7 +26,8 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
-const homeTopTabs = ["Feed", "Reels", "Friends", "live"] as const;
+const homeTopTabs = ["Reels", "Friends", "Live"] as const;
+const friendLikeNames = ["Ramesh", "Sowndherya", "AgroRoots", "Meera", "Suresh"];
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
   if (!post) return [];
@@ -48,7 +49,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [commentsByPost, setCommentsByPost] = useState<Record<number, { id: string; user: string; text: string; likes: number }[]>>({});
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
-  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
+  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
   const progress = useRef(new Animated.Value(0)).current;
 
   const viewabilityConfig = useMemo(
@@ -77,16 +78,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     }
   );
 
+  const tabPosts = useMemo(() => {
+    if (activeHomeTab === "Reels") return posts;
+    if (activeHomeTab === "Live") return posts.filter((p) => !!p.videoUrl);
+    return posts.filter((p) => !!p.videoUrl && p.likesCount > 0);
+  }, [activeHomeTab, posts]);
+
   useEffect(() => {
-    if (posts.length === 0) {
+    if (tabPosts.length === 0) {
       setPlayingPostId(null);
       return;
     }
     setPlayingPostId((current) => {
-      if (current != null && posts.some((p) => p.id === current)) return current;
-      return posts.find((p) => p.videoUrl)?.id ?? null;
+      if (current != null && tabPosts.some((p) => p.id === current)) return current;
+      return tabPosts.find((p) => p.videoUrl)?.id ?? null;
     });
-  }, [posts]);
+  }, [tabPosts]);
 
   const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
   const otherStories = useMemo(
@@ -376,22 +383,39 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <Text style={styles.caption}>
             <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
           </Text>
+          {activeHomeTab === "Friends" ? (
+            <Text style={styles.friendLikeMeta}>
+              Liked by {friendLikeNames[index % friendLikeNames.length]} and {Math.max(1, Math.floor(post.likesCount / 3))} others
+            </Text>
+          ) : null}
           <Pressable onPress={() => openCommentsForPost(post)}>
             <Text style={styles.comments}>View all {shownCommentsCount} comments</Text>
           </Pressable>
         </View>
       );
     },
-    [commentsByPost, feedMediaWidth, openCommentsForPost, playingPostId]
+    [activeHomeTab, commentsByPost, feedMediaWidth, openCommentsForPost, playingPostId]
   );
 
   return (
     <View style={styles.screen}>
       <FlatList
-        data={posts}
+        data={tabPosts}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderPost}
         ListHeaderComponent={listHeader}
+        ListEmptyComponent={
+          <View style={styles.emptyTabWrap}>
+            <Text style={styles.emptyTabTitle}>
+              {activeHomeTab === "Friends"
+                ? "No friend-liked reels yet"
+                : activeHomeTab === "Live"
+                  ? "No live reels yet"
+                  : "No reels yet"}
+            </Text>
+            <Text style={styles.emptyTabSub}>Create a reel to start filling this section.</Text>
+          </View>
+        }
         contentContainerStyle={styles.feedBottom}
         onViewableItemsChanged={onViewableItemsChangedRef.current}
         viewabilityConfig={viewabilityConfig}
@@ -745,7 +769,21 @@ const styles = StyleSheet.create({
   likes: { marginTop: 6, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29", fontSize: 13 },
   caption: { marginTop: 4, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20, fontSize: 13 },
   captionUser: { fontWeight: "700" },
-  comments: { marginTop: 4, paddingHorizontal: 10, color: "#637571", fontSize: 13 }
+  friendLikeMeta: { marginTop: 4, paddingHorizontal: 10, color: "#4b5e59", fontSize: 12, fontWeight: "700" },
+  comments: { marginTop: 4, paddingHorizontal: 10, color: "#637571", fontSize: 13 },
+  emptyTabWrap: {
+    marginHorizontal: 12,
+    marginTop: 18,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#dce4e1",
+    backgroundColor: "#fff",
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    alignItems: "center"
+  },
+  emptyTabTitle: { fontWeight: "900", color: "#22312d", fontSize: 15 },
+  emptyTabSub: { marginTop: 6, color: "#5b6965", fontWeight: "600" }
   ,
   commentsBackdrop: {
     flex: 1,

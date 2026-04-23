@@ -21,6 +21,15 @@ export function ProfileScreen() {
   const { user, signOut } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [isFollowing, setFollowing] = useState(false);
+  const [activeGalleryTab, setActiveGalleryTab] = useState<"Posts" | "Reels">("Posts");
+
+  const normalizeName = (v: string) =>
+    String(v || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   useEffect(() => {
     let mounted = true;
@@ -40,13 +49,18 @@ export function ProfileScreen() {
 
   const userPosts = useMemo(() => {
     if (!user) return [];
-    const nameA = String(user.fullName || "").trim().toLowerCase();
-    const nameB = String(user.email || "").split("@")[0].trim().toLowerCase();
+    const nameA = normalizeName(user.fullName || "");
+    const nameB = normalizeName(String(user.email || "").split("@")[0] || "");
     return allPosts.filter((p) => {
-      const postName = String(p.userName || "").trim().toLowerCase();
+      const postName = normalizeName(p.userName || "");
       return postName === nameA || postName === nameB;
     });
   }, [allPosts, user]);
+
+  const visiblePosts = useMemo(() => {
+    if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
+    return userPosts.filter((p) => !p.videoUrl);
+  }, [activeGalleryTab, userPosts]);
 
   const profileModel = useMemo(() => {
     if (!user) return null;
@@ -163,21 +177,29 @@ export function ProfileScreen() {
 
             <View style={styles.galleryTabs}>
               {[
-                { icon: "grid-outline", label: "Posts" },
-                { icon: "ticket-outline", label: "Tips" },
-                { icon: "sparkles-outline", label: "Top" },
-                { icon: "play-outline", label: "Videos" }
+                { icon: "grid-outline", label: "Posts" as const },
+                { icon: "play-outline", label: "Reels" as const }
               ].map((t) => (
-                <View key={t.label} style={styles.galleryTab}>
-                  <Ionicons name={t.icon as any} size={18} color="#0f7d3d" />
-                  <Text style={styles.galleryTabText}>{t.label}</Text>
-                </View>
+                <Pressable
+                  key={t.label}
+                  style={[styles.galleryTab, activeGalleryTab === t.label ? styles.galleryTabActive : null]}
+                  onPress={() => setActiveGalleryTab(t.label)}
+                >
+                  <Ionicons
+                    name={t.icon as any}
+                    size={18}
+                    color={activeGalleryTab === t.label ? "#fff" : "#0f7d3d"}
+                  />
+                  <Text style={[styles.galleryTabText, activeGalleryTab === t.label ? styles.galleryTabTextActive : null]}>
+                    {t.label}
+                  </Text>
+                </Pressable>
               ))}
             </View>
 
             <View style={styles.grid}>
-              {userPosts.length ? (
-                userPosts.map((post) => (
+              {visiblePosts.length ? (
+                visiblePosts.map((post) => (
                   <View key={post.id} style={styles.gridTile}>
                     {post.imageUrl ? (
                       <Image source={{ uri: post.imageUrl }} style={styles.gridImage} resizeMode="cover" />
@@ -195,7 +217,11 @@ export function ProfileScreen() {
               ) : (
                 <View style={styles.emptyWrap}>
                   <Ionicons name="images-outline" size={20} color="#6b7874" />
-                  <Text style={styles.emptyText}>Your posts will appear here after sharing.</Text>
+                  <Text style={styles.emptyText}>
+                    {activeGalleryTab === "Reels"
+                      ? "Your reels will appear here after sharing."
+                      : "Your posts will appear here after sharing."}
+                  </Text>
                 </View>
               )}
             </View>
@@ -270,7 +296,9 @@ const styles = StyleSheet.create({
 
   galleryTabs: { flexDirection: "row", gap: 10, marginTop: 12 },
   galleryTab: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 14, backgroundColor: "#f2f5f4", borderWidth: 1, borderColor: "#dce4e1" },
+  galleryTabActive: { backgroundColor: "#0f7d3d", borderColor: "#0f7d3d" },
   galleryTabText: { marginTop: 6, color: "#0f7d3d", fontWeight: "900", fontSize: 12 },
+  galleryTabTextActive: { color: "#fff" },
 
   grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 14, gap: 10 },
   gridTile: {

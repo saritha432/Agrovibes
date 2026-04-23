@@ -7,6 +7,14 @@ import { useAuth } from "../../auth/AuthContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 
+function stableUserId(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return (hash % 900000) + 100000;
+}
+
 export function OtpVerifyScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "OtpVerify">>();
@@ -18,9 +26,9 @@ export function OtpVerifyScreen() {
     if (digits.length < 4) return;
     const phone = route.params.phone;
     await signIn({
-      token: `otp-${phone}-${Date.now()}`,
+      token: `otp-${phone}`,
       user: {
-        id: Math.floor(Date.now() / 1000) % 1_000_000,
+        id: stableUserId(`phone:${phone}`),
         email: `${phone}@phone.agrovibes`,
         fullName: "Farmer",
         role: "student",

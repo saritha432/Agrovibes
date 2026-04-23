@@ -986,7 +986,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
               )}
             </View>
-            {createType === "post" || createType === "reel" ? (
+            {createType === "post" ? (
               <>
                 <View style={styles.igPostToolsRow}>
                   {[
