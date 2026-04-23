@@ -9,23 +9,24 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 
 export function SplashScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { token, loading: authLoading } = useAuth();
+  const { token, user, loading: authLoading } = useAuth();
   const { state: ob, loading: obLoading } = useOnboarding();
 
   React.useEffect(() => {
-    if (authLoading || (token && obLoading)) return;
-    const dest = resolveOnboardingDestination(!!token, ob);
+    const hasSession = Boolean(token || user);
+    if (authLoading || (hasSession && obLoading)) return;
+    const dest = resolveOnboardingDestination(hasSession, ob);
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
         routes: [{ name: dest as keyof RootStackParamList }]
       })
     );
-  }, [authLoading, obLoading, token, ob, navigation]);
+  }, [authLoading, obLoading, token, user, ob, navigation]);
 
   return (
     <View style={styles.root}>
-      <Text style={styles.wordmark}>Agrovibes</Text>
+      <Text style={styles.wordmark}>Cropvibes</Text>
       <ActivityIndicator size="large" color="#0a9f46" style={styles.spinner} />
     </View>
   );

@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
+import { fetchHomePosts, HomePost } from "../services/api";
 
 function safeHandle(name: string) {
   const base = String(name || "user")
@@ -18,14 +19,39 @@ function safeHandle(name: string) {
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { user, signOut } = useAuth();
+  const [allPosts, setAllPosts] = useState<HomePost[]>([]);
+  const [isFollowing, setFollowing] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchHomePosts()
+      .then((data) => {
+        if (!mounted) return;
+        setAllPosts(data.posts);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setAllPosts([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const userPosts = useMemo(() => {
+    if (!user) return [];
+    const nameA = String(user.fullName || "").trim().toLowerCase();
+    const nameB = String(user.email || "").split("@")[0].trim().toLowerCase();
+    return allPosts.filter((p) => {
+      const postName = String(p.userName || "").trim().toLowerCase();
+      return postName === nameA || postName === nameB;
+    });
+  }, [allPosts, user]);
 
   const profileModel = useMemo(() => {
     if (!user) return null;
-    // Simple deterministic placeholders (until we connect real profile stats API).
-    const seed = Number(user.id || 1);
-    const posts = 6 + (seed % 10);
-    const followers = 80 + (seed % 200);
-    const following = 20 + (seed % 90);
+    const followers = isFollowing ? 1 : 0;
+    const following = isFollowing ? 1 : 0;
     const handle = safeHandle(user.fullName || user.email);
     const initials = String(user.fullName || user.email || "U")
       .split(" ")
@@ -33,8 +59,8 @@ export function ProfileScreen() {
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase())
       .join("");
-    return { posts, followers, following, handle, initials: initials || "U" };
-  }, [user]);
+    return { posts: userPosts.length, followers, following, handle, initials: initials || "U" };
+  }, [isFollowing, user, userPosts.length]);
 
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
   return (
@@ -86,15 +112,27 @@ export function ProfileScreen() {
             </Text>
 
             <View style={styles.actionsRow}>
-              <Pressable style={styles.followBtn} accessibilityRole="button" onPress={() => {}}>
-                <Ionicons name="heart-outline" size={18} color="#fff" />
-                <Text style={styles.followBtnText}>Follow</Text>
+              <Pressable
+                style={[styles.followBtn, isFollowing ? styles.followBtnActive : null]}
+                accessibilityRole="button"
+                onPress={() => setFollowing((v) => !v)}
+              >
+                <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color="#fff" />
+                <Text style={styles.followBtnText}>{isFollowing ? "Following" : "Follow"}</Text>
               </Pressable>
-              <Pressable style={styles.msgBtn} accessibilityRole="button" onPress={() => {}}>
+              <Pressable
+                style={styles.msgBtn}
+                accessibilityRole="button"
+                onPress={() => Alert.alert("Message", "Messaging UI will be wired next.")}
+              >
                 <Ionicons name="chatbubble-ellipses-outline" size={18} color="#0f7d3d" />
                 <Text style={styles.msgBtnText}>Message</Text>
               </Pressable>
-              <Pressable style={styles.editBtn} accessibilityRole="button" onPress={() => {}}>
+              <Pressable
+                style={styles.editBtn}
+                accessibilityRole="button"
+                onPress={() => Alert.alert("Edit profile", "Profile editing flow can be added in next step.")}
+              >
                 <Ionicons name="create-outline" size={18} color="#0a9f46" />
                 <Text style={styles.editBtnText}>Edit</Text>
               </Pressable>
@@ -138,11 +176,28 @@ export function ProfileScreen() {
             </View>
 
             <View style={styles.grid}>
-              {Array.from({ length: 12 }).map((_, i) => (
-                <View key={i} style={styles.gridTile}>
-                  <Ionicons name="leaf-outline" size={20} color="#0a9f46" />
+              {userPosts.length ? (
+                userPosts.map((post) => (
+                  <View key={post.id} style={styles.gridTile}>
+                    {post.imageUrl ? (
+                      <Image source={{ uri: post.imageUrl }} style={styles.gridImage} resizeMode="cover" />
+                    ) : post.videoUrl ? (
+                      <View style={styles.gridVideoTile}>
+                        <Ionicons name="play-circle" size={24} color="#fff" />
+                      </View>
+                    ) : (
+                      <View style={styles.gridVideoTile}>
+                        <Ionicons name="leaf-outline" size={20} color="#fff" />
+                      </View>
+                    )}
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyWrap}>
+                  <Ionicons name="images-outline" size={20} color="#6b7874" />
+                  <Text style={styles.emptyText}>Your posts will appear here after sharing.</Text>
                 </View>
-              ))}
+              )}
             </View>
           </View>
         </>
@@ -182,6 +237,7 @@ const styles = StyleSheet.create({
 
   actionsRow: { marginTop: 10, flexDirection: "row", gap: 8 },
   followBtn: { flex: 1, backgroundColor: "#0a9f46", borderRadius: 14, paddingVertical: 10, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
+  followBtnActive: { backgroundColor: "#0f7d3d" },
   followBtnText: { color: "#fff", fontWeight: "900" },
   msgBtn: { flex: 1, backgroundColor: "#eef8f1", borderRadius: 14, paddingVertical: 10, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#cde9d9" },
   msgBtnText: { color: "#0f7d3d", fontWeight: "900" },
@@ -217,5 +273,29 @@ const styles = StyleSheet.create({
   galleryTabText: { marginTop: 6, color: "#0f7d3d", fontWeight: "900", fontSize: 12 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 14, gap: 10 },
-  gridTile: { width: "30%", aspectRatio: 1, borderRadius: 14, backgroundColor: "#eef8f1", borderWidth: 1, borderColor: "#cde9d9", alignItems: "center", justifyContent: "center" }
+  gridTile: {
+    width: "30%",
+    aspectRatio: 1,
+    borderRadius: 14,
+    backgroundColor: "#eef8f1",
+    borderWidth: 1,
+    borderColor: "#cde9d9",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  gridImage: { width: "100%", height: "100%" },
+  gridVideoTile: { flex: 1, width: "100%", backgroundColor: "#22312d", alignItems: "center", justifyContent: "center" },
+  emptyWrap: {
+    width: "100%",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#dce4e1",
+    backgroundColor: "#f7faf8",
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    gap: 8
+  },
+  emptyText: { color: "#6b7874", fontWeight: "700", textAlign: "center" }
 });

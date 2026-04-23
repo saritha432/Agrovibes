@@ -23,6 +23,7 @@ import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { captureRef } from "react-native-view-shot";
 import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
+import { useAuth } from "../auth/AuthContext";
 
 interface CreateModalProps {
   visible: boolean;
@@ -216,6 +217,7 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.back);
   const [entryFlashOn, setEntryFlashOn] = useState(false);
@@ -223,8 +225,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [entryTimerOn, setEntryTimerOn] = useState(false);
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
   const [entryType, setEntryType] = useState<CreateType>("story");
-  const [userName, setUserName] = useState("Ramesh Patel");
-  const [location, setLocation] = useState("Nashik");
   const [caption, setCaption] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
@@ -551,8 +551,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         if (!storyIsImage) await validateVideoSize(storyUri, 30);
         const { url: storyUrl } = await uploadPickedMedia(storyUri, storyAssetForUpload);
         await createHomeStory({
-          userName: userName.trim() || "Farmer",
-          district: location.trim() || "Unknown",
+          userName: user?.fullName?.trim() || "Farmer",
+          district: user?.locationLabel?.trim() || "Unknown",
           ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
         });
       } else {
@@ -589,8 +589,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           await validateVideoSize(v.uri, 80);
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           await createHomePost({
-            userName: "Farmer",
-            location: "Unknown",
+            userName: user?.fullName?.trim() || "Farmer",
+            location: user?.locationLabel?.trim() || "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             videoUrl: mediaUrl,
             thumbnailUrl: thumbnailUrl.trim() || undefined
@@ -610,8 +610,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             return;
           }
           await createHomePost({
-            userName: "Farmer",
-            location: "Unknown",
+            userName: user?.fullName?.trim() || "Farmer",
+            location: user?.locationLabel?.trim() || "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             imageUrl: urls[0],
             ...(urls.length > 1 ? { imageUrls: urls } : {})

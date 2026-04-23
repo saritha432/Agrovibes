@@ -42,7 +42,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false);
           return;
         }
-        const parsed = JSON.parse(raw) as { token: string; user: AuthUser };
+        const parsed = JSON.parse(raw) as { token?: string; user?: AuthUser } | null;
+        if (!parsed?.token || !parsed?.user) {
+          await AsyncStorage.removeItem(STORAGE_KEY);
+          setToken(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
         setToken(parsed.token);
         setUser(parsed.user);
       } catch {

@@ -35,7 +35,7 @@ export function AuthChoiceScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.logo}>Agrovibes</Text>
+      <Text style={styles.logo}>Cropvibes</Text>
       <Text style={styles.tag}>Grow, learn, and trade together</Text>
 
       <View style={styles.card}>
