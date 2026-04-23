@@ -435,6 +435,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const mediaTypeForEntry = () => {
     if (entryType === "live") return ImagePicker.MediaTypeOptions.All;
+    if (entryType === "reel") return ImagePicker.MediaTypeOptions.Videos;
     return ImagePicker.MediaTypeOptions.All;
   };
 
@@ -452,6 +453,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       return;
     }
     if (entryType === "reel") {
+      if (shouldUseImageUpload(uri, first)) {
+        setErrorText("Reels support video only. Please select or record a video.");
+        return;
+      }
       setPickedPostAssets([first]);
       setCreateType("reel");
       setCreateStep("preview");
@@ -568,12 +573,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           return;
         }
         if (createType === "reel" && assets.length > 1) {
-          setErrorText("A reel is a single video or photo.");
+          setErrorText("A reel must be a single video.");
           setSubmitting(false);
           return;
         }
         const images = assets.filter((a) => shouldUseImageUpload(a.uri, a));
         const videos = assets.filter((a) => !shouldUseImageUpload(a.uri, a));
+        if (createType === "reel" && (videos.length !== 1 || images.length > 0)) {
+          setErrorText("Please upload one video reel.");
+          setSubmitting(false);
+          return;
+        }
         if (images.length && videos.length) {
           setErrorText("Use either one video or multiple photos — not both.");
           setSubmitting(false);

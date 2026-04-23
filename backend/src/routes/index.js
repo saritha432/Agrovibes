@@ -718,6 +718,30 @@ router.post("/v1/home/posts", async (req, res) => {
   }
 });
 
+router.post("/v1/media/cloudinary-sign", (req, res) => {
+  const cloudName = String(process.env.CLOUDINARY_CLOUD_NAME || "").trim();
+  const apiKey = String(process.env.CLOUDINARY_API_KEY || "").trim();
+  const apiSecret = String(process.env.CLOUDINARY_API_SECRET || "").trim();
+
+  if (!cloudName || !apiKey || !apiSecret) {
+    res.status(500).json({ message: "Cloudinary credentials are not configured on server" });
+    return;
+  }
+
+  const folder = String(req.body?.folder || "agrovibes").trim() || "agrovibes";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signaturePayload = `folder=${folder}&timestamp=${timestamp}${apiSecret}`;
+  const signature = crypto.createHash("sha1").update(signaturePayload).digest("hex");
+
+  res.json({
+    cloudName,
+    apiKey,
+    timestamp,
+    folder,
+    signature
+  });
+});
+
 router.post("/v1/uploads/video", (req, res) => {
   uploadVideo.single("video")(req, res, (err) => {
     if (err) {
