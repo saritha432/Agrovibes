@@ -77,10 +77,14 @@ async function ensurePhoneOtpTable() {
       used BOOLEAN NOT NULL DEFAULT false,
       channel TEXT NOT NULL DEFAULT 'sms',
       provider_request_id TEXT,
+      provider_status TEXT,
+      provider_message TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     `
   );
+  await query(`ALTER TABLE phone_otp_codes ADD COLUMN IF NOT EXISTS provider_status TEXT`);
+  await query(`ALTER TABLE phone_otp_codes ADD COLUMN IF NOT EXISTS provider_message TEXT`);
   phoneOtpTableReady = true;
 }
 
@@ -164,13 +168,15 @@ async function sendSmsOtp(phone, otp) {
     }
     return {
       channel: "sms",
-      providerRequestId: String(payload?.request_id || payload?.requestId || "")
+      providerRequestId: String(payload?.request_id || payload?.requestId || ""),
+      providerStatus: String(payload?.type || payload?.status || "accepted"),
+      providerMessage: String(payload?.message || payload?.details || "")
     };
   } catch (error) {
     if (allowDevOtpFallback()) {
       // eslint-disable-next-line no-console
       console.log(`[DEV OTP FALLBACK] ${phone} => ${otp}`);
-      return { channel: "sms", providerRequestId: null };
+      return { channel: "sms", providerRequestId: null, providerStatus: "dev-fallback", providerMessage: "Provider unavailable in development fallback mode" };
     }
     throw error;
   }
@@ -583,10 +589,10 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
     try {
       await query(
         `
-        INSERT INTO phone_otp_codes (phone, otp_hash, expires_at, attempts, used, channel, provider_request_id)
-        VALUES ($1, $2, NOW() + INTERVAL '10 minutes', 0, false, $3, $4)
+        INSERT INTO phone_otp_codes (phone, otp_hash, expires_at, attempts, used, channel, provider_request_id, provider_status, provider_message)
+        VALUES ($1, $2, NOW() + INTERVAL '10 minutes', 0, false, $3, $4, $5, $6)
         `,
-        [phone, otpHash, sent.channel, sent.providerRequestId || null]
+        [phone, otpHash, sent.channel, sent.providerRequestId || null, sent.providerStatus || null, sent.providerMessage || null]
       );
     } catch (_e) {
       const rows = phoneOtpMemory.get(phone) || [];
@@ -600,7 +606,14 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
       phoneOtpMemory.set(phone, rows.slice(-5));
     }
 
-    res.json({ success: true, phone, channel: sent.channel });
+    res.json({
+      success: true,
+      phone,
+      channel: sent.channel,
+      requestId: sent.providerRequestId || null,
+      providerStatus: sent.providerStatus || null,
+      providerMessage: sent.providerMessage || null
+    });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("send-otp failed", error);
