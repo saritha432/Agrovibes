@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { onboardingTheme } from "../../onboarding/OnboardingLayout";
+import { sendPhoneOtp } from "../../services/api";
 
 const { GREEN, BORDER } = onboardingTheme;
 
@@ -21,11 +22,24 @@ export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { signIn } = useAuth();
   const [phone, setPhone] = React.useState("");
+  const [loadingOtp, setLoadingOtp] = React.useState(false);
+  const [otpError, setOtpError] = React.useState("");
 
-  const goOtp = () => {
+  const goOtp = async () => {
     const digits = phone.replace(/\D/g, "");
-    if (digits.length < 10) return;
-    navigation.navigate("OtpVerify", { phone: digits });
+    if (digits.length < 10 || loadingOtp) return;
+    setLoadingOtp(true);
+    setOtpError("");
+    try {
+      const normalized = digits.length > 10 ? digits : `91${digits}`;
+      const phoneForApi = `+${normalized}`;
+      await sendPhoneOtp({ phone: phoneForApi });
+      navigation.navigate("OtpVerify", { phone: phoneForApi });
+    } catch (error: any) {
+      setOtpError(error?.message || "Failed to send OTP. Please try again.");
+    } finally {
+      setLoadingOtp(false);
+    }
   };
 
   const stubSocial = async (provider: string) => {
@@ -57,10 +71,15 @@ export function AuthChoiceScreen() {
           placeholderTextColor="#9aa9a5"
           style={styles.input}
         />
-        <Pressable onPress={goOtp} style={[styles.primaryBtn, phone.replace(/\D/g, "").length < 10 ? styles.disabled : null]}>
+        <Pressable
+          onPress={goOtp}
+          style={[styles.primaryBtn, phone.replace(/\D/g, "").length < 10 || loadingOtp ? styles.disabled : null]}
+        >
           <Ionicons name="chatbubble-ellipses-outline" size={18} color="#fff" />
-          <Text style={styles.primaryBtnText}>Continue with OTP</Text>
+          <Text style={styles.primaryBtnText}>{loadingOtp ? "Sending OTP..." : "Continue with OTP"}</Text>
         </Pressable>
+        {otpError ? <Text style={styles.errorText}>{otpError}</Text> : null}
+        <Text style={styles.helperText}>You may receive SMS notification from us for verification.</Text>
 
         <View style={styles.dividerRow}>
           <View style={styles.divider} />
@@ -140,5 +159,7 @@ const styles = StyleSheet.create({
   },
   outlineBtnText: { fontWeight: "900", color: "#22312d", fontSize: 14 },
   linkRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 },
-  linkText: { fontWeight: "800", color: GREEN, fontSize: 14 }
+  linkText: { fontWeight: "800", color: GREEN, fontSize: 14 },
+  helperText: { marginTop: 8, color: "#7b8986", fontSize: 12, fontWeight: "600" },
+  errorText: { marginTop: 8, color: "#b42318", fontSize: 12, fontWeight: "700" }
 });
