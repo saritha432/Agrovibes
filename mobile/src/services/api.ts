@@ -16,7 +16,8 @@ export const API_BASE_URL = resolveApiBaseUrl();
 
 export interface AuthResponse {
   token: string;
-  user: { id: number; email: string; fullName: string; role: "student" | "instructor" | "admin" };
+  user: { id: number; email: string; fullName: string; role: "student" | "instructor" | "admin"; phone?: string };
+  isNewUser?: boolean;
 }
 
 async function parseJsonOrThrow(response: Response) {
@@ -48,6 +49,24 @@ export async function authRegister(payload: { email: string; password: string; f
 
 export async function authLogin(payload: { email: string; password: string }) {
   const response = await fetch(`${API_BASE_URL}/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return (await parseJsonOrThrow(response)) as AuthResponse;
+}
+
+export async function sendPhoneOtp(payload: { phone: string }) {
+  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return (await parseJsonOrThrow(response)) as { success: boolean; phone: string; channel: "sms" | "whatsapp" };
+}
+
+export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
+  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)

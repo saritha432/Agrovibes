@@ -10,6 +10,7 @@ import { ActivityIndicator } from "react-native";
 import type { Course } from "../services/api";
 import { fetchLearnCourseById } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
+import { navigationRef } from "../navigation/navigationRef";
 import { enrollInCourse } from "../services/api";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "CourseDetail">;
@@ -130,7 +131,7 @@ export function CourseDetailScreen() {
             accessibilityRole="button"
             onPress={async () => {
               if (!user || !token) {
-                navigation.navigate("Auth" as any);
+                if (navigationRef.isReady()) navigationRef.navigate("AuthChoice");
                 return;
               }
               try {

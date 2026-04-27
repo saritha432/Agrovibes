@@ -1,13 +1,14 @@
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Props = BottomTabBarProps & { onCreatePress: () => void };
 
-const GREEN = "#0a9f46";
-const MUTED = "#6b7280";
+const TAB_BG = "#1e1f1f";
+const ACTIVE = "#ffffff";
+const MUTED = "#b9bec3";
 
 function tabIcon(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
   switch (routeName) {
@@ -68,9 +69,9 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
         accessibilityState={{ selected: isFocused }}
         accessibilityLabel={route.name}
       >
-        <Ionicons name={tabIcon(route.name, isFocused)} size={22} color={isFocused ? GREEN : MUTED} />
+        <Ionicons name={tabIcon(route.name, isFocused)} size={15} color={isFocused ? ACTIVE : MUTED} />
         <Text style={[styles.tabLabel, isFocused ? styles.tabLabelActive : null]} numberOfLines={1}>
-          {route.name}
+          {route.name === "Services" ? "community" : route.name}
         </Text>
       </Pressable>
     );
@@ -79,15 +80,24 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
   return (
     <View style={[styles.wrap, { paddingBottom: bottomPad }]}>
       <View style={styles.row}>
-        {renderTab("Home")}
+        <Pressable
+          onPress={() => {
+            const route = state.routes.find((r) => r.name === "Home");
+            if (!route) return;
+            const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+            if (!event.defaultPrevented) navigation.navigate("Home");
+          }}
+          style={styles.logoTab}
+          accessibilityRole="button"
+          accessibilityLabel="Home"
+        >
+          <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
+        </Pressable>
         {renderTab("Market")}
-        {renderTab("Learn")}
-        <View style={styles.fabColumn}>
-          <Pressable onPress={onCreatePress} style={styles.fab} accessibilityRole="button" accessibilityLabel="Create">
-            <Ionicons name="add" size={30} color="#fff" />
-          </Pressable>
-          <Text style={styles.fabLabel}>Create+</Text>
-        </View>
+        <Pressable onPress={onCreatePress} style={styles.tabItem} accessibilityRole="button" accessibilityLabel="Create">
+          <Ionicons name="add-circle-outline" size={15} color={ACTIVE} />
+          <Text style={styles.tabLabel}>Create</Text>
+        </Pressable>
         {renderTab("Services")}
         {renderTab("Profile")}
       </View>
@@ -97,33 +107,34 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: "#fff",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#dde5e2",
-    paddingTop: 6
+    backgroundColor: TAB_BG,
+    borderTopWidth: 0,
+    paddingTop: 5
   },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-around" },
-  tabItem: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 0, minWidth: 0 },
-  tabLabel: { marginTop: 2, fontSize: 10, lineHeight: 12, fontWeight: "600", color: MUTED },
-  tabLabelActive: { color: GREEN },
-  fabColumn: { flex: 1, alignItems: "center", justifyContent: "center", minWidth: 0 },
-  fab: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: GREEN,
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 6 },
+  logoTab: {
+    width: 42,
+    height: 32,
+    borderRadius: 2,
+    backgroundColor: "#2a2b2c",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 8
+    marginRight: 4
   },
-  fabLabel: {
+  logoImage: { width: 36, height: 14 },
+  tabItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    paddingVertical: 1
+  },
+  tabLabel: {
     marginTop: 2,
-    fontSize: Platform.OS === "web" ? 10 : 11,
-    fontWeight: "700",
-    color: GREEN
-  }
+    fontSize: Platform.OS === "web" ? 8 : 9,
+    lineHeight: 11,
+    fontWeight: "500",
+    color: MUTED
+  },
+  tabLabelActive: { color: ACTIVE, fontWeight: "600" }
 });

@@ -8,6 +8,10 @@ export interface AuthUser {
   email: string;
   fullName: string;
   role: UserRole;
+  phone?: string;
+  dateOfBirth?: string;
+  preferredLanguage?: string;
+  locationLabel?: string;
 }
 
 interface AuthState {
@@ -16,6 +20,7 @@ interface AuthState {
   loading: boolean;
   signIn: (payload: { token: string; user: AuthUser }) => Promise<void>;
   signOut: () => Promise<void>;
+  updateUser: (patch: Partial<AuthUser>) => Promise<void>;
 }
 
 const STORAGE_KEY = "agrovibes.auth";
@@ -37,7 +42,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false);
           return;
         }
-        const parsed = JSON.parse(raw) as { token: string; user: AuthUser };
+        const parsed = JSON.parse(raw) as { token?: string; user?: AuthUser } | null;
+        if (!parsed?.token || !parsed?.user) {
+          await AsyncStorage.removeItem(STORAGE_KEY);
+          setToken(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
         setToken(parsed.token);
         setUser(parsed.user);
       } catch {
@@ -63,7 +75,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.removeItem(STORAGE_KEY);
   }, []);
 
-  const value: AuthState = { token, user, loading, signIn, signOut };
+  const tokenRef = React.useRef<string | null>(null);
+  tokenRef.current = token;
+
+  const updateUser = React.useCallback(async (patch: Partial<AuthUser>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const merged = { ...prev, ...patch };
+      const t = tokenRef.current;
+      if (t) {
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: t, user: merged })).catch(() => {});
+      }
+      return merged;
+    });
+  }, []);
+
+  const value: AuthState = { token, user, loading, signIn, signOut, updateUser };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

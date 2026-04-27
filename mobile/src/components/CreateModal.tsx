@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,9 +18,12 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ResizeMode, Video } from "expo-av";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
 import { captureRef } from "react-native-view-shot";
 import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
+import { useAuth } from "../auth/AuthContext";
 
 interface CreateModalProps {
   visible: boolean;
@@ -163,6 +166,14 @@ type MediaCreativeProps = {
   shouldPlay?: boolean;
 };
 
+type RecentGridAsset = {
+  id: string;
+  uri: string;
+  mediaType: "image" | "video";
+  filename?: string;
+  duration?: number;
+};
+
 const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
   { uri, isVideo, filter, overlayText, font, textColor, textBackground, shouldPlay = true },
   ref
@@ -205,11 +216,15 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
 });
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
+  const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [createType, setCreateType] = useState<CreateType | null>(null);
+  const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.back);
+  const [entryFlashOn, setEntryFlashOn] = useState(false);
+  const [entryZoomLabel, setEntryZoomLabel] = useState<"1x" | "2x">("1x");
+  const [entryTimerOn, setEntryTimerOn] = useState(false);
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
   const [entryType, setEntryType] = useState<CreateType>("story");
-  const [userName, setUserName] = useState("Ramesh Patel");
-  const [location, setLocation] = useState("Nashik");
   const [caption, setCaption] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
@@ -227,6 +242,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
   const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
   const [showStickerPanel, setShowStickerPanel] = useState(false);
+  const [recentGridAssets, setRecentGridAssets] = useState<RecentGridAsset[]>([]);
+  const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
+  const [entryMultiSelect, setEntryMultiSelect] = useState(false);
   /** Snapshot of preview with text+filter for single-image post/reel (captured when leaving preview). */
   const [composedImageUri, setComposedImageUri] = useState<string | null>(null);
   const previewCaptureRef = useRef<View>(null);
@@ -243,14 +261,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       throw new Error(`Video is ${mb.toFixed(1)}MB. Please select a video under ${maxMb}MB.`);
     }
   }
-
-  const isStory = createType === "story";
-  const isLive = createType === "live";
-  const isReel = createType === "reel";
-  const storyHint = useMemo(() => {
-    if (!isStory) return "";
-    return pickedStoryVideoUri ? "Video selected." : "Choose how you want to add a story video.";
-  }, [isStory, pickedStoryVideoUri]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -277,7 +287,20 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
     setComposedImageUri(null);
+    setEntrySelectedIds([]);
+    setEntryMultiSelect(false);
   }, [visible, initialType]);
+
+  React.useEffect(() => {
+    if (!visible || createType) return;
+    void loadRecentGridAssets();
+  }, [createType, visible]);
+
+  React.useEffect(() => {
+    if (!visible || createType || entryType !== "post") return;
+    if (!recentGridAssets.length) return;
+    setEntrySelectedIds((prev) => (prev.length ? prev : [recentGridAssets[0].id]));
+  }, [recentGridAssets, visible, createType, entryType]);
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -288,6 +311,65 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowStickerPanel(false);
     onClose();
   };
+
+  const startPostFromEntry = () => {
+    const selected = recentGridAssets.filter((a) => entrySelectedIds.includes(a.id));
+    if (!selected.length) {
+      setErrorText("Please select at least one photo.");
+      return;
+    }
+    const assets: ImagePicker.ImagePickerAsset[] = selected.map((a) => ({
+      uri: a.uri,
+      fileName: a.filename,
+      duration: a.duration ?? undefined,
+      type: a.mediaType
+    })) as ImagePicker.ImagePickerAsset[];
+    applyPickedMediaToFlow(assets);
+  };
+
+  const onEntryPressAsset = (asset: RecentGridAsset) => {
+    setErrorText("");
+    if (asset.mediaType === "video") {
+      setErrorText("Post grid supports photos only. Choose Reel for video.");
+      return;
+    }
+    setEntrySelectedIds((prev) => {
+      if (!entryMultiSelect) return [asset.id];
+      if (prev.includes(asset.id)) return prev.filter((id) => id !== asset.id);
+      if (prev.length >= 10) return prev;
+      return [...prev, asset.id];
+    });
+  };
+
+  async function loadRecentGridAssets() {
+    if (Platform.OS === "web") {
+      setRecentGridAssets([]);
+      return;
+    }
+    try {
+      const perm = await MediaLibrary.requestPermissionsAsync();
+      if (!perm.granted) {
+        setRecentGridAssets([]);
+        return;
+      }
+      const result = await MediaLibrary.getAssetsAsync({
+        first: 24,
+        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        sortBy: [MediaLibrary.SortBy.creationTime]
+      });
+      setRecentGridAssets(
+        result.assets.map((a) => ({
+          id: a.id,
+          uri: a.uri,
+          mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "image",
+          filename: a.filename,
+          duration: a.duration
+        }))
+      );
+    } catch {
+      setRecentGridAssets([]);
+    }
+  }
 
   async function snapshotComposedImage(): Promise<string | null> {
     if (!previewCaptureRef.current) return null;
@@ -353,6 +435,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const mediaTypeForEntry = () => {
     if (entryType === "live") return ImagePicker.MediaTypeOptions.All;
+    if (entryType === "reel") return ImagePicker.MediaTypeOptions.Videos;
     return ImagePicker.MediaTypeOptions.All;
   };
 
@@ -370,6 +453,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       return;
     }
     if (entryType === "reel") {
+      if (shouldUseImageUpload(uri, first)) {
+        setErrorText("Reels support video only. Please select or record a video.");
+        return;
+      }
       setPickedPostAssets([first]);
       setCreateType("reel");
       setCreateStep("preview");
@@ -402,7 +489,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: mediaTypeForEntry(),
-      quality: 0.9
+      quality: 0.9,
+      cameraType: entryCameraFacing
     });
     if (!result.canceled && result.assets[0]) {
       applyPickedMediaToFlow([result.assets[0]]);
@@ -468,8 +556,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         if (!storyIsImage) await validateVideoSize(storyUri, 30);
         const { url: storyUrl } = await uploadPickedMedia(storyUri, storyAssetForUpload);
         await createHomeStory({
-          userName: userName.trim() || "Farmer",
-          district: location.trim() || "Unknown",
+          userName: user?.fullName?.trim() || "Farmer",
+          district: user?.locationLabel?.trim() || "Unknown",
           ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
         });
       } else {
@@ -485,12 +573,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           return;
         }
         if (createType === "reel" && assets.length > 1) {
-          setErrorText("A reel is a single video or photo.");
+          setErrorText("A reel must be a single video.");
           setSubmitting(false);
           return;
         }
         const images = assets.filter((a) => shouldUseImageUpload(a.uri, a));
         const videos = assets.filter((a) => !shouldUseImageUpload(a.uri, a));
+        if (createType === "reel" && (videos.length !== 1 || images.length > 0)) {
+          setErrorText("Please upload one video reel.");
+          setSubmitting(false);
+          return;
+        }
         if (images.length && videos.length) {
           setErrorText("Use either one video or multiple photos — not both.");
           setSubmitting(false);
@@ -506,8 +599,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           await validateVideoSize(v.uri, 80);
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           await createHomePost({
-            userName: "Farmer",
-            location: "Unknown",
+            userName: user?.fullName?.trim() || "Farmer",
+            location: user?.locationLabel?.trim() || "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             videoUrl: mediaUrl,
             thumbnailUrl: thumbnailUrl.trim() || undefined
@@ -527,8 +620,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             return;
           }
           await createHomePost({
-            userName: "Farmer",
-            location: "Unknown",
+            userName: user?.fullName?.trim() || "Farmer",
+            location: user?.locationLabel?.trim() || "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             imageUrl: urls[0],
             ...(urls.length > 1 ? { imageUrls: urls } : {})
@@ -554,6 +647,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const previewWidth = Dimensions.get("window").width - 32;
+  const selectedEntryAsset = recentGridAssets.find((a) => a.id === entrySelectedIds[0]) ?? null;
   const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostAssets[0]?.uri ?? "";
   const postFirst = pickedPostAssets[0];
   const isSelectedVideo =
@@ -566,41 +660,221 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   return (
     <>
-    <Modal visible={visible} transparent={!createType} animationType={createType ? "fade" : "slide"} onRequestClose={handleClose}>
+    <Modal
+      visible={visible}
+      transparent={!createType || createType === "live"}
+      animationType={createType && createType !== "live" ? "fade" : "slide"}
+      onRequestClose={handleClose}
+    >
       {!createType ? (
-        <View style={styles.igFullScreen}>
-          <View style={styles.igTopControls}>
-            <Pressable onPress={handleClose} hitSlop={10}>
-              <Ionicons name="close" size={28} color="#fff" />
+        entryType === "post" ? (
+          <View style={[styles.igPostEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
+            <View style={styles.igPostEntryTop}>
+              <Pressable style={styles.igPostEntryTopBtn} onPress={handleClose}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </Pressable>
+              <Text style={styles.igPostEntryTitle}>New post</Text>
+              <Pressable onPress={startPostFromEntry} disabled={!entrySelectedIds.length}>
+                <Text style={[styles.igPostEntryNext, !entrySelectedIds.length ? styles.igPostEntryNextDisabled : null]}>Next</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.igPostEntryPreview}>
+              {selectedEntryAsset ? (
+                <Image
+                  source={{ uri: selectedEntryAsset.uri }}
+                  style={styles.igPostEntryPreviewImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.igPostEntryPreviewFallback}>
+                  <Ionicons name="images-outline" size={34} color="#fff" />
+                </View>
+              )}
+              <View style={styles.igPostGridOverlay} pointerEvents="none">
+                <View style={styles.igPostGridLineH} />
+                <View style={[styles.igPostGridLineH, { top: "66.666%" }]} />
+                <View style={styles.igPostGridLineV} />
+                <View style={[styles.igPostGridLineV, { left: "66.666%" }]} />
+              </View>
+            </View>
+
+            <View style={styles.igPostEntryRecentsRow}>
+              <Text style={styles.igPostEntryRecentsText}>Recents</Text>
+              <Pressable
+                style={[styles.igPostEntrySelectBtn, entryMultiSelect ? styles.igPostEntrySelectBtnOn : null]}
+                onPress={() => setEntryMultiSelect((v) => !v)}
+              >
+                <Ionicons name="copy-outline" size={14} color="#fff" />
+                <Text style={styles.igPostEntrySelectText}>Select</Text>
+              </Pressable>
+            </View>
+
+            <FlatList
+              data={recentGridAssets}
+              keyExtractor={(item) => item.id}
+              numColumns={4}
+              contentContainerStyle={styles.igPostEntryGrid}
+              renderItem={({ item, index }) => (
+                <Pressable
+                  style={styles.igPostEntryCell}
+                  onPress={() => {
+                    if (index === 0) {
+                      openEntryCamera();
+                      return;
+                    }
+                    onEntryPressAsset(item);
+                  }}
+                >
+                  <Image source={{ uri: item.uri }} style={styles.igPostEntryCellImage} resizeMode="cover" />
+                  {index === 0 ? (
+                    <View style={styles.igPostEntryCameraBadge}>
+                      <Ionicons name="camera" size={16} color="#fff" />
+                    </View>
+                  ) : null}
+                  {entrySelectedIds.includes(item.id) ? (
+                    <View style={styles.igPostEntrySelectedBadge}>
+                      <Text style={styles.igPostEntrySelectedText}>{entrySelectedIds.indexOf(item.id) + 1}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              )}
+            />
+
+            <View style={styles.igPostEntryModes}>
+              {createModes.map((m) => (
+                <Pressable key={m.key} onPress={() => setEntryType(m.key)} style={styles.igPostEntryModeItem}>
+                  <Text style={[styles.igPostEntryModeText, entryType === m.key ? styles.igPostEntryModeTextOn : null]}>
+                    {m.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : (
+        <View style={[styles.igCameraEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View style={styles.igCamTopRow}>
+            <Pressable style={styles.igCamIconSq} onPress={handleClose} hitSlop={10}>
+              <Ionicons name="close" size={22} color="#fff" />
             </Pressable>
-            <View style={styles.igTopRightControls}>
-              <Ionicons name="flash-off-outline" size={24} color="#fff" />
-              <Ionicons name="settings-outline" size={24} color="#fff" />
+            <View style={styles.igCamTopCenter}>
+              <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
+                <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#b7ff37" />
+              </Pressable>
+              <Pressable
+                style={styles.igCamRoundControl}
+                onPress={() => setEntryZoomLabel((z) => (z === "1x" ? "2x" : "1x"))}
+              >
+                <Text style={styles.igCamZoomText}>{entryZoomLabel}</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRoundControl} onPress={() => setEntryTimerOn((v) => !v)}>
+                <Ionicons name="timer-outline" size={18} color={entryTimerOn ? "#b7ff37" : "#e8e8e8"} />
+              </Pressable>
+            </View>
+            <Pressable
+              style={styles.igCamIconSq}
+              onPress={() =>
+                Alert.alert("Settings", "Live and advanced camera options are available from the mode bar.", [
+                  { text: "Go Live", onPress: () => setEntryType("live") },
+                  { text: "OK", style: "cancel" }
+                ])
+              }
+            >
+              <Ionicons name="settings-sharp" size={19} color="#b7ff37" />
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.igAddAudioPill} onPress={() => Alert.alert("Audio", "Add music or audio after you capture — coming soon.")}>
+            <Ionicons name="musical-notes" size={16} color="#b7ff37" />
+            <Text style={styles.igAddAudioText}>Add Audio</Text>
+          </Pressable>
+
+          <View style={styles.igCamBody}>
+            <View style={styles.igCamLeftRail} pointerEvents="box-none">
+              <Pressable style={styles.igCamRailRow} onPress={() => Alert.alert("Audio", "Browse audio tracks — coming soon.")}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="musical-note" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Audio</Text>
+              </Pressable>
+              <Pressable style={styles.igCamRailRow} onPress={() => setShowCreativeFilterPanel(true)}>
+                <View style={styles.igCamRailIcon}>
+                  <Ionicons name="sparkles" size={16} color="#b7ff37" />
+                </View>
+                <Text style={styles.igCamRailLabel}>Effects</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.igCamViewfinder}>
+              <View style={styles.igCrosshair} pointerEvents="none">
+                <View style={styles.igCrosshairLineH} />
+                <View style={styles.igCrosshairLineV} />
+                <View style={styles.igCrosshairBurst}>
+                  <Ionicons name="sparkles" size={12} color="#38bdf8" />
+                </View>
+              </View>
             </View>
           </View>
 
-          {renderCreativeToolbar()}
+          {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
 
-          <View style={styles.igBottomControls}>
-            <Pressable style={styles.igThumbPlaceholder} onPress={openEntryGallery}>
-              <Ionicons name="image-outline" size={20} color="#fff" />
+          <View style={styles.igCamCaptureRow}>
+            <Pressable style={styles.igCamGalleryThumb} onPress={openEntryGallery}>
+              {recentGridAssets[0] ? (
+                <Image source={{ uri: recentGridAssets[0].uri }} style={styles.igCamGalleryThumbImg} resizeMode="cover" />
+              ) : (
+                <Ionicons name="images-outline" size={22} color="#b7ff37" />
+              )}
             </Pressable>
-            <Pressable style={styles.igCaptureBtn} onPress={openEntryCamera}>
-              <View style={styles.igCaptureInner} />
-            </Pressable>
-            <Pressable>
-              <Ionicons name="camera-reverse-outline" size={28} color="#fff" />
+            <View style={styles.igCamCaptureRowSpacer} />
+            <View style={styles.igCamCaptureCluster}>
+              <Pressable style={styles.igCamCaptureOuter} onPress={openEntryCamera}>
+                <View style={styles.igCamCaptureInner} />
+              </Pressable>
+              <View style={styles.igCamAuxDots}>
+                <View style={styles.igCamAuxDot} />
+                <View style={[styles.igCamAuxDot, styles.igCamAuxDotSm]} />
+              </View>
+            </View>
+            <View style={styles.igCamCaptureRowSpacer} />
+            <Pressable
+              style={styles.igCamFlipBtn}
+              onPress={() =>
+                setEntryCameraFacing((f) =>
+                  f === ImagePicker.CameraType.back ? ImagePicker.CameraType.front : ImagePicker.CameraType.back
+                )
+              }
+              hitSlop={8}
+            >
+              <Ionicons name="camera-reverse-outline" size={28} color="#b7ff37" />
             </Pressable>
           </View>
 
-          <View style={styles.igModeRow}>
-            {createModes.map((m) => (
-              <Pressable key={m.key} onPress={() => setEntryType(m.key)}>
-                <Text style={[styles.igModeText, entryType === m.key ? styles.igModeTextActive : null]}>{m.label}</Text>
-              </Pressable>
-            ))}
+          <View style={styles.igCamBottomModes}>
+            {createModes.map((m) => {
+              const label = m.label;
+              const emphasize = m.key === "story";
+              return (
+                <Pressable
+                  key={m.key}
+                  style={[styles.igCamModeItem, entryType === m.key ? styles.igCamModeItemOn : null]}
+                  onPress={() => setEntryType(m.key)}
+                >
+                  <Text
+                    style={[
+                      styles.igCamModeItemText,
+                      entryType === m.key ? styles.igCamModeItemTextOn : null,
+                      emphasize && entryType === m.key ? styles.igCamModeItemTextHero : null
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
+        )
       ) : (
       createType !== "live" ? (
       <View style={styles.igFullScreen}>
@@ -626,7 +900,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </Text>
               </Pressable>
             </View>
-            {renderCreativeToolbar()}
+            {createType === "story" ? renderCreativeToolbar() : null}
             <View style={styles.igMediaPreviewWrap}>
               {createType === "story" ? (
                 selectedUri ? (
@@ -712,8 +986,63 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
               )}
             </View>
-            {createType === "post" || createType === "reel" ? (
-              <Text style={styles.igPreviewHint}>Tap Next to add a caption, then Share.</Text>
+            {createType === "post" ? (
+              <>
+                <View style={styles.igPostToolsRow}>
+                  {[
+                    { id: "audio", label: "Audio", icon: "musical-note-outline" as const, onPress: () => Alert.alert("Audio", "Audio picker coming soon.") },
+                    {
+                      id: "text",
+                      label: "Text",
+                      icon: "text-outline" as const,
+                      onPress: () => {
+                        setShowCreativeFilterPanel(false);
+                        setShowStickerPanel(false);
+                        setShowCreativeTextPanel(true);
+                      }
+                    },
+                    {
+                      id: "overlay",
+                      label: "Overlay",
+                      icon: "images-outline" as const,
+                      onPress: () => Alert.alert("Overlay", "Overlay editor coming soon.")
+                    },
+                    {
+                      id: "filter",
+                      label: "Filter",
+                      icon: "color-filter-outline" as const,
+                      onPress: () => {
+                        setShowCreativeTextPanel(false);
+                        setShowStickerPanel(false);
+                        setShowCreativeFilterPanel(true);
+                      }
+                    },
+                    {
+                      id: "edit",
+                      label: "Edit",
+                      icon: "options-outline" as const,
+                      onPress: () => Alert.alert("Edit", "Advanced editing tools coming soon.")
+                    }
+                  ].map((tool) => (
+                    <Pressable key={tool.id} style={styles.igPostToolPill} onPress={tool.onPress}>
+                      <Ionicons name={tool.icon} size={16} color="#f5f7fa" />
+                      <Text style={styles.igPostToolText}>{tool.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={styles.igPostNextRow}>
+                  <Pressable
+                    onPress={() => {
+                      void proceedToCompose();
+                    }}
+                    disabled={!canProceedFromPreview || isSubmitting}
+                    style={[styles.igPostNextBtn, !canProceedFromPreview ? styles.igPostNextBtnDisabled : null]}
+                  >
+                    <Text style={styles.igPostNextText}>Next</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#fff" />
+                  </Pressable>
+                </View>
+              </>
             ) : null}
             {errorText ? <Text style={styles.igErrorText}>{errorText}</Text> : null}
           </>
@@ -950,7 +1279,336 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 }
 
 const styles = StyleSheet.create({
-  igFullScreen: { flex: 1, backgroundColor: "#111", justifyContent: "space-between", paddingTop: 48, paddingBottom: 24, paddingHorizontal: 16 },
+  igPostEntryRoot: {
+    flex: 1,
+    backgroundColor: "#03070d"
+  },
+  igPostEntryTop: {
+    height: 48,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  igPostEntryTopBtn: { width: 32, alignItems: "flex-start", justifyContent: "center" },
+  igPostEntryTitle: { color: "#fff", fontWeight: "800", fontSize: 32 },
+  igPostEntryNext: { color: "#6f81ff", fontWeight: "800", fontSize: 28 },
+  igPostEntryNextDisabled: { opacity: 0.45 },
+  igPostEntryPreview: {
+    width: "100%",
+    aspectRatio: 1,
+    backgroundColor: "#0b111a",
+    position: "relative"
+  },
+  igPostEntryPreviewImage: { width: "100%", height: "100%" },
+  igPostEntryPreviewFallback: { flex: 1, alignItems: "center", justifyContent: "center" },
+  igPostGridOverlay: { ...StyleSheet.absoluteFillObject },
+  igPostGridLineH: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "33.333%",
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.25)"
+  },
+  igPostGridLineV: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: "33.333%",
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.25)"
+  },
+  igPostEntryRecentsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  igPostEntryRecentsText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  igPostEntrySelectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#232a36"
+  },
+  igPostEntrySelectBtnOn: { backgroundColor: "#3a4660" },
+  igPostEntrySelectText: { color: "#fff", fontWeight: "600", fontSize: 13 },
+  igPostEntryGrid: { paddingBottom: 8 },
+  igPostEntryCell: {
+    width: "25%",
+    aspectRatio: 1,
+    borderWidth: 0.5,
+    borderColor: "#0d121b",
+    position: "relative"
+  },
+  igPostEntryCellImage: { width: "100%", height: "100%" },
+  igPostEntryCameraBadge: {
+    position: "absolute",
+    left: 8,
+    bottom: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)"
+  },
+  igPostEntrySelectedBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#4f62ff",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igPostEntrySelectedText: { color: "#fff", fontSize: 12, fontWeight: "800" },
+  igPostEntryModes: {
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#121925"
+  },
+  igPostEntryModeItem: { paddingHorizontal: 2, paddingVertical: 6 },
+  igPostEntryModeText: { color: "rgba(255,255,255,0.55)", fontWeight: "700", fontSize: 18, letterSpacing: 0.8 },
+  igPostEntryModeTextOn: { color: "#fff" },
+  igCameraEntryRoot: {
+    flex: 1,
+    backgroundColor: "#8e8e93",
+    paddingHorizontal: 8
+  },
+  igCamTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 2,
+    marginBottom: 10
+  },
+  igCamIconSq: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamTopCenter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  igCamRoundControl: {
+    minWidth: 40,
+    height: 40,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamZoomText: {
+    color: "#b7ff37",
+    fontWeight: "800",
+    fontSize: 13
+  },
+  igAddAudioPill: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    marginBottom: 8
+  },
+  igAddAudioText: {
+    color: "#b7ff37",
+    fontWeight: "700",
+    fontSize: 14
+  },
+  igCamBody: {
+    flex: 1,
+    flexDirection: "row",
+    marginTop: 4,
+    minHeight: 280
+  },
+  igCamLeftRail: {
+    width: 112,
+    justifyContent: "center",
+    gap: 14,
+    paddingRight: 4,
+    zIndex: 2
+  },
+  igCamRailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  igCamRailIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamRailLabel: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+    flex: 1
+  },
+  igCamViewfinder: {
+    flex: 1,
+    marginLeft: -6,
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: "#9a9a9e"
+  },
+  igCrosshair: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCrosshairLineH: {
+    position: "absolute",
+    width: "72%",
+    height: 2,
+    backgroundColor: "rgba(56,189,248,0.9)",
+    borderRadius: 1
+  },
+  igCrosshairLineV: {
+    position: "absolute",
+    width: 2,
+    height: "58%",
+    backgroundColor: "rgba(56,189,248,0.9)",
+    borderRadius: 1
+  },
+  igCrosshairBurst: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamErrorBanner: {
+    color: "#7f1d1d",
+    backgroundColor: "rgba(255,255,255,0.92)",
+    textAlign: "center",
+    fontWeight: "700",
+    paddingVertical: 6,
+    marginHorizontal: 12,
+    marginTop: 6,
+    borderRadius: 8,
+    overflow: "hidden"
+  },
+  igCamCaptureRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+    marginBottom: 10,
+    paddingHorizontal: 4
+  },
+  igCamGalleryThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "#b7ff37",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  igCamGalleryThumbImg: { width: "100%", height: "100%" },
+  igCamCaptureRowSpacer: { flex: 1 },
+  igCamCaptureCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  igCamCaptureOuter: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 5,
+    borderColor: "#b7ff37",
+    backgroundColor: "transparent",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamCaptureInner: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#3a3a3c"
+  },
+  igCamAuxDots: {
+    justifyContent: "center",
+    gap: 10
+  },
+  igCamAuxDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#3a3a3c"
+  },
+  igCamAuxDotSm: {
+    width: 11,
+    height: 11,
+    borderRadius: 6
+  },
+  igCamFlipBtn: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamBottomModes: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    paddingBottom: 4
+  },
+  igCamModeItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8
+  },
+  igCamModeItemOn: {
+    backgroundColor: "rgba(0,0,0,0.35)"
+  },
+  igCamModeItemText: {
+    color: "rgba(255,255,255,0.72)",
+    fontWeight: "800",
+    fontSize: 11,
+    letterSpacing: 0.6
+  },
+  igCamModeItemTextOn: {
+    color: "#b7ff37"
+  },
+  igCamModeItemTextHero: {
+    fontSize: 13,
+    letterSpacing: 0.8
+  },
+  igFullScreen: { flex: 1, backgroundColor: "#05080d", justifyContent: "space-between", paddingTop: 48, paddingBottom: 24, paddingHorizontal: 16 },
   igTopControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   igTopRightControls: { flexDirection: "row", alignItems: "center", gap: 16 },
   igLeftTools: { position: "absolute", left: 16, top: 140, gap: 24, alignItems: "center" },
@@ -1085,8 +1743,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingBottom: 12
   },
-  igPreviewTitle: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  igPreviewAction: { color: "#4da6ff", fontWeight: "700", fontSize: 16 },
+  igPreviewTitle: { color: "#fff", fontWeight: "800", fontSize: 33 },
+  igPreviewAction: { color: "#6f81ff", fontWeight: "800", fontSize: 22 },
   igPreviewActionDisabled: { color: "rgba(77,166,255,0.5)" },
   igMediaPreviewWrap: { flex: 1, borderRadius: 14, overflow: "hidden", backgroundColor: "#000", alignItems: "center", justifyContent: "center" },
   igPreviewCarousel: { flex: 1, alignSelf: "center" },
@@ -1095,13 +1753,41 @@ const styles = StyleSheet.create({
   igEmptyPreview: { alignItems: "center", gap: 8 },
   igEmptyPreviewText: { color: "rgba(255,255,255,0.7)" },
   igErrorText: { color: "#fecaca", textAlign: "center", marginTop: 10, fontWeight: "600" },
-  igPreviewHint: {
-    color: "rgba(255,255,255,0.55)",
-    textAlign: "center",
-    fontSize: 13,
-    marginTop: 8,
-    paddingHorizontal: 12
+  igPostToolsRow: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8
   },
+  igPostToolPill: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: "#1b2430",
+    borderWidth: 1,
+    borderColor: "#2b3748",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10
+  },
+  igPostToolText: { marginTop: 4, color: "#f5f7fa", fontSize: 11, fontWeight: "600" },
+  igPostNextRow: {
+    marginTop: 16,
+    alignItems: "flex-end"
+  },
+  igPostNextBtn: {
+    minWidth: 108,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#4f62ff",
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8
+  },
+  igPostNextBtnDisabled: { opacity: 0.5 },
+  igPostNextText: { color: "#fff", fontWeight: "800", fontSize: 16 },
   igComposeTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 8, backgroundColor: "#fff" },
   igComposeTitle: { color: "#1b2422", fontWeight: "700", fontSize: 16 },
   igComposeShare: { color: "#0a9f46", fontWeight: "700", fontSize: 16 },

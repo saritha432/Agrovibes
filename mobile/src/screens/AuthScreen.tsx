@@ -32,7 +32,7 @@ export function AuthScreen() {
           ? await authLogin({ email, password })
           : await authRegister({ email, password, fullName, role });
       await signIn({ token: payload.token, user: payload.user as any });
-      navigation.goBack();
+      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
     } catch (e: any) {
       setError(e?.message || "Failed");
     } finally {
