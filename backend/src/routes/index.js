@@ -650,8 +650,22 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
   try {
     const provider = otpProvider();
     const phone = normalizeIndiaPhone(req.body?.phone);
+    const staticCode = staticOtpCode();
     if (!phone) {
       res.status(400).json({ message: "Enter a valid phone number" });
+      return;
+    }
+
+    if (staticCode) {
+      res.json({
+        success: true,
+        phone,
+        provider: "static",
+        channel: "sms",
+        requestId: null,
+        providerStatus: "static-otp-enabled",
+        providerMessage: "Static OTP mode enabled. Use STATIC_OTP_CODE to verify."
+      });
       return;
     }
 
