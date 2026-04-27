@@ -7,11 +7,55 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const SLIDES = [
-  { title: "CROPVIBE", subtitle: "Your Field, Your Future", inverted: false },
-  { title: "Own Onboarding\nProcess And Keep\nUsers", subtitle: "", inverted: false },
-  { title: "Own Onboarding\nProcess And Keep\nUsers", subtitle: "", inverted: true },
-  { title: "Own Onboarding\nProcess And Keep\nUsers", subtitle: "", inverted: false },
-  { title: "Own Onboarding\nProcess And Keep\nUsers", subtitle: "", inverted: true }
+  {
+    title: "CROPVIBE",
+    subtitle: "Your Field, Your Future",
+    description: "",
+    mode: "brand",
+    inverted: false
+  },
+  {
+    title: "Share Your\nFarming Journey",
+    subtitle: "Post daily updates, discuss crop health, and connect with farmers across the community.",
+    description: "Discover",
+    mode: "feature",
+    inverted: false
+  },
+  {
+    title: "Buy & Sell With Ease",
+    subtitle: "Sell your farm produce and reach buyers directly for better prices and simple deals.",
+    description: "Marketplace",
+    mode: "feature",
+    inverted: true
+  },
+  {
+    title: "Grow Together",
+    subtitle: "Collaborate with nearby farmers, ask expert questions, and share practical advice.",
+    description: "Community",
+    mode: "feature",
+    inverted: false
+  },
+  {
+    title: "Learn Modern Farming",
+    subtitle: "Explore expert tips, smart techniques, and short learning videos to improve productivity.",
+    description: "Education",
+    mode: "feature",
+    inverted: true
+  },
+  {
+    title: "Reliable Farm Delivery",
+    subtitle: "Track your produce shipments from source to market through trusted transport options.",
+    description: "Logistics",
+    mode: "feature",
+    inverted: false
+  },
+  {
+    title: "Reliable Farm Delivery",
+    subtitle: "Now Your Produce Reaches Market Securely And Quickly Without Hassle.",
+    description: "Logistics",
+    mode: "cta",
+    inverted: true
+  }
 ] as const;
 
 export const INITIAL_SETUP_SEEN_KEY = "agrovibes.initial-setup.seen.v1";
@@ -21,9 +65,9 @@ export function InitialSetupScreen() {
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = React.useState(0);
 
-  const finish = async () => {
+  const finish = async (route: "AuthChoice" | "AuthEmail" = "AuthChoice") => {
     await AsyncStorage.setItem(INITIAL_SETUP_SEEN_KEY, "1");
-    navigation.reset({ index: 0, routes: [{ name: "AuthEmail" }] });
+    navigation.reset({ index: 0, routes: [{ name: route }] });
   };
 
   return (
@@ -47,23 +91,44 @@ export function InitialSetupScreen() {
               <View style={styles.topBar} />
             </View>
             <View style={styles.content}>
-              {item.title === "CROPVIBE" ? (
+              {item.mode === "brand" ? (
                 <View style={styles.brandWrap}>
                   <Text style={styles.logoWord}>CROPVIBE</Text>
                   <Text style={styles.logoSub}>{item.subtitle}</Text>
                 </View>
               ) : (
                 <View style={styles.copyWrap}>
+                  <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>{item.description}</Text>
                   <Text style={[styles.copyText, item.inverted ? styles.copyTextInverted : null]}>{item.title}</Text>
+                  <Text style={[styles.copySubText, item.inverted ? styles.copySubTextInverted : null]}>{item.subtitle}</Text>
                 </View>
               )}
             </View>
-            {itemIndex === SLIDES.length - 1 ? (
-              <Pressable style={styles.getStartedBtn} onPress={finish}>
-                <Text style={styles.getStartedText}>Get Started</Text>
-              </Pressable>
-            ) : <View style={{ height: 44 }} />}
-            <View style={styles.bottomProgress} />
+            {item.mode === "cta" ? (
+              <View style={styles.ctaWrap}>
+                <Pressable style={styles.getStartedBtn} onPress={() => finish("AuthChoice")}>
+                  <Text style={styles.getStartedText}>Get Started</Text>
+                </Pressable>
+                <Pressable style={styles.signInBtn} onPress={() => finish("AuthEmail")}>
+                  <Text style={styles.signInText}>Sign in</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={{ height: 78 }} />
+            )}
+            <View style={styles.paginationRow}>
+              {SLIDES.map((_, dotIndex) => (
+                <View
+                  key={`dot-${dotIndex}`}
+                  style={[
+                    styles.dot,
+                    dotIndex === itemIndex ? styles.dotActive : null,
+                    item.inverted ? styles.dotInverted : null,
+                    item.inverted && dotIndex === itemIndex ? styles.dotActiveInverted : null
+                  ]}
+                />
+              ))}
+            </View>
           </View>
         )}
       />
@@ -74,19 +139,46 @@ export function InitialSetupScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#11161b" },
   list: { flex: 1 },
-  page: { backgroundColor: "#1d2126", paddingHorizontal: 22, paddingTop: 8, paddingBottom: 12, justifyContent: "space-between" },
+  page: { backgroundColor: "#1d2126", paddingHorizontal: 22, paddingTop: 8, paddingBottom: 14, justifyContent: "space-between" },
   pageInverted: { backgroundColor: "#c7ff2f" },
   topBarWrap: { height: 24, justifyContent: "center", alignItems: "center" },
-  topBar: { width: 86, height: 4, borderRadius: 2, backgroundColor: "#b9f530" },
+  topBar: { width: 86, height: 4, borderRadius: 2, backgroundColor: "#b9f530", opacity: 0.85 },
   content: { flex: 1 },
   brandWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  logoWord: { color: "#b9f530", fontWeight: "900", fontSize: 34, letterSpacing: 1.2, textAlign: "center" },
-  logoSub: { marginTop: 4, color: "#c8d0d6", fontWeight: "600", textAlign: "center", fontSize: 10 },
-  copyWrap: { paddingTop: 34 },
-  copyText: { color: "#b9f530", fontWeight: "900", fontSize: 29, lineHeight: 35 },
+  logoWord: { color: "#b9f530", fontWeight: "900", fontSize: 34, letterSpacing: 1.2, textAlign: "center", marginBottom: 4 },
+  logoSub: { color: "#c8d0d6", fontWeight: "600", textAlign: "center", fontSize: 10 },
+  copyWrap: { paddingTop: 20 },
+  slideTag: { color: "#8bc76f", fontSize: 12, fontWeight: "700", marginBottom: 8 },
+  slideTagInverted: { color: "#476112" },
+  copyText: { color: "#b9f530", fontWeight: "900", fontSize: 31, lineHeight: 36, letterSpacing: -0.2 },
   copyTextInverted: { color: "#1b1f23" },
-  getStartedBtn: { alignSelf: "center", width: "92%", height: 36, borderRadius: 6, backgroundColor: "#1b1f23", alignItems: "center", justifyContent: "center", marginBottom: 6 },
-  getStartedText: { color: "#b9f530", fontWeight: "800", fontSize: 14 },
-  bottomProgress: { alignSelf: "center", width: 56, height: 3, borderRadius: 2, backgroundColor: "#b9f530" }
+  copySubText: { marginTop: 10, color: "#bdc7c4", fontWeight: "600", lineHeight: 20, fontSize: 13 },
+  copySubTextInverted: { color: "#2f3d16" },
+  ctaWrap: { width: "100%", gap: 8, marginBottom: 8 },
+  getStartedBtn: {
+    width: "100%",
+    height: 40,
+    borderRadius: 7,
+    backgroundColor: "#1b1f23",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  getStartedText: { color: "#b9f530", fontWeight: "900", fontSize: 14 },
+  signInBtn: {
+    width: "100%",
+    height: 36,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#4f6414",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(27,31,35,0.08)"
+  },
+  signInText: { color: "#1b1f23", fontWeight: "800", fontSize: 13 },
+  paginationRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 5 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#445449" },
+  dotInverted: { backgroundColor: "#8aa946" },
+  dotActive: { width: 16, backgroundColor: "#b9f530" },
+  dotActiveInverted: { backgroundColor: "#1b1f23" }
 });
 

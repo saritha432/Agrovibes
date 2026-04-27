@@ -839,6 +839,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
 
     const syntheticEmail = `${phone.replace(/\D/g, "")}@phone.agrovibes`;
     let user = null;
+    let isNewUser = false;
     try {
       await ensureLearnUsersTable();
       const lookup = await query(
@@ -853,6 +854,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
 
       user = lookup.rows[0];
       if (!user) {
+        isNewUser = true;
         const tempPassword = crypto.randomBytes(24).toString("hex");
         const passwordHash = await bcrypt.hash(tempPassword, 10);
         const created = await query(
@@ -868,6 +870,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
     } catch (_e) {
       user = phoneUserMemory.get(phone);
       if (!user) {
+        isNewUser = true;
         user = {
           id: stableNumericId(`phone:${phone}`),
           email: syntheticEmail,
@@ -886,7 +889,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
       fullName: user.fullName,
       phone: user.phone
     });
-    res.json({ token, user });
+    res.json({ token, user, isNewUser });
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("verify-otp failed", error);

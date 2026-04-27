@@ -17,6 +17,7 @@ export const API_BASE_URL = resolveApiBaseUrl();
 export interface AuthResponse {
   token: string;
   user: { id: number; email: string; fullName: string; role: "student" | "instructor" | "admin"; phone?: string };
+  isNewUser?: boolean;
 }
 
 async function parseJsonOrThrow(response: Response) {
