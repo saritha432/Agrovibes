@@ -38,7 +38,7 @@ export function OtpVerifyScreen() {
     try {
       const auth = await verifyPhoneOtp({ phone, code: digits });
       await signIn({ token: auth.token, user: auth.user });
-      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
+      navigation.reset({ index: 0, routes: [{ name: "EnableLocation" }] });
     } catch (e: any) {
       setError(e?.message || "Invalid OTP. Please try again.");
     } finally {
