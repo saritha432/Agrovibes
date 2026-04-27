@@ -3,24 +3,16 @@ import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { onboardingTheme } from "../../onboarding/OnboardingLayout";
 import { sendPhoneOtp } from "../../services/api";
 
-const { GREEN, BORDER } = onboardingTheme;
-
-function stableUserId(seed: string) {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return (hash % 900000) + 100000;
-}
+const GREEN = "#b9f530";
+const BG = "#1d2126";
+const CARD = "#252a30";
+const BORDER = "#3a424c";
 
 export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { signIn } = useAuth();
   const [phone, setPhone] = React.useState("");
   const [loadingOtp, setLoadingOtp] = React.useState(false);
   const [otpError, setOtpError] = React.useState("");
@@ -42,124 +34,96 @@ export function AuthChoiceScreen() {
     }
   };
 
-  const stubSocial = async (provider: string) => {
-    const email = `user.${provider.toLowerCase()}@agrovibes.app`;
-    await signIn({
-      token: `social-${provider.toLowerCase()}`,
-      user: {
-        id: stableUserId(email),
-        email,
-        fullName: `${provider} user`,
-        role: "student"
-      }
-    });
-    navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
-  };
-
   return (
     <View style={styles.screen}>
-      <Text style={styles.logo}>Cropvibes</Text>
-      <Text style={styles.tag}>Grow, learn, and trade together</Text>
+      <View style={styles.header}>
+        <Text style={styles.label}>Mobile Number</Text>
+        <Text style={styles.subtag}>Enter your number to continue to OTP verification</Text>
+      </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionLabel}>Mobile</Text>
-        <TextInput
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          placeholder="Phone number"
-          placeholderTextColor="#9aa9a5"
-          style={styles.input}
-        />
+        <View style={styles.row}>
+          <View style={styles.countryTag}>
+            <Text style={styles.countryText}>🇮🇳 +91</Text>
+          </View>
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+            placeholder="Enter mobile number"
+            placeholderTextColor="#7f8b93"
+            style={styles.input}
+          />
+        </View>
         <Pressable
           onPress={goOtp}
           style={[styles.primaryBtn, phone.replace(/\D/g, "").length < 10 || loadingOtp ? styles.disabled : null]}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={18} color="#fff" />
-          <Text style={styles.primaryBtnText}>{loadingOtp ? "Sending OTP..." : "Continue with OTP"}</Text>
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#1b1f23" />
+          <Text style={styles.primaryBtnText}>{loadingOtp ? "Sending..." : "Send OTP via SMS"}</Text>
         </Pressable>
         {otpError ? <Text style={styles.errorText}>{otpError}</Text> : null}
-        <Text style={styles.helperText}>You may receive SMS notification from us for verification.</Text>
-
-        <View style={styles.dividerRow}>
-          <View style={styles.divider} />
-          <Text style={styles.dividerText}>or</Text>
-          <View style={styles.divider} />
-        </View>
-
-        <Pressable onPress={() => stubSocial("Google")} style={styles.outlineBtn}>
-          <Ionicons name="logo-google" size={18} color="#22312d" />
-          <Text style={styles.outlineBtnText}>Sign in with Google</Text>
-        </Pressable>
-
-        {Platform.OS === "ios" ? (
-          <Pressable onPress={() => stubSocial("Apple")} style={styles.outlineBtn}>
-            <Ionicons name="logo-apple" size={18} color="#22312d" />
-            <Text style={styles.outlineBtnText}>Sign in with Apple</Text>
-          </Pressable>
-        ) : null}
-
-        <Pressable onPress={() => navigation.navigate("AuthEmail")} style={styles.linkRow}>
-          <Ionicons name="mail-outline" size={16} color={GREEN} />
-          <Text style={styles.linkText}>Use email & password instead</Text>
-        </Pressable>
+        <Text style={styles.helperText}>A verification code will be sent to this number.</Text>
       </View>
+      {Platform.OS === "ios" ? <View style={styles.bottomHomeBar} /> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f2f5f4", paddingHorizontal: 16, paddingTop: 56 },
-  logo: { fontSize: 32, fontWeight: "900", color: "#0f3d2e", textAlign: "center" },
-  tag: { marginTop: 8, fontSize: 15, fontWeight: "600", color: "#5b6966", textAlign: "center" },
+  screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 52 },
+  header: { marginBottom: 22 },
+  label: { color: GREEN, fontWeight: "900", fontSize: 24, letterSpacing: -0.2 },
+  subtag: { marginTop: 8, color: "#909ba4", fontWeight: "600", fontSize: 12 },
   card: {
-    marginTop: 28,
-    backgroundColor: "#fff",
-    borderRadius: 18,
+    backgroundColor: CARD,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: BORDER,
     padding: 16
   },
-  sectionLabel: { fontWeight: "900", color: "#22312d", marginBottom: 8 },
-  input: {
+  row: { flexDirection: "row", gap: 8, alignItems: "center" },
+  countryTag: {
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 12,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    backgroundColor: "#20262d"
+  },
+  countryText: { color: "#d6dde2", fontWeight: "700", fontSize: 12 },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     fontWeight: "700",
-    color: "#111616",
-    marginBottom: 12
+    color: "#eef4f8",
+    backgroundColor: "#20262d"
   },
   primaryBtn: {
+    marginTop: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     backgroundColor: GREEN,
-    borderRadius: 14,
-    paddingVertical: 14
+    borderRadius: 10,
+    paddingVertical: 12
   },
-  disabled: { opacity: 0.45 },
-  primaryBtnText: { color: "#fff", fontWeight: "900", fontSize: 15 },
-  dividerRow: { flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 18 },
-  divider: { flex: 1, height: 1, backgroundColor: BORDER },
-  dividerText: { fontWeight: "700", color: "#8a9693", fontSize: 12 },
-  outlineBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 14,
-    paddingVertical: 13,
-    marginBottom: 10,
-    backgroundColor: "#fafcfb"
-  },
-  outlineBtnText: { fontWeight: "900", color: "#22312d", fontSize: 14 },
-  linkRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 },
-  linkText: { fontWeight: "800", color: GREEN, fontSize: 14 },
-  helperText: { marginTop: 8, color: "#7b8986", fontSize: 12, fontWeight: "600" },
-  errorText: { marginTop: 8, color: "#b42318", fontSize: 12, fontWeight: "700" }
+  disabled: { opacity: 0.55 },
+  primaryBtnText: { color: "#1b1f23", fontWeight: "900", fontSize: 13 },
+  helperText: { marginTop: 10, color: "#8b98a1", fontSize: 11, fontWeight: "600" },
+  errorText: { marginTop: 10, color: "#ff6b6b", fontSize: 12, fontWeight: "700" },
+  bottomHomeBar: {
+    marginTop: "auto",
+    alignSelf: "center",
+    width: 58,
+    height: 3,
+    borderRadius: 3,
+    backgroundColor: GREEN,
+    marginBottom: 12
+  }
 });

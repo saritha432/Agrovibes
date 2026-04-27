@@ -1,12 +1,16 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
-import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { sendPhoneOtp, verifyPhoneOtp } from "../../services/api";
+
+const GREEN = "#b9f530";
+const BG = "#1d2126";
+const CARD = "#252a30";
+const BORDER = "#3a424c";
 
 export function OtpVerifyScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -17,6 +21,7 @@ export function OtpVerifyScreen() {
   const [resending, setResending] = React.useState(false);
   const [error, setError] = React.useState("");
   const [countdown, setCountdown] = React.useState(30);
+  const otpInputRef = React.useRef<TextInput>(null);
 
   React.useEffect(() => {
     if (countdown <= 0) return;
@@ -59,55 +64,104 @@ export function OtpVerifyScreen() {
     }
   };
 
+  const digitsOnly = code.replace(/\D/g, "").slice(0, 6);
+
   return (
-    <OnboardingLayout
-      title="Verify mobile"
-      subtitle={`Enter the 6-digit code sent to ${route.params.phone}.`}
-      primaryLabel={loading ? "Verifying..." : "Verify & continue"}
-      onPrimary={submit}
-      primaryDisabled={code.replace(/\D/g, "").length !== 6 || loading}
-      onBack={() => navigation.goBack()}
-    >
-      <Text style={styles.label}>OTP</Text>
+    <View style={styles.screen}>
+      <Text style={styles.title}>6 Digit Code</Text>
+      <Text style={styles.subtitle}>Please enter the verification code sent to {route.params.phone}</Text>
+
+      <Pressable onPress={() => navigation.goBack()} style={styles.backPill}>
+        <Text style={styles.backText}>Back</Text>
+      </Pressable>
+
+      <Pressable style={styles.codeRow} onPress={() => otpInputRef.current?.focus()}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <View key={`otp-${i}`} style={[styles.codeCell, digitsOnly[i] ? styles.codeCellFilled : null]}>
+            <Text style={styles.codeDigit}>{digitsOnly[i] || ""}</Text>
+          </View>
+        ))}
+      </Pressable>
+
       <TextInput
-        value={code}
-        onChangeText={setCode}
+        ref={otpInputRef}
+        value={digitsOnly}
+        onChangeText={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}
         keyboardType="number-pad"
         maxLength={6}
-        placeholder="••••••"
-        placeholderTextColor="#c5cdca"
-        style={styles.input}
+        autoFocus
+        style={styles.hiddenInput}
       />
+
+      <Pressable onPress={submit} style={[styles.verifyBtn, digitsOnly.length !== 6 || loading ? styles.disabledBtn : null]}>
+        <Text style={styles.verifyText}>{loading ? "Verifying..." : "Verify & Continue"}</Text>
+      </Pressable>
+
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       <View style={styles.resendRow}>
-        <Text style={styles.hintText}>Didn&apos;t receive code?</Text>
+        <Text style={styles.hintText}>Resend the code?</Text>
         <Pressable onPress={resendOtp} disabled={resending || countdown > 0}>
           <Text style={[styles.resendText, resending || countdown > 0 ? styles.disabledText : null]}>
-            {countdown > 0 ? `Resend in ${countdown}s` : resending ? "Sending..." : "Resend OTP"}
+            {countdown > 0 ? `${countdown}s` : resending ? "Sending..." : "Resend"}
           </Text>
         </Pressable>
       </View>
-    </OnboardingLayout>
+      {Platform.OS === "ios" ? <View style={styles.bottomHomeBar} /> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  label: { fontWeight: "900", color: "#22312d", marginBottom: 8 },
-  input: {
+  screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 52 },
+  title: { color: GREEN, fontWeight: "900", fontSize: 24, letterSpacing: -0.2 },
+  subtitle: { marginTop: 8, color: "#909ba4", fontWeight: "600", fontSize: 12 },
+  backPill: {
+    marginTop: 16,
+    alignSelf: "flex-start",
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#dce3e1",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 22,
-    letterSpacing: 6,
-    fontWeight: "800",
-    color: "#111616",
-    textAlign: "center"
+    borderColor: BORDER,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: CARD
   },
-  hintText: { color: "#5b6966", fontWeight: "700" },
+  backText: { color: "#c9d2d8", fontSize: 11, fontWeight: "700" },
+  codeRow: { marginTop: 18, flexDirection: "row", gap: 8 },
+  codeCell: {
+    width: 44,
+    height: 46,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 8,
+    backgroundColor: CARD,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  codeCellFilled: { borderColor: GREEN },
+  codeDigit: { color: "#eef4f8", fontWeight: "900", fontSize: 18 },
+  hiddenInput: { opacity: 0, height: 0, width: 0 },
+  verifyBtn: {
+    marginTop: 20,
+    borderRadius: 10,
+    backgroundColor: GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12
+  },
+  disabledBtn: { opacity: 0.55 },
+  verifyText: { color: "#1b1f23", fontWeight: "900", fontSize: 13 },
+  hintText: { color: "#8b98a1", fontWeight: "700" },
   resendRow: { marginTop: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  resendText: { color: "#0a9f46", fontWeight: "900" },
+  resendText: { color: GREEN, fontWeight: "900" },
   disabledText: { opacity: 0.6 },
-  errorText: { marginTop: 8, color: "#b42318", fontSize: 12, fontWeight: "700" }
+  errorText: { marginTop: 10, color: "#ff6b6b", fontSize: 12, fontWeight: "700" },
+  bottomHomeBar: {
+    marginTop: "auto",
+    alignSelf: "center",
+    width: 58,
+    height: 3,
+    borderRadius: 3,
+    backgroundColor: GREEN,
+    marginBottom: 12
+  }
 });
