@@ -10,6 +10,8 @@ import { OtpVerifyScreen } from "../screens/onboarding/OtpVerifyScreen";
 import { EnableLocationScreen } from "../screens/onboarding/EnableLocationScreen";
 import { AllowNotificationScreen } from "../screens/onboarding/AllowNotificationScreen";
 import { ChooseLanguageScreen } from "../screens/onboarding/ChooseLanguageScreen";
+import { FirstTimeRoleScreen } from "../screens/onboarding/FirstTimeRoleScreen";
+import { FirstTimeCropsScreen } from "../screens/onboarding/FirstTimeCropsScreen";
 import { PersonalInfoScreen } from "../screens/onboarding/PersonalInfoScreen";
 import { RoleSelectionScreen } from "../screens/onboarding/RoleSelectionScreen";
 import { BuyerInterestsScreen } from "../screens/onboarding/BuyerInterestsScreen";
@@ -43,6 +45,8 @@ export type RootStackParamList = {
   EnableLocation: undefined;
   AllowNotification: undefined;
   ChooseLanguage: undefined;
+  FirstTimeRole: undefined;
+  FirstTimeCrops: undefined;
   PersonalInfo: undefined;
   RoleSelection: undefined;
   BuyerInterests: undefined;
@@ -72,6 +76,8 @@ export function RootNavigator() {
       <Stack.Screen name="EnableLocation" component={EnableLocationScreen} />
       <Stack.Screen name="AllowNotification" component={AllowNotificationScreen} />
       <Stack.Screen name="ChooseLanguage" component={ChooseLanguageScreen} />
+      <Stack.Screen name="FirstTimeRole" component={FirstTimeRoleScreen} />
+      <Stack.Screen name="FirstTimeCrops" component={FirstTimeCropsScreen} />
       <Stack.Screen name="PersonalInfo" component={PersonalInfoScreen} />
       <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />
       <Stack.Screen name="BuyerInterests" component={BuyerInterestsScreen} />
