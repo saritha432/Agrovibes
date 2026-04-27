@@ -77,16 +77,21 @@ export function ProfileScreen() {
   }, [isFollowing, user, userPosts.length]);
 
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
+  const handleLogout = async () => {
+    await signOut();
+    navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] });
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
       <AppTopBar />
       {!user ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Welcome to AgroGram</Text>
-          <Text style={styles.cardSub}>Login to enroll, enroll in courses, and track progress.</Text>
-          <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("AuthChoice")}>
+          <Text style={styles.cardSub}>Start from the launch screens to create your account with OTP.</Text>
+          <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
             <Ionicons name="log-in-outline" size={18} color="#fff" />
-            <Text style={styles.primaryBtnText}>Login / Register</Text>
+            <Text style={styles.primaryBtnText}>Get Started</Text>
           </Pressable>
         </View>
       ) : (
@@ -160,7 +165,7 @@ export function ProfileScreen() {
                 <Ionicons name="chevron-forward" size={18} color="#6b7b77" />
               </Pressable>
             ) : (
-              <Pressable style={[styles.actionBtn, styles.actionBtnSecondary]} accessibilityRole="button" onPress={() => signOut()}>
+              <Pressable style={[styles.actionBtn, styles.actionBtnSecondary]} accessibilityRole="button" onPress={handleLogout}>
                 <Ionicons name="log-out-outline" size={18} color="#fff" />
                 <Text style={styles.actionBtnText}>Logout</Text>
               </Pressable>

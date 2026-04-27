@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 
 const GREEN = "#b9f530";
@@ -9,14 +10,15 @@ const BG = "#1d2126";
 
 export function EnableLocationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { t } = useLanguage();
 
   return (
     <View style={styles.screen}>
       <View style={styles.illustration} />
-      <Text style={styles.title}>Enable{"\n"}Location Service</Text>
-      <Text style={styles.subtitle}>Enable your location to discover nearby farms and local opportunities.</Text>
+      <Text style={styles.title}>{t("enableLocationTitle")}</Text>
+      <Text style={styles.subtitle}>{t("enableLocationSubtitle")}</Text>
       <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("AllowNotification")}>
-        <Text style={styles.primaryText}>Enable Location Service</Text>
+        <Text style={styles.primaryText}>{t("enableLocationBtn")}</Text>
       </Pressable>
     </View>
   );

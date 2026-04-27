@@ -3,8 +3,10 @@ import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { sendPhoneOtp } from "../../services/api";
+import { authLogin, authRegister } from "../../services/api";
 
 const GREEN = "#b9f530";
 const BG = "#1d2126";
@@ -13,57 +15,141 @@ const BORDER = "#3a424c";
 
 export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { signIn } = useAuth();
+  const { t } = useLanguage();
+  const [mode, setMode] = React.useState<"register" | "login">("register");
   const [phone, setPhone] = React.useState("");
-  const [loadingOtp, setLoadingOtp] = React.useState(false);
-  const [otpError, setOtpError] = React.useState("");
+  const [loginIdentifier, setLoginIdentifier] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [fullName, setFullName] = React.useState("");
+  const [username, setUsername] = React.useState("");
+  const [loadingSubmit, setLoadingSubmit] = React.useState(false);
+  const [errorText, setErrorText] = React.useState("");
 
-  const goOtp = async () => {
+  const submit = async () => {
     const digits = phone.replace(/\D/g, "");
-    if (digits.length < 10 || loadingOtp) return;
-    setLoadingOtp(true);
-    setOtpError("");
+    const normalizedLoginIdentifier = loginIdentifier.trim();
+    if (password.trim().length < 6 || loadingSubmit) return;
+    if (mode === "register" && (!fullName.trim() || !username.trim())) return;
+    if (mode === "register" && digits.length < 10) return;
+    if (mode === "login" && !normalizedLoginIdentifier) return;
+    setLoadingSubmit(true);
+    setErrorText("");
     try {
-      const normalized = digits.length > 10 ? digits : `91${digits}`;
-      const phoneForApi = `+${normalized}`;
-      await sendPhoneOtp({ phone: phoneForApi });
-      navigation.navigate("OtpVerify", { phone: phoneForApi });
+      const syntheticEmail = `${digits}@phone.agrovibes`;
+      const auth =
+        mode === "register"
+          ? await authRegister({
+              email: syntheticEmail,
+              password: password.trim(),
+              fullName: fullName.trim(),
+              role: "student",
+              username: username.trim(),
+              phone: `+91${digits.slice(-10)}`
+            })
+          : await authLogin({
+              identifier: normalizedLoginIdentifier,
+              password: password.trim()
+            });
+      await signIn(auth);
+      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
     } catch (error: any) {
-      setOtpError(error?.message || "Failed to send OTP. Please try again.");
+      setErrorText(mode === "register" ? error?.message || "Failed to create account. Please try again." : error?.message || "Failed to login. Please try again.");
     } finally {
-      setLoadingOtp(false);
+      setLoadingSubmit(false);
     }
+  };
+
+  const toggleMode = () => {
+    setMode((prev) => (prev === "register" ? "login" : "register"));
+    setErrorText("");
   };
 
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.label}>Mobile Number</Text>
-        <Text style={styles.subtag}>Enter your number to continue to OTP verification</Text>
+        <Text style={styles.label}>{mode === "register" ? t("createAccount") : t("login")}</Text>
+        <Text style={styles.subtag}>
+          {mode === "register" ? t("createSubtitle") : t("loginSubtitle")}
+        </Text>
       </View>
 
       <View style={styles.card}>
+        {mode === "register" ? (
+          <>
+            <TextInput
+              value={fullName}
+              onChangeText={setFullName}
+              placeholder={t("name")}
+              placeholderTextColor="#7f8b93"
+              style={styles.input}
+            />
+            <TextInput
+              value={username}
+              onChangeText={setUsername}
+              placeholder={t("username")}
+              placeholderTextColor="#7f8b93"
+              style={[styles.input, styles.spaced]}
+              autoCapitalize="none"
+            />
+          </>
+        ) : null}
         <View style={styles.row}>
-          <View style={styles.countryTag}>
-            <Text style={styles.countryText}>🇮🇳 +91</Text>
-          </View>
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-            placeholder="Enter mobile number"
-            placeholderTextColor="#7f8b93"
-            style={styles.input}
-          />
+          {mode === "register" ? (
+            <>
+              <View style={styles.countryTag}>
+                <Text style={styles.countryText}>🇮🇳 +91</Text>
+              </View>
+              <TextInput
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                placeholder={t("mobilePlaceholder")}
+                placeholderTextColor="#7f8b93"
+                style={styles.input}
+              />
+            </>
+          ) : (
+            <TextInput
+              value={loginIdentifier}
+              onChangeText={setLoginIdentifier}
+              placeholder="Mobile number or username"
+              placeholderTextColor="#7f8b93"
+              style={styles.input}
+              autoCapitalize="none"
+            />
+          )}
         </View>
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          placeholder={t("passwordPlaceholder")}
+          placeholderTextColor="#7f8b93"
+          style={[styles.input, styles.spaced]}
+          secureTextEntry
+        />
         <Pressable
-          onPress={goOtp}
-          style={[styles.primaryBtn, phone.replace(/\D/g, "").length < 10 || loadingOtp ? styles.disabled : null]}
+          onPress={submit}
+          style={[
+            styles.primaryBtn,
+            password.trim().length < 6 ||
+            (mode === "register" && phone.replace(/\D/g, "").length < 10) ||
+            (mode === "login" && !loginIdentifier.trim()) ||
+            (mode === "register" && (!fullName.trim() || !username.trim())) ||
+            loadingSubmit
+              ? styles.disabled
+              : null
+          ]}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#1b1f23" />
-          <Text style={styles.primaryBtnText}>{loadingOtp ? "Sending..." : "Send OTP via SMS"}</Text>
+          <Text style={styles.primaryBtnText}>{loadingSubmit ? "Submitting..." : mode === "register" ? t("submit") : t("login")}</Text>
         </Pressable>
-        {otpError ? <Text style={styles.errorText}>{otpError}</Text> : null}
-        <Text style={styles.helperText}>A verification code will be sent to this number.</Text>
+        <Pressable onPress={toggleMode} style={styles.secondaryBtn}>
+          <Text style={styles.secondaryText}>{mode === "register" ? t("iHaveAccount") : t("createNewAccount")}</Text>
+        </Pressable>
+        {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+        <Text style={styles.helperText}>
+          {mode === "register" ? "Already registered users can switch to login." : "Use the same mobile number used while registering."}
+        </Text>
       </View>
       {Platform.OS === "ios" ? <View style={styles.bottomHomeBar} /> : null}
     </View>
@@ -82,7 +168,6 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     padding: 16
   },
-  row: { flexDirection: "row", gap: 8, alignItems: "center" },
   countryTag: {
     borderWidth: 1,
     borderColor: BORDER,
@@ -93,7 +178,6 @@ const styles = StyleSheet.create({
   },
   countryText: { color: "#d6dde2", fontWeight: "700", fontSize: 12 },
   input: {
-    flex: 1,
     borderWidth: 1,
     borderColor: BORDER,
     borderRadius: 10,
@@ -103,16 +187,27 @@ const styles = StyleSheet.create({
     color: "#eef4f8",
     backgroundColor: "#20262d"
   },
+  spaced: { marginTop: 10 },
+  row: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 10 },
   primaryBtn: {
     marginTop: 12,
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
     backgroundColor: GREEN,
     borderRadius: 10,
     paddingVertical: 12
   },
+  secondaryBtn: {
+    marginTop: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#666f7a",
+    paddingVertical: 11,
+    backgroundColor: "#232930"
+  },
+  secondaryText: { color: "#d8dde3", fontWeight: "700", fontSize: 13 },
   disabled: { opacity: 0.55 },
   primaryBtnText: { color: "#1b1f23", fontWeight: "900", fontSize: 13 },
   helperText: { marginTop: 10, color: "#8b98a1", fontSize: 11, fontWeight: "600" },

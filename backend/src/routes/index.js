@@ -61,6 +61,7 @@ async function ensureLearnUsersTable() {
     `
   );
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS phone TEXT UNIQUE`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`);
   learnUsersTableReady = true;
 }
 
@@ -576,8 +577,10 @@ router.get("/v1/bootstrap", (_req, res) => {
 router.post("/v1/auth/register", async (req, res) => {
   try {
     await ensureLearnUsersTable();
-    const { email, password, fullName, role } = req.body || {};
+    const { email, password, fullName, role, username, phone } = req.body || {};
     const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedUsername = String(username || "").trim().toLowerCase() || null;
+    const normalizedPhone = normalizeIndiaPhone(phone || (normalizedEmail.endsWith("@phone.agrovibes") ? normalizedEmail.split("@")[0] : null));
     const safeRole = ["student", "instructor", "admin"].includes(String(role)) ? String(role) : "student";
 
     if (!normalizedEmail || !password || String(password).length < 6 || !fullName) {
@@ -588,11 +591,11 @@ router.post("/v1/auth/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(String(password), 10);
     const result = await query(
       `
-      INSERT INTO learn_users (email, password_hash, full_name, role)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, email, full_name AS "fullName", role
+      INSERT INTO learn_users (email, password_hash, full_name, role, username, phone)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, email, full_name AS "fullName", role, phone, username
       `,
-      [normalizedEmail, passwordHash, String(fullName).trim(), safeRole]
+      [normalizedEmail, passwordHash, String(fullName).trim(), safeRole, normalizedUsername, normalizedPhone]
     );
 
     const user = result.rows[0];
@@ -601,7 +604,7 @@ router.post("/v1/auth/register", async (req, res) => {
   } catch (error) {
     const msg = String(error.message || "");
     if (msg.includes("duplicate key") || msg.includes("already exists") || msg.includes("unique")) {
-      res.status(409).json({ message: "Email already registered" });
+      res.status(409).json({ message: "Email, phone, or username already registered" });
       return;
     }
     res.status(500).json({ message: "Failed to register", error: error.message });
@@ -611,21 +614,24 @@ router.post("/v1/auth/register", async (req, res) => {
 router.post("/v1/auth/login", async (req, res) => {
   try {
     await ensureLearnUsersTable();
-    const { email, password } = req.body || {};
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    if (!normalizedEmail || !password) {
-      res.status(400).json({ message: "email and password are required" });
+    const { email, identifier, password } = req.body || {};
+    const normalizedIdentifier = String(identifier || email || "").trim().toLowerCase();
+    const phoneIdentifier = normalizeIndiaPhone(normalizedIdentifier);
+    if (!normalizedIdentifier || !password) {
+      res.status(400).json({ message: "identifier (email/phone/username) and password are required" });
       return;
     }
 
     const result = await query(
       `
-      SELECT id, email, password_hash AS "passwordHash", full_name AS "fullName", role
+      SELECT id, email, password_hash AS "passwordHash", full_name AS "fullName", role, phone, username
       FROM learn_users
       WHERE email = $1
+         OR username = $1
+         OR ($2::TEXT IS NOT NULL AND phone = $2)
       LIMIT 1
       `,
-      [normalizedEmail]
+      [normalizedIdentifier, phoneIdentifier]
     );
     const userRow = result.rows[0];
     if (!userRow) {
@@ -638,7 +644,7 @@ router.post("/v1/auth/login", async (req, res) => {
       return;
     }
 
-    const user = { id: userRow.id, email: userRow.email, fullName: userRow.fullName, role: userRow.role };
+    const user = { id: userRow.id, email: userRow.email, fullName: userRow.fullName, role: userRow.role, phone: userRow.phone };
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.json({ token, user });
   } catch (error) {

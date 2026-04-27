@@ -2,6 +2,7 @@ import React from "react";
 import { FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage, type AppLanguage } from "../localization/LanguageContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -66,11 +67,12 @@ const SLIDES = [
 
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { language, setLanguage, t } = useLanguage();
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = React.useState(0);
 
-  const finish = (route: "AuthChoice" | "AuthEmail" = "AuthChoice") => {
-    navigation.reset({ index: 0, routes: [{ name: route }] });
+  const finish = () => {
+    navigation.reset({ index: 0, routes: [{ name: "AuthChoice" }] });
   };
 
   return (
@@ -131,12 +133,16 @@ export function InitialSetupScreen() {
             </View>
             {item.mode === "cta" ? (
               <View style={styles.ctaWrap}>
-                <Pressable style={styles.getStartedBtn} onPress={() => finish("AuthChoice")}>
-                  <Text style={styles.getStartedText}>Get Started</Text>
+                <Pressable style={styles.getStartedBtn} onPress={finish}>
+                  <Text style={styles.getStartedText}>{t("getStarted")}</Text>
                 </Pressable>
-                <Pressable style={styles.signInBtn} onPress={() => finish("AuthEmail")}>
-                  <Text style={styles.signInText}>Sign in</Text>
-                </Pressable>
+                <View style={styles.langRow}>
+                  {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
+                    <Pressable key={lang} style={[styles.langChip, language === lang ? styles.langChipActive : null]} onPress={() => setLanguage(lang)}>
+                      <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             ) : (
               <View style={{ height: 78 }} />
@@ -193,7 +199,7 @@ const styles = StyleSheet.create({
   copyTextInverted: { color: "#1b1f23" },
   copySubText: { marginTop: 10, color: "#bdc7c4", fontWeight: "600", lineHeight: 20, fontSize: 13 },
   copySubTextInverted: { color: "#2f3d16" },
-  ctaWrap: { width: "100%", gap: 8, marginBottom: 8 },
+  ctaWrap: { width: "100%", marginBottom: 8 },
   getStartedBtn: {
     width: "100%",
     height: 40,
@@ -203,17 +209,11 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   getStartedText: { color: "#b9f530", fontWeight: "900", fontSize: 14 },
-  signInBtn: {
-    width: "100%",
-    height: 36,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: "#4f6414",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(27,31,35,0.08)"
-  },
-  signInText: { color: "#1b1f23", fontWeight: "800", fontSize: 13 },
+  langRow: { marginTop: 10, flexDirection: "row", gap: 8, justifyContent: "center" },
+  langChip: { borderWidth: 1, borderColor: "#4f6414", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  langChipActive: { backgroundColor: "#1b1f23", borderColor: "#1b1f23" },
+  langChipText: { color: "#1b1f23", fontSize: 11, fontWeight: "700" },
+  langChipTextActive: { color: "#b9f530" },
   paginationRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 5 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#445449" },
   dotInverted: { backgroundColor: "#8aa946" },

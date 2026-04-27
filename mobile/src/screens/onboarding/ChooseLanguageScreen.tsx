@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
-import { setLaunchLanguage } from "../../onboarding/launchSetup";
+import { markLaunchSetupComplete, setLaunchLanguage } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 
 const GREEN = "#b9f530";
@@ -19,9 +19,10 @@ export function ChooseLanguageScreen() {
   const finish = async () => {
     if (user?.id != null) {
       await setLaunchLanguage(user.id, selected);
+      await markLaunchSetupComplete(user.id);
     }
     await updateUser({ preferredLanguage: selected });
-    navigation.navigate("FirstTimeRole");
+    navigation.reset({ index: 0, routes: [{ name: "Main" }] });
   };
 
   return (

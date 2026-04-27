@@ -38,7 +38,14 @@ async function parseJsonOrThrow(response: Response) {
   return parsed;
 }
 
-export async function authRegister(payload: { email: string; password: string; fullName: string; role?: string }) {
+export async function authRegister(payload: {
+  email: string;
+  password: string;
+  fullName: string;
+  role?: string;
+  username?: string;
+  phone?: string;
+}) {
   const response = await fetch(`${API_BASE_URL}/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,7 +54,7 @@ export async function authRegister(payload: { email: string; password: string; f
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
-export async function authLogin(payload: { email: string; password: string }) {
+export async function authLogin(payload: { email?: string; identifier?: string; password: string }) {
   const response = await fetch(`${API_BASE_URL}/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
