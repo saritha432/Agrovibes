@@ -15,6 +15,13 @@ const SLIDES = [
     inverted: false
   },
   {
+    title: "CROPVIBE",
+    subtitle: "Your Field, Your Future",
+    description: "",
+    mode: "pattern",
+    inverted: false
+  },
+  {
     title: "Share Your\nFarming Journey",
     subtitle: "Post daily updates, discuss crop health, and connect with farmers across the community.",
     description: "Discover",
@@ -96,6 +103,28 @@ export function InitialSetupScreen() {
                   <Text style={styles.logoWord}>CROPVIBE</Text>
                   <Text style={styles.logoSub}>{item.subtitle}</Text>
                 </View>
+              ) : item.mode === "pattern" ? (
+                <View style={styles.patternScreenWrap}>
+                  <View style={styles.patternCard}>
+                    <View style={styles.patternRow}>
+                      <View style={[styles.tile, styles.tileDark]} />
+                      <View style={[styles.tile, styles.tileLime]} />
+                      <View style={[styles.tile, styles.tileDark]} />
+                    </View>
+                    <View style={styles.patternRow}>
+                      <View style={[styles.tile, styles.tileLime]} />
+                      <View style={[styles.tile, styles.tileDark]} />
+                      <View style={[styles.tile, styles.tileLime]} />
+                    </View>
+                    <View style={styles.patternRow}>
+                      <View style={[styles.tile, styles.tileDark]} />
+                      <View style={[styles.tile, styles.tileLime]} />
+                      <View style={[styles.tile, styles.tileDark]} />
+                    </View>
+                  </View>
+                  <Text style={styles.logoWord}>CROPVIBE</Text>
+                  <Text style={styles.logoSub}>{item.subtitle}</Text>
+                </View>
               ) : (
                 <View style={styles.copyWrap}>
                   <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>{item.description}</Text>
@@ -145,6 +174,20 @@ const styles = StyleSheet.create({
   topBar: { width: 86, height: 4, borderRadius: 2, backgroundColor: "#b9f530", opacity: 0.85 },
   content: { flex: 1 },
   brandWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  patternScreenWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 18 },
+  patternCard: {
+    width: 96,
+    height: 96,
+    borderRadius: 18,
+    padding: 8,
+    backgroundColor: "#21262b",
+    borderWidth: 1,
+    borderColor: "#313841"
+  },
+  patternRow: { flex: 1, flexDirection: "row", gap: 6, marginBottom: 6 },
+  tile: { flex: 1, borderRadius: 9 },
+  tileDark: { backgroundColor: "#171c20" },
+  tileLime: { backgroundColor: "#b9f530" },
   logoWord: { color: "#b9f530", fontWeight: "900", fontSize: 34, letterSpacing: 1.2, textAlign: "center", marginBottom: 4 },
   logoSub: { color: "#c8d0d6", fontWeight: "600", textAlign: "center", fontSize: 10 },
   copyWrap: { paddingTop: 20 },

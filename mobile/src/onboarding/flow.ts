@@ -18,6 +18,5 @@ export type OnboardingDestination =
 
 export function resolveOnboardingDestination(hasToken: boolean, ob: OnboardingState): OnboardingDestination {
   if (!hasToken) return "AuthChoice";
-  if (!ob.personalInfoCompleted) return "PersonalInfo";
   return "Main";
 }
