@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
 import { FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -65,15 +64,12 @@ const SLIDES = [
   }
 ] as const;
 
-export const INITIAL_SETUP_SEEN_KEY = "agrovibes.initial-setup.seen.v1";
-
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = React.useState(0);
 
-  const finish = async (route: "AuthChoice" | "AuthEmail" = "AuthChoice") => {
-    await AsyncStorage.setItem(INITIAL_SETUP_SEEN_KEY, "1");
+  const finish = (route: "AuthChoice" | "AuthEmail" = "AuthChoice") => {
     navigation.reset({ index: 0, routes: [{ name: route }] });
   };
 

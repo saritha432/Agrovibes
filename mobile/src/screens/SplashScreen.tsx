@@ -1,30 +1,15 @@
 import React from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { isLaunchSetupComplete } from "../onboarding/launchSetup";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { INITIAL_SETUP_SEEN_KEY } from "./InitialSetupScreen";
 
 export function SplashScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { token, user, loading: authLoading } = useAuth();
-  const [introSeen, setIntroSeen] = React.useState<boolean | null>(null);
   const [launchSetupDone, setLaunchSetupDone] = React.useState<boolean | null>(null);
-
-  React.useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const seen = await AsyncStorage.getItem(INITIAL_SETUP_SEEN_KEY);
-      if (!mounted) return;
-      setIntroSeen(seen === "1");
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   React.useEffect(() => {
     let mounted = true;
@@ -44,8 +29,8 @@ export function SplashScreen() {
 
   React.useEffect(() => {
     const hasSession = Boolean(token || user);
-    if (introSeen == null || authLoading || (hasSession && launchSetupDone == null)) return;
-    if (!hasSession && !introSeen) {
+    if (authLoading || (hasSession && launchSetupDone == null)) return;
+    if (!hasSession) {
       navigation.dispatch(
         CommonActions.reset({
           index: 0,
@@ -61,7 +46,7 @@ export function SplashScreen() {
         routes: [{ name: dest as keyof RootStackParamList }]
       })
     );
-  }, [authLoading, token, user, navigation, introSeen, launchSetupDone]);
+  }, [authLoading, token, user, navigation, launchSetupDone]);
 
   return (
     <View style={styles.root}>
