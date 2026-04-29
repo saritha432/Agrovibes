@@ -21,6 +21,8 @@ import { ExpertCredentialsScreen } from "../screens/onboarding/ExpertCredentials
 import { ExpertVerificationScreen } from "../screens/onboarding/ExpertVerificationScreen";
 import { SecurityVerificationScreen } from "../screens/onboarding/SecurityVerificationScreen";
 import { InitialSetupScreen } from "../screens/InitialSetupScreen";
+import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
+import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
 import type { LearnStackParamList } from "./LearnStackNavigator";
 
@@ -37,6 +39,8 @@ export type RootStackParamList = {
   InitialSetup: undefined;
   AuthChoice: undefined;
   OtpVerify: { phone: string };
+  ForgotPassword: undefined;
+  ForgotPasswordOtp: { phone: string };
   EnableLocation: undefined;
   AllowNotification: undefined;
   PersonalInfo: undefined;
@@ -64,6 +68,8 @@ export function RootNavigator() {
       <Stack.Screen name="InitialSetup" component={InitialSetupScreen} />
       <Stack.Screen name="AuthChoice" component={AuthChoiceScreen} />
       <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <Stack.Screen name="ForgotPasswordOtp" component={ForgotPasswordOtpResetScreen} />
       <Stack.Screen name="EnableLocation" component={EnableLocationScreen} />
       <Stack.Screen name="AllowNotification" component={AllowNotificationScreen} />
       <Stack.Screen name="PersonalInfo" component={PersonalInfoScreen} />

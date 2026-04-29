@@ -81,6 +81,15 @@ export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
+export async function resetPasswordWithOtp(payload: { phone: string; code: string; newPassword: string }) {
+  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return (await parseJsonOrThrow(response)) as { success: boolean };
+}
+
 export async function fetchWithAuth(url: string, token: string | null, init: RequestInit = {}) {
   const headers: any = { ...(init.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;

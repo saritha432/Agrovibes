@@ -177,6 +177,16 @@ export function AuthChoiceScreen() {
         >
           <Text style={styles.primaryBtnText}>{loadingSubmit ? "Submitting..." : mode === "register" ? t("submit") : t("login")}</Text>
         </Pressable>
+
+        {mode === "login" ? (
+          <Pressable
+            onPress={() => navigation.navigate("ForgotPassword")}
+            style={styles.forgotPasswordLink}
+          >
+            <Text style={styles.forgotPasswordText}>{t("forgotPasswordLink")}</Text>
+          </Pressable>
+        ) : null}
+
         <Pressable onPress={toggleMode} style={styles.secondaryBtn}>
           <Text style={styles.secondaryText}>{mode === "register" ? t("iHaveAccount") : t("createNewAccount")}</Text>
         </Pressable>
@@ -231,6 +241,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 12
   },
+  forgotPasswordLink: { marginTop: 10, alignSelf: "center" },
+  forgotPasswordText: { color: "#8bc76f", fontWeight: "800", fontSize: 12 },
   secondaryBtn: {
     marginTop: 10,
     alignItems: "center",
