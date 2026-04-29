@@ -84,7 +84,7 @@ export function ForgotPasswordOtpResetScreen() {
         <Text style={styles.title}>6 Digit Code</Text>
         <Text style={styles.subtitle}>
           Reset password for {route.params.phone}{"\n"}
-          Use static OTP: 123456
+          Use static OTP: 525252
         </Text>
 
         <TextInput

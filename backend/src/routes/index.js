@@ -146,10 +146,9 @@ function msg91Mode() {
 function staticOtpCode() {
   const fromEnv = String(process.env.STATIC_OTP_CODE || "").trim();
   if (fromEnv) return fromEnv;
-  // Development fallback so OTP-based flows (including forgot password) work
-  // even when the SMS/OTP provider isn't configured.
-  if (allowDevOtpFallback()) return "123456";
-  return "";
+  // Static OTP fallback for development/testing.
+  // If you are using this in production, set STATIC_OTP_CODE explicitly.
+  return "525252";
 }
 
 async function sendTwilioVerifyOtp(phone) {
