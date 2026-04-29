@@ -13,6 +13,27 @@ const BG = "#1d2126";
 const CARD = "#252a30";
 const BORDER = "#3a424c";
 
+/** Match backend + register: last 10 digits for @phone.agrovibes (handles +91 / leading 0). */
+function resolvePhoneEmailLocalPart(digits: string): string {
+  const d = digits.replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : d;
+}
+
+/** Try multiple identifier formats so users can login with just phone number. */
+function buildLoginIdentifiers(raw: string): string[] {
+  const base = raw.trim().toLowerCase();
+  if (!base) return [];
+  const candidates = [base];
+  const digits = base.replace(/\D/g, "");
+  if (digits.length >= 10) {
+    const last10 = digits.slice(-10);
+    candidates.push(last10);
+    candidates.push(`+91${last10}`);
+    candidates.push(`${last10}@phone.agrovibes`);
+  }
+  return [...new Set(candidates)];
+}
+
 export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { signIn } = useAuth();
@@ -36,7 +57,8 @@ export function AuthChoiceScreen() {
     setLoadingSubmit(true);
     setErrorText("");
     try {
-      const syntheticEmail = `${digits}@phone.agrovibes`;
+      const phoneLocal = resolvePhoneEmailLocalPart(digits);
+      const syntheticEmail = `${phoneLocal}@phone.agrovibes`;
       const auth =
         mode === "register"
           ? await authRegister({
@@ -45,12 +67,24 @@ export function AuthChoiceScreen() {
               fullName: fullName.trim(),
               role: "student",
               username: username.trim(),
-              phone: `+91${digits.slice(-10)}`
+              phone: `+91${phoneLocal}`
             })
-          : await authLogin({
-              identifier: normalizedLoginIdentifier,
-              password: password.trim()
-            });
+          : await (async () => {
+              const candidates = buildLoginIdentifiers(normalizedLoginIdentifier);
+              let lastError: any = null;
+              for (const identifierCandidate of candidates) {
+                try {
+                  return await authLogin({
+                    identifier: identifierCandidate,
+                    password: password.trim()
+                  });
+                } catch (error: any) {
+                  lastError = error;
+                  if (error?.status !== 401) throw error;
+                }
+              }
+              throw lastError || new Error("Failed to login. Please try again.");
+            })();
       await signIn(auth);
       navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
     } catch (error: any) {
@@ -113,7 +147,7 @@ export function AuthChoiceScreen() {
             <TextInput
               value={loginIdentifier}
               onChangeText={setLoginIdentifier}
-              placeholder="Mobile number or username"
+              placeholder="Mobile, username, or 9876543210@phone.agrovibes"
               placeholderTextColor="#7f8b93"
               style={styles.input}
               autoCapitalize="none"

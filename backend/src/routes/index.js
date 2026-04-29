@@ -100,6 +100,13 @@ function normalizeIndiaPhone(rawPhone) {
   return null;
 }
 
+/** Same synthetic email shape as mobile register (`{digits}@phone.agrovibes`). */
+function syntheticPhoneEmailFromIdentifier(normalizedIdentifier) {
+  const digits = String(normalizedIdentifier || "").replace(/\D/g, "");
+  if (digits.length < 10) return null;
+  return `${digits.slice(-10)}@phone.agrovibes`.toLowerCase();
+}
+
 function phoneDigitsOnly(phone) {
   return String(phone || "").replace(/\D/g, "");
 }
@@ -578,12 +585,18 @@ router.post("/v1/auth/register", async (req, res) => {
   try {
     await ensureLearnUsersTable();
     const { email, password, fullName, role, username, phone } = req.body || {};
-    const normalizedEmail = String(email || "").trim().toLowerCase();
+    let storeEmail = String(email || "").trim().toLowerCase();
+    if (storeEmail.endsWith("@phone.agrovibes")) {
+      const localDigits = storeEmail.split("@")[0].replace(/\D/g, "");
+      if (localDigits.length >= 10) {
+        storeEmail = `${localDigits.slice(-10)}@phone.agrovibes`;
+      }
+    }
     const normalizedUsername = String(username || "").trim().toLowerCase() || null;
-    const normalizedPhone = normalizeIndiaPhone(phone || (normalizedEmail.endsWith("@phone.agrovibes") ? normalizedEmail.split("@")[0] : null));
+    const normalizedPhone = normalizeIndiaPhone(phone || (storeEmail.endsWith("@phone.agrovibes") ? storeEmail.split("@")[0] : null));
     const safeRole = ["student", "instructor", "admin"].includes(String(role)) ? String(role) : "student";
 
-    if (!normalizedEmail || !password || String(password).length < 6 || !fullName) {
+    if (!storeEmail || !password || String(password).length < 6 || !fullName) {
       res.status(400).json({ message: "email, fullName and password (min 6 chars) are required" });
       return;
     }
@@ -595,7 +608,7 @@ router.post("/v1/auth/register", async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, email, full_name AS "fullName", role, phone, username
       `,
-      [normalizedEmail, passwordHash, String(fullName).trim(), safeRole, normalizedUsername, normalizedPhone]
+      [storeEmail, passwordHash, String(fullName).trim(), safeRole, normalizedUsername, normalizedPhone]
     );
 
     const user = result.rows[0];
@@ -617,28 +630,44 @@ router.post("/v1/auth/login", async (req, res) => {
     const { email, identifier, password } = req.body || {};
     const normalizedIdentifier = String(identifier || email || "").trim().toLowerCase();
     const phoneIdentifier = normalizeIndiaPhone(normalizedIdentifier);
+    const syntheticPhoneEmail = syntheticPhoneEmailFromIdentifier(normalizedIdentifier);
     if (!normalizedIdentifier || !password) {
       res.status(400).json({ message: "identifier (email/phone/username) and password are required" });
       return;
     }
 
+    const idDigits = phoneIdentifier ? phoneDigitsOnly(phoneIdentifier) : "";
+    const phoneDigitsLast10 = idDigits.length >= 10 ? idDigits.slice(-10) : "";
+
+    const syntheticLocal = syntheticPhoneEmail ? syntheticPhoneEmail.split("@")[0] : "";
+
     const result = await query(
       `
       SELECT id, email, password_hash AS "passwordHash", full_name AS "fullName", role, phone, username
       FROM learn_users
-      WHERE email = $1
-         OR username = $1
-         OR ($2::TEXT IS NOT NULL AND phone = $2)
+      WHERE LOWER(TRIM(email)) = $1
+         OR LOWER(TRIM(username)) = $1
+         OR ($2::TEXT IS NOT NULL AND $4::TEXT <> '' AND (
+              phone = $2
+              OR RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $4
+            ))
+         OR ($3::TEXT IS NOT NULL AND LOWER(TRIM(email)) = $3)
+         OR ($5::TEXT <> '' AND LOWER(TRIM(email)) LIKE '%@phone.agrovibes'
+             AND RIGHT(REGEXP_REPLACE(SPLIT_PART(LOWER(TRIM(email)), '@', 1), '[^0-9]', '', 'g'), 10) = $5)
       LIMIT 1
       `,
-      [normalizedIdentifier, phoneIdentifier]
+      [normalizedIdentifier, phoneIdentifier, syntheticPhoneEmail, phoneDigitsLast10, syntheticLocal]
     );
     const userRow = result.rows[0];
     if (!userRow) {
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
-    const ok = await bcrypt.compare(String(password), String(userRow.passwordHash));
+    const hash = String(userRow.passwordHash);
+    let ok = await bcrypt.compare(String(password), hash);
+    if (!ok) {
+      ok = await bcrypt.compare(String(password).trim(), hash);
+    }
     if (!ok) {
       res.status(401).json({ message: "Invalid credentials" });
       return;
