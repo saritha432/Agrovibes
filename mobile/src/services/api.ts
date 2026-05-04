@@ -421,6 +421,32 @@ export async function fetchProfileStats(token: string, userId: number) {
   };
 }
 
+export async function syncLocalFollowEdgesToServer(
+  token: string,
+  payload: {
+    edges: Array<{ peerFullName: string; relation: "i_follow" | "follows_me"; status: "accepted" | "pending" }>;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/sync-local`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as {
+    ok: boolean;
+    imported: number;
+    synced?: Array<{ peerFullName: string; relation: string; status: string }>;
+    followersCount: number;
+    followingCount: number;
+  };
+}
+
+export async function fetchSocialNetwork(token: string, userId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/network/${encodeURIComponent(String(userId))}`, token)) as {
+    followers: Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>;
+    following: Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>;
+  };
+}
+
 export async function fetchSocialNotifications(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications`, token)) as {
     followRequests: SocialNotificationItem[];

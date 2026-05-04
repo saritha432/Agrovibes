@@ -5,11 +5,21 @@ import { AppTopBar } from "../components/AppTopBar";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
-import { fetchHomePosts, fetchProfileStats, HomePost } from "../services/api";
+import {
+  fetchHomePosts,
+  fetchProfileStats,
+  fetchSocialNetwork,
+  HomePost,
+  sendFollowRequest,
+  syncLocalFollowEdgesToServer,
+  unfollowUser
+} from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
+  getLocalFollowEdgesForServerSync,
   getLocalFollowNetworkByIdentity,
   removeLocalFollowByIdentity,
+  removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 
@@ -66,25 +76,63 @@ export function ProfileScreen() {
       return;
     }
     const identity = { name: user.fullName, key: user.email || String(user.id || "") };
-    const [localCounts, localNetwork] = await Promise.all([
-      getLocalFollowCountsByIdentity(identity),
-      getLocalFollowNetworkByIdentity(identity)
-    ]);
+
+    if (token && user?.id) {
+      try {
+        const edges = await getLocalFollowEdgesForServerSync(identity);
+        if (edges.length) {
+          try {
+            const syncRes = await syncLocalFollowEdgesToServer(token, {
+              edges: edges.map((e) => ({ peerFullName: e.peerFullName, relation: e.relation, status: e.status }))
+            });
+            const synced = syncRes.synced || [];
+            const syncedKey = new Set(synced.map((s) => `${String(s.relation)}:${String(s.status)}:${String(s.peerFullName || "").trim().toLowerCase()}`));
+            const toRemove = edges.filter((e) =>
+              syncedKey.has(`${e.relation}:${e.status}:${String(e.peerFullName || "").trim().toLowerCase()}`)
+            );
+            await removeLocalFollowRecordsByIds(toRemove.map((e) => e.localId));
+          } catch {
+            // Old server without sync route, or offline — keep AsyncStorage copy.
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const localCounts = await getLocalFollowCountsByIdentity(identity);
     let apiFollowers = 0;
     let apiFollowing = 0;
+    let followersListData: Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }> = [];
+    let followingListData: Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }> = [];
+
     if (token && user?.id) {
       try {
         const stats = await fetchProfileStats(token, user.id);
         apiFollowers = Number(stats.followersCount || 0);
         apiFollowing = Number(stats.followingCount || 0);
       } catch {
-        // Remote API may omit social routes or be unreachable — local counts still apply.
+        /* keep zeros; local still merges below */
       }
+      try {
+        const network = await fetchSocialNetwork(token, user.id);
+        followersListData = network.followers || [];
+        followingListData = network.following || [];
+      } catch {
+        const localNetwork = await getLocalFollowNetworkByIdentity(identity);
+        followersListData = localNetwork.followers;
+        followingListData = localNetwork.following;
+      }
+    } else {
+      const localNetwork = await getLocalFollowNetworkByIdentity(identity);
+      followersListData = localNetwork.followers;
+      followingListData = localNetwork.following;
     }
+
     setFollowersCount(apiFollowers + Number(localCounts.followersCount || 0));
     setFollowingCount(apiFollowing + Number(localCounts.followingCount || 0));
-    setFollowersList(localNetwork.followers);
-    setFollowingList(localNetwork.following);
+    setFollowersList(followersListData);
+    setFollowingList(followingListData);
   }, [token, user?.email, user?.fullName, user?.id]);
 
   useEffect(() => {
@@ -126,6 +174,16 @@ export function ProfileScreen() {
 
   const followBackFromFollowersList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
+    const targetId = person.key && /^\d+$/.test(String(person.key)) ? Number(person.key) : null;
+    if (token && targetId && user?.id) {
+      try {
+        await sendFollowRequest(token, targetId);
+        await refreshMergedFollowStats();
+        return;
+      } catch {
+        /* fall back to local */
+      }
+    }
     await sendLocalFollowRequestByIdentity(
       { name: user.fullName, key: user.email || String(user.id || "") },
       { name: person.name, key: person.key }
@@ -135,6 +193,16 @@ export function ProfileScreen() {
 
   const unfollowFromFollowingList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
+    const targetId = person.key && /^\d+$/.test(String(person.key)) ? Number(person.key) : null;
+    if (token && targetId && user?.id) {
+      try {
+        await unfollowUser(token, targetId);
+        await refreshMergedFollowStats();
+        return;
+      } catch {
+        /* fall back to local */
+      }
+    }
     await removeLocalFollowByIdentity(
       { name: user.fullName, key: user.email || String(user.id || "") },
       { name: person.name, key: person.key }

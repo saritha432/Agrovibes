@@ -1303,6 +1303,76 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
   }
 });
 
+/** Accepted followers + following + pending outgoing (for profile lists). Viewer must match userId. */
+router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId) || Number(req.user.userId) !== targetUserId) {
+      res.status(403).json({ message: "You can only load your own follow network" });
+      return;
+    }
+
+    const followersRes = await query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.follower_id
+      WHERE f.following_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    );
+    const followingRes = await query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.following_id
+      WHERE f.follower_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    );
+    const pendingOutRes = await query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.following_id
+      WHERE f.follower_id = $1 AND f.status = 'pending'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    );
+
+    const followingAcceptedIds = new Set(followingRes.rows.map((r) => Number(r.userId)));
+    const pendingFollowingIds = new Set(pendingOutRes.rows.map((r) => Number(r.userId)));
+
+    const followers = followersRes.rows.map((row) => {
+      const uid = Number(row.userId);
+      const iFollow = followingAcceptedIds.has(uid);
+      const iPending = pendingFollowingIds.has(uid);
+      const viewerStatus = iFollow ? "accepted" : iPending ? "pending" : "none";
+      return {
+        name: row.fullName,
+        key: String(row.userId),
+        viewerStatus,
+        canFollowBack: viewerStatus === "none"
+      };
+    });
+
+    const following = followingRes.rows.map((row) => ({
+      name: row.fullName,
+      key: String(row.userId),
+      viewerStatus: "accepted",
+      canFollowBack: false
+    }));
+
+    res.json({ followers, following });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load follow network", error: error.message });
+  }
+});
+
 router.get("/v1/social/relationships", authRequired, async (req, res) => {
   try {
     await ensureSocialNotificationsTable();
@@ -1445,6 +1515,63 @@ router.post("/v1/social/follow/unfollow", authRequired, async (req, res) => {
     res.json({ ok: true, actorCounts, targetCounts });
   } catch (error) {
     res.status(500).json({ message: "Failed to unfollow", error: error.message });
+  }
+});
+
+/**
+ * Upsert follow rows from client-side (AsyncStorage) history into social_follows.
+ * Body: { edges: [{ peerFullName, relation: "i_follow" | "follows_me", status: "accepted" | "pending" }] }
+ * peerFullName must match learn_users.full_name (case-insensitive). No notifications are created here.
+ */
+router.post("/v1/social/follow/sync-local", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const me = Number(req.user.userId);
+    const raw = Array.isArray(req.body?.edges) ? req.body.edges : [];
+    const edges = raw.slice(0, 120);
+    let imported = 0;
+    /** @type {{ peerFullName: string; relation: string; status: string }[]} */
+    const synced = [];
+
+    for (const edge of edges) {
+      const peerFullName = String(edge.peerFullName || "").trim();
+      const relation = String(edge.relation || "").trim();
+      const status = edge.status === "accepted" ? "accepted" : edge.status === "pending" ? "pending" : null;
+      if (!peerFullName || !status || !["i_follow", "follows_me"].includes(relation)) continue;
+
+      const peerRes = await query(
+        `SELECT id FROM learn_users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) LIMIT 1`,
+        [peerFullName]
+      );
+      const peerId = peerRes.rows[0]?.id != null ? Number(peerRes.rows[0].id) : null;
+      if (!peerId || peerId === me) continue;
+
+      const followerId = relation === "i_follow" ? me : peerId;
+      const followingId = relation === "i_follow" ? peerId : me;
+
+      await query(
+        `
+        INSERT INTO social_follows (follower_id, following_id, status, updated_at, responded_at)
+        VALUES ($1, $2, $3, NOW(), CASE WHEN $3 = 'pending' THEN NULL ELSE NOW() END)
+        ON CONFLICT (follower_id, following_id)
+        DO UPDATE SET
+          status = EXCLUDED.status,
+          updated_at = NOW(),
+          responded_at = CASE
+            WHEN EXCLUDED.status = 'pending' THEN NULL
+            ELSE COALESCE(social_follows.responded_at, NOW())
+          END
+        `,
+        [followerId, followingId, status]
+      );
+      imported += 1;
+      synced.push({ peerFullName, relation, status });
+    }
+
+    const counts = await socialCountsForUser(me);
+    res.json({ ok: true, imported, synced, followersCount: counts.followersCount, followingCount: counts.followingCount });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to sync local follows", error: error.message });
   }
 });
 
