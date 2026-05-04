@@ -345,27 +345,37 @@ export function ProfileScreen() {
                 <Ionicons name="location-outline" size={14} color={MUTED} />
                 <Text style={styles.locText}>{locationDisplay}</Text>
               </View>
-              <Text style={styles.stars}>★★★★☆ <Text style={styles.ratingNum}>4.8</Text></Text>
+              <View style={styles.ratingRow}>
+                <View style={styles.starsRow}>
+                  {([0, 1, 2, 3] as const).map((i) => (
+                    <Ionicons key={i} name="star" size={17} color="#ca8a04" style={styles.starIcon} />
+                  ))}
+                  <Ionicons name="star-outline" size={17} color={TEXT} style={[styles.starIcon, styles.starOutline]} />
+                </View>
+                <Text style={styles.ratingNum}>4.8</Text>
+              </View>
 
-              <Pressable style={styles.editProfileBtn} onPress={() => Alert.alert("Edit profile", "Profile editing coming soon.")}>
-                <Ionicons name="create-outline" size={18} color="#fff" />
-                <Text style={styles.editProfileBtnText}>Edit Profile</Text>
-              </Pressable>
-
-              <Pressable
-                style={[styles.followWideBtn, isFollowing ? styles.followWideBtnActive : null]}
-                onPress={() => setFollowing((v) => !v)}
-              >
-                <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color={TEXT} />
-                <Text style={styles.followWideBtnText}>{isFollowing ? "Following" : "Follow"}</Text>
-              </Pressable>
-
-              <View style={styles.smallActionsRow}>
-                <Pressable style={styles.circleBtn} onPress={() => Alert.alert("Message", "Messaging coming soon.")}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={18} color={TEXT} />
+              <View style={styles.profileActionsRow}>
+                <Pressable style={styles.editProfileBtnCompact} onPress={() => Alert.alert("Edit profile", "Profile editing coming soon.")}>
+                  <Ionicons name="create-outline" size={18} color="#fff" />
+                  <Text style={styles.editProfileBtnText} numberOfLines={1}>
+                    Edit Profile
+                  </Text>
                 </Pressable>
-                <Pressable style={styles.circleBtn} onPress={() => Alert.alert("Share", "Share coming soon.")}>
-                  <Ionicons name="paper-plane-outline" size={18} color={TEXT} />
+                <Pressable
+                  style={[styles.followCompactBtn, isFollowing ? styles.followWideBtnActive : null]}
+                  onPress={() => setFollowing((v) => !v)}
+                >
+                  <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color={TEXT} />
+                  <Text style={styles.followCompactBtnText} numberOfLines={1}>
+                    {isFollowing ? "Following" : "Follow"}
+                  </Text>
+                </Pressable>
+                <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Message", "Messaging coming soon.")}>
+                  <Ionicons name="chatbubble-outline" size={20} color={TEXT} />
+                </Pressable>
+                <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Share", "Share coming soon.")}>
+                  <Ionicons name="share-outline" size={20} color={TEXT} />
                 </Pressable>
               </View>
 
@@ -622,39 +632,56 @@ const styles = StyleSheet.create({
   bio: { marginTop: 8, color: TEXT, fontWeight: "600", fontSize: 13, lineHeight: 19 },
   locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
   locText: { color: MUTED, fontWeight: "700", fontSize: 12 },
-  stars: { marginTop: 6, color: "#eab308", fontSize: 14, fontWeight: "800" },
-  ratingNum: { color: TEXT, fontWeight: "800" },
-
-  editProfileBtn: {
-    marginTop: 14,
-    backgroundColor: TEAL,
-    borderRadius: 14,
-    paddingVertical: 12,
+  ratingRow: {
+    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 10
+  },
+  starsRow: { flexDirection: "row", alignItems: "center" },
+  starIcon: { marginRight: 2 },
+  starOutline: { opacity: 0.45 },
+  ratingNum: { color: TEXT, fontWeight: "900", fontSize: 15 },
+
+  profileActionsRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8
   },
-  editProfileBtnText: { color: "#fff", fontWeight: "900", fontSize: 15 },
-  followWideBtn: {
-    marginTop: 10,
-    backgroundColor: BEIGE_FOLLOW,
-    borderRadius: 14,
-    paddingVertical: 12,
+  editProfileBtnCompact: {
+    flex: 1.35,
+    minWidth: 0,
+    backgroundColor: TEAL,
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 6
+  },
+  editProfileBtnText: { color: "#fff", fontWeight: "900", fontSize: 14 },
+  followCompactBtn: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: BEIGE_FOLLOW,
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     borderWidth: 1,
     borderColor: "#dcd3c8"
   },
   followWideBtnActive: { backgroundColor: "#dce8e4", borderColor: TEAL },
-  followWideBtnText: { color: TEXT, fontWeight: "900", fontSize: 15 },
-  smallActionsRow: { flexDirection: "row", justifyContent: "center", gap: 12, marginTop: 12 },
-  circleBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  followCompactBtnText: { color: TEXT, fontWeight: "900", fontSize: 14 },
+  iconActionSquare: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
     backgroundColor: BEIGE_FOLLOW,
     alignItems: "center",
     justifyContent: "center",
