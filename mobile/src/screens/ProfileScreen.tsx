@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -19,6 +19,7 @@ import {
   getLocalFollowCountsByIdentity,
   getLocalFollowEdgesForServerSync,
   getLocalFollowNetworkByIdentity,
+  getLocalFollowNotificationsByIdentity,
   removeLocalFollowByIdentity,
   removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
@@ -100,8 +101,6 @@ export function ProfileScreen() {
       setFollowingList([]);
       return;
     }
-    const identity = { name: user.fullName, key: user.email || String(user.id || "") };
-
     if (token && user?.id) {
       try {
         const stats = await fetchProfileStats(token, user.id);
@@ -110,13 +109,11 @@ export function ProfileScreen() {
           getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
         ]);
         const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-        if (!mounted) return;
         setFollowersCount(Number(stats.followersCount || 0) + Number(localCounts.followersCount || 0));
         setFollowingCount(Number(stats.followingCount || 0) + Number(localCounts.followingCount || 0));
         setFollowersList(localNetwork.followers);
         setFollowingList(localNetwork.following);
       } catch {
-        if (!mounted) return;
         const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
         const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
         setFollowersCount(Number(localCounts.followersCount || 0));
@@ -124,11 +121,15 @@ export function ProfileScreen() {
         setFollowersList(localNetwork.followers);
         setFollowingList(localNetwork.following);
       }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [token, user?.id]);
+    } else {
+      const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+      const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+      setFollowersCount(Number(localCounts.followersCount || 0));
+      setFollowingCount(Number(localCounts.followingCount || 0));
+      setFollowersList(localNetwork.followers);
+      setFollowingList(localNetwork.following);
+    }
+  }, [token, user?.id, user?.fullName]);
 
   const userPosts = useMemo(() => {
     if (!user) return [];
