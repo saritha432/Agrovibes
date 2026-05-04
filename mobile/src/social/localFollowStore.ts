@@ -334,3 +334,53 @@ export async function getLocalFollowCounts(currentUserName: string) {
   const followingCount = records.filter((r) => normalizeName(r.actorName) === current && r.status === "accepted").length;
   return { followersCount, followingCount };
 }
+
+export type LocalFollowEdgeForSync = {
+  localId: string;
+  peerFullName: string;
+  relation: "i_follow" | "follows_me";
+  status: "accepted" | "pending";
+};
+
+/** Maps stored name-based follow rows into API upserts (peer matched by full_name on server). */
+export async function getLocalFollowEdgesForServerSync(current: { name: string; key?: string }): Promise<LocalFollowEdgeForSync[]> {
+  const currentName = normalizeName(current.name);
+  const currentKey = String(current.key || "").trim().toLowerCase();
+  const records = await readAll();
+  const out: LocalFollowEdgeForSync[] = [];
+
+  const iAmActor = (r: LocalFollowRecord) =>
+    currentKey && r.actorKey ? String(r.actorKey).toLowerCase() === currentKey : normalizeName(r.actorName) === currentName;
+  const iAmTarget = (r: LocalFollowRecord) =>
+    currentKey && r.targetKey ? String(r.targetKey).toLowerCase() === currentKey : normalizeName(r.targetName) === currentName;
+
+  for (const r of records) {
+    if (r.status !== "accepted" && r.status !== "pending") continue;
+    const a = iAmActor(r);
+    const t = iAmTarget(r);
+    if (a && !t) {
+      out.push({
+        localId: r.id,
+        peerFullName: String(r.targetName || "").trim(),
+        relation: "i_follow",
+        status: r.status
+      });
+    } else if (t && !a) {
+      out.push({
+        localId: r.id,
+        peerFullName: String(r.actorName || "").trim(),
+        relation: "follows_me",
+        status: r.status
+      });
+    }
+  }
+  return out;
+}
+
+export async function removeLocalFollowRecordsByIds(ids: string[]) {
+  const idSet = new Set(ids.map(String).filter(Boolean));
+  if (!idSet.size) return;
+  const records = await readAll();
+  const next = records.filter((r) => !idSet.has(r.id));
+  await writeAll(next);
+}

@@ -17,9 +17,10 @@ import { useAuth } from "../auth/AuthContext";
 import { fetchHomePosts, fetchProfileStats, HomePost } from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
+  getLocalFollowEdgesForServerSync,
   getLocalFollowNetworkByIdentity,
-  getLocalFollowNotificationsByIdentity,
   removeLocalFollowByIdentity,
+  removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 
@@ -91,10 +92,17 @@ export function ProfileScreen() {
     };
   }, [token]);
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!token || !user?.id) return;
+  const refreshMergedFollowStats = useCallback(async () => {
+    if (!user?.fullName) {
+      setFollowersCount(0);
+      setFollowingCount(0);
+      setFollowersList([]);
+      setFollowingList([]);
+      return;
+    }
+    const identity = { name: user.fullName, key: user.email || String(user.id || "") };
+
+    if (token && user?.id) {
       try {
         const stats = await fetchProfileStats(token, user.id);
         const [localCounts] = await Promise.all([
@@ -178,30 +186,40 @@ export function ProfileScreen() {
 
   const followBackFromFollowersList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
+    const targetId = person.key && /^\d+$/.test(String(person.key)) ? Number(person.key) : null;
+    if (token && targetId && user?.id) {
+      try {
+        await sendFollowRequest(token, targetId);
+        await refreshMergedFollowStats();
+        return;
+      } catch {
+        /* fall back to local */
+      }
+    }
     await sendLocalFollowRequestByIdentity(
       { name: user.fullName, key: user.email || String(user.id || "") },
       { name: person.name, key: person.key }
     );
-    const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    setFollowersList(localNetwork.followers);
-    setFollowingList(localNetwork.following);
-    setFollowersCount(Number(localCounts.followersCount || 0));
-    setFollowingCount(Number(localCounts.followingCount || 0));
+    await refreshMergedFollowStats();
   };
 
   const unfollowFromFollowingList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
+    const targetId = person.key && /^\d+$/.test(String(person.key)) ? Number(person.key) : null;
+    if (token && targetId && user?.id) {
+      try {
+        await unfollowUser(token, targetId);
+        await refreshMergedFollowStats();
+        return;
+      } catch {
+        /* fall back to local */
+      }
+    }
     await removeLocalFollowByIdentity(
       { name: user.fullName, key: user.email || String(user.id || "") },
       { name: person.name, key: person.key }
     );
-    const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    setFollowersList(localNetwork.followers);
-    setFollowingList(localNetwork.following);
-    setFollowersCount(Number(localCounts.followersCount || 0));
-    setFollowingCount(Number(localCounts.followingCount || 0));
+    await refreshMergedFollowStats();
   };
 
   return (
