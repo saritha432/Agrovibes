@@ -1,19 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { AppTopBar } from "../components/AppTopBar";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions
+} from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
-import {
-  fetchHomePosts,
-  fetchProfileStats,
-  fetchSocialNetwork,
-  HomePost,
-  sendFollowRequest,
-  syncLocalFollowEdgesToServer,
-  unfollowUser
-} from "../services/api";
+import { fetchHomePosts, fetchProfileStats, HomePost } from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
   getLocalFollowEdgesForServerSync,
@@ -22,6 +23,14 @@ import {
   removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
+
+const TEAL = "#0f9b8e";
+const CREAM = "#f5f3ee";
+const CARD = "#ffffff";
+const TEXT = "#1a2e2a";
+const MUTED = "#5c6b66";
+const BEIGE_FOLLOW = "#ebe4d8";
+const LIME = "#d4e157";
 
 function safeHandle(name: string) {
   const base = String(name || "user")
@@ -32,16 +41,32 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
+const HIGHLIGHTS = [
+  { key: "harvest", label: "Harvest", icon: "leaf-outline" as const, border: "#c9b458" },
+  { key: "products", label: "Products", icon: "nutrition-outline" as const, border: "#e07a8a" },
+  { key: "tips", label: "Tips", icon: "bulb-outline" as const, border: "#7ec8c3" },
+  { key: "market", label: "Market", icon: "storefront-outline" as const, border: "#5a9e8f" }
+];
+
+type GalleryTab = "Posts" | "Reels" | "Tagged";
+
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
+  const { width } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
-  const [followersList, setFollowersList] = useState<Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>([]);
+  const [followersList, setFollowersList] = useState<
+    Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>
+  >([]);
   const [followingList, setFollowingList] = useState<Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>>([]);
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
-  const [activeGalleryTab, setActiveGalleryTab] = useState<"Posts" | "Reels">("Posts");
+  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Posts");
+  const [isFollowing, setFollowing] = useState(false);
+
+  const gridGap = 6;
+  const gridTileSize = (width - 24 - gridGap * 2) / 3;
 
   const normalizeName = (v: string) =>
     String(v || "")
@@ -79,65 +104,31 @@ export function ProfileScreen() {
 
     if (token && user?.id) {
       try {
-        const edges = await getLocalFollowEdgesForServerSync(identity);
-        if (edges.length) {
-          try {
-            const syncRes = await syncLocalFollowEdgesToServer(token, {
-              edges: edges.map((e) => ({ peerFullName: e.peerFullName, relation: e.relation, status: e.status }))
-            });
-            const synced = syncRes.synced || [];
-            const syncedKey = new Set(synced.map((s) => `${String(s.relation)}:${String(s.status)}:${String(s.peerFullName || "").trim().toLowerCase()}`));
-            const toRemove = edges.filter((e) =>
-              syncedKey.has(`${e.relation}:${e.status}:${String(e.peerFullName || "").trim().toLowerCase()}`)
-            );
-            await removeLocalFollowRecordsByIds(toRemove.map((e) => e.localId));
-          } catch {
-            // Old server without sync route, or offline — keep AsyncStorage copy.
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-
-    const localCounts = await getLocalFollowCountsByIdentity(identity);
-    let apiFollowers = 0;
-    let apiFollowing = 0;
-    let followersListData: Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }> = [];
-    let followingListData: Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }> = [];
-
-    if (token && user?.id) {
-      try {
         const stats = await fetchProfileStats(token, user.id);
-        apiFollowers = Number(stats.followersCount || 0);
-        apiFollowing = Number(stats.followingCount || 0);
+        const [localCounts] = await Promise.all([
+          getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id) }),
+          getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
+        ]);
+        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+        if (!mounted) return;
+        setFollowersCount(Number(stats.followersCount || 0) + Number(localCounts.followersCount || 0));
+        setFollowingCount(Number(stats.followingCount || 0) + Number(localCounts.followingCount || 0));
+        setFollowersList(localNetwork.followers);
+        setFollowingList(localNetwork.following);
       } catch {
-        /* keep zeros; local still merges below */
+        if (!mounted) return;
+        const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+        setFollowersCount(Number(localCounts.followersCount || 0));
+        setFollowingCount(Number(localCounts.followingCount || 0));
+        setFollowersList(localNetwork.followers);
+        setFollowingList(localNetwork.following);
       }
-      try {
-        const network = await fetchSocialNetwork(token, user.id);
-        followersListData = network.followers || [];
-        followingListData = network.following || [];
-      } catch {
-        const localNetwork = await getLocalFollowNetworkByIdentity(identity);
-        followersListData = localNetwork.followers;
-        followingListData = localNetwork.following;
-      }
-    } else {
-      const localNetwork = await getLocalFollowNetworkByIdentity(identity);
-      followersListData = localNetwork.followers;
-      followingListData = localNetwork.following;
-    }
-
-    setFollowersCount(apiFollowers + Number(localCounts.followersCount || 0));
-    setFollowingCount(apiFollowing + Number(localCounts.followingCount || 0));
-    setFollowersList(followersListData);
-    setFollowingList(followingListData);
-  }, [token, user?.email, user?.fullName, user?.id]);
-
-  useEffect(() => {
-    void refreshMergedFollowStats();
-  }, [refreshMergedFollowStats]);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [token, user?.id]);
 
   const userPosts = useMemo(() => {
     if (!user) return [];
@@ -151,6 +142,7 @@ export function ProfileScreen() {
 
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
+    if (activeGalleryTab === "Tagged") return [];
     return userPosts.filter((p) => !p.videoUrl);
   }, [activeGalleryTab, userPosts]);
 
@@ -166,7 +158,27 @@ export function ProfileScreen() {
     return { posts: userPosts.length, followers: followersCount, following: followingCount, handle, initials: initials || "U" };
   }, [followersCount, followingCount, user, userPosts.length]);
 
+  const roleLabel = useMemo(() => {
+    if (!user) return "";
+    if (user.role === "instructor" || user.role === "admin") return "Instructor · Seller";
+    return "Farmer · Buyer";
+  }, [user]);
+
+  const bioText = useMemo(() => {
+    if (!user) return "";
+    if (user.locationLabel && user.locationLabel.length > 24) return user.locationLabel;
+    return `${user.fullName} — growing and trading fresh produce. Share tips and connect with the community.`;
+  }, [user]);
+
+  const locationDisplay = useMemo(() => {
+    if (!user?.locationLabel) return "Add your district";
+    const parts = user.locationLabel.split(",").map((s) => s.trim());
+    if (parts.length >= 2) return `${parts[0]}, ${parts[1]}`;
+    return user.locationLabel;
+  }, [user]);
+
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
+
   const handleLogout = async () => {
     await signOut();
     navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] });
@@ -212,327 +224,505 @@ export function ProfileScreen() {
 
   return (
     <>
-    <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
-      <AppTopBar />
-      {!user ? (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Welcome to AgroGram</Text>
-          <Text style={styles.cardSub}>Start from the launch screens to create your account with OTP.</Text>
-          <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
-            <Ionicons name="log-in-outline" size={18} color="#fff" />
-            <Text style={styles.primaryBtnText}>Get Started</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <>
-          <View style={styles.profileHeader}>
-            <View style={styles.headerTopRow}>
-              <Text style={styles.handleText}>{profileModel?.handle}</Text>
-              <Pressable style={styles.iconChip} accessibilityRole="button" onPress={() => {}}>
-                <Ionicons name="ellipsis-horizontal" size={18} color="#22312d" />
-              </Pressable>
-            </View>
-
-            <View style={styles.headerMidRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{profileModel?.initials}</Text>
-              </View>
-
-              <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{profileModel?.posts}</Text>
-                  <Text style={styles.statLabel}>Posts</Text>
-                </View>
-                <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
-                  <Text style={styles.statValue}>{profileModel?.followers}</Text>
-                  <Text style={styles.statLabel}>Followers</Text>
-                </Pressable>
-                <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
-                  <Text style={styles.statValue}>{profileModel?.following}</Text>
-                  <Text style={styles.statLabel}>Following</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            <Text style={styles.fullName}>{user.fullName}</Text>
-            <Text style={styles.roleLine}>
-              {isInstructor ? "Instructor" : "Farmer"} • {user.email}
+      <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
+        {/* Profile-specific top bar (matches reference layout) */}
+        <View style={styles.topBar}>
+          <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
+          <Pressable style={styles.locationPill} onPress={() => Alert.alert("Location", "Location picker can be wired next.")}>
+            <Ionicons name="location-outline" size={14} color={LIME} />
+            <Text style={styles.locationPillText} numberOfLines={1}>
+              Nashik, MH
             </Text>
-            <View style={styles.savedAddressCard}>
-              <Text style={styles.savedAddressTitle}>Saved Address</Text>
-              <Text style={styles.savedAddressText}>{user.locationLabel || "No saved address yet"}</Text>
-            </View>
-
-            <View style={styles.actionsRow}>
-              <Pressable
-                style={styles.msgBtn}
-                accessibilityRole="button"
-                onPress={() => Alert.alert("Message", "Messaging UI will be wired next.")}
-              >
-                <Ionicons name="chatbubble-ellipses-outline" size={18} color="#0f7d3d" />
-                <Text style={styles.msgBtnText}>Message</Text>
-              </Pressable>
-              <Pressable
-                style={styles.editBtn}
-                accessibilityRole="button"
-                onPress={() => Alert.alert("Edit profile", "Profile editing flow can be added in next step.")}
-              >
-                <Ionicons name="create-outline" size={18} color="#0a9f46" />
-                <Text style={styles.editBtnText}>Edit</Text>
-              </Pressable>
-            </View>
-
-            {isInstructor ? (
-              <Pressable style={styles.studioBtn} accessibilityRole="button" onPress={() => navigation.navigate("InstructorStudio")}>
-                <Ionicons name="school-outline" size={18} color="#0a9f46" />
-                <Text style={styles.studioText}>Instructor Studio</Text>
-                <Text style={styles.studioMeta}>Upload courses & lessons</Text>
-                <Ionicons name="chevron-forward" size={18} color="#6b7b77" />
-              </Pressable>
-            ) : null}
-            <Pressable style={[styles.actionBtn, styles.actionBtnSecondary]} accessibilityRole="button" onPress={handleLogout}>
-              <Ionicons name="log-out-outline" size={18} color="#fff" />
-              <Text style={styles.actionBtnText}>Logout</Text>
+            <Ionicons name="chevron-down" size={12} color="#c8d4cf" />
+          </Pressable>
+          <View style={styles.topBarIcons}>
+            <Pressable hitSlop={8} onPress={() => Alert.alert("Search", "Search coming soon.")}>
+              <Ionicons name="search-outline" size={18} color="#e8f0ec" />
+            </Pressable>
+            <Pressable hitSlop={8} onPress={() => Alert.alert("Messages", "Messaging coming soon.")}>
+              <Ionicons name="chatbubble-ellipses-outline" size={18} color="#e8f0ec" />
+            </Pressable>
+            <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => Alert.alert("Cart", "Cart coming soon.")}>
+              <Ionicons name="cart-outline" size={18} color="#e8f0ec" />
+              <View style={[styles.miniBadge, styles.miniBadgeTeal]}>
+                <Text style={styles.miniBadgeText}>6</Text>
+              </View>
+            </Pressable>
+            <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => {}}>
+              <Ionicons name="notifications-outline" size={18} color="#e8f0ec" />
+              <View style={[styles.miniBadge, styles.miniBadgeRed]}>
+                <Text style={styles.miniBadgeText}>5</Text>
+              </View>
+            </Pressable>
+            <Pressable hitSlop={8} onPress={() => {}}>
+              <Ionicons name="person-circle-outline" size={22} color="#e8f0ec" />
             </Pressable>
           </View>
+        </View>
 
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Gallery</Text>
-              <Pressable style={styles.smallLink} onPress={() => {}}>
-                <Text style={styles.smallLinkText}>View all</Text>
+        {!user ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Welcome</Text>
+            <Text style={styles.cardSub}>Start from the launch screens to create your account.</Text>
+            <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
+              <Ionicons name="log-in-outline" size={18} color="#fff" />
+              <Text style={styles.primaryBtnText}>Get Started</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <View style={styles.profileCard}>
+              <View style={styles.handleRow}>
+                <Text style={styles.handleText}>{profileModel?.handle}</Text>
+                <Pressable hitSlop={10} onPress={() => Alert.alert("Share", "Share profile coming soon.")}>
+                  <Ionicons name="share-outline" size={20} color={TEXT} />
+                </Pressable>
+              </View>
+
+              <View style={styles.headerMidRow}>
+                <View style={styles.avatarWrap}>
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>{profileModel?.initials}</Text>
+                  </View>
+                  <View style={styles.shieldBadge}>
+                    <Ionicons name="shield-checkmark" size={12} color="#1a1a1a" />
+                  </View>
+                </View>
+
+                <View style={styles.statsRow}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>{profileModel?.posts}</Text>
+                    <Text style={styles.statLabel}>Posts</Text>
+                  </View>
+                  <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
+                    <Text style={styles.statValue}>{profileModel?.followers}</Text>
+                    <Text style={styles.statLabel}>Followers</Text>
+                  </Pressable>
+                  <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
+                    <Text style={styles.statValue}>{profileModel?.following}</Text>
+                    <Text style={styles.statLabel}>Following</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.nameRow}>
+                <Text style={styles.fullName}>{user.fullName}</Text>
+                <View style={styles.kycPill}>
+                  <Ionicons name="checkmark-circle" size={14} color={TEAL} />
+                  <Text style={styles.kycText}>KYC Verified</Text>
+                </View>
+              </View>
+
+              <Text style={styles.roleLine}>
+                {roleLabel} <Text style={styles.wheatEmoji}>🌾</Text>
+              </Text>
+              <Text style={styles.bio}>{bioText}</Text>
+              <View style={styles.locRow}>
+                <Ionicons name="location-outline" size={14} color={MUTED} />
+                <Text style={styles.locText}>{locationDisplay}</Text>
+              </View>
+              <Text style={styles.stars}>★★★★☆ <Text style={styles.ratingNum}>4.8</Text></Text>
+
+              <Pressable style={styles.editProfileBtn} onPress={() => Alert.alert("Edit profile", "Profile editing coming soon.")}>
+                <Ionicons name="create-outline" size={18} color="#fff" />
+                <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.followWideBtn, isFollowing ? styles.followWideBtnActive : null]}
+                onPress={() => setFollowing((v) => !v)}
+              >
+                <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color={TEXT} />
+                <Text style={styles.followWideBtnText}>{isFollowing ? "Following" : "Follow"}</Text>
+              </Pressable>
+
+              <View style={styles.smallActionsRow}>
+                <Pressable style={styles.circleBtn} onPress={() => Alert.alert("Message", "Messaging coming soon.")}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={18} color={TEXT} />
+                </Pressable>
+                <Pressable style={styles.circleBtn} onPress={() => Alert.alert("Share", "Share coming soon.")}>
+                  <Ionicons name="paper-plane-outline" size={18} color={TEXT} />
+                </Pressable>
+              </View>
+
+              {isInstructor ? (
+                <Pressable style={styles.studioBtn} onPress={() => navigation.navigate("InstructorStudio")}>
+                  <Ionicons name="school-outline" size={18} color={TEAL} />
+                  <Text style={styles.studioText}>Instructor Studio</Text>
+                  <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                </Pressable>
+              ) : null}
+
+              <Pressable onPress={handleLogout} style={styles.logoutLink}>
+                <Text style={styles.logoutLinkText}>Log out</Text>
               </Pressable>
             </View>
 
-            <View style={styles.galleryTabs}>
-              {[
-                { icon: "grid-outline", label: "Posts" as const },
-                { icon: "play-outline", label: "Reels" as const }
-              ].map((t) => (
-                <Pressable
-                  key={t.label}
-                  style={[styles.galleryTab, activeGalleryTab === t.label ? styles.galleryTabActive : null]}
-                  onPress={() => setActiveGalleryTab(t.label)}
-                >
-                  <Ionicons
-                    name={t.icon as any}
-                    size={18}
-                    color={activeGalleryTab === t.label ? "#fff" : "#0f7d3d"}
-                  />
-                  <Text style={[styles.galleryTabText, activeGalleryTab === t.label ? styles.galleryTabTextActive : null]}>
-                    {t.label}
-                  </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.highlightsScroll}>
+              {HIGHLIGHTS.map((h) => (
+                <Pressable key={h.key} style={styles.highlightItem} onPress={() => Alert.alert(h.label, "Highlights coming soon.")}>
+                  <View style={[styles.highlightRing, { borderColor: h.border }]}>
+                    <View style={styles.highlightInner}>
+                      <Ionicons name={h.icon} size={22} color={TEXT} />
+                    </View>
+                  </View>
+                  <Text style={styles.highlightLabel}>{h.label}</Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
 
-            <View style={styles.grid}>
-              {visiblePosts.length ? (
-                visiblePosts.map((post) => (
-                  <View key={post.id} style={styles.gridTile}>
-                    {post.imageUrl ? (
-                      <Image source={{ uri: post.imageUrl }} style={styles.gridImage} resizeMode="cover" />
-                    ) : post.videoUrl ? (
-                      <View style={styles.gridVideoTile}>
-                        <Ionicons name="play-circle" size={24} color="#fff" />
-                      </View>
+            <View style={styles.gallerySection}>
+              <View style={styles.iconTabsRow}>
+                {(
+                  [
+                    { key: "Posts" as const, icon: "grid-outline" as const },
+                    { key: "Reels" as const, icon: "play-circle-outline" as const },
+                    { key: "Tagged" as const, icon: "pricetag-outline" as const }
+                  ] as const
+                ).map((t) => (
+                  <Pressable key={t.key} style={styles.iconTab} onPress={() => setActiveGalleryTab(t.key)}>
+                    <Ionicons name={t.icon} size={22} color={activeGalleryTab === t.key ? TEXT : MUTED} />
+                    {activeGalleryTab === t.key ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={[styles.grid, { gap: gridGap }]}>
+                {activeGalleryTab === "Tagged" ? (
+                  <View style={styles.emptyWrap}>
+                    <Ionicons name="pricetag-outline" size={22} color={MUTED} />
+                    <Text style={styles.emptyText}>No tagged posts yet.</Text>
+                  </View>
+                ) : visiblePosts.length ? (
+                  visiblePosts.map((post) => (
+                    <View key={post.id} style={[styles.gridTile, { width: gridTileSize, height: gridTileSize }]}>
+                      {post.imageUrl ? (
+                        <Image source={{ uri: post.imageUrl }} style={styles.gridImage} resizeMode="cover" />
+                      ) : post.videoUrl ? (
+                        <View style={[styles.gridPlaceholder, styles.gridVideoBg]}>
+                          <Ionicons name="play-circle" size={28} color="#fff" />
+                        </View>
+                      ) : (
+                        <View style={[styles.gridPlaceholder, styles.gridPastelA]}>
+                          <Ionicons name="leaf-outline" size={28} color="#7a6b2e" />
+                        </View>
+                      )}
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.placeholderGridRow}>
+                    <View style={[styles.gridPlaceholder, styles.gridPastelA, { width: gridTileSize, height: gridTileSize }]}>
+                      <Ionicons name="leaf-outline" size={32} color="#7a6b2e" />
+                    </View>
+                    <View style={[styles.gridPlaceholder, styles.gridPastelB, { width: gridTileSize, height: gridTileSize }]}>
+                      <Ionicons name="nutrition-outline" size={32} color="#8b3d4a" />
+                    </View>
+                    <View style={[styles.gridPlaceholder, styles.gridPastelC, { width: gridTileSize, height: gridTileSize }]}>
+                      <Ionicons name="rose-outline" size={32} color="#2d6b4a" />
+                    </View>
+                  </View>
+                )}
+              </View>
+            </View>
+          </>
+        )}
+      </ScrollView>
+
+      <Modal visible={!!activeListType} transparent animationType="slide" onRequestClose={() => setActiveListType(null)}>
+        <Pressable style={styles.overlay} onPress={() => setActiveListType(null)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{activeListType === "followers" ? "Followers" : "Following"}</Text>
+              <Pressable onPress={() => setActiveListType(null)}>
+                <Ionicons name="close" size={22} color={TEAL} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.sheetBody}>
+              {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
+                <Text style={styles.sheetEmpty}>No users found.</Text>
+              ) : (
+                (activeListType === "followers" ? followersList : followingList).map((person, idx) => (
+                  <View key={`${person.key || person.name}-${idx}`} style={styles.personRow}>
+                    <Text style={styles.personName}>{person.name}</Text>
+                    {activeListType === "followers" ? (
+                      person.viewerStatus === "accepted" ? (
+                        <View style={styles.followingPill}>
+                          <Text style={styles.followingPillText}>Following</Text>
+                        </View>
+                      ) : person.viewerStatus === "pending" ? (
+                        <View style={styles.requestedPill}>
+                          <Text style={styles.requestedPillText}>Requested</Text>
+                        </View>
+                      ) : (
+                        <Pressable style={styles.followBackBtn} onPress={() => followBackFromFollowersList(person)}>
+                          <Text style={styles.followBackBtnText}>Follow Back</Text>
+                        </Pressable>
+                      )
                     ) : (
-                      <View style={styles.gridVideoTile}>
-                        <Ionicons name="leaf-outline" size={20} color="#fff" />
-                      </View>
+                      <Pressable style={styles.unfollowBtn} onPress={() => unfollowFromFollowingList(person)}>
+                        <Text style={styles.unfollowBtnText}>Unfollow</Text>
+                      </Pressable>
                     )}
                   </View>
                 ))
-              ) : (
-                <View style={styles.emptyWrap}>
-                  <Ionicons name="images-outline" size={20} color="#6b7874" />
-                  <Text style={styles.emptyText}>
-                    {activeGalleryTab === "Reels"
-                      ? "Your reels will appear here after sharing."
-                      : "Your posts will appear here after sharing."}
-                  </Text>
-                </View>
               )}
-            </View>
-          </View>
-        </>
-      )}
-    </ScrollView>
-    <Modal visible={!!activeListType} transparent animationType="slide" onRequestClose={() => setActiveListType(null)}>
-      <Pressable style={styles.overlay} onPress={() => setActiveListType(null)}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{activeListType === "followers" ? "Followers" : "Following"}</Text>
-            <Pressable onPress={() => setActiveListType(null)}>
-              <Ionicons name="close" size={20} color="#0f7d3d" />
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.sheetBody}>
-            {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
-              <Text style={styles.sheetEmpty}>No users found.</Text>
-            ) : (
-              (activeListType === "followers" ? followersList : followingList).map((person, idx) => (
-                <View key={`${person.key || person.name}-${idx}`} style={styles.personRow}>
-                  <Text style={styles.personName}>{person.name}</Text>
-                  {activeListType === "followers" ? (
-                    person.viewerStatus === "accepted" ? (
-                      <View style={styles.followingPill}>
-                        <Text style={styles.followingPillText}>Following</Text>
-                      </View>
-                    ) : person.viewerStatus === "pending" ? (
-                      <View style={styles.requestedPill}>
-                        <Text style={styles.requestedPillText}>Requested</Text>
-                      </View>
-                    ) : (
-                      <Pressable style={styles.followBackBtn} onPress={() => followBackFromFollowersList(person)}>
-                        <Text style={styles.followBackBtnText}>Follow Back</Text>
-                      </Pressable>
-                    )
-                  ) : (
-                    <Pressable style={styles.unfollowBtn} onPress={() => unfollowFromFollowingList(person)}>
-                      <Text style={styles.unfollowBtnText}>Unfollow</Text>
-                    </Pressable>
-                  )}
-                </View>
-              ))
-            )}
-          </ScrollView>
+            </ScrollView>
+          </Pressable>
         </Pressable>
-      </Pressable>
-    </Modal>
+      </Modal>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#f2f5f4" },
-  scrollBottom: { paddingBottom: 90 },
+  screen: { flex: 1, backgroundColor: CREAM },
+  scrollBottom: { paddingBottom: 100 },
 
-  card: { margin: 12, borderRadius: 16, backgroundColor: "#fff", borderWidth: 1, borderColor: "#dce4e1", padding: 16 },
-  cardTitle: { fontSize: 20, fontWeight: "900", color: "#111616" },
-  cardSub: { marginTop: 6, color: "#5b6965", fontWeight: "600", lineHeight: 18 },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#262626",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    paddingTop: 10,
+    gap: 6
+  },
+  logoImage: { width: 72, height: 18 },
+  locationPill: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#333333",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    maxWidth: 120
+  },
+  locationPillText: { flex: 1, color: "#e8f0ec", fontSize: 11, fontWeight: "700" },
+  topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
+  iconWithBadge: { position: "relative" },
+  miniBadge: {
+    position: "absolute",
+    right: -6,
+    top: -5,
+    minWidth: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3
+  },
+  miniBadgeTeal: { backgroundColor: "#2dd4bf" },
+  miniBadgeRed: { backgroundColor: "#f87171" },
+  miniBadgeText: { color: "#111", fontSize: 9, fontWeight: "900" },
 
-  primaryBtn: { marginTop: 16, borderRadius: 14, backgroundColor: "#0a9f46", paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#e5e2dc", padding: 16 },
+  cardTitle: { fontSize: 20, fontWeight: "900", color: TEXT },
+  cardSub: { marginTop: 6, color: MUTED, fontWeight: "600", lineHeight: 18 },
+  primaryBtn: {
+    marginTop: 16,
+    borderRadius: 14,
+    backgroundColor: TEAL,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8
+  },
   primaryBtnText: { color: "#fff", fontWeight: "900" },
 
-  profileHeader: { margin: 12, borderRadius: 16, backgroundColor: "#fff", borderWidth: 1, borderColor: "#dce4e1", padding: 14 },
-
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  handleText: { fontWeight: "900", color: "#22312d" },
-  iconChip: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: "#e3e7e6", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-
-  headerMidRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 10 },
-  avatar: { width: 66, height: 66, borderRadius: 33, backgroundColor: "#e8f7ee", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#cde9d9" },
-  avatarText: { color: "#0a9f46", fontSize: 22, fontWeight: "900" },
-
-  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-around" },
-  statItem: { alignItems: "center" },
-  statValue: { fontWeight: "900", color: "#22312d" },
-  statLabel: { marginTop: 1, color: "#5b6965", fontWeight: "700", fontSize: 12 },
-
-  fullName: { marginTop: 10, fontSize: 16, fontWeight: "900", color: "#22312d" },
-  roleLine: { marginTop: 2, color: "#5b6965", fontWeight: "700" },
-  savedAddressCard: {
+  profileCard: {
+    marginHorizontal: 12,
     marginTop: 10,
+    borderRadius: 18,
+    backgroundColor: CARD,
+    padding: 14,
     borderWidth: 1,
-    borderColor: "#dce4e1",
-    borderRadius: 12,
-    backgroundColor: "#f7faf8",
-    paddingHorizontal: 10,
-    paddingVertical: 8
+    borderColor: "#ebe6df",
+    shadowColor: "#000",
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2
   },
-  savedAddressTitle: { color: "#1e2b27", fontWeight: "900", fontSize: 12 },
-  savedAddressText: { marginTop: 4, color: "#4c5b57", fontWeight: "700", fontSize: 12, lineHeight: 16 },
+  handleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  handleText: { fontWeight: "900", color: TEXT, fontSize: 15 },
 
-  actionsRow: { marginTop: 10, flexDirection: "row", gap: 8 },
-  msgBtn: { flex: 1, backgroundColor: "#eef8f1", borderRadius: 14, paddingVertical: 10, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#cde9d9" },
-  msgBtnText: { color: "#0f7d3d", fontWeight: "900" },
-  editBtn: { width: 84, backgroundColor: "#fff", borderRadius: 14, paddingVertical: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#dce4e1" },
-  editBtnText: { marginTop: 2, color: "#0a9f46", fontWeight: "900", fontSize: 12 },
+  headerMidRow: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 12 },
+  avatarWrap: { position: "relative" },
+  avatar: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: "#e8f4f1",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#d4ebe6"
+  },
+  avatarText: { color: TEAL, fontSize: 28, fontWeight: "900" },
+  shieldBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: LIME,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: CARD
+  },
+
+  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-around", paddingLeft: 4 },
+  statItem: { alignItems: "center" },
+  statValue: { fontWeight: "900", color: TEXT, fontSize: 17 },
+  statLabel: { marginTop: 2, color: MUTED, fontWeight: "700", fontSize: 12 },
+
+  nameRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 14 },
+  fullName: { fontSize: 17, fontWeight: "900", color: TEXT },
+  kycPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#e6f7f4",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999
+  },
+  kycText: { color: TEAL, fontWeight: "800", fontSize: 11 },
+  roleLine: { marginTop: 6, color: MUTED, fontWeight: "700", fontSize: 13 },
+  wheatEmoji: { fontSize: 13 },
+  bio: { marginTop: 8, color: TEXT, fontWeight: "600", fontSize: 13, lineHeight: 19 },
+  locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
+  locText: { color: MUTED, fontWeight: "700", fontSize: 12 },
+  stars: { marginTop: 6, color: "#eab308", fontSize: 14, fontWeight: "800" },
+  ratingNum: { color: TEXT, fontWeight: "800" },
+
+  editProfileBtn: {
+    marginTop: 14,
+    backgroundColor: TEAL,
+    borderRadius: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8
+  },
+  editProfileBtnText: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  followWideBtn: {
+    marginTop: 10,
+    backgroundColor: BEIGE_FOLLOW,
+    borderRadius: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#dcd3c8"
+  },
+  followWideBtnActive: { backgroundColor: "#dce8e4", borderColor: TEAL },
+  followWideBtnText: { color: TEXT, fontWeight: "900", fontSize: 15 },
+  smallActionsRow: { flexDirection: "row", justifyContent: "center", gap: 12, marginTop: 12 },
+  circleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: BEIGE_FOLLOW,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#dcd3c8"
+  },
 
   studioBtn: {
     marginTop: 12,
-    borderRadius: 14,
-    backgroundColor: "#eef8f1",
-    borderWidth: 1,
-    borderColor: "#cde9d9",
-    padding: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8
+    gap: 8,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: "#ebe6df"
   },
-  studioText: { fontWeight: "900", color: "#0a9f46" },
-  studioMeta: { flex: 1, color: "#5b6965", fontWeight: "700", fontSize: 12 },
+  studioText: { flex: 1, fontWeight: "900", color: TEAL, fontSize: 14 },
+  logoutLink: { marginTop: 10, alignSelf: "center", paddingVertical: 6 },
+  logoutLinkText: { color: MUTED, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
 
-  actionBtn: { marginTop: 12, borderRadius: 14, backgroundColor: "#0a9f46", paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  actionBtnSecondary: { backgroundColor: "#111827" },
-  actionBtnText: { color: "#fff", fontWeight: "900" },
-  sectionCard: { margin: 12, borderRadius: 16, backgroundColor: "#fff", borderWidth: 1, borderColor: "#dce4e1", padding: 14 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  sectionTitle: { fontWeight: "900", color: "#22312d", fontSize: 16 },
-  smallLink: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: "#f2f5f4", borderWidth: 1, borderColor: "#dce4e1" },
-  smallLinkText: { color: "#0f7d3d", fontWeight: "800" },
-
-  galleryTabs: { flexDirection: "row", gap: 10, marginTop: 12 },
-  galleryTab: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10, borderRadius: 14, backgroundColor: "#f2f5f4", borderWidth: 1, borderColor: "#dce4e1" },
-  galleryTabActive: { backgroundColor: "#0f7d3d", borderColor: "#0f7d3d" },
-  galleryTabText: { marginTop: 6, color: "#0f7d3d", fontWeight: "900", fontSize: 12 },
-  galleryTabTextActive: { color: "#fff" },
-
-  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 14, gap: 10 },
-  gridTile: {
-    width: "30%",
-    aspectRatio: 1,
-    borderRadius: 14,
-    backgroundColor: "#eef8f1",
-    borderWidth: 1,
-    borderColor: "#cde9d9",
+  highlightsScroll: { paddingHorizontal: 12, paddingVertical: 14, gap: 16, flexDirection: "row", alignItems: "flex-start" },
+  highlightItem: { alignItems: "center", marginRight: 4 },
+  highlightRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 3,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden"
+    padding: 3
   },
+  highlightInner: {
+    flex: 1,
+    width: "100%",
+    borderRadius: 30,
+    backgroundColor: "#f0ebe4",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  highlightLabel: { marginTop: 6, fontSize: 12, fontWeight: "800", color: TEXT },
+
+  gallerySection: { marginHorizontal: 12, marginBottom: 16 },
+  iconTabsRow: { flexDirection: "row", justifyContent: "space-around", borderBottomWidth: 1, borderColor: "#e5e2dc", paddingBottom: 4 },
+  iconTab: { alignItems: "center", minWidth: 56, paddingVertical: 6 },
+  iconTabUnderline: { marginTop: 6, height: 2, width: 28, backgroundColor: TEXT, borderRadius: 2 },
+  iconTabSpacer: { marginTop: 6, height: 2, width: 28 },
+
+  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
+  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#eee" },
   gridImage: { width: "100%", height: "100%" },
-  gridVideoTile: { flex: 1, width: "100%", backgroundColor: "#22312d", alignItems: "center", justifyContent: "center" },
+  gridPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 12 },
+  gridVideoBg: { backgroundColor: "#2d3b38" },
+  gridPastelA: { backgroundColor: "#f5ebc4" },
+  gridPastelB: { backgroundColor: "#f5d4d9" },
+  gridPastelC: { backgroundColor: "#d4ebd4" },
+  placeholderGridRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
+
   emptyWrap: {
     width: "100%",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#dce4e1",
-    backgroundColor: "#f7faf8",
-    paddingVertical: 18,
-    paddingHorizontal: 12,
     alignItems: "center",
+    paddingVertical: 28,
     gap: 8
   },
-  emptyText: { color: "#6b7874", fontWeight: "700", textAlign: "center" }
-  ,
+  emptyText: { color: MUTED, fontWeight: "700", textAlign: "center" },
+
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    maxHeight: "70%",
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 14
+    backgroundColor: CARD,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    maxHeight: "72%",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 16
   },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sheetTitle: { color: "#22312d", fontWeight: "900", fontSize: 16 },
-  sheetBody: { paddingTop: 10, gap: 10 },
-  sheetEmpty: { color: "#5b6965", fontWeight: "700" },
+  sheetTitle: { color: TEXT, fontWeight: "900", fontSize: 17 },
+  sheetBody: { paddingTop: 12, gap: 10 },
+  sheetEmpty: { color: MUTED, fontWeight: "700" },
   personRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderWidth: 1,
-    borderColor: "#dce4e1",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    backgroundColor: "#f7faf8"
+    borderColor: "#e5e2dc",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: CREAM
   },
-  personName: { color: "#22312d", fontWeight: "800" },
-  followBackBtn: { backgroundColor: "#0a9f46", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  personName: { color: TEXT, fontWeight: "800" },
+  followBackBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   followBackBtnText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedPillText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
