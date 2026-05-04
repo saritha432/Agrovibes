@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -14,7 +14,13 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
-import { fetchHomePosts, fetchProfileStats, HomePost } from "../services/api";
+import {
+  fetchHomePosts,
+  fetchProfileStats,
+  HomePost,
+  sendFollowRequest,
+  unfollowUser
+} from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
   getLocalFollowEdgesForServerSync,
@@ -64,6 +70,7 @@ export function ProfileScreen() {
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Posts");
   const [isFollowing, setFollowing] = useState(false);
+  const isMountedRef = useRef(true);
 
   const gridGap = 6;
   const gridTileSize = (width - 24 - gridGap * 2) / 3;
@@ -92,6 +99,13 @@ export function ProfileScreen() {
     };
   }, [token]);
 
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const refreshMergedFollowStats = useCallback(async () => {
     if (!user?.fullName) {
       setFollowersCount(0);
@@ -100,35 +114,45 @@ export function ProfileScreen() {
       setFollowingList([]);
       return;
     }
-    const identity = { name: user.fullName, key: user.email || String(user.id || "") };
 
     if (token && user?.id) {
       try {
         const stats = await fetchProfileStats(token, user.id);
-        const [localCounts] = await Promise.all([
-          getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id) }),
-          getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
-        ]);
-        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-        if (!mounted) return;
+        const localCounts = await getLocalFollowCountsByIdentity({
+          name: user.fullName,
+          key: user.email || String(user.id)
+        });
+        const localNetwork = await getLocalFollowNetworkByIdentity({
+          name: user.fullName,
+          key: user.email || String(user.id)
+        });
+        if (!isMountedRef.current) return;
         setFollowersCount(Number(stats.followersCount || 0) + Number(localCounts.followersCount || 0));
         setFollowingCount(Number(stats.followingCount || 0) + Number(localCounts.followingCount || 0));
         setFollowersList(localNetwork.followers);
         setFollowingList(localNetwork.following);
       } catch {
-        if (!mounted) return;
-        const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+        if (!isMountedRef.current) return;
+        const localCounts = await getLocalFollowCountsByIdentity({
+          name: user.fullName,
+          key: user.email || String(user.id)
+        });
+        const localNetwork = await getLocalFollowNetworkByIdentity({
+          name: user.fullName,
+          key: user.email || String(user.id)
+        });
+        if (!isMountedRef.current) return;
         setFollowersCount(Number(localCounts.followersCount || 0));
         setFollowingCount(Number(localCounts.followingCount || 0));
         setFollowersList(localNetwork.followers);
         setFollowingList(localNetwork.following);
       }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [token, user?.id]);
+    }
+  }, [token, user?.id, user?.fullName, user?.email]);
+
+  useEffect(() => {
+    void refreshMergedFollowStats();
+  }, [refreshMergedFollowStats]);
 
   const userPosts = useMemo(() => {
     if (!user) return [];
