@@ -174,23 +174,126 @@ async function ensureHomePostCommentsTable() {
   homePostCommentsTableReady = true;
 }
 
+function isLegacySyntheticPostAuthorEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  return e.startsWith("legacy_post_") && e.endsWith("@phone.agrovibes");
+}
+
+/**
+ * Resolves which learn_users row should receive like/comment notifications for a home post.
+ * Prefers real accounts over legacy backfill placeholders; updates home_posts.user_id when remapping.
+ */
 async function resolveHomePostAuthorUserId(postRow) {
-  const direct = postRow.user_id != null ? Number(postRow.user_id) : null;
-  if (direct && Number.isFinite(direct) && direct > 0) return direct;
   const name = String(postRow.user_name || "").trim();
-  if (!name) return null;
-  let r = await query(
-    `
-    SELECT id FROM learn_users
-    WHERE LOWER(TRIM(REGEXP_REPLACE(full_name, '\\s+', ' ', 'g')))
-      = LOWER(TRIM(REGEXP_REPLACE($1, '\\s+', ' ', 'g')))
-    LIMIT 1
-    `,
-    [name]
-  );
-  if (r.rows[0]) return Number(r.rows[0].id);
-  r = await query(`SELECT id FROM learn_users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) LIMIT 1`, [name]);
-  return r.rows[0] ? Number(r.rows[0].id) : null;
+  const postId = postRow.id != null ? Number(postRow.id) : null;
+
+  const persistAuthor = async (uid) => {
+    if (uid && Number.isFinite(postId) && postId > 0) {
+      await query(`UPDATE home_posts SET user_id = $1 WHERE id = $2`, [uid, postId]);
+    }
+  };
+
+  const direct = postRow.user_id != null ? Number(postRow.user_id) : null;
+  if (direct && Number.isFinite(direct) && direct > 0) {
+    const ur = await query(`SELECT id, email FROM learn_users WHERE id = $1 LIMIT 1`, [direct]);
+    if (ur.rows[0]) {
+      const email = String(ur.rows[0].email || "");
+      if (!isLegacySyntheticPostAuthorEmail(email)) return direct;
+    }
+  }
+
+  if (name) {
+    const nameMatchSql = `
+      LOWER(TRIM(REGEXP_REPLACE(COALESCE(full_name, ''), '\\s+', ' ', 'g')))
+      = LOWER(TRIM(REGEXP_REPLACE($1::text, '\\s+', ' ', 'g')))
+    `;
+    let r = await query(
+      `
+      SELECT id FROM learn_users
+      WHERE ${nameMatchSql}
+        AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [name]
+    );
+    if (!r.rows[0]) {
+      r = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE ${nameMatchSql}
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [name]
+      );
+    }
+    if (r.rows[0]) {
+      const uid = Number(r.rows[0].id);
+      await persistAuthor(uid);
+      return uid;
+    }
+
+    const slug = slugUsernameFromName(name);
+    if (slug) {
+      let r2 = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+          AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [slug]
+      );
+      if (!r2.rows[0]) {
+        r2 = await query(
+          `
+          SELECT id FROM learn_users
+          WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+          ORDER BY id ASC
+          LIMIT 1
+          `,
+          [slug]
+        );
+      }
+      if (r2.rows[0]) {
+        const uid = Number(r2.rows[0].id);
+        await persistAuthor(uid);
+        return uid;
+      }
+    }
+
+    let r3 = await query(
+      `
+      SELECT id FROM learn_users
+      WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [name]
+    );
+    if (!r3.rows[0]) {
+      r3 = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [name]
+      );
+    }
+    if (r3.rows[0]) {
+      const uid = Number(r3.rows[0].id);
+      await persistAuthor(uid);
+      return uid;
+    }
+  }
+
+  if (direct && Number.isFinite(direct) && direct > 0) return direct;
+  return null;
 }
 
 function normalizeIndiaPhone(rawPhone) {
