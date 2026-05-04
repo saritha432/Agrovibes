@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
+import { markLaunchSetupComplete } from "../onboarding/launchSetup";
 import { authLogin, authRegister } from "../services/api";
 
 type Mode = "login" | "register";
@@ -32,6 +33,9 @@ export function AuthScreen() {
           ? await authLogin({ email, password })
           : await authRegister({ email, password, fullName, role });
       await signIn({ token: payload.token, user: payload.user as any });
+      if (mode === "login" && (payload.user as any)?.id != null) {
+        await markLaunchSetupComplete((payload.user as any).id);
+      }
       navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
     } catch (e: any) {
       setError(e?.message || "Failed");

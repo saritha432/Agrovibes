@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
 import { useLanguage } from "../../localization/LanguageContext";
+import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister } from "../../services/api";
 
@@ -36,9 +38,11 @@ function buildLoginIdentifiers(raw: string): string[] {
 
 export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute<RouteProp<RootStackParamList, "AuthChoice">>();
   const { signIn } = useAuth();
   const { t } = useLanguage();
-  const [mode, setMode] = React.useState<"register" | "login">("register");
+  const initialMode = route.params?.initialMode === "login" ? "login" : "register";
+  const [mode, setMode] = React.useState<"register" | "login">(initialMode);
   const [phone, setPhone] = React.useState("");
   const [loginIdentifier, setLoginIdentifier] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -86,6 +90,9 @@ export function AuthChoiceScreen() {
               throw lastError || new Error("Failed to login. Please try again.");
             })();
       await signIn(auth);
+      if (mode === "login" && auth?.user?.id != null) {
+        await markLaunchSetupComplete(auth.user.id);
+      }
       navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
     } catch (error: any) {
       setErrorText(mode === "register" ? error?.message || "Failed to create account. Please try again." : error?.message || "Failed to login. Please try again.");

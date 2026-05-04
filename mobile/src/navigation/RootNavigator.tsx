@@ -6,8 +6,6 @@ import { InstructorStudioScreen } from "../screens/InstructorStudioScreen";
 import { SplashScreen } from "../screens/SplashScreen";
 import { AuthChoiceScreen } from "../screens/onboarding/AuthChoiceScreen";
 import { OtpVerifyScreen } from "../screens/onboarding/OtpVerifyScreen";
-import { EnableLocationScreen } from "../screens/onboarding/EnableLocationScreen";
-import { AllowNotificationScreen } from "../screens/onboarding/AllowNotificationScreen";
 import { PersonalInfoScreen } from "../screens/onboarding/PersonalInfoScreen";
 import { RoleSelectionScreen } from "../screens/onboarding/RoleSelectionScreen";
 import { BuyerInterestsScreen } from "../screens/onboarding/BuyerInterestsScreen";
@@ -37,12 +35,10 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Splash: undefined;
   InitialSetup: undefined;
-  AuthChoice: undefined;
+  AuthChoice: { initialMode?: "register" | "login" } | undefined;
   OtpVerify: { phone: string };
   ForgotPassword: undefined;
   ForgotPasswordOtp: { phone: string };
-  EnableLocation: undefined;
-  AllowNotification: undefined;
   PersonalInfo: undefined;
   RoleSelection: undefined;
   BuyerInterests: undefined;
@@ -70,8 +66,6 @@ export function RootNavigator() {
       <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
       <Stack.Screen name="ForgotPasswordOtp" component={ForgotPasswordOtpResetScreen} />
-      <Stack.Screen name="EnableLocation" component={EnableLocationScreen} />
-      <Stack.Screen name="AllowNotification" component={AllowNotificationScreen} />
       <Stack.Screen name="PersonalInfo" component={PersonalInfoScreen} />
       <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />
       <Stack.Screen name="BuyerInterests" component={BuyerInterestsScreen} />

@@ -1,11 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
-import { fetchHomePosts, HomePost } from "../services/api";
+import {
+  fetchHomePosts,
+  fetchProfileStats,
+  HomePost,
+  fetchSocialNotifications
+} from "../services/api";
+import {
+  getLocalFollowCountsByIdentity,
+  getLocalFollowNetworkByIdentity,
+  getLocalFollowNotificationsByIdentity,
+  removeLocalFollowByIdentity,
+  sendLocalFollowRequestByIdentity
+} from "../social/localFollowStore";
 
 function safeHandle(name: string) {
   const base = String(name || "user")
@@ -18,9 +30,13 @@ function safeHandle(name: string) {
 
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  const { user, signOut } = useAuth();
+  const { user, token, signOut } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
-  const [isFollowing, setFollowing] = useState(false);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [followersList, setFollowersList] = useState<Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>([]);
+  const [followingList, setFollowingList] = useState<Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>>([]);
+  const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [activeGalleryTab, setActiveGalleryTab] = useState<"Posts" | "Reels">("Posts");
 
   const normalizeName = (v: string) =>
@@ -33,7 +49,7 @@ export function ProfileScreen() {
 
   useEffect(() => {
     let mounted = true;
-    fetchHomePosts()
+    fetchHomePosts(token || null)
       .then((data) => {
         if (!mounted) return;
         setAllPosts(data.posts);
@@ -45,7 +61,44 @@ export function ProfileScreen() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [token]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!token || !user?.id) return;
+      try {
+        const [stats, notifications] = await Promise.all([
+          fetchProfileStats(token, user.id),
+          fetchSocialNotifications(token)
+        ]);
+        const [localNotifs, localCounts] = await Promise.all([
+          getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id) }),
+          getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
+        ]);
+        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+        if (!mounted) return;
+        setFollowersCount(Number(stats.followersCount || 0) + Number(localCounts.followersCount || 0));
+        setFollowingCount(Number(stats.followingCount || 0) + Number(localCounts.followingCount || 0));
+        setFollowersList(localNetwork.followers);
+        setFollowingList(localNetwork.following);
+      } catch {
+        if (!mounted) return;
+        const [localNotifs, localCounts] = await Promise.all([
+          getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id) }),
+          getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
+        ]);
+        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+        setFollowersCount(Number(localCounts.followersCount || 0));
+        setFollowingCount(Number(localCounts.followingCount || 0));
+        setFollowersList(localNetwork.followers);
+        setFollowingList(localNetwork.following);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [token, user?.id]);
 
   const userPosts = useMemo(() => {
     if (!user) return [];
@@ -64,8 +117,6 @@ export function ProfileScreen() {
 
   const profileModel = useMemo(() => {
     if (!user) return null;
-    const followers = isFollowing ? 1 : 0;
-    const following = isFollowing ? 1 : 0;
     const handle = safeHandle(user.fullName || user.email);
     const initials = String(user.fullName || user.email || "U")
       .split(" ")
@@ -73,8 +124,8 @@ export function ProfileScreen() {
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase())
       .join("");
-    return { posts: userPosts.length, followers, following, handle, initials: initials || "U" };
-  }, [isFollowing, user, userPosts.length]);
+    return { posts: userPosts.length, followers: followersCount, following: followingCount, handle, initials: initials || "U" };
+  }, [followersCount, followingCount, user, userPosts.length]);
 
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
   const handleLogout = async () => {
@@ -82,7 +133,36 @@ export function ProfileScreen() {
     navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] });
   };
 
+  const followBackFromFollowersList = async (person: { name: string; key?: string }) => {
+    if (!user?.fullName) return;
+    await sendLocalFollowRequestByIdentity(
+      { name: user.fullName, key: user.email || String(user.id || "") },
+      { name: person.name, key: person.key }
+    );
+    const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+    const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+    setFollowersList(localNetwork.followers);
+    setFollowingList(localNetwork.following);
+    setFollowersCount(Number(localCounts.followersCount || 0));
+    setFollowingCount(Number(localCounts.followingCount || 0));
+  };
+
+  const unfollowFromFollowingList = async (person: { name: string; key?: string }) => {
+    if (!user?.fullName) return;
+    await removeLocalFollowByIdentity(
+      { name: user.fullName, key: user.email || String(user.id || "") },
+      { name: person.name, key: person.key }
+    );
+    const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+    const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
+    setFollowersList(localNetwork.followers);
+    setFollowingList(localNetwork.following);
+    setFollowersCount(Number(localCounts.followersCount || 0));
+    setFollowingCount(Number(localCounts.followingCount || 0));
+  };
+
   return (
+    <>
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
       <AppTopBar />
       {!user ? (
@@ -114,14 +194,14 @@ export function ProfileScreen() {
                   <Text style={styles.statValue}>{profileModel?.posts}</Text>
                   <Text style={styles.statLabel}>Posts</Text>
                 </View>
-                <View style={styles.statItem}>
+                <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
                   <Text style={styles.statValue}>{profileModel?.followers}</Text>
                   <Text style={styles.statLabel}>Followers</Text>
-                </View>
-                <View style={styles.statItem}>
+                </Pressable>
+                <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
                   <Text style={styles.statValue}>{profileModel?.following}</Text>
                   <Text style={styles.statLabel}>Following</Text>
-                </View>
+                </Pressable>
               </View>
             </View>
 
@@ -129,16 +209,12 @@ export function ProfileScreen() {
             <Text style={styles.roleLine}>
               {isInstructor ? "Instructor" : "Farmer"} • {user.email}
             </Text>
+            <View style={styles.savedAddressCard}>
+              <Text style={styles.savedAddressTitle}>Saved Address</Text>
+              <Text style={styles.savedAddressText}>{user.locationLabel || "No saved address yet"}</Text>
+            </View>
 
             <View style={styles.actionsRow}>
-              <Pressable
-                style={[styles.followBtn, isFollowing ? styles.followBtnActive : null]}
-                accessibilityRole="button"
-                onPress={() => setFollowing((v) => !v)}
-              >
-                <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color="#fff" />
-                <Text style={styles.followBtnText}>{isFollowing ? "Following" : "Follow"}</Text>
-              </Pressable>
               <Pressable
                 style={styles.msgBtn}
                 accessibilityRole="button"
@@ -164,12 +240,11 @@ export function ProfileScreen() {
                 <Text style={styles.studioMeta}>Upload courses & lessons</Text>
                 <Ionicons name="chevron-forward" size={18} color="#6b7b77" />
               </Pressable>
-            ) : (
-              <Pressable style={[styles.actionBtn, styles.actionBtnSecondary]} accessibilityRole="button" onPress={handleLogout}>
-                <Ionicons name="log-out-outline" size={18} color="#fff" />
-                <Text style={styles.actionBtnText}>Logout</Text>
-              </Pressable>
-            )}
+            ) : null}
+            <Pressable style={[styles.actionBtn, styles.actionBtnSecondary]} accessibilityRole="button" onPress={handleLogout}>
+              <Ionicons name="log-out-outline" size={18} color="#fff" />
+              <Text style={styles.actionBtnText}>Logout</Text>
+            </Pressable>
           </View>
 
           <View style={styles.sectionCard}>
@@ -234,6 +309,49 @@ export function ProfileScreen() {
         </>
       )}
     </ScrollView>
+    <Modal visible={!!activeListType} transparent animationType="slide" onRequestClose={() => setActiveListType(null)}>
+      <Pressable style={styles.overlay} onPress={() => setActiveListType(null)}>
+        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{activeListType === "followers" ? "Followers" : "Following"}</Text>
+            <Pressable onPress={() => setActiveListType(null)}>
+              <Ionicons name="close" size={20} color="#0f7d3d" />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetBody}>
+            {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
+              <Text style={styles.sheetEmpty}>No users found.</Text>
+            ) : (
+              (activeListType === "followers" ? followersList : followingList).map((person, idx) => (
+                <View key={`${person.key || person.name}-${idx}`} style={styles.personRow}>
+                  <Text style={styles.personName}>{person.name}</Text>
+                  {activeListType === "followers" ? (
+                    person.viewerStatus === "accepted" ? (
+                      <View style={styles.followingPill}>
+                        <Text style={styles.followingPillText}>Following</Text>
+                      </View>
+                    ) : person.viewerStatus === "pending" ? (
+                      <View style={styles.requestedPill}>
+                        <Text style={styles.requestedPillText}>Requested</Text>
+                      </View>
+                    ) : (
+                      <Pressable style={styles.followBackBtn} onPress={() => followBackFromFollowersList(person)}>
+                        <Text style={styles.followBackBtnText}>Follow Back</Text>
+                      </Pressable>
+                    )
+                  ) : (
+                    <Pressable style={styles.unfollowBtn} onPress={() => unfollowFromFollowingList(person)}>
+                      <Text style={styles.unfollowBtnText}>Unfollow</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+    </>
   );
 }
 
@@ -265,11 +383,19 @@ const styles = StyleSheet.create({
 
   fullName: { marginTop: 10, fontSize: 16, fontWeight: "900", color: "#22312d" },
   roleLine: { marginTop: 2, color: "#5b6965", fontWeight: "700" },
+  savedAddressCard: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#dce4e1",
+    borderRadius: 12,
+    backgroundColor: "#f7faf8",
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  savedAddressTitle: { color: "#1e2b27", fontWeight: "900", fontSize: 12 },
+  savedAddressText: { marginTop: 4, color: "#4c5b57", fontWeight: "700", fontSize: 12, lineHeight: 16 },
 
   actionsRow: { marginTop: 10, flexDirection: "row", gap: 8 },
-  followBtn: { flex: 1, backgroundColor: "#0a9f46", borderRadius: 14, paddingVertical: 10, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center" },
-  followBtnActive: { backgroundColor: "#0f7d3d" },
-  followBtnText: { color: "#fff", fontWeight: "900" },
   msgBtn: { flex: 1, backgroundColor: "#eef8f1", borderRadius: 14, paddingVertical: 10, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#cde9d9" },
   msgBtnText: { color: "#0f7d3d", fontWeight: "900" },
   editBtn: { width: 84, backgroundColor: "#fff", borderRadius: 14, paddingVertical: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#dce4e1" },
@@ -292,7 +418,6 @@ const styles = StyleSheet.create({
   actionBtn: { marginTop: 12, borderRadius: 14, backgroundColor: "#0a9f46", paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   actionBtnSecondary: { backgroundColor: "#111827" },
   actionBtnText: { color: "#fff", fontWeight: "900" },
-
   sectionCard: { margin: 12, borderRadius: 16, backgroundColor: "#fff", borderWidth: 1, borderColor: "#dce4e1", padding: 14 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sectionTitle: { fontWeight: "900", color: "#22312d", fontSize: 16 },
@@ -331,4 +456,39 @@ const styles = StyleSheet.create({
     gap: 8
   },
   emptyText: { color: "#6b7874", fontWeight: "700", textAlign: "center" }
+  ,
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: "70%",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 14
+  },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sheetTitle: { color: "#22312d", fontWeight: "900", fontSize: 16 },
+  sheetBody: { paddingTop: 10, gap: 10 },
+  sheetEmpty: { color: "#5b6965", fontWeight: "700" },
+  personRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#dce4e1",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: "#f7faf8"
+  },
+  personName: { color: "#22312d", fontWeight: "800" },
+  followBackBtn: { backgroundColor: "#0a9f46", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followBackBtnText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  requestedPillText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
+  followingPill: { backgroundColor: "#1f6f43", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followingPillText: { color: "#e8fff2", fontWeight: "800", fontSize: 12 },
+  unfollowBtn: { backgroundColor: "#111827", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 }
 });

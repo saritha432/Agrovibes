@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   FlatList,
   Image,
@@ -18,7 +19,27 @@ import {
 } from "react-native";
 import { ResizeMode, Video } from "expo-av";
 import { AppTopBar } from "../components/AppTopBar";
-import { fetchHomePosts, fetchHomeStories, HomePost, HomeStory } from "../services/api";
+import { useAuth } from "../auth/AuthContext";
+import {
+  createHomePostComment,
+  fetchHomePosts,
+  fetchHomeStories,
+  fetchRelationships,
+  HomePost,
+  HomeStory,
+  likeHomePost,
+  sendFollowRequest,
+  unfollowUser,
+  unlikeHomePost
+} from "../services/api";
+import {
+  addLocalCommentForPost,
+  appendLocalEngagementNotification,
+  getLocalCommentsForPost,
+  getLocalLikeStateForPosts,
+  setLocalPostLikedByIdentity
+} from "../social/localEngagementStore";
+import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 
 interface HomeScreenProps {
   refreshToken?: number;
@@ -28,6 +49,16 @@ interface HomeScreenProps {
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 const homeTopTabs = ["Reels", "Friends", "Live"] as const;
 const friendLikeNames = ["Ramesh", "Sowndherya", "AgroRoots", "Meera", "Suresh"];
+const likeActiveColor = "#16a34a";
+
+function normalizeIdentity(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
   if (!post) return [];
@@ -37,6 +68,7 @@ function postImageGallery(post: HomePost | null | undefined): string[] {
 }
 
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
+  const { token, user } = useAuth();
   const { width: windowWidth } = useWindowDimensions();
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
@@ -50,6 +82,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
+  const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
+  const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
+  const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
+  const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
+  const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const progress = useRef(new Animated.Value(0)).current;
 
   const viewabilityConfig = useMemo(
@@ -96,9 +133,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   }, [tabPosts]);
 
   const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
+  const currentUserStoryKey = useMemo(() => normalizeIdentity(user?.fullName || "You"), [user?.fullName]);
+  const ownStories = useMemo(
+    () =>
+      stories.filter((s) => {
+        const storyName = normalizeIdentity(s.userName);
+        return storyName === "you" || storyName === currentUserStoryKey;
+      }),
+    [currentUserStoryKey, stories]
+  );
   const otherStories = useMemo(
-    () => stories.filter((s) => s.userName.trim().toLowerCase() !== "you"),
-    [stories]
+    () =>
+      stories.filter((s) => {
+        const storyName = normalizeIdentity(s.userName);
+        return storyName !== "you" && storyName !== currentUserStoryKey;
+      }),
+    [currentUserStoryKey, stories]
   );
   const activeStory = playableStories[activeStoryIndex];
 
@@ -178,19 +228,160 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   useEffect(() => {
     let mounted = true;
-    fetchHomePosts()
-      .then((data) => {
+    (async () => {
+      try {
+        const data = await fetchHomePosts(token ?? null);
         if (!mounted) return;
-        setPosts(data.posts);
-      })
-      .catch(() => {
+        const localLikes = await getLocalLikeStateForPosts(
+          { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
+          data.posts.map((p) => p.id)
+        );
+        if (!mounted) return;
+        setPosts(
+          data.posts.map((p) => ({
+            ...p,
+            viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
+            likesCount: Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
+          }))
+        );
+      } catch {
         if (!mounted) return;
         setPosts([]);
-      });
+      }
+    })();
     return () => {
       mounted = false;
     };
-  }, [refreshToken]);
+  }, [refreshToken, token, user?.email, user?.fullName, user?.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!token || !user?.id) {
+        if (mounted) setRelationships({});
+        return;
+      }
+      const targetIds = [...new Set(posts.map((p) => Number(p.userId)).filter((v) => Number.isFinite(v) && v > 0 && v !== user.id))];
+      if (!targetIds.length) {
+        if (mounted) setRelationships({});
+        return;
+      }
+      try {
+        const data = await fetchRelationships(token, targetIds);
+        if (!mounted) return;
+        setRelationships(data.relationships || {});
+      } catch {
+        if (!mounted) return;
+        setRelationships({});
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [posts, token, user?.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!user?.fullName) {
+        if (mounted) setLegacyRelationshipByName({});
+        return;
+      }
+      const names = [...new Set(posts.map((p) => normalizeIdentity(p.userName)).filter(Boolean))];
+      if (!names.length) {
+        if (mounted) setLegacyRelationshipByName({});
+        return;
+      }
+      const map = await getLocalRelationshipMapByNames(
+        { name: user.fullName, key: user.email || String(user.id || "") },
+        names
+      );
+      if (!mounted) return;
+      setLegacyRelationshipByName(map);
+      setLegacyFollowStateByName((prev) => {
+        const next = { ...prev };
+        for (const name of Object.keys(map)) {
+          if (!next[name] || next[name] === "none") next[name] = map[name].viewerStatus;
+        }
+        return next;
+      });
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [posts, user?.email, user?.fullName, user?.id]);
+
+  const toggleFollow = useCallback(
+    async (targetUserId: number | null, postUserName: string, currentStatus: "none" | "pending" | "accepted") => {
+      const legacyKey = normalizeIdentity(postUserName);
+      if (currentStatus === "accepted") {
+        if (!targetUserId) {
+          await removeLocalFollowByIdentity(
+            { name: user?.fullName || "Farmer", key: user?.email || String(user?.id || "") },
+            { name: postUserName || "Farmer" }
+          );
+          setLegacyFollowStateByName((prev) => ({ ...prev, [legacyKey]: "none" }));
+          setLegacyRelationshipByName((prev) => ({
+            ...prev,
+            [legacyKey]: { ...(prev[legacyKey] || { canFollowBack: false }), viewerStatus: "none", canFollowBack: true }
+          }));
+          return;
+        }
+        if (!token || followBusyByUserId[targetUserId]) return;
+        setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
+        try {
+          await unfollowUser(token, targetUserId);
+          setRelationships((prev) => ({
+            ...prev,
+            [targetUserId]: {
+              ...(prev[targetUserId] || { reverseStatus: "none", canFollowBack: false }),
+              viewerStatus: "none",
+              canFollowBack: !!prev[targetUserId]?.canFollowBack
+            }
+          }));
+        } catch {
+          // If backend route is unavailable on hosted env, keep UI stable.
+          setRelationships((prev) => ({
+            ...prev,
+            [targetUserId]: {
+              ...(prev[targetUserId] || { reverseStatus: "none", canFollowBack: false }),
+              viewerStatus: "none",
+              canFollowBack: !!prev[targetUserId]?.canFollowBack
+            }
+          }));
+        } finally {
+          setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: false }));
+        }
+        return;
+      }
+      if (!targetUserId) {
+        await sendLocalFollowRequestByIdentity(
+          { name: user?.fullName || "Farmer", key: user?.email || String(user?.id || "") },
+          { name: postUserName || "Farmer", key: undefined }
+        );
+        setLegacyFollowStateByName((prev) => ({ ...prev, [legacyKey]: prev[legacyKey] === "accepted" ? "accepted" : "pending" }));
+        return;
+      }
+      if (!token || followBusyByUserId[targetUserId]) return;
+      setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
+      try {
+        const data = await sendFollowRequest(token, targetUserId);
+        setRelationships((prev) => ({
+          ...prev,
+          [targetUserId]: {
+            ...(prev[targetUserId] || { reverseStatus: "none", canFollowBack: false }),
+            viewerStatus: data.follow.status,
+            canFollowBack: false
+          }
+        }));
+      } catch (error: any) {
+        Alert.alert("Follow failed", error?.message || "Could not send follow request.");
+      } finally {
+        setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: false }));
+      }
+    },
+    [followBusyByUserId, token, user?.email, user?.fullName, user?.id]
+  );
 
   const openCommentsForPost = useCallback((post: HomePost) => {
     setActiveCommentsPost(post);
@@ -204,23 +395,167 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         ]
       };
     });
+    getLocalCommentsForPost(post.id).then((localRows) => {
+      if (!localRows.length) return;
+      setCommentsByPost((prev) => {
+        const seed = prev[post.id] ?? [];
+        const existing = new Set(seed.map((x) => String(x.id)));
+        const merged = [...seed, ...localRows.filter((x) => !existing.has(String(x.id)))];
+        return { ...prev, [post.id]: merged };
+      });
+    });
   }, []);
 
-  const submitComment = useCallback(() => {
+  const togglePostLike = useCallback(
+    async (post: HomePost) => {
+      const likedNow = !!post.viewerHasLiked;
+      const nextLiked = !likedNow;
+      const prevSnapshot = { liked: likedNow, count: post.likesCount };
+      const normalizedPostName = normalizeIdentity(post.userName);
+      const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
+      const postUserId = Number(post.userId);
+      const isOwnPost =
+        (postUserId > 0 && postUserId === Number(user?.id)) ||
+        (!postUserId && normalizedPostName && normalizedPostName === normalizedCurrentUserName);
+
+      const applyOptimistic = () => {
+        setPosts((prev) =>
+          prev.map((p) =>
+            p.id === post.id
+              ? { ...p, viewerHasLiked: nextLiked, likesCount: Math.max(0, p.likesCount + (nextLiked ? 1 : -1)) }
+              : p
+          )
+        );
+      };
+
+      const revert = () => {
+        setPosts((prev) =>
+          prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: prevSnapshot.liked, likesCount: prevSnapshot.count } : p))
+        );
+      };
+
+      applyOptimistic();
+      const localResult = await setLocalPostLikedByIdentity(
+        post.id,
+        { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
+        nextLiked
+      );
+      setPosts((prev) =>
+        prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: localResult.liked, likesCount: localResult.likesCount } : p))
+      );
+
+      if (!token) {
+        if (nextLiked && !isOwnPost) {
+          await appendLocalEngagementNotification({
+            type: "post_like",
+            actorName: user?.fullName || "Someone",
+            recipientDisplayName: post.userName,
+            postId: post.id,
+            isReel: !!post.videoUrl
+          });
+        }
+        return;
+      }
+
+      setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: true }));
+      try {
+        const res = nextLiked ? await likeHomePost(token, post.id) : await unlikeHomePost(token, post.id);
+        setPosts((prev) =>
+          prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: res.liked, likesCount: res.likesCount } : p))
+        );
+        await setLocalPostLikedByIdentity(
+          post.id,
+          { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
+          res.liked
+        );
+      } catch {
+        if (nextLiked && !isOwnPost) {
+          await appendLocalEngagementNotification({
+            type: "post_like",
+            actorName: user?.fullName || "Someone",
+            recipientDisplayName: post.userName,
+            postId: post.id,
+            isReel: !!post.videoUrl
+          });
+        }
+        if (!nextLiked) {
+          revert();
+          await setLocalPostLikedByIdentity(
+            post.id,
+            { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
+            true
+          );
+        }
+      } finally {
+        setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
+      }
+    },
+    [token, user?.email, user?.fullName, user?.id]
+  );
+
+  const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
     if (!text || !activeCommentsPost) return;
+    const post = activeCommentsPost;
+    const normalizedPostName = normalizeIdentity(post.userName);
+    const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
+    const postUserId = Number(post.userId);
+    const isOwnPost =
+      (postUserId > 0 && postUserId === Number(user?.id)) ||
+      (!postUserId && normalizedPostName && normalizedPostName === normalizedCurrentUserName);
+
+    if (token) {
+      try {
+        const res = await createHomePostComment(token, post.id, text);
+        await addLocalCommentForPost({
+          postId: post.id,
+          user: res.comment.user || user?.fullName || "You",
+          userKey: user?.email || String(user?.id || ""),
+          text: res.comment.text || text,
+          likes: res.comment.likes || 0
+        });
+        setCommentsByPost((prev) => {
+          const list = prev[post.id] ?? [];
+          return {
+            ...prev,
+            [post.id]: [...list, { id: res.comment.id, user: res.comment.user, text: res.comment.text, likes: res.comment.likes }]
+          };
+        });
+        setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, commentsCount: res.commentsCount } : p)));
+        setCommentDraft("");
+        return;
+      } catch {
+        // fall through to local behavior
+      }
+    }
+
     setCommentsByPost((prev) => {
-      const list = prev[activeCommentsPost.id] ?? [];
+      const list = prev[post.id] ?? [];
       return {
         ...prev,
-        [activeCommentsPost.id]: [
-          ...list,
-          { id: `c-${Date.now()}`, user: "You", text, likes: 0 }
-        ]
+        [post.id]: [...list, { id: `c-${Date.now()}`, user: user?.fullName || "You", text, likes: 0 }]
       };
     });
+    await addLocalCommentForPost({
+      postId: post.id,
+      user: user?.fullName || "You",
+      userKey: user?.email || String(user?.id || ""),
+      text,
+      likes: 0
+    });
+    setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, commentsCount: p.commentsCount + 1 } : p)));
     setCommentDraft("");
-  }, [activeCommentsPost, commentDraft]);
+    if (!isOwnPost) {
+      await appendLocalEngagementNotification({
+        type: "post_comment",
+        actorName: user?.fullName || "Someone",
+        recipientDisplayName: post.userName,
+        postId: post.id,
+        isReel: !!post.videoUrl,
+        commentExcerpt: text.length > 120 ? `${text.slice(0, 117)}...` : text
+      });
+    }
+  }, [activeCommentsPost, commentDraft, token, user?.fullName, user?.id]);
 
   const listHeader = useMemo(
     () => (
@@ -233,11 +568,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           style={styles.storyRowWrap}
           contentContainerStyle={styles.storyRow}
         >
-          <Pressable style={styles.storyItem} onPress={onOpenCreate}>
-            <View style={[styles.storyRing, styles.storyRingViewed]}>
+          <Pressable
+            style={styles.storyItem}
+            onPress={() => {
+              const ownPlayable = ownStories.find((s) => !!s.videoUrl || !!s.imageUrl);
+              if (!ownPlayable) {
+                onOpenCreate?.();
+                return;
+              }
+              const idx = playableStories.findIndex((s) => s.id === ownPlayable.id);
+              setActiveStoryIndex(Math.max(idx, 0));
+              setStoryOpen(true);
+            }}
+          >
+            <View
+              style={[
+                styles.storyRing,
+                ownStories.some((s) => !s.viewed && (!!s.videoUrl || !!s.imageUrl)) ? styles.storyRingNew : styles.storyRingViewed
+              ]}
+            >
               <View style={styles.storyInner}>
                 <View style={styles.storyAvatarFill}>
-                  <Text style={styles.storyInitial}>Y</Text>
+                  <Text style={styles.storyInitial}>{(user?.fullName || "Y").charAt(0).toUpperCase()}</Text>
                 </View>
                 <View style={styles.yourStoryPlusBadge}>
                   <Ionicons name="add" size={12} color="#fff" />
@@ -291,7 +643,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </>
     ),
-    [activeHomeTab, onOpenCreate, otherStories, playableStories]
+    [activeHomeTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
   );
 
   const renderPost = useCallback(
@@ -301,6 +653,34 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const isCarousel = !post.videoUrl && gallery.length > 1;
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = postComments.length > 0 ? postComments.length : post.commentsCount;
+      const postUserId = Number(post.userId);
+      const normalizedPostName = normalizeIdentity(post.userName);
+      const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
+      const isOwnPost = (postUserId > 0 && postUserId === Number(user?.id)) || (!postUserId && normalizedPostName && normalizedPostName === normalizedCurrentUserName);
+      const relationship = postUserId > 0 ? relationships[postUserId] : null;
+      const localRelationship = legacyRelationshipByName[normalizedPostName];
+      const legacyStatus = legacyFollowStateByName[normalizedPostName] || "none";
+      const currentFollowStatus: "none" | "pending" | "accepted" =
+        relationship?.viewerStatus === "accepted" || localRelationship?.viewerStatus === "accepted" || legacyStatus === "accepted"
+          ? "accepted"
+          : relationship?.viewerStatus === "pending" || localRelationship?.viewerStatus === "pending" || legacyStatus === "pending"
+            ? "pending"
+            : "none";
+      const followLabel = relationship?.viewerStatus === "accepted"
+        ? "Following"
+        : relationship?.viewerStatus === "pending"
+          ? "Requested"
+            : localRelationship?.viewerStatus === "accepted"
+              ? "Following"
+              : localRelationship?.viewerStatus === "pending"
+                ? "Requested"
+            : legacyStatus === "accepted"
+              ? "Following"
+              : legacyStatus === "pending"
+                ? "Requested"
+                : followBusyByUserId[postUserId]
+                  ? "..."
+                  : "Follow";
       return (
         <View style={styles.postCard}>
           <View style={styles.postTop}>
@@ -314,7 +694,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 </Text>
               </View>
             </View>
-            <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+            <View style={styles.postTopActions}>
+              {!isOwnPost ? (
+                <Pressable
+                  onPress={() => toggleFollow(postUserId > 0 ? postUserId : null, post.userName, currentFollowStatus)}
+                  style={styles.followChip}
+                  disabled={(postUserId > 0 && !!followBusyByUserId[postUserId]) || currentFollowStatus === "pending"}
+                >
+                  <Text style={styles.followChipText}>{followLabel}</Text>
+                </Pressable>
+              ) : null}
+              <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+            </View>
           </View>
 
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
@@ -364,8 +755,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
           <View style={styles.postActionsRow}>
             <View style={styles.postActionsLeft}>
-              <Pressable style={styles.postActionIconBtn}>
-                <Ionicons name="heart-outline" size={25} color="#111" />
+              <Pressable
+                style={styles.postActionIconBtn}
+                onPress={() => togglePostLike(post)}
+                disabled={!!likeBusyByPostId[post.id]}
+              >
+                <Ionicons
+                  name={post.viewerHasLiked ? "heart" : "heart-outline"}
+                  size={25}
+                  color={post.viewerHasLiked ? likeActiveColor : "#111"}
+                />
               </Pressable>
               <Pressable style={styles.postActionIconBtn} onPress={() => openCommentsForPost(post)}>
                 <Ionicons name="chatbubble-outline" size={23} color="#111" />
@@ -394,7 +793,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       );
     },
-    [activeHomeTab, commentsByPost, feedMediaWidth, openCommentsForPost, playingPostId]
+    [
+      activeHomeTab,
+      commentsByPost,
+      feedMediaWidth,
+      followBusyByUserId,
+      legacyFollowStateByName,
+      legacyRelationshipByName,
+      likeActiveColor,
+      likeBusyByPostId,
+      openCommentsForPost,
+      playingPostId,
+      relationships,
+      toggleFollow,
+      togglePostLike,
+      user?.fullName,
+      user?.id
+    ]
   );
 
   return (
@@ -679,6 +1094,16 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8
   },
+  postTopActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  followChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#0f7d3d",
+    backgroundColor: "#eef8f1",
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  followChipText: { color: "#0f7d3d", fontWeight: "800", fontSize: 12 },
   postUserRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   userAvatar: {
     width: 34,

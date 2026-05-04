@@ -82,6 +82,10 @@ export function InitialSetupScreen() {
     navigation.reset({ index: 0, routes: [{ name: "AuthChoice" }] });
   };
 
+  const openLogin = () => {
+    navigation.reset({ index: 0, routes: [{ name: "AuthChoice", params: { initialMode: "login" } }] });
+  };
+
   const pauseAutoplay = React.useCallback((ms = 5000) => {
     pauseUntilRef.current = Date.now() + ms;
   }, []);
@@ -293,7 +297,7 @@ export function InitialSetupScreen() {
           ))}
         </View>
         <View style={styles.actionRow}>
-          <Pressable style={styles.signInBtn} onPress={finish}>
+          <Pressable style={styles.signInBtn} onPress={openLogin}>
             <Text style={styles.signInText}>{t("login")}</Text>
           </Pressable>
           <Pressable style={styles.getStartedBtn} onPress={finish}>

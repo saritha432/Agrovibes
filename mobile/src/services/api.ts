@@ -133,6 +133,7 @@ export interface HomeStory {
 
 export interface HomePost {
   id: number;
+  userId?: number | null;
   userName: string;
   location: string;
   caption: string;
@@ -144,6 +145,39 @@ export interface HomePost {
   imageUrls?: string[];
   thumbnailUrl?: string;
   createdAt: string;
+  /** Present when posts are loaded with an auth token (server-tracked like). */
+  viewerHasLiked?: boolean;
+}
+
+export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
+
+export interface SocialRelationship {
+  viewerStatus: FollowStatus;
+  reverseStatus: FollowStatus;
+  canFollowBack: boolean;
+}
+
+export interface SocialNotificationItem {
+  id: number;
+  type: "follow_request" | "follow_accept";
+  isRead: boolean;
+  createdAt: string;
+  followId: number;
+  actorId: number;
+  actorName: string;
+  followStatus: FollowStatus;
+}
+
+export interface SocialPostActivityNotification {
+  id: number;
+  type: "post_like" | "post_comment";
+  isRead: boolean;
+  createdAt: string;
+  actorId: number;
+  actorName: string;
+  postId: number | null;
+  postIsReel?: boolean;
+  commentExcerpt?: string | null;
 }
 
 export type CourseLevel = "Beginner" | "Intermediate" | "Advanced";
@@ -229,12 +263,37 @@ export async function createHomeStory(payload: { userName: string; district: str
   return (await response.json()) as { story: HomeStory };
 }
 
-export async function fetchHomePosts() {
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts`);
+export async function fetchHomePosts(token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
   return (await response.json()) as { posts: HomePost[] };
+}
+
+export async function likeHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/like`, token, {
+    method: "POST"
+  })) as { liked: boolean; likesCount: number };
+}
+
+export async function unlikeHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unlike`, token, {
+    method: "POST"
+  })) as { liked: boolean; likesCount: number };
+}
+
+export async function createHomePostComment(token: string, postId: number, text: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  })) as {
+    comment: { id: string; user: string; text: string; likes: number; createdAt?: string };
+    commentsCount: number;
+  };
 }
 
 export async function fetchLearnCourses() {
@@ -296,6 +355,7 @@ export async function updateCourse(token: string, courseId: string, payload: Cou
 }
 
 export async function createHomePost(payload: {
+  userId?: number;
   userName: string;
   location: string;
   caption: string;
@@ -313,6 +373,77 @@ export async function createHomePost(payload: {
     throw new Error("Failed to create post");
   }
   return (await response.json()) as { post: HomePost };
+}
+
+export async function sendFollowRequest(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/request`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId })
+  })) as {
+    follow: { id: number; status: FollowStatus; followerId: number; followingId: number };
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
+export async function unfollowUser(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/unfollow`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId })
+  })) as {
+    ok: boolean;
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
+export async function respondToFollowRequest(token: string, followId: number, action: "accept" | "decline") {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/${followId}/respond`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action })
+  })) as {
+    follow: { id: number; status: FollowStatus; followerId: number; followingId: number };
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
+export async function fetchProfileStats(token: string, userId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/profile-stats/${encodeURIComponent(String(userId))}`, token)) as {
+    followersCount: number;
+    followingCount: number;
+    viewerStatus: FollowStatus;
+    reverseStatus: FollowStatus;
+    canFollowBack: boolean;
+  };
+}
+
+export async function fetchSocialNotifications(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications`, token)) as {
+    followRequests: SocialNotificationItem[];
+    followAccepted: SocialNotificationItem[];
+    postLikes?: SocialPostActivityNotification[];
+    postComments?: SocialPostActivityNotification[];
+    unreadCount: number;
+  };
+}
+
+export async function markSocialNotificationRead(token: string, notificationId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications/${encodeURIComponent(String(notificationId))}/read`, token, {
+    method: "POST"
+  })) as { ok: boolean };
+}
+
+export async function fetchRelationships(token: string, userIds: number[]) {
+  const cleaned = [...new Set(userIds.filter((v) => Number.isFinite(v) && v > 0))];
+  if (!cleaned.length) return { relationships: {} as Record<number, SocialRelationship> };
+  const qs = cleaned.join(",");
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/relationships?userIds=${encodeURIComponent(qs)}`, token)) as {
+    relationships: Record<number, SocialRelationship>;
+  };
 }
 
 async function signCloudinaryUpload(folder = "agrovibes") {

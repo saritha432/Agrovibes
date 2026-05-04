@@ -599,6 +599,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           await validateVideoSize(v.uri, 80);
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           await createHomePost({
+            userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
             location: user?.locationLabel?.trim() || "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
@@ -620,6 +621,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             return;
           }
           await createHomePost({
+            userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
             location: user?.locationLabel?.trim() || "Unknown",
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
