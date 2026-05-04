@@ -3,7 +3,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
-import { fetchSocialNotifications, markSocialNotificationRead, respondToFollowRequest, sendFollowRequest } from "../services/api";
+import {
+  fetchRelationships,
+  fetchSocialNotifications,
+  markSocialNotificationRead,
+  respondToFollowRequest,
+  sendFollowRequest
+} from "../services/api";
 import {
   getLocalFollowNotificationsByIdentity,
   getLocalRelationshipMapByNames,
@@ -22,6 +28,10 @@ export function AppTopBar() {
   const [declined, setDeclined] = React.useState<any[]>([]);
   const [followBackStatusByKey, setFollowBackStatusByKey] = React.useState<Record<string, "none" | "pending" | "accepted">>({});
   const [followBackQueue, setFollowBackQueue] = React.useState<any[]>([]);
+  const followBackQueueRef = React.useRef<any[]>([]);
+  React.useEffect(() => {
+    followBackQueueRef.current = followBackQueue;
+  }, [followBackQueue]);
   const [followBackPromptByKey, setFollowBackPromptByKey] = React.useState<Record<string, boolean>>({});
   const [postLikes, setPostLikes] = React.useState<any[]>([]);
   const [postComments, setPostComments] = React.useState<any[]>([]);
@@ -79,19 +89,61 @@ export function AppTopBar() {
       }))
     ]);
 
-    const names = mergedPending.map((n) => String(n.actorName || "")).filter(Boolean);
+    const fbQueue = followBackQueueRef.current;
+    const nameSet = new Set<string>();
+    for (const n of mergedPending) {
+      const nm = String(n.actorName || "").trim();
+      if (nm) nameSet.add(nm);
+    }
+    for (const n of fbQueue) {
+      const nm = String(n.actorName || "").trim();
+      if (nm) nameSet.add(nm);
+    }
+    const names = [...nameSet];
     if (names.length && user?.fullName) {
       const localMap = await getLocalRelationshipMapByNames(
         { name: user.fullName, key: user.email || String(user.id || "") },
         names
       );
       const next: Record<string, "none" | "pending" | "accepted"> = {};
+      const actorIds = [...new Set([...mergedPending, ...fbQueue].map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))];
+      let remoteRel: Record<number, { viewerStatus: string }> = {};
+      if (token && actorIds.length) {
+        try {
+          const data = await fetchRelationships(token, actorIds);
+          remoteRel = data.relationships || {};
+        } catch {
+          /* ignore */
+        }
+      }
       for (const n of mergedPending) {
         const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-        const local = localMap[String(n.actorName || "").toLowerCase()];
-        next[key] = local?.viewerStatus || "none";
+        const nm = String(n.actorName || "").toLowerCase();
+        let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
+        if (n.actorId && remoteRel[Number(n.actorId)]?.viewerStatus) {
+          const rs = String(remoteRel[Number(n.actorId)].viewerStatus) as "none" | "pending" | "accepted";
+          if (rs === "accepted" || rs === "pending") st = rs;
+        }
+        next[key] = st;
+      }
+      for (const n of fbQueue) {
+        const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
+        const nm = String(n.actorName || "").toLowerCase();
+        let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
+        if (n.actorId && remoteRel[Number(n.actorId)]?.viewerStatus) {
+          const rs = String(remoteRel[Number(n.actorId)].viewerStatus) as "none" | "pending" | "accepted";
+          if (rs === "accepted" || rs === "pending") st = rs;
+        }
+        next[key] = st;
       }
       setFollowBackStatusByKey(next);
+      setFollowBackQueue((prev) =>
+        prev.filter((n) => {
+          const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
+          const st = next[key] || "none";
+          return st === "none";
+        })
+      );
     }
   }, [token, user?.email, user?.fullName, user?.id]);
 
@@ -272,6 +324,31 @@ export function AppTopBar() {
                           onPress={async () => {
                             await onRespond(n, "accept");
                             const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
+                            let viewerSt: "none" | "pending" | "accepted" = "none";
+                            if (token && n.actorId && user?.fullName) {
+                              try {
+                                const data = await fetchRelationships(token, [Number(n.actorId)]);
+                                const rs = data.relationships?.[Number(n.actorId)]?.viewerStatus;
+                                if (rs === "accepted" || rs === "pending" || rs === "declined" || rs === "none") {
+                                  viewerSt = rs === "declined" ? "none" : rs;
+                                }
+                              } catch {
+                                /* use local */
+                              }
+                            }
+                            if (viewerSt !== "accepted" && viewerSt !== "pending" && user?.fullName) {
+                              const lm = await getLocalRelationshipMapByNames(
+                                { name: user.fullName, key: user.email || String(user.id || "") },
+                                [String(n.actorName || "")]
+                              );
+                              const ls = lm[String(n.actorName || "").toLowerCase()]?.viewerStatus;
+                              if (ls === "accepted" || ls === "pending") viewerSt = ls;
+                            }
+                            setFollowBackStatusByKey((prev) => ({ ...prev, [key]: viewerSt }));
+                            if (viewerSt === "accepted" || viewerSt === "pending") {
+                              await loadNotifications();
+                              return;
+                            }
                             setFollowBackPromptByKey((prev) => ({ ...prev, [key]: true }));
                             setFollowBackQueue((prev) => {
                               if (prev.some((x) => (x.actorId ? `id:${x.actorId}` : `name:${String(x.actorName || "").toLowerCase()}`) === key)) return prev;
@@ -296,11 +373,7 @@ export function AppTopBar() {
                     <View key={item.key} style={styles.row}>
                       <Text style={styles.rowText}>{n.actorName} is now following you.</Text>
                       <View style={styles.rowActions}>
-                        {showPrompt ? (
-                          <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
-                            <Text style={styles.followBackText}>Follow Back</Text>
-                          </Pressable>
-                        ) : status === "accepted" ? (
+                        {status === "accepted" ? (
                           <View style={styles.followingPill}>
                             <Text style={styles.followingText}>Following</Text>
                           </View>
@@ -308,6 +381,10 @@ export function AppTopBar() {
                           <View style={styles.requestedPill}>
                             <Text style={styles.requestedText}>Requested</Text>
                           </View>
+                        ) : showPrompt ? (
+                          <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
+                            <Text style={styles.followBackText}>Follow Back</Text>
+                          </Pressable>
                         ) : (
                           <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
                             <Text style={styles.followBackText}>Follow Back</Text>
