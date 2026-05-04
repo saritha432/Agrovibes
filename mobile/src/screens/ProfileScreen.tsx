@@ -1,20 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
-import {
-  fetchHomePosts,
-  fetchProfileStats,
-  HomePost,
-  fetchSocialNotifications
-} from "../services/api";
+import { fetchHomePosts, fetchProfileStats, HomePost } from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
   getLocalFollowNetworkByIdentity,
-  getLocalFollowNotificationsByIdentity,
   removeLocalFollowByIdentity,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
@@ -63,42 +57,39 @@ export function ProfileScreen() {
     };
   }, [token]);
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!token || !user?.id) return;
+  const refreshMergedFollowStats = useCallback(async () => {
+    if (!user?.fullName) {
+      setFollowersCount(0);
+      setFollowingCount(0);
+      setFollowersList([]);
+      setFollowingList([]);
+      return;
+    }
+    const identity = { name: user.fullName, key: user.email || String(user.id || "") };
+    const [localCounts, localNetwork] = await Promise.all([
+      getLocalFollowCountsByIdentity(identity),
+      getLocalFollowNetworkByIdentity(identity)
+    ]);
+    let apiFollowers = 0;
+    let apiFollowing = 0;
+    if (token && user?.id) {
       try {
-        const [stats, notifications] = await Promise.all([
-          fetchProfileStats(token, user.id),
-          fetchSocialNotifications(token)
-        ]);
-        const [localNotifs, localCounts] = await Promise.all([
-          getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id) }),
-          getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
-        ]);
-        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-        if (!mounted) return;
-        setFollowersCount(Number(stats.followersCount || 0) + Number(localCounts.followersCount || 0));
-        setFollowingCount(Number(stats.followingCount || 0) + Number(localCounts.followingCount || 0));
-        setFollowersList(localNetwork.followers);
-        setFollowingList(localNetwork.following);
+        const stats = await fetchProfileStats(token, user.id);
+        apiFollowers = Number(stats.followersCount || 0);
+        apiFollowing = Number(stats.followingCount || 0);
       } catch {
-        if (!mounted) return;
-        const [localNotifs, localCounts] = await Promise.all([
-          getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id) }),
-          getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) })
-        ]);
-        const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-        setFollowersCount(Number(localCounts.followersCount || 0));
-        setFollowingCount(Number(localCounts.followingCount || 0));
-        setFollowersList(localNetwork.followers);
-        setFollowingList(localNetwork.following);
+        // Remote API may omit social routes or be unreachable — local counts still apply.
       }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [token, user?.id]);
+    }
+    setFollowersCount(apiFollowers + Number(localCounts.followersCount || 0));
+    setFollowingCount(apiFollowing + Number(localCounts.followingCount || 0));
+    setFollowersList(localNetwork.followers);
+    setFollowingList(localNetwork.following);
+  }, [token, user?.email, user?.fullName, user?.id]);
+
+  useEffect(() => {
+    void refreshMergedFollowStats();
+  }, [refreshMergedFollowStats]);
 
   const userPosts = useMemo(() => {
     if (!user) return [];
@@ -139,12 +130,7 @@ export function ProfileScreen() {
       { name: user.fullName, key: user.email || String(user.id || "") },
       { name: person.name, key: person.key }
     );
-    const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    setFollowersList(localNetwork.followers);
-    setFollowingList(localNetwork.following);
-    setFollowersCount(Number(localCounts.followersCount || 0));
-    setFollowingCount(Number(localCounts.followingCount || 0));
+    await refreshMergedFollowStats();
   };
 
   const unfollowFromFollowingList = async (person: { name: string; key?: string }) => {
@@ -153,12 +139,7 @@ export function ProfileScreen() {
       { name: user.fullName, key: user.email || String(user.id || "") },
       { name: person.name, key: person.key }
     );
-    const localNetwork = await getLocalFollowNetworkByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    const localCounts = await getLocalFollowCountsByIdentity({ name: user.fullName, key: user.email || String(user.id) });
-    setFollowersList(localNetwork.followers);
-    setFollowingList(localNetwork.following);
-    setFollowersCount(Number(localCounts.followersCount || 0));
-    setFollowingCount(Number(localCounts.followingCount || 0));
+    await refreshMergedFollowStats();
   };
 
   return (
