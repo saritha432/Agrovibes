@@ -176,10 +176,20 @@ async function ensureHomePostCommentsTable() {
 
 async function resolveHomePostAuthorUserId(postRow) {
   const direct = postRow.user_id != null ? Number(postRow.user_id) : null;
-  if (direct && Number.isFinite(direct)) return direct;
+  if (direct && Number.isFinite(direct) && direct > 0) return direct;
   const name = String(postRow.user_name || "").trim();
   if (!name) return null;
-  const r = await query(`SELECT id FROM learn_users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) LIMIT 1`, [name]);
+  let r = await query(
+    `
+    SELECT id FROM learn_users
+    WHERE LOWER(TRIM(REGEXP_REPLACE(full_name, '\\s+', ' ', 'g')))
+      = LOWER(TRIM(REGEXP_REPLACE($1, '\\s+', ' ', 'g')))
+    LIMIT 1
+    `,
+    [name]
+  );
+  if (r.rows[0]) return Number(r.rows[0].id);
+  r = await query(`SELECT id FROM learn_users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) LIMIT 1`, [name]);
   return r.rows[0] ? Number(r.rows[0].id) : null;
 }
 
@@ -2104,6 +2114,46 @@ router.post("/v1/home/posts/:postId/unlike", authRequired, async (req, res) => {
     res.json({ liked: false, likesCount: Number(cur.rows[0]?.likesCount || 0) });
   } catch (error) {
     res.status(500).json({ message: "Failed to unlike post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/:postId/comments", async (req, res) => {
+  try {
+    await ensureHomePostCommentsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId)) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const postCheck = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!postCheck.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        c.id::text AS id,
+        c.body AS text,
+        u.full_name AS "user",
+        c.created_at AS "createdAt"
+      FROM home_post_comments c
+      JOIN learn_users u ON u.id = c.user_id
+      WHERE c.post_id = $1
+      ORDER BY c.created_at ASC
+      `,
+      [postId]
+    );
+    res.json({
+      comments: result.rows.map((row) => ({
+        id: String(row.id),
+        user: row.user,
+        text: row.text,
+        likes: 0
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load comments", error: error.message });
   }
 });
 

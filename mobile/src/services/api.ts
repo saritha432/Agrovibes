@@ -285,6 +285,18 @@ export async function unlikeHomePost(token: string, postId: number) {
   })) as { liked: boolean; likesCount: number };
 }
 
+export async function fetchHomePostComments(postId: number, token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to load comments");
+  }
+  return (await response.json()) as {
+    comments: { id: string; user: string; text: string; likes: number }[];
+  };
+}
+
 export async function createHomePostComment(token: string, postId: number, text: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, token, {
     method: "POST",

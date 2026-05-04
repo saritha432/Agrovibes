@@ -25,6 +25,7 @@ import { AppTopBar } from "../components/AppTopBar";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomePostComment,
+  fetchHomePostComments,
   fetchHomePosts,
   fetchHomeStories,
   fetchRelationships,
@@ -69,6 +70,17 @@ function postImageGallery(post: HomePost | null | undefined): string[] {
   if (post.imageUrls?.length) return post.imageUrls;
   if (post.imageUrl) return [post.imageUrl];
   return [];
+}
+
+type HomeCommentRow = { id: string; user: string; text: string; likes: number };
+
+function mergeRemoteAndLocalComments(remote: HomeCommentRow[], local: HomeCommentRow[]): HomeCommentRow[] {
+  const remoteIds = new Set(remote.map((c) => String(c.id)));
+  const merged = [...remote];
+  for (const c of local) {
+    if (!remoteIds.has(String(c.id))) merged.push(c);
+  }
+  return merged;
 }
 
 /** Fit video inside a box without cropping (letterbox if needed). */
@@ -214,6 +226,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
+  const commentsFetchSeqRef = useRef(0);
 
   const viewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 65, minimumViewTime: 200 }),
@@ -514,28 +527,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [followBusyByUserId, token, user?.email, user?.fullName, user?.id]
   );
 
-  const openCommentsForPost = useCallback((post: HomePost) => {
-    setActiveCommentsPost(post);
-    setCommentsByPost((prev) => {
-      if (prev[post.id]) return prev;
-      return {
-        ...prev,
-        [post.id]: [
-          { id: `seed-${post.id}-1`, user: "sowndherya", text: "Super post 👏", likes: 12 },
-          { id: `seed-${post.id}-2`, user: "AgroRoots", text: "Very useful info!", likes: 8 }
-        ]
-      };
-    });
-    getLocalCommentsForPost(post.id).then((localRows) => {
-      if (!localRows.length) return;
-      setCommentsByPost((prev) => {
-        const seed = prev[post.id] ?? [];
-        const existing = new Set(seed.map((x) => String(x.id)));
-        const merged = [...seed, ...localRows.filter((x) => !existing.has(String(x.id)))];
-        return { ...prev, [post.id]: merged };
-      });
-    });
-  }, []);
+  const openCommentsForPost = useCallback(
+    (post: HomePost) => {
+      setActiveCommentsPost(post);
+      const reqKey = ++commentsFetchSeqRef.current;
+      void (async () => {
+        let remote: HomeCommentRow[] = [];
+        try {
+          const data = await fetchHomePostComments(post.id, token ?? null);
+          remote = data.comments ?? [];
+        } catch {
+          remote = [];
+        }
+        if (reqKey !== commentsFetchSeqRef.current) return;
+        const localRows = await getLocalCommentsForPost(post.id);
+        if (reqKey !== commentsFetchSeqRef.current) return;
+        const merged = mergeRemoteAndLocalComments(remote, localRows);
+        setCommentsByPost((prev) => ({ ...prev, [post.id]: merged }));
+      })();
+    },
+    [token]
+  );
 
   const togglePostLike = useCallback(
     async (post: HomePost) => {
@@ -638,19 +650,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     if (token) {
       try {
         const res = await createHomePostComment(token, post.id, text);
-        await addLocalCommentForPost({
-          postId: post.id,
+        const row: HomeCommentRow = {
+          id: String(res.comment.id),
           user: res.comment.user || user?.fullName || "You",
-          userKey: user?.email || String(user?.id || ""),
           text: res.comment.text || text,
-          likes: res.comment.likes || 0
-        });
+          likes: res.comment.likes ?? 0
+        };
         setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
-          return {
-            ...prev,
-            [post.id]: [...list, { id: res.comment.id, user: res.comment.user, text: res.comment.text, likes: res.comment.likes }]
-          };
+          const withoutDup = list.filter((c) => String(c.id) !== row.id);
+          return { ...prev, [post.id]: [...withoutDup, row] };
         });
         setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, commentsCount: res.commentsCount } : p)));
         setCommentDraft("");
@@ -812,7 +821,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                     ? "..."
                     : "Follow";
       const postComments = commentsByPost[post.id] ?? [];
-      const shownCommentsCount = postComments.length > 0 ? postComments.length : post.commentsCount;
+      const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const nextPost = tabPosts[index + 1];
       const thumbUri = post.thumbnailUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
       const musicLabel =
@@ -876,7 +885,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Ionicons
                   name={post.viewerHasLiked ? "heart" : "heart-outline"}
                   size={30}
-                  color={REEL_LIKE_COLOR}
+                  color={post.viewerHasLiked ? likeActiveColor : REEL_LIKE_COLOR}
                 />
                 <Text style={styles.reelActionCount}>{post.likesCount}</Text>
               </Pressable>
@@ -927,7 +936,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const gallery = postImageGallery(post);
       const isCarousel = !post.videoUrl && gallery.length > 1;
       const postComments = commentsByPost[post.id] ?? [];
-      const shownCommentsCount = postComments.length > 0 ? postComments.length : post.commentsCount;
+      const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
