@@ -26,6 +26,7 @@ import {
   getLocalFollowCountsByIdentity,
   getLocalFollowEdgesForServerSync,
   getLocalFollowNetworkByIdentity,
+  getLocalFollowNotificationsByIdentity,
   removeLocalFollowByIdentity,
   removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity

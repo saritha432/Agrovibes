@@ -122,6 +122,7 @@ export interface CommunityQuestion {
 
 export interface HomeStory {
   id: number;
+  userId?: number | null;
   userName: string;
   district: string;
   avatarLabel: string;
@@ -129,6 +130,7 @@ export interface HomeStory {
   viewed: boolean;
   videoUrl?: string | null;
   imageUrl?: string | null;
+  createdAt?: string;
 }
 
 export interface HomePost {
@@ -186,7 +188,7 @@ export interface SocialNotificationItem {
 
 export interface SocialPostActivityNotification {
   id: number;
-  type: "post_like" | "post_comment";
+  type: "post_like" | "post_comment" | "comment_reply";
   isRead: boolean;
   createdAt: string;
   actorId: number;
@@ -279,6 +281,18 @@ export async function createHomeStory(payload: { userName: string; district: str
   return (await response.json()) as { story: HomeStory };
 }
 
+export async function deleteHomeStory(storyId: number, userName: string) {
+  const response = await fetch(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userName })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to delete story");
+  }
+  return (await response.json()) as { ok: true; deletedId: number };
+}
+
 export async function fetchHomePosts(token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -301,13 +315,34 @@ export async function unlikeHomePost(token: string, postId: number) {
   })) as { liked: boolean; likesCount: number };
 }
 
-export async function createHomePostComment(token: string, postId: number, text: string) {
+export async function fetchHomePostComments(postId: number, token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to load comments");
+  }
+  return (await response.json()) as {
+    comments: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string }[];
+  };
+}
+
+export async function createHomePostComment(
+  token: string,
+  postId: number,
+  text: string,
+  options?: { parentCommentId?: number | null }
+) {
+  const body: { text: string; parentCommentId?: number } = { text };
+  if (options?.parentCommentId != null && Number.isFinite(options.parentCommentId) && options.parentCommentId > 0) {
+    body.parentCommentId = Number(options.parentCommentId);
+  }
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
+    body: JSON.stringify(body)
   })) as {
-    comment: { id: string; user: string; text: string; likes: number; createdAt?: string };
+    comment: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string };
     commentsCount: number;
   };
 }

@@ -172,9 +172,13 @@ async function ensureHomePostCommentsTable() {
     )
     `
   );
+  await query(
+    `ALTER TABLE home_post_comments ADD COLUMN IF NOT EXISTS parent_comment_id INT REFERENCES home_post_comments(id) ON DELETE CASCADE`
+  );
   homePostCommentsTableReady = true;
 }
 
+<<<<<<< HEAD
 async function ensureDirectMessagesTable() {
   if (directMessagesTableReady) return;
   await ensureLearnUsersTable();
@@ -194,13 +198,128 @@ async function ensureDirectMessagesTable() {
   directMessagesTableReady = true;
 }
 
+=======
+function isLegacySyntheticPostAuthorEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  return e.startsWith("legacy_post_") && e.endsWith("@phone.agrovibes");
+}
+
+/**
+ * Resolves which learn_users row should receive like/comment notifications for a home post.
+ * Prefers real accounts over legacy backfill placeholders; updates home_posts.user_id when remapping.
+ */
+>>>>>>> c0e32aa23da51613b888a66fc3b1b11bad9c18b7
 async function resolveHomePostAuthorUserId(postRow) {
-  const direct = postRow.user_id != null ? Number(postRow.user_id) : null;
-  if (direct && Number.isFinite(direct)) return direct;
   const name = String(postRow.user_name || "").trim();
-  if (!name) return null;
-  const r = await query(`SELECT id FROM learn_users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) LIMIT 1`, [name]);
-  return r.rows[0] ? Number(r.rows[0].id) : null;
+  const postId = postRow.id != null ? Number(postRow.id) : null;
+
+  const persistAuthor = async (uid) => {
+    if (uid && Number.isFinite(postId) && postId > 0) {
+      await query(`UPDATE home_posts SET user_id = $1 WHERE id = $2`, [uid, postId]);
+    }
+  };
+
+  const direct = postRow.user_id != null ? Number(postRow.user_id) : null;
+  if (direct && Number.isFinite(direct) && direct > 0) {
+    const ur = await query(`SELECT id, email FROM learn_users WHERE id = $1 LIMIT 1`, [direct]);
+    if (ur.rows[0]) {
+      const email = String(ur.rows[0].email || "");
+      if (!isLegacySyntheticPostAuthorEmail(email)) return direct;
+    }
+  }
+
+  if (name) {
+    const nameMatchSql = `
+      LOWER(TRIM(REGEXP_REPLACE(COALESCE(full_name, ''), '\\s+', ' ', 'g')))
+      = LOWER(TRIM(REGEXP_REPLACE($1::text, '\\s+', ' ', 'g')))
+    `;
+    let r = await query(
+      `
+      SELECT id FROM learn_users
+      WHERE ${nameMatchSql}
+        AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [name]
+    );
+    if (!r.rows[0]) {
+      r = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE ${nameMatchSql}
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [name]
+      );
+    }
+    if (r.rows[0]) {
+      const uid = Number(r.rows[0].id);
+      await persistAuthor(uid);
+      return uid;
+    }
+
+    const slug = slugUsernameFromName(name);
+    if (slug) {
+      let r2 = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+          AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [slug]
+      );
+      if (!r2.rows[0]) {
+        r2 = await query(
+          `
+          SELECT id FROM learn_users
+          WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+          ORDER BY id ASC
+          LIMIT 1
+          `,
+          [slug]
+        );
+      }
+      if (r2.rows[0]) {
+        const uid = Number(r2.rows[0].id);
+        await persistAuthor(uid);
+        return uid;
+      }
+    }
+
+    let r3 = await query(
+      `
+      SELECT id FROM learn_users
+      WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [name]
+    );
+    if (!r3.rows[0]) {
+      r3 = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [name]
+      );
+    }
+    if (r3.rows[0]) {
+      const uid = Number(r3.rows[0].id);
+      await persistAuthor(uid);
+      return uid;
+    }
+  }
+
+  if (direct && Number.isFinite(direct) && direct > 0) return direct;
+  return null;
 }
 
 function normalizeIndiaPhone(rawPhone) {
@@ -1710,7 +1829,9 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
     const followAccepted = result.rows.filter((r) => r.type === "follow_accept" && !r.isRead);
     const postLikes = result.rows.filter((r) => r.type === "post_like" && !r.isRead);
-    const postComments = result.rows.filter((r) => r.type === "post_comment" && !r.isRead);
+    const postComments = result.rows.filter(
+      (r) => (r.type === "post_comment" || r.type === "comment_reply") && !r.isRead
+    );
     res.json({
       followRequests,
       followAccepted,
@@ -2049,6 +2170,33 @@ router.post("/v1/home/stories", async (req, res) => {
   }
 });
 
+router.delete("/v1/home/stories/:storyId", async (req, res) => {
+  try {
+    await ensureHomeStoriesTable();
+    const storyId = Number(req.params.storyId);
+    const userName = String((req.body || {}).userName || "").trim();
+    if (!Number.isFinite(storyId) || storyId <= 0 || !userName) {
+      res.status(400).json({ message: "Valid storyId and userName are required" });
+      return;
+    }
+    const deleted = await query(
+      `
+      DELETE FROM home_stories
+      WHERE id = $1 AND LOWER(TRIM(user_name)) = LOWER(TRIM($2))
+      RETURNING id
+      `,
+      [storyId, userName]
+    );
+    if (!deleted.rows[0]) {
+      res.status(404).json({ message: "Story not found or not owned by user" });
+      return;
+    }
+    res.json({ ok: true, deletedId: Number(deleted.rows[0].id) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete story", error: error.message });
+  }
+});
+
 router.get("/v1/home/posts", authOptional, async (req, res) => {
   try {
     await backfillHomePostUserIds();
@@ -2250,6 +2398,49 @@ router.post("/v1/home/posts/:postId/unlike", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/home/posts/:postId/comments", async (req, res) => {
+  try {
+    await ensureHomePostCommentsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId)) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const postCheck = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!postCheck.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        c.id::text AS id,
+        c.body AS text,
+        u.full_name AS "user",
+        c.created_at AS "createdAt",
+        c.parent_comment_id AS "parentCommentId"
+      FROM home_post_comments c
+      JOIN learn_users u ON u.id = c.user_id
+      WHERE c.post_id = $1
+      ORDER BY c.created_at ASC
+      `,
+      [postId]
+    );
+    res.json({
+      comments: result.rows.map((row) => ({
+        id: String(row.id),
+        user: row.user,
+        text: row.text,
+        likes: 0,
+        createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
+        parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load comments", error: error.message });
+  }
+});
+
 router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) => {
   try {
     await ensureHomePostCommentsTable();
@@ -2261,30 +2452,68 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
       return;
     }
     const actorUserId = Number(req.user.userId);
+    const parentRaw = (req.body || {}).parentCommentId;
+    const parentCommentPk =
+      parentRaw != null && parentRaw !== "" && Number.isFinite(Number(parentRaw)) && Number(parentRaw) > 0
+        ? Number(parentRaw)
+        : null;
+
     const postRes = await query(`SELECT id, user_id, user_name FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
     if (!postRes.rows[0]) {
       res.status(404).json({ message: "Post not found" });
       return;
     }
     const post = postRes.rows[0];
+
+    if (parentCommentPk) {
+      const parentRow = await query(
+        `SELECT id, post_id, user_id FROM home_post_comments WHERE id = $1 LIMIT 1`,
+        [parentCommentPk]
+      );
+      if (!parentRow.rows[0] || Number(parentRow.rows[0].post_id) !== postId) {
+        res.status(400).json({ message: "Invalid parent comment for this post" });
+        return;
+      }
+    }
+
     const excerpt = body.length > 160 ? `${body.slice(0, 157)}...` : body;
     const ins = await query(
       `
-      INSERT INTO home_post_comments (post_id, user_id, body)
-      VALUES ($1, $2, $3)
-      RETURNING id, body, created_at AS "createdAt"
+      INSERT INTO home_post_comments (post_id, user_id, body, parent_comment_id)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, body, created_at AS "createdAt", parent_comment_id AS "parentCommentId"
       `,
-      [postId, actorUserId, body]
+      [postId, actorUserId, body, parentCommentPk]
     );
     await query(`UPDATE home_posts SET comments_count = comments_count + 1 WHERE id = $1`, [postId]);
+
     const authorUserId = await resolveHomePostAuthorUserId(post);
-    if (authorUserId && authorUserId !== actorUserId) {
+    let parentCommentAuthorId = null;
+    if (parentCommentPk) {
+      const pu = await query(`SELECT user_id FROM home_post_comments WHERE id = $1 LIMIT 1`, [parentCommentPk]);
+      parentCommentAuthorId = pu.rows[0] != null ? Number(pu.rows[0].user_id) : null;
+    }
+
+    if (parentCommentAuthorId && parentCommentAuthorId !== actorUserId) {
       await query(
         `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
-         VALUES ($1, $2, NULL, 'post_comment', false, $3, $4)`,
-        [authorUserId, actorUserId, postId, excerpt]
+         VALUES ($1, $2, NULL, 'comment_reply', false, $3, $4)`,
+        [parentCommentAuthorId, actorUserId, postId, excerpt]
       );
     }
+
+    if (authorUserId && authorUserId !== actorUserId) {
+      const skipPostOwnerNotif =
+        parentCommentPk && parentCommentAuthorId != null && authorUserId === parentCommentAuthorId;
+      if (!skipPostOwnerNotif) {
+        await query(
+          `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+           VALUES ($1, $2, NULL, 'post_comment', false, $3, $4)`,
+          [authorUserId, actorUserId, postId, excerpt]
+        );
+      }
+    }
+
     const actor = await query(`SELECT full_name AS "fullName" FROM learn_users WHERE id = $1`, [actorUserId]);
     const row = ins.rows[0];
     const cc = await query(`SELECT comments_count AS "commentsCount" FROM home_posts WHERE id = $1`, [postId]);
@@ -2294,7 +2523,8 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
         user: actor.rows[0]?.fullName || "Member",
         text: row.body,
         likes: 0,
-        createdAt: row.createdAt
+        createdAt: row.createdAt,
+        parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
       },
       commentsCount: Number(cc.rows[0]?.commentsCount ?? 0)
     });
