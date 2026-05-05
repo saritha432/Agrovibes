@@ -1,7 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo, useState } from "react";
+import * as ImagePicker from "expo-image-picker";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,6 +16,7 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
+import { uploadImageFile } from "../services/api";
 
 const TEXT = "#0f0f0f";
 const MUTED = "#7a7a7a";
@@ -38,6 +41,8 @@ export function EditProfileScreen() {
   const [bio, setBio] = useState("");
   const [website, setWebsite] = useState("");
   const [location, setLocation] = useState(user?.locationLabel || "");
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
+  const [isUploadingPhoto, setUploadingPhoto] = useState(false);
 
   const initials = useMemo(() => {
     return String(fullName || user?.fullName || "U")
@@ -54,9 +59,41 @@ export function EditProfileScreen() {
       Alert.alert("Name required", "Please enter your name.");
       return;
     }
-    await updateUser({ fullName: name, locationLabel: location.trim() || undefined });
+    await updateUser({ fullName: name, locationLabel: location.trim() || undefined, avatarUrl: avatarUrl || undefined });
     Alert.alert("Saved", "Profile updated.");
     navigation.goBack();
+  };
+
+  const pickProfilePhoto = async () => {
+    if (isUploadingPhoto) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Permission needed", "Please allow photo library access.");
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+      allowsEditing: true,
+      aspect: [1, 1]
+    });
+    if (picked.canceled || !picked.assets?.[0]?.uri) return;
+
+    const localUri = picked.assets[0].uri;
+    setUploadingPhoto(true);
+    try {
+      const uploaded = await uploadImageFile(localUri);
+      setAvatarUrl(uploaded.url);
+      await updateUser({ avatarUrl: uploaded.url });
+      Alert.alert("Updated", "Profile picture uploaded.");
+    } catch (error: any) {
+      // Keep local uri so user sees immediate change in development even if cloud upload is unavailable.
+      setAvatarUrl(localUri);
+      await updateUser({ avatarUrl: localUri });
+      Alert.alert("Photo saved locally", error?.message ? String(error.message) : "Could not upload to server, using local preview.");
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   return (
@@ -64,10 +101,10 @@ export function EditProfileScreen() {
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(24, insets.bottom + 10) }]}>
         <View style={styles.avatarWrap}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials || "U"}</Text>
+            {avatarUrl ? <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" /> : <Text style={styles.avatarText}>{initials || "U"}</Text>}
           </View>
-          <Pressable onPress={() => Alert.alert("Profile photo", "Profile photo editing can be added next.")}>
-            <Text style={styles.changePhotoText}>Change profile photo</Text>
+          <Pressable onPress={pickProfilePhoto} disabled={isUploadingPhoto}>
+            <Text style={styles.changePhotoText}>{isUploadingPhoto ? "Uploading..." : "Change profile photo"}</Text>
           </Pressable>
         </View>
 
@@ -150,6 +187,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#ececec"
   },
   avatarText: { fontSize: 34, fontWeight: "800", color: TEXT },
+  avatarImage: { width: "100%", height: "100%", borderRadius: 47 },
   changePhotoText: { marginTop: 12, fontSize: 14, fontWeight: "700", color: "#3897f0" },
   form: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
   field: {

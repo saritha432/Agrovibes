@@ -20,3 +20,9 @@ export function navigateToEditProfile() {
     navigationRef.navigate("EditProfile");
   }
 }
+
+export function navigateToUserSearch() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("UserSearch");
+  }
+}

@@ -12,7 +12,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { listDmThreads, makeDmThreadId, rememberDmPeer, type DmThreadSummary } from "../../social/localMessageStore";
+import { fetchMessageThreads } from "../../services/api";
 
 const BG = "#ffffff";
 const TEXT = "#0f0f0f";
@@ -35,18 +35,17 @@ function formatTime(ts: number) {
 
 export function DirectInboxScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [query, setQuery] = useState("");
-  const [threads, setThreads] = useState<DmThreadSummary[]>([]);
+  const [threads, setThreads] = useState<
+    Array<{ peerUserId: number; peerName: string; peerEmail?: string; lastMessage: string; lastAt: string }>
+  >([]);
 
   const openNewMessage = useCallback(async () => {
-    const selfKey = user?.email || String(user?.id ?? "");
     const peerName = "Demo Farmer";
-    const peerKey = "demo-peer";
-    const threadId = makeDmThreadId(selfKey, peerName, peerKey);
-    await rememberDmPeer(threadId, peerName, peerKey);
-    navigation.navigate("DirectChat", { threadId, peerName, peerKey });
-  }, [navigation, user?.email, user?.id]);
+    const peerUserId = 1;
+    navigation.navigate("DirectChat", { peerUserId, peerName, peerKey: String(peerUserId) });
+  }, [navigation]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -59,13 +58,25 @@ export function DirectInboxScreen() {
   }, [navigation, openNewMessage]);
 
   const load = useCallback(async () => {
-    const list = await listDmThreads();
-    setThreads(list);
-  }, []);
+    if (!token) {
+      setThreads([]);
+      return;
+    }
+    try {
+      const list = await fetchMessageThreads(token);
+      setThreads(list.threads || []);
+    } catch {
+      setThreads([]);
+    }
+  }, [token]);
 
   useFocusEffect(
     useCallback(() => {
       void load();
+      const timer = setInterval(() => {
+        void load();
+      }, 4000);
+      return () => clearInterval(timer);
     }, [load])
   );
 
@@ -73,11 +84,11 @@ export function DirectInboxScreen() {
     ? threads.filter((t) => t.peerName.toLowerCase().includes(query.trim().toLowerCase()))
     : threads;
 
-  const openThread = (t: DmThreadSummary) => {
+  const openThread = (t: { peerUserId: number; peerName: string; peerEmail?: string }) => {
     navigation.navigate("DirectChat", {
-      threadId: t.threadId,
+      peerUserId: t.peerUserId,
       peerName: t.peerName,
-      peerKey: t.peerKey
+      peerKey: t.peerEmail
     });
   };
 
@@ -105,7 +116,7 @@ export function DirectInboxScreen() {
       ) : (
         <FlatList
           data={filtered}
-          keyExtractor={(item) => item.threadId}
+          keyExtractor={(item) => String(item.peerUserId)}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <Pressable style={styles.row} onPress={() => openThread(item)}>
@@ -117,7 +128,7 @@ export function DirectInboxScreen() {
                   <Text style={styles.peerName} numberOfLines={1}>
                     {item.peerName}
                   </Text>
-                  <Text style={styles.time}>{formatTime(item.lastAt)}</Text>
+                  <Text style={styles.time}>{formatTime(new Date(item.lastAt).getTime())}</Text>
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>
                   {item.lastMessage}

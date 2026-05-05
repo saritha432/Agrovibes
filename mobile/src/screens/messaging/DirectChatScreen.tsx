@@ -13,13 +13,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import {
-  appendDmMessage,
-  getDmMessages,
-  rememberDmPeer,
-  type DmMessage
-} from "../../social/localMessageStore";
+import { fetchMessageThread, sendDirectMessage, type DirectMessageItem } from "../../services/api";
 
 const BG = "#ffffff";
 const TEXT = "#0f0f0f";
@@ -37,30 +33,38 @@ export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { threadId, peerName, peerKey } = route.params;
-  const [messages, setMessages] = useState<DmMessage[]>([]);
+  const { peerUserId, peerName } = route.params;
+  const { token, user } = useAuth();
+  const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [draft, setDraft] = useState("");
-  const listRef = useRef<FlatList<DmMessage>>(null);
+  const listRef = useRef<FlatList<DirectMessageItem>>(null);
 
   const reload = useCallback(async () => {
-    const list = await getDmMessages(threadId);
-    setMessages(list);
+    if (!token) {
+      setMessages([]);
+      return;
+    }
+    const list = await fetchMessageThread(token, peerUserId);
+    setMessages(list.messages || []);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
-  }, [threadId]);
-
-  useEffect(() => {
-    void rememberDmPeer(threadId, peerName, peerKey);
-  }, [threadId, peerName, peerKey]);
+  }, [token, peerUserId]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void reload();
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [reload]);
+
   const send = async () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || !token) return;
     setDraft("");
-    await appendDmMessage(threadId, true, text);
+    await sendDirectMessage(token, peerUserId, text);
     await reload();
   };
 
@@ -101,11 +105,20 @@ export function DirectChatScreen() {
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => (
-          <View style={[styles.bubbleRow, item.fromSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
-            <View style={[styles.bubble, item.fromSelf ? styles.bubbleSelf : styles.bubblePeer]}>
-              <Text style={[styles.bubbleText, item.fromSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{item.text}</Text>
-              <Text style={[styles.bubbleMeta, item.fromSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer]}>
-                {formatMsgTime(item.createdAt)}
+          <View
+            style={[
+              styles.bubbleRow,
+              Number(item.senderId) === Number(user?.id) ? styles.bubbleRowSelf : styles.bubbleRowPeer
+            ]}
+          >
+            <View style={[styles.bubble, Number(item.senderId) === Number(user?.id) ? styles.bubbleSelf : styles.bubblePeer]}>
+              <Text style={[styles.bubbleText, Number(item.senderId) === Number(user?.id) ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
+                {item.body}
+              </Text>
+              <Text
+                style={[styles.bubbleMeta, Number(item.senderId) === Number(user?.id) ? styles.bubbleMetaSelf : styles.bubbleMetaPeer]}
+              >
+                {formatMsgTime(new Date(item.createdAt).getTime())}
               </Text>
             </View>
           </View>

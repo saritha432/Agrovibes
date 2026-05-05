@@ -9,6 +9,7 @@ export interface AuthUser {
   fullName: string;
   role: UserRole;
   phone?: string;
+  avatarUrl?: string;
   dateOfBirth?: string;
   preferredLanguage?: string;
   locationLabel?: string;

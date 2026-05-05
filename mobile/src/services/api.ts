@@ -157,6 +157,22 @@ export interface SocialRelationship {
   canFollowBack: boolean;
 }
 
+export interface MessageThread {
+  peerUserId: number;
+  peerName: string;
+  peerEmail?: string;
+  lastMessage: string;
+  lastAt: string;
+}
+
+export interface DirectMessageItem {
+  id: number;
+  senderId: number;
+  receiverId: number;
+  body: string;
+  createdAt: string;
+}
+
 export interface SocialNotificationItem {
   id: number;
   type: "follow_request" | "follow_accept";
@@ -470,6 +486,27 @@ export async function fetchRelationships(token: string, userIds: number[]) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/relationships?userIds=${encodeURIComponent(qs)}`, token)) as {
     relationships: Record<number, SocialRelationship>;
   };
+}
+
+export async function fetchMessageThreads(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/threads`, token)) as {
+    threads: MessageThread[];
+  };
+}
+
+export async function fetchMessageThread(token: string, peerUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
+    peer: { id: number; fullName: string; email?: string };
+    messages: DirectMessageItem[];
+  };
+}
+
+export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  })) as { message: DirectMessageItem };
 }
 
 async function signCloudinaryUpload(folder = "agrovibes") {

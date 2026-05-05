@@ -19,6 +19,7 @@ let socialFollowsTableReady = false;
 let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
+let directMessagesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
 
@@ -172,6 +173,25 @@ async function ensureHomePostCommentsTable() {
     `
   );
   homePostCommentsTableReady = true;
+}
+
+async function ensureDirectMessagesTable() {
+  if (directMessagesTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS direct_messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      receiver_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      is_read BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
+  directMessagesTableReady = true;
 }
 
 async function resolveHomePostAuthorUserId(postRow) {
@@ -1727,6 +1747,129 @@ router.post("/v1/social/notifications/:notificationId/read", authRequired, async
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to update notification", error: error.message });
+  }
+});
+
+router.get("/v1/messages/threads", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const result = await query(
+      `
+      WITH thread_rows AS (
+        SELECT
+          CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END AS peer_id,
+          dm.id,
+          dm.body,
+          dm.created_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END
+            ORDER BY dm.created_at DESC
+          ) AS rn
+        FROM direct_messages dm
+        WHERE dm.sender_id = $1 OR dm.receiver_id = $1
+      )
+      SELECT
+        t.peer_id AS "peerUserId",
+        u.full_name AS "peerName",
+        u.email AS "peerEmail",
+        t.body AS "lastMessage",
+        t.created_at AS "lastAt"
+      FROM thread_rows t
+      JOIN learn_users u ON u.id = t.peer_id
+      WHERE t.rn = 1
+      ORDER BY t.created_at DESC
+      `
+      ,
+      [me]
+    );
+    res.json({ threads: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load message threads", error: error.message });
+  }
+});
+
+router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+
+    const peerRes = await query(`SELECT id, full_name AS "fullName", email FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+
+    await query(`UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`, [peerUserId, me]);
+
+    const rows = await query(
+      `
+      SELECT
+        id,
+        sender_id AS "senderId",
+        receiver_id AS "receiverId",
+        body,
+        created_at AS "createdAt"
+      FROM direct_messages
+      WHERE (sender_id = $1 AND receiver_id = $2)
+         OR (sender_id = $2 AND receiver_id = $1)
+      ORDER BY created_at ASC
+      LIMIT 500
+      `,
+      [me, peerUserId]
+    );
+
+    res.json({
+      peer: { id: peerRes.rows[0].id, fullName: peerRes.rows[0].fullName, email: peerRes.rows[0].email },
+      messages: rows.rows
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load message thread", error: error.message });
+  }
+});
+
+router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    const body = String(req.body?.text || "").trim();
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    if (!body) {
+      res.status(400).json({ message: "Message text is required" });
+      return;
+    }
+
+    const peerRes = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+
+    const ins = await query(
+      `
+      INSERT INTO direct_messages (sender_id, receiver_id, body, is_read)
+      VALUES ($1, $2, $3, false)
+      RETURNING
+        id,
+        sender_id AS "senderId",
+        receiver_id AS "receiverId",
+        body,
+        created_at AS "createdAt"
+      `,
+      [me, peerUserId, body]
+    );
+    res.status(201).json({ message: ins.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to send message", error: error.message });
   }
 });
 

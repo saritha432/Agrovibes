@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { navigateToDirectInbox, navigateToEditProfile } from "../navigation/navigationRef";
+import { navigateToDirectInbox, navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
 import { useAuth } from "../auth/AuthContext";
 import {
   fetchHomePosts,
@@ -254,36 +254,42 @@ export function ProfileScreen() {
       <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
         {/* Profile-specific top bar (matches reference layout) */}
         <View style={styles.topBar}>
-          <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
-          <Pressable style={styles.locationPill} onPress={() => Alert.alert("Location", "Location picker can be wired next.")}>
-            <Ionicons name="location-outline" size={14} color={LIME} />
-            <Text style={styles.locationPillText} numberOfLines={1}>
-              Nashik, MH
-            </Text>
-            <Ionicons name="chevron-down" size={12} color="#c8d4cf" />
-          </Pressable>
+          <View style={styles.topBarLeft}>
+            <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
+            <Pressable style={styles.locationPill} onPress={() => Alert.alert("Location", "Location picker can be wired next.")}>
+              <Ionicons name="location-outline" size={14} color={LIME} />
+              <Text style={styles.locationPillText} numberOfLines={1}>
+                Nashik, MH
+              </Text>
+              <Ionicons name="chevron-down" size={12} color="#c8d4cf" />
+            </Pressable>
+          </View>
           <View style={styles.topBarIcons}>
-            <Pressable hitSlop={8} onPress={() => Alert.alert("Search", "Search coming soon.")}>
+            <Pressable hitSlop={8} onPress={navigateToUserSearch}>
               <Ionicons name="search-outline" size={18} color="#e8f0ec" />
             </Pressable>
             <Pressable hitSlop={8} onPress={() => Alert.alert("Messages", "Messaging coming soon.")}>
               <Ionicons name="chatbubble-ellipses-outline" size={18} color="#e8f0ec" />
             </Pressable>
+            {/*
             <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => Alert.alert("Cart", "Cart coming soon.")}>
               <Ionicons name="cart-outline" size={18} color="#e8f0ec" />
               <View style={[styles.miniBadge, styles.miniBadgeTeal]}>
                 <Text style={styles.miniBadgeText}>6</Text>
               </View>
             </Pressable>
+            */}
             <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => {}}>
               <Ionicons name="notifications-outline" size={18} color="#e8f0ec" />
               <View style={[styles.miniBadge, styles.miniBadgeRed]}>
                 <Text style={styles.miniBadgeText}>5</Text>
               </View>
             </Pressable>
+            {/*
             <Pressable hitSlop={8} onPress={() => {}}>
               <Ionicons name="person-circle-outline" size={22} color="#e8f0ec" />
             </Pressable>
+            */}
           </View>
         </View>
 
@@ -309,7 +315,11 @@ export function ProfileScreen() {
               <View style={styles.headerMidRow}>
                 <View style={styles.avatarWrap}>
                   <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{profileModel?.initials}</Text>
+                    {user.avatarUrl ? (
+                      <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                    ) : (
+                      <Text style={styles.avatarText}>{profileModel?.initials}</Text>
+                    )}
                   </View>
                   <View style={styles.shieldBadge}>
                     <Ionicons name="shield-checkmark" size={12} color="#1a1a1a" />
@@ -520,15 +530,16 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     backgroundColor: "#262626",
     paddingHorizontal: 10,
     paddingVertical: 8,
     paddingTop: 10,
     gap: 6
   },
+  topBarLeft: { flexDirection: "row", alignItems: "center", flex: 1, minWidth: 0, gap: 6 },
   logoImage: { width: 72, height: 18 },
   locationPill: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
@@ -536,10 +547,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 5,
-    maxWidth: 120
+    maxWidth: 120,
+    minWidth: 0
   },
   locationPillText: { flex: 1, color: "#e8f0ec", fontSize: 11, fontWeight: "700" },
-  topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
+  topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10, marginLeft: 8 },
   iconWithBadge: { position: "relative" },
   miniBadge: {
     position: "absolute",
@@ -601,6 +613,7 @@ const styles = StyleSheet.create({
     borderColor: "#d4ebe6"
   },
   avatarText: { color: TEAL, fontSize: 28, fontWeight: "900" },
+  avatarImage: { width: "100%", height: "100%", borderRadius: 43 },
   shieldBadge: {
     position: "absolute",
     right: -2,
