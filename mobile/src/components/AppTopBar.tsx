@@ -82,7 +82,7 @@ export function AppTopBar() {
         ...n,
         isLocal: true,
         id: n.id,
-        type: "post_comment",
+        type: n.type,
         postIsReel: n.isReel,
         postId: n.postId,
         commentExcerpt: n.commentExcerpt
@@ -256,6 +256,11 @@ export function AppTopBar() {
 
   const postActivityLabel = (n: any) => {
     const kind = n.postIsReel ? "reel" : "post";
+    if (n.type === "comment_reply") {
+      const ex = String(n.commentExcerpt || "").trim();
+      const tail = ex ? `: "${ex}"` : "";
+      return `${n.actorName} replied to your comment${tail}`;
+    }
     if (n.type === "post_comment" || (n.isLocal && n.commentExcerpt)) {
       const ex = String(n.commentExcerpt || "").trim();
       const tail = ex ? `: "${ex}"` : "";

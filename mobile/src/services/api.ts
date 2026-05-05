@@ -170,7 +170,7 @@ export interface SocialNotificationItem {
 
 export interface SocialPostActivityNotification {
   id: number;
-  type: "post_like" | "post_comment";
+  type: "post_like" | "post_comment" | "comment_reply";
   isRead: boolean;
   createdAt: string;
   actorId: number;
@@ -293,17 +293,26 @@ export async function fetchHomePostComments(postId: number, token?: string | nul
     throw new Error("Failed to load comments");
   }
   return (await response.json()) as {
-    comments: { id: string; user: string; text: string; likes: number }[];
+    comments: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string }[];
   };
 }
 
-export async function createHomePostComment(token: string, postId: number, text: string) {
+export async function createHomePostComment(
+  token: string,
+  postId: number,
+  text: string,
+  options?: { parentCommentId?: number | null }
+) {
+  const body: { text: string; parentCommentId?: number } = { text };
+  if (options?.parentCommentId != null && Number.isFinite(options.parentCommentId) && options.parentCommentId > 0) {
+    body.parentCommentId = Number(options.parentCommentId);
+  }
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
+    body: JSON.stringify(body)
   })) as {
-    comment: { id: string; user: string; text: string; likes: number; createdAt?: string };
+    comment: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string };
     commentsCount: number;
   };
 }

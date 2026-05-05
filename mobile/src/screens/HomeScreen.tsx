@@ -72,7 +72,48 @@ function postImageGallery(post: HomePost | null | undefined): string[] {
   return [];
 }
 
-type HomeCommentRow = { id: string; user: string; text: string; likes: number };
+type HomeCommentRow = {
+  id: string;
+  user: string;
+  text: string;
+  likes: number;
+  createdAt?: string;
+  parentCommentId?: string;
+};
+
+const COMMENT_REPLY_INDENT = 14;
+/** Show "View more replies" only when a comment has more than this many direct replies (i.e. 3+ → link). */
+const REPLY_PREVIEW_VISIBLE = 2;
+
+function sortCommentsByTime(a: HomeCommentRow, b: HomeCommentRow) {
+  const ta = Date.parse(a.createdAt || "") || 0;
+  const tb = Date.parse(b.createdAt || "") || 0;
+  if (ta !== tb) return ta - tb;
+  return String(a.id).localeCompare(String(b.id));
+}
+
+/** Roots = top-level comments; children map = direct replies only (sorted). */
+function buildCommentReplyTree(rows: HomeCommentRow[]) {
+  const byId = new Map<string, HomeCommentRow>();
+  for (const r of rows) byId.set(String(r.id), r);
+  const children = new Map<string, HomeCommentRow[]>();
+  const roots: HomeCommentRow[] = [];
+  for (const r of rows) {
+    const pid = r.parentCommentId ? String(r.parentCommentId) : "";
+    if (pid && byId.has(pid)) {
+      const list = children.get(pid) ?? [];
+      list.push(r);
+      children.set(pid, list);
+    } else {
+      roots.push(r);
+    }
+  }
+  for (const [, list] of children) {
+    list.sort(sortCommentsByTime);
+  }
+  roots.sort(sortCommentsByTime);
+  return { children, roots };
+}
 
 function mergeRemoteAndLocalComments(remote: HomeCommentRow[], local: HomeCommentRow[]): HomeCommentRow[] {
   const remoteIds = new Set(remote.map((c) => String(c.id)));
@@ -81,6 +122,83 @@ function mergeRemoteAndLocalComments(remote: HomeCommentRow[], local: HomeCommen
     if (!remoteIds.has(String(c.id))) merged.push(c);
   }
   return merged;
+}
+
+/** Handles alternate API/proxy keys and numeric ids so threading survives refetch. */
+function normalizeCommentRow(c: Partial<HomeCommentRow> & Record<string, unknown>): HomeCommentRow {
+  const pidRaw = c.parentCommentId ?? c["parent_comment_id"] ?? c["parentcommentid"];
+  const parentCommentId =
+    pidRaw != null && String(pidRaw).trim() !== "" && String(pidRaw) !== "null"
+      ? String(pidRaw).trim()
+      : undefined;
+  return {
+    id: String(c.id ?? ""),
+    user: String(c.user ?? ""),
+    text: String(c.text ?? ""),
+    likes: Number.isFinite(Number(c.likes)) ? Number(c.likes) : 0,
+    createdAt: typeof c.createdAt === "string" ? c.createdAt : c.createdAt != null ? String(c.createdAt) : undefined,
+    parentCommentId
+  };
+}
+
+/**
+ * When the server omits parent_comment_id (legacy rows / older deploy), infer a parent from a leading @mention
+ * so replies stay nested after closing and reopening the sheet.
+ */
+function inferParentFromMention(rows: HomeCommentRow[]): HomeCommentRow[] {
+  if (!rows.length) return rows;
+  const byId = new Map<string, HomeCommentRow>();
+  for (const r of rows) {
+    byId.set(String(r.id), { ...r });
+  }
+  const chronological = [...rows].sort((a, b) => {
+    const ta = Date.parse(a.createdAt || "") || 0;
+    const tb = Date.parse(b.createdAt || "") || 0;
+    if (ta !== tb) return ta - tb;
+    return String(a.id).localeCompare(String(b.id));
+  });
+  const seenChrono: HomeCommentRow[] = [];
+  for (const r of chronological) {
+    const cur = byId.get(String(r.id))!;
+    if (!cur.parentCommentId) {
+      const match = String(cur.text || "").trim().match(/^@([^\s@]+)/u);
+      if (match) {
+        const mentionNorm = normalizeIdentity(match[1]);
+        if (mentionNorm) {
+          for (let i = seenChrono.length - 1; i >= 0; i--) {
+            if (normalizeIdentity(seenChrono[i].user) === mentionNorm) {
+              cur.parentCommentId = String(seenChrono[i].id);
+              break;
+            }
+          }
+        }
+      }
+    }
+    seenChrono.push(cur);
+  }
+  return rows.map((r) => byId.get(String(r.id))!);
+}
+
+function formatCommentRelativeTime(iso?: string): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const diff = Math.max(0, Date.now() - t);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w`;
+  const months = Math.floor(days / 30);
+  return `${Math.max(1, months)}mo`;
+}
+
+function commentInteractionKey(postId: number, commentId: string) {
+  return `${postId}:${commentId}`;
 }
 
 /** Fit video inside a box without cropping (letterbox if needed). */
@@ -215,7 +333,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
-  const [commentsByPost, setCommentsByPost] = useState<Record<number, { id: string; user: string; text: string; likes: number }[]>>({});
+  const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
+  const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
+  /** Parent comment ids whose direct replies are fully expanded (only used when direct reply count > REPLY_PREVIEW_VISIBLE). */
+  const [expandedReplyThreads, setExpandedReplyThreads] = useState<Record<string, boolean>>({});
+  const [commentInteractions, setCommentInteractions] = useState<Record<string, { liked: boolean; disliked: boolean }>>({});
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
@@ -527,21 +649,32 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [followBusyByUserId, token, user?.email, user?.fullName, user?.id]
   );
 
+  useEffect(() => {
+    setExpandedReplyThreads({});
+  }, [activeCommentsPost?.id]);
+
+  useEffect(() => {
+    if (!activeCommentsPost) setReplyingTo(null);
+  }, [activeCommentsPost]);
+
   const openCommentsForPost = useCallback(
     (post: HomePost) => {
       setActiveCommentsPost(post);
+      setReplyingTo(null);
+      setExpandedReplyThreads({});
       const reqKey = ++commentsFetchSeqRef.current;
       void (async () => {
         let remote: HomeCommentRow[] = [];
         try {
           const data = await fetchHomePostComments(post.id, token ?? null);
-          remote = data.comments ?? [];
+          remote = (data.comments ?? []).map((x) => normalizeCommentRow(x as HomeCommentRow & Record<string, unknown>));
         } catch {
           remote = [];
         }
         if (reqKey !== commentsFetchSeqRef.current) return;
-        const localRows = await getLocalCommentsForPost(post.id);
+        const localRowsRaw = await getLocalCommentsForPost(post.id);
         if (reqKey !== commentsFetchSeqRef.current) return;
+        const localRows = localRowsRaw.map((x) => normalizeCommentRow(x as HomeCommentRow & Record<string, unknown>));
         const merged = mergeRemoteAndLocalComments(remote, localRows);
         setCommentsByPost((prev) => ({ ...prev, [post.id]: merged }));
       })();
@@ -647,14 +780,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       (postUserId > 0 && postUserId === Number(user?.id)) ||
       (!postUserId && normalizedPostName && normalizedPostName === normalizedCurrentUserName);
 
+    const replyTarget = replyingTo;
+    const parentNum = replyTarget ? Number(replyTarget.id) : NaN;
+    const parentIdStr = Number.isFinite(parentNum) && parentNum > 0 ? String(Math.trunc(parentNum)) : undefined;
+
     if (token) {
       try {
-        const res = await createHomePostComment(token, post.id, text);
+        const res = await createHomePostComment(token, post.id, text, {
+          parentCommentId: parentIdStr != null ? Number(parentIdStr) : undefined
+        });
+        const createdRaw = res.comment.createdAt;
+        const createdIso =
+          typeof createdRaw === "string"
+            ? createdRaw
+            : createdRaw != null
+              ? new Date(createdRaw as Date).toISOString()
+              : new Date().toISOString();
         const row: HomeCommentRow = {
           id: String(res.comment.id),
           user: res.comment.user || user?.fullName || "You",
           text: res.comment.text || text,
-          likes: res.comment.likes ?? 0
+          likes: res.comment.likes ?? 0,
+          createdAt: createdIso,
+          parentCommentId: res.comment.parentCommentId ?? parentIdStr
         };
         setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
@@ -663,17 +811,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         });
         setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, commentsCount: res.commentsCount } : p)));
         setCommentDraft("");
+        setReplyingTo(null);
         return;
       } catch {
         // fall through to local behavior
       }
     }
 
+    const nowIso = new Date().toISOString();
     setCommentsByPost((prev) => {
       const list = prev[post.id] ?? [];
       return {
         ...prev,
-        [post.id]: [...list, { id: `c-${Date.now()}`, user: user?.fullName || "You", text, likes: 0 }]
+        [post.id]: [
+          ...list,
+          {
+            id: `c-${Date.now()}`,
+            user: user?.fullName || "You",
+            text,
+            likes: 0,
+            createdAt: nowIso,
+            parentCommentId: parentIdStr
+          }
+        ]
       };
     });
     await addLocalCommentForPost({
@@ -681,21 +841,62 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       user: user?.fullName || "You",
       userKey: user?.email || String(user?.id || ""),
       text,
-      likes: 0
+      likes: 0,
+      parentCommentId: parentIdStr
     });
     setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, commentsCount: p.commentsCount + 1 } : p)));
     setCommentDraft("");
-    if (!isOwnPost) {
+    setReplyingTo(null);
+    const excerpt = text.length > 120 ? `${text.slice(0, 117)}...` : text;
+    if (replyTarget) {
+      const parentNameNorm = normalizeIdentity(replyTarget.user);
+      if (parentNameNorm && parentNameNorm !== normalizedCurrentUserName) {
+        await appendLocalEngagementNotification({
+          type: "comment_reply",
+          actorName: user?.fullName || "Someone",
+          recipientDisplayName: replyTarget.user,
+          postId: post.id,
+          isReel: !!post.videoUrl,
+          commentExcerpt: excerpt
+        });
+      }
+    } else if (!isOwnPost) {
       await appendLocalEngagementNotification({
         type: "post_comment",
         actorName: user?.fullName || "Someone",
         recipientDisplayName: post.userName,
         postId: post.id,
         isReel: !!post.videoUrl,
-        commentExcerpt: text.length > 120 ? `${text.slice(0, 117)}...` : text
+        commentExcerpt: excerpt
       });
     }
-  }, [activeCommentsPost, commentDraft, token, user?.fullName, user?.id]);
+  }, [activeCommentsPost, commentDraft, replyingTo, token, user?.email, user?.fullName, user?.id]);
+
+  const toggleCommentSheetLike = useCallback((postId: number, commentId: string) => {
+    setCommentInteractions((prev) => {
+      const k = commentInteractionKey(postId, commentId);
+      const cur = prev[k] ?? { liked: false, disliked: false };
+      const liked = !cur.liked;
+      return { ...prev, [k]: { liked, disliked: liked ? false : cur.disliked } };
+    });
+  }, []);
+
+  const toggleCommentSheetDislike = useCallback((postId: number, commentId: string) => {
+    setCommentInteractions((prev) => {
+      const k = commentInteractionKey(postId, commentId);
+      const cur = prev[k] ?? { liked: false, disliked: false };
+      const disliked = !cur.disliked;
+      return { ...prev, [k]: { liked: disliked ? false : cur.liked, disliked } };
+    });
+  }, []);
+
+  const onCommentReplyPress = useCallback((c: HomeCommentRow) => {
+    setReplyingTo({ id: String(c.id), user: c.user });
+    const clean = String(c.user || "").replace(/^@/, "").trim();
+    if (!clean) return;
+    const mention = `@${clean} `;
+    setCommentDraft((d) => (d.trim() ? `${d} ${mention}` : mention));
+  }, []);
 
   const listHeader = useMemo(
     () => (
@@ -1277,34 +1478,143 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </Modal>
 
-      <Modal visible={!!activeCommentsPost} transparent animationType="slide" onRequestClose={() => setActiveCommentsPost(null)}>
-        <Pressable style={styles.commentsBackdrop} onPress={() => setActiveCommentsPost(null)}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.commentsKeyboardWrap}>
-            <Pressable style={styles.commentsSheet} onPress={(e) => e.stopPropagation?.()}>
-              <View style={styles.commentsHandle} />
+      <Modal
+        visible={!!activeCommentsPost}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setActiveCommentsPost(null)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.commentsKeyboardWrap}
+        >
+          <View style={[styles.commentsFullScreen, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <View style={[styles.commentsFullHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+              <Pressable
+                onPress={() => setActiveCommentsPost(null)}
+                hitSlop={12}
+                style={styles.commentsCloseHit}
+                accessibilityRole="button"
+                accessibilityLabel="Close comments"
+              >
+                <Ionicons name="close" size={26} color="#b7ff37" />
+              </Pressable>
               <Text style={styles.commentsTitle}>Comments</Text>
+              <View style={styles.commentsHeaderSpacer} />
+            </View>
 
-              <ScrollView style={styles.commentsList} contentContainerStyle={styles.commentsListInner}>
-                {(activeCommentsPost ? commentsByPost[activeCommentsPost.id] ?? [] : []).length === 0 ? (
-                  <Text style={styles.noCommentsText}>No Comments</Text>
-                ) : (
-                  (activeCommentsPost ? commentsByPost[activeCommentsPost.id] ?? [] : []).map((c) => (
-                    <View key={c.id} style={styles.commentRow}>
-                      <View style={styles.commentAvatar}>
-                        <Text style={styles.commentAvatarText}>{c.user[0].toUpperCase()}</Text>
+            <ScrollView
+              style={styles.commentsList}
+              contentContainerStyle={styles.commentsListInner}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
+                {(() => {
+                  if (!activeCommentsPost) {
+                    return <Text style={styles.noCommentsText}>No Comments</Text>;
+                  }
+                  const pid = activeCommentsPost.id;
+                  const allRaw = commentsByPost[pid] ?? [];
+                  const all = inferParentFromMention(allRaw.map((x) => normalizeCommentRow(x as HomeCommentRow & Record<string, unknown>)));
+                  if (all.length === 0) {
+                    return <Text style={styles.noCommentsText}>No Comments</Text>;
+                  }
+                  const { roots, children } = buildCommentReplyTree(all);
+
+                  const renderOneRow = (c: HomeCommentRow, depth: number) => {
+                    const ikey = commentInteractionKey(pid, c.id);
+                    const inter = commentInteractions[ikey] ?? { liked: false, disliked: false };
+                    const likeCount = Math.max(0, Number(c.likes || 0) + (inter.liked ? 1 : 0));
+                    const rel = formatCommentRelativeTime(c.createdAt);
+                    const indent = Math.min(4, depth) * COMMENT_REPLY_INDENT;
+                    return (
+                      <View style={[styles.commentBlock, { marginLeft: indent }]}>
+                        <View style={styles.commentRowInsta}>
+                          <View style={styles.commentAvatarSq}>
+                            <Text style={styles.commentAvatarSqText}>{(c.user[0] || "?").toUpperCase()}</Text>
+                          </View>
+                          <View style={styles.commentMainCol}>
+                            <View style={styles.commentHeaderRow}>
+                              <Text style={styles.commentUserName} numberOfLines={1}>
+                                {c.user}
+                              </Text>
+                              {rel ? <Text style={styles.commentTime}>{rel}</Text> : null}
+                            </View>
+                            <Text style={styles.commentBodyText}>{c.text}</Text>
+                            <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
+                              <Text style={styles.commentReplyText}>Reply</Text>
+                            </Pressable>
+                          </View>
+                          <View style={styles.commentActionsCol}>
+                            <Pressable
+                              hitSlop={8}
+                              onPress={() => toggleCommentSheetLike(pid, c.id)}
+                              style={styles.commentActionHit}
+                            >
+                              <Ionicons
+                                name={inter.liked ? "heart" : "heart-outline"}
+                                size={18}
+                                color={inter.liked ? "#ec4899" : "#9ca3af"}
+                              />
+                              <Text style={styles.commentActionCount}>{likeCount}</Text>
+                            </Pressable>
+                            <Pressable hitSlop={8} onPress={() => toggleCommentSheetDislike(pid, c.id)} style={styles.commentActionHit}>
+                              <Ionicons
+                                name={inter.disliked ? "thumbs-down" : "thumbs-down-outline"}
+                                size={17}
+                                color={inter.disliked ? "#f87171" : "#9ca3af"}
+                              />
+                            </Pressable>
+                          </View>
+                        </View>
                       </View>
-                      <View style={styles.commentBody}>
-                        <Text style={styles.commentUser}>{c.user}</Text>
-                        <Text style={styles.commentText}>{c.text}</Text>
-                      </View>
-                      <View style={styles.commentLikeWrap}>
-                        <Ionicons name="heart-outline" size={14} color="#9ca3af" />
-                        <Text style={styles.commentLikeCount}>{c.likes}</Text>
-                      </View>
-                    </View>
-                  ))
-                )}
+                    );
+                  };
+
+                  const renderBranch = (c: HomeCommentRow, depth: number): React.ReactNode => {
+                    const direct = children.get(String(c.id)) ?? [];
+                    const needsMoreLink = direct.length > REPLY_PREVIEW_VISIBLE;
+                    const expanded = !!expandedReplyThreads[String(c.id)];
+                    const shown = needsMoreLink && !expanded ? direct.slice(0, REPLY_PREVIEW_VISIBLE) : direct;
+                    const moreCount = needsMoreLink && !expanded ? direct.length - REPLY_PREVIEW_VISIBLE : 0;
+
+                    return (
+                      <React.Fragment key={c.id}>
+                        {renderOneRow(c, depth)}
+                        {shown.map((child) => renderBranch(child, depth + 1))}
+                        {moreCount > 0 ? (
+                          <Pressable
+                            onPress={() => setExpandedReplyThreads((p) => ({ ...p, [String(c.id)]: true }))}
+                            style={[
+                              styles.viewMoreCommentsWrap,
+                              { marginLeft: Math.min(4, depth + 1) * COMMENT_REPLY_INDENT, paddingLeft: 0 }
+                            ]}
+                          >
+                            <View style={styles.viewMoreCommentsLine} />
+                            <Text style={styles.viewMoreCommentsText}>
+                              View {moreCount} more {moreCount === 1 ? "reply" : "replies"}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                      </React.Fragment>
+                    );
+                  };
+
+                  return <>{roots.map((r) => renderBranch(r, 0))}</>;
+                })()}
               </ScrollView>
+
+              {replyingTo ? (
+                <View style={styles.replyingToBanner}>
+                  <Text style={styles.replyingToBannerText} numberOfLines={1}>
+                    Replying to @{String(replyingTo.user || "").replace(/^@/, "")}
+                  </Text>
+                  <Pressable hitSlop={8} onPress={() => setReplyingTo(null)} style={styles.replyingToCancel}>
+                    <Text style={styles.replyingToCancelText}>Cancel</Text>
+                  </Pressable>
+                </View>
+              ) : null}
 
               <View style={styles.emojiRow}>
                 {["😀", "😍", "🔥", "👏", "💯", "😅", "😎", "🥳"].map((emoji) => (
@@ -1321,7 +1631,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <TextInput
                   value={commentDraft}
                   onChangeText={setCommentDraft}
-                  placeholder="Add comment for PureFarm..."
+                  placeholder={replyingTo ? "Write a reply…" : "Add comment for PureFarm..."}
                   placeholderTextColor="#6b7280"
                   style={styles.commentInput}
                 />
@@ -1329,9 +1639,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   <Ionicons name="send" size={14} color="#111827" />
                 </Pressable>
               </View>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -1641,57 +1950,102 @@ const styles = StyleSheet.create({
   emptyTabTitle: { fontWeight: "900", color: "#22312d", fontSize: 15 },
   emptyTabSub: { marginTop: 6, color: "#5b6965", fontWeight: "600" }
   ,
-  commentsBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end"
-  },
   commentsKeyboardWrap: {
-    width: "100%"
+    flex: 1,
+    width: "100%",
+    backgroundColor: "#1a1b1c"
   },
-  commentsSheet: {
+  commentsFullScreen: {
+    flex: 1,
     backgroundColor: "#1a1b1c",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    minHeight: 360,
-    maxHeight: "72%",
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 14
+    paddingHorizontal: 14
   },
-  commentsHandle: {
-    width: 42,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: "#b7ff37",
-    alignSelf: "center",
-    marginBottom: 12
+  commentsFullHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#303236",
+    paddingBottom: 10
   },
-  commentsTitle: {
-    color: "#b7ff37",
-    fontSize: 13,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 10
-  },
-  commentsList: { flex: 1 },
-  commentsListInner: { paddingBottom: 10, gap: 10 },
-  noCommentsText: { color: "#b7ff37", textAlign: "center", marginTop: 40, fontWeight: "700" },
-  commentRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  commentAvatar: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#d1d5db",
+  commentsCloseHit: {
+    width: 40,
+    height: 40,
     alignItems: "center",
     justifyContent: "center"
   },
-  commentAvatarText: { color: "#111827", fontSize: 11, fontWeight: "700" },
-  commentBody: { flex: 1 },
-  commentUser: { color: "#f9fafb", fontSize: 11, fontWeight: "700" },
-  commentText: { color: "#d1d5db", fontSize: 11, marginTop: 1 },
-  commentLikeWrap: { alignItems: "center", minWidth: 24 },
-  commentLikeCount: { color: "#9ca3af", fontSize: 9, marginTop: 1 },
+  commentsHeaderSpacer: {
+    width: 40,
+    height: 40
+  },
+  commentsTitle: {
+    color: "#b7ff37",
+    fontSize: 16,
+    fontWeight: "800",
+    textAlign: "center",
+    flex: 1
+  },
+  commentsList: { flex: 1 },
+  commentsListInner: { paddingBottom: 12, gap: 14 },
+  noCommentsText: { color: "#b7ff37", textAlign: "center", marginTop: 40, fontWeight: "700" },
+  commentBlock: { marginBottom: 2 },
+  commentRowInsta: { flexDirection: "row", alignItems: "flex-start" },
+  commentAvatarSq: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#3f3f46",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10
+  },
+  commentAvatarSqText: { color: "#fafafa", fontSize: 14, fontWeight: "800" },
+  commentMainCol: { flex: 1, minWidth: 0, paddingRight: 6 },
+  commentHeaderRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
+  commentUserName: { color: "#fafafa", fontSize: 13, fontWeight: "800", maxWidth: "70%" },
+  commentTime: { color: "#9ca3af", fontSize: 12, fontWeight: "600" },
+  commentBodyText: { color: "#e4e4e7", fontSize: 13, lineHeight: 18, marginTop: 4 },
+  commentReplyBtn: { alignSelf: "flex-start", marginTop: 8 },
+  commentReplyText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
+  commentActionsCol: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingTop: 2,
+    marginLeft: 4,
+    alignSelf: "flex-start"
+  },
+  commentActionHit: { flexDirection: "row", alignItems: "center", gap: 4, minWidth: 24 },
+  commentActionCount: { color: "#9ca3af", fontSize: 11, fontWeight: "700" },
+  viewMoreCommentsWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 4,
+    paddingLeft: 46
+  },
+  viewMoreCommentsLine: {
+    width: 22,
+    height: 1,
+    backgroundColor: "#52525b"
+  },
+  viewMoreCommentsText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
+  replyingToBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderTopWidth: 1,
+    borderTopColor: "#303236",
+    backgroundColor: "rgba(184,255,55,0.08)"
+  },
+  replyingToBannerText: { flex: 1, color: "#d8ff37", fontSize: 12, fontWeight: "800" },
+  replyingToCancel: { paddingVertical: 4, paddingHorizontal: 6 },
+  replyingToCancelText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
   emojiRow: {
     borderTopWidth: 1,
     borderTopColor: "#303236",

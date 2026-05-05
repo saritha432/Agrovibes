@@ -16,7 +16,7 @@ function normalizeName(value: string) {
 
 export type LocalEngagementRecord = {
   id: string;
-  type: "post_like" | "post_comment";
+  type: "post_like" | "post_comment" | "comment_reply";
   actorName: string;
   recipientNameNorm: string;
   postId: number;
@@ -49,6 +49,7 @@ type LocalCommentRecord = {
   text: string;
   likes: number;
   createdAt: string;
+  parentCommentId?: string;
 };
 
 function identityKey(identity: { name: string; key?: string }) {
@@ -97,7 +98,7 @@ async function writeLocalComments(rows: LocalCommentRecord[]) {
 
 /** For same-device testing or when the hosted API has no engagement routes yet. */
 export async function appendLocalEngagementNotification(payload: {
-  type: "post_like" | "post_comment";
+  type: "post_like" | "post_comment" | "comment_reply";
   actorName: string;
   recipientDisplayName: string;
   postId: number;
@@ -132,7 +133,7 @@ export async function getLocalEngagementNotificationsForViewer(viewerName: strin
   const mine = records.filter((r) => r.recipientNameNorm === norm && !r.read);
   return {
     postLikes: mine.filter((r) => r.type === "post_like"),
-    postComments: mine.filter((r) => r.type === "post_comment")
+    postComments: mine.filter((r) => r.type === "post_comment" || r.type === "comment_reply")
   };
 }
 
@@ -192,12 +193,20 @@ export async function setLocalPostLikedByIdentity(
 }
 
 export async function getLocalCommentsForPost(postId: number) {
-  if (!Number.isFinite(postId) || postId <= 0) return [] as Array<{ id: string; user: string; text: string; likes: number }>;
+  if (!Number.isFinite(postId) || postId <= 0)
+    return [] as Array<{ id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string }>;
   const rows = await readLocalComments();
   return rows
     .filter((r) => Number(r.postId) === Number(postId))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-    .map((r) => ({ id: r.id, user: r.user, text: r.text, likes: r.likes }));
+    .map((r) => ({
+      id: r.id,
+      user: r.user,
+      text: r.text,
+      likes: r.likes,
+      createdAt: r.createdAt,
+      parentCommentId: r.parentCommentId
+    }));
 }
 
 export async function addLocalCommentForPost(payload: {
@@ -206,11 +215,13 @@ export async function addLocalCommentForPost(payload: {
   userKey?: string;
   text: string;
   likes?: number;
+  parentCommentId?: string;
 }) {
   if (!Number.isFinite(payload.postId) || payload.postId <= 0) return null;
   const text = String(payload.text || "").trim();
   if (!text) return null;
   const rows = await readLocalComments();
+  const parentId = payload.parentCommentId != null ? String(payload.parentCommentId).trim() : "";
   const record: LocalCommentRecord = {
     id: `lc-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
     postId: payload.postId,
@@ -218,9 +229,17 @@ export async function addLocalCommentForPost(payload: {
     userKey: payload.userKey ? String(payload.userKey).toLowerCase() : undefined,
     text,
     likes: Number.isFinite(payload.likes) ? Number(payload.likes) : 0,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    parentCommentId: parentId || undefined
   };
   rows.push(record);
   await writeLocalComments(rows);
-  return { id: record.id, user: record.user, text: record.text, likes: record.likes };
+  return {
+    id: record.id,
+    user: record.user,
+    text: record.text,
+    likes: record.likes,
+    createdAt: record.createdAt,
+    parentCommentId: record.parentCommentId
+  };
 }
