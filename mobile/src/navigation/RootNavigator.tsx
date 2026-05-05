@@ -19,6 +19,9 @@ import { ExpertCredentialsScreen } from "../screens/onboarding/ExpertCredentials
 import { ExpertVerificationScreen } from "../screens/onboarding/ExpertVerificationScreen";
 import { SecurityVerificationScreen } from "../screens/onboarding/SecurityVerificationScreen";
 import { InitialSetupScreen } from "../screens/InitialSetupScreen";
+import { EditProfileScreen } from "../screens/EditProfileScreen";
+import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
+import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
 import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
 import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
@@ -53,6 +56,9 @@ export type RootStackParamList = {
   SecurityVerification: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   InstructorStudio: undefined;
+  EditProfile: undefined;
+  DirectInbox: undefined;
+  DirectChat: { threadId: string; peerName: string; peerKey?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -79,6 +85,33 @@ export function RootNavigator() {
       <Stack.Screen name="ExpertVerification" component={ExpertVerificationScreen} />
       <Stack.Screen name="SecurityVerification" component={SecurityVerificationScreen} />
       <Stack.Screen name="Main" component={AppNavigator} />
+      <Stack.Screen
+        name="EditProfile"
+        component={EditProfileScreen}
+        options={{
+          title: "Edit profile",
+          headerShown: true,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: "#ffffff" },
+          headerTintColor: "#0f0f0f",
+          headerTitleStyle: { fontWeight: "800" as const, fontSize: 18 },
+          headerBackTitle: "Back"
+        }}
+      />
+      <Stack.Screen
+        name="DirectInbox"
+        component={DirectInboxScreen}
+        options={{
+          title: "Messages",
+          headerShown: true,
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: "#ffffff" },
+          headerTintColor: "#0f0f0f",
+          headerTitleStyle: { fontWeight: "800" as const, fontSize: 18 },
+          headerBackTitle: "Back"
+        }}
+      />
+      <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
       <Stack.Screen name="InstructorStudio" component={InstructorStudioScreen} />
     </Stack.Navigator>
   );

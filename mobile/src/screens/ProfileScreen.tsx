@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { navigateToDirectInbox, navigateToEditProfile } from "../navigation/navigationRef";
 import { useAuth } from "../auth/AuthContext";
 import {
   fetchHomePosts,
@@ -47,12 +48,14 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
+/* Profile highlight rings (Harvest, Products, Tips, Market) — re-enable when needed
 const HIGHLIGHTS = [
   { key: "harvest", label: "Harvest", icon: "leaf-outline" as const, border: "#c9b458" },
   { key: "products", label: "Products", icon: "nutrition-outline" as const, border: "#e07a8a" },
   { key: "tips", label: "Tips", icon: "bulb-outline" as const, border: "#7ec8c3" },
   { key: "market", label: "Market", icon: "storefront-outline" as const, border: "#5a9e8f" }
 ];
+*/
 
 type GalleryTab = "Posts" | "Reels" | "Tagged";
 
@@ -356,7 +359,7 @@ export function ProfileScreen() {
               </View>
 
               <View style={styles.profileActionsRow}>
-                <Pressable style={styles.editProfileBtnCompact} onPress={() => Alert.alert("Edit profile", "Profile editing coming soon.")}>
+                <Pressable style={styles.editProfileBtnCompact} onPress={navigateToEditProfile}>
                   <Ionicons name="create-outline" size={18} color="#fff" />
                   <Text style={styles.editProfileBtnText} numberOfLines={1}>
                     Edit Profile
@@ -371,7 +374,7 @@ export function ProfileScreen() {
                     {isFollowing ? "Following" : "Follow"}
                   </Text>
                 </Pressable>
-                <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Message", "Messaging coming soon.")}>
+                <Pressable style={styles.iconActionSquare} onPress={navigateToDirectInbox}>
                   <Ionicons name="chatbubble-outline" size={20} color={TEXT} />
                 </Pressable>
                 <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Share", "Share coming soon.")}>
@@ -392,6 +395,7 @@ export function ProfileScreen() {
               </Pressable>
             </View>
 
+            {/*
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.highlightsScroll}>
               {HIGHLIGHTS.map((h) => (
                 <Pressable key={h.key} style={styles.highlightItem} onPress={() => Alert.alert(h.label, "Highlights coming soon.")}>
@@ -404,6 +408,7 @@ export function ProfileScreen() {
                 </Pressable>
               ))}
             </ScrollView>
+            */}
 
             <View style={styles.gallerySection}>
               <View style={styles.iconTabsRow}>
