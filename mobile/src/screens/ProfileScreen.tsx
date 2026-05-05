@@ -269,7 +269,7 @@ export function ProfileScreen() {
             <Pressable hitSlop={8} onPress={navigateToUserSearch}>
               <Ionicons name="search-outline" size={18} color="#e8f0ec" />
             </Pressable>
-            <Pressable hitSlop={8} onPress={() => Alert.alert("Messages", "Messaging coming soon.")}>
+            <Pressable hitSlop={8} onPress={navigateToDirectInbox}>
               <Ionicons name="chatbubble-ellipses-outline" size={18} color="#e8f0ec" />
             </Pressable>
             {/*

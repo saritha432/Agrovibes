@@ -1892,7 +1892,14 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         u.full_name AS "peerName",
         u.email AS "peerEmail",
         t.body AS "lastMessage",
-        t.created_at AS "lastAt"
+        t.created_at AS "lastAt",
+        COALESCE((
+          SELECT COUNT(*)::INT
+          FROM direct_messages dm2
+          WHERE dm2.sender_id = t.peer_id
+            AND dm2.receiver_id = $1
+            AND dm2.is_read = false
+        ), 0) AS "unreadCount"
       FROM thread_rows t
       JOIN learn_users u ON u.id = t.peer_id
       WHERE t.rn = 1
