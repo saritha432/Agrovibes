@@ -270,6 +270,12 @@ export async function createHomeStory(
   return (await response.json()) as { story: HomeStory };
 }
 
+export async function deleteHomeStory(storyId: number, token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}`, token, {
+    method: "DELETE"
+  })) as { ok: true };
+}
+
 export async function fetchHomePosts(token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

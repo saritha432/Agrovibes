@@ -2031,6 +2031,41 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
   }
 });
 
+router.delete("/v1/home/stories/:storyId", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoriesTable();
+    const storyId = Number(req.params.storyId);
+    const actorUserId = Number(req.user.userId);
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    const actor = await query(`SELECT full_name AS "fullName" FROM learn_users WHERE id = $1 LIMIT 1`, [actorUserId]);
+    const actorNameNorm = String(actor.rows[0]?.fullName || "")
+      .trim()
+      .toLowerCase();
+    const deleted = await query(
+      `
+      DELETE FROM home_stories
+      WHERE id = $1
+        AND (
+          user_id = $2
+          OR (user_id IS NULL AND LOWER(TRIM(user_name)) = $3)
+        )
+      RETURNING id
+      `,
+      [storyId, actorUserId, actorNameNorm]
+    );
+    if (!deleted.rows[0]) {
+      res.status(404).json({ message: "Story not found or not yours" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete story", error: error.message });
+  }
+});
+
 router.get("/v1/home/posts", authOptional, async (req, res) => {
   try {
     await backfillHomePostUserIds();

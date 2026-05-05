@@ -28,6 +28,7 @@ import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
   createHomePostComment,
+  deleteHomeStory,
   fetchHomePostComments,
   fetchHomePosts,
   fetchHomeStories,
@@ -390,6 +391,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [commentInteractions, setCommentInteractions] = useState<Record<string, { liked: boolean; disliked: boolean }>>({});
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const [storyViewerOwnerKey, setStoryViewerOwnerKey] = useState<string | null>(null);
   const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
@@ -452,25 +454,53 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
   const currentUserStoryKey = useMemo(() => normalizeIdentity(user?.fullName || "You"), [user?.fullName]);
   const currentUserId = Number(user?.id);
+  const ownOwnerKey =
+    Number.isFinite(currentUserId) && currentUserId > 0 ? `uid:${currentUserId}` : `name:${currentUserStoryKey || "you"}`;
+  const storyOwnerKeyOf = useCallback(
+    (story: HomeStory) => {
+      const sid = Number(story.userId);
+      if (Number.isFinite(sid) && sid > 0) return `uid:${sid}`;
+      const nameNorm = normalizeIdentity(story.userName || "");
+      if (!nameNorm || nameNorm === "you") return ownOwnerKey;
+      return `name:${nameNorm}`;
+    },
+    [ownOwnerKey]
+  );
   const ownStories = useMemo(
     () =>
-      stories.filter((s) => {
-        const storyName = normalizeIdentity(s.userName);
-        const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && sid > 0 && sid === currentUserId) return true;
-        return storyName === "you" || storyName === currentUserStoryKey;
+      playableStories.filter((s) => {
+        return storyOwnerKeyOf(s) === ownOwnerKey;
       }),
-    [currentUserId, currentUserStoryKey, stories]
+    [ownOwnerKey, playableStories, storyOwnerKeyOf]
   );
-  const otherStories = useMemo(
-    () =>
-      stories.filter((s) => {
-        const storyName = normalizeIdentity(s.userName);
-        return storyName !== "you" && storyName !== currentUserStoryKey;
-      }),
-    [currentUserStoryKey, stories]
-  );
-  const activeStory = playableStories[activeStoryIndex];
+  const otherStoryUsers = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { ownerKey: string; userName: string; avatarLabel: string; hasUnviewed: boolean; firstStoryId: number }
+    >();
+    for (const s of playableStories) {
+      const ownerKey = storyOwnerKeyOf(s);
+      if (ownerKey === ownOwnerKey) continue;
+      const prev = grouped.get(ownerKey);
+      if (!prev) {
+        grouped.set(ownerKey, {
+          ownerKey,
+          userName: s.userName,
+          avatarLabel: s.avatarLabel || (s.userName?.charAt(0) || "?").toUpperCase(),
+          hasUnviewed: !s.viewed,
+          firstStoryId: Number(s.id)
+        });
+      } else if (!s.viewed) {
+        grouped.set(ownerKey, { ...prev, hasUnviewed: true });
+      }
+    }
+    return [...grouped.values()];
+  }, [ownOwnerKey, playableStories, storyOwnerKeyOf]);
+  const viewerStories = useMemo(() => {
+    if (!storyViewerOwnerKey) return playableStories;
+    return playableStories.filter((s) => storyOwnerKeyOf(s) === storyViewerOwnerKey);
+  }, [playableStories, storyOwnerKeyOf, storyViewerOwnerKey]);
+  const activeStory = viewerStories[activeStoryIndex];
 
   const applyViewedStories = useCallback(
     (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
@@ -479,12 +509,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const closeStory = () => {
     setStoryOpen(false);
+    setStoryViewerOwnerKey(null);
     progress.stopAnimation();
     progress.setValue(0);
   };
 
   const nextStory = () => {
-    if (activeStoryIndex >= playableStories.length - 1) {
+    if (activeStoryIndex >= viewerStories.length - 1) {
       closeStory();
       return;
     }
@@ -512,6 +543,32 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStoryOpen, activeStoryIndex]);
+
+  const deleteActiveStory = useCallback(async () => {
+    if (!activeStory) return;
+    if (!token) {
+      Alert.alert("Login required", "Please login to delete your story.");
+      return;
+    }
+    const isMine = storyOwnerKeyOf(activeStory) === ownOwnerKey;
+    if (!isMine) return;
+    try {
+      await deleteHomeStory(Number(activeStory.id), token);
+      setStories((prev) => prev.filter((s) => Number(s.id) !== Number(activeStory.id)));
+      setOptimisticStories((prev) => prev.filter((s) => Number(s.id) !== Number(activeStory.id)));
+      setViewedStoryIds((prev) => {
+        const n = new Set(prev);
+        n.delete(Number(activeStory.id));
+        return n;
+      });
+      setActiveStoryIndex((idx) => Math.max(0, idx - 1));
+      if (viewerStories.length <= 1) {
+        closeStory();
+      }
+    } catch {
+      Alert.alert("Delete failed", "Could not delete story right now.");
+    }
+  }, [activeStory, closeStory, ownOwnerKey, storyOwnerKeyOf, token, viewerStories.length]);
 
   useEffect(() => {
     let mounted = true;
@@ -1088,7 +1145,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 onOpenCreate?.("story");
                 return;
               }
-              const idx = playableStories.findIndex((s) => s.id === ownPlayable.id);
+              setStoryViewerOwnerKey(ownOwnerKey);
+              const ownQueue = playableStories.filter((s) => storyOwnerKeyOf(s) === ownOwnerKey);
+              const idx = ownQueue.findIndex((s) => s.id === ownPlayable.id);
               setActiveStoryIndex(Math.max(idx, 0));
               setStoryOpen(true);
             }}
@@ -1120,25 +1179,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </Text>
           </Pressable>
 
-          {otherStories.map((story) => (
+          {otherStoryUsers.map((story) => (
             <Pressable
-              key={story.id}
+              key={story.ownerKey}
               style={styles.storyItem}
               onPress={() => {
-                if (!story.videoUrl && !story.imageUrl) return;
+                const queue = playableStories.filter((s) => storyOwnerKeyOf(s) === story.ownerKey);
+                const first = queue[0];
+                if (!first) return;
                 setViewedStoryIds((prev) => {
-                  if (prev.has(story.id)) return prev;
+                  if (prev.has(first.id)) return prev;
                   const next = new Set(prev);
-                  next.add(story.id);
+                  next.add(first.id);
                   return next;
                 });
-                setStories((prev) => prev.map((s) => (s.id === story.id ? { ...s, viewed: true } : s)));
-                const idx = playableStories.findIndex((s) => s.id === story.id);
-                setActiveStoryIndex(Math.max(idx, 0));
+                setStories((prev) => prev.map((s) => (s.id === first.id ? { ...s, viewed: true } : s)));
+                setStoryViewerOwnerKey(story.ownerKey);
+                setActiveStoryIndex(0);
                 setStoryOpen(true);
               }}
             >
-              <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
+              <View style={[styles.storyRing, story.hasUnviewed ? styles.storyRingNew : styles.storyRingViewed]}>
                 <View style={styles.storyInner}>
                   <View style={styles.storyAvatarFill}>
                     <Text style={styles.storyInitial}>{story.avatarLabel}</Text>
@@ -1162,7 +1223,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
+    [activeHomeTab, onOpenCreate, otherStoryUsers, ownOwnerKey, ownStories, playableStories, storyOwnerKeyOf, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
@@ -1556,7 +1617,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       >
         <View style={styles.storyViewerRoot}>
           <View style={styles.storyProgressRow}>
-            {playableStories.map((s, idx) => {
+            {viewerStories.map((s, idx) => {
               const isPast = idx < activeStoryIndex;
               const isActive = idx === activeStoryIndex;
               const width = isActive
@@ -1587,9 +1648,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
               </View>
             </View>
-            <Pressable onPress={closeStory} hitSlop={10}>
-              <Ionicons name="close" size={26} color="#fff" />
-            </Pressable>
+            <View style={styles.storyViewerTopActions}>
+              {activeStory && storyOwnerKeyOf(activeStory) === ownOwnerKey ? (
+                <Pressable onPress={deleteActiveStory} hitSlop={10}>
+                  <Ionicons name="trash-outline" size={22} color="#fff" />
+                </Pressable>
+              ) : null}
+              <Pressable onPress={closeStory} hitSlop={10}>
+                <Ionicons name="close" size={26} color="#fff" />
+              </Pressable>
+            </View>
           </View>
 
           <View
@@ -2174,6 +2242,7 @@ const styles = StyleSheet.create({
   storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
   storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
+  storyViewerTopActions: { flexDirection: "row", alignItems: "center", gap: 14 },
   storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
   storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
