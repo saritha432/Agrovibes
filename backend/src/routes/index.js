@@ -178,7 +178,6 @@ async function ensureHomePostCommentsTable() {
   homePostCommentsTableReady = true;
 }
 
-<<<<<<< HEAD
 async function ensureDirectMessagesTable() {
   if (directMessagesTableReady) return;
   await ensureLearnUsersTable();
@@ -198,7 +197,6 @@ async function ensureDirectMessagesTable() {
   directMessagesTableReady = true;
 }
 
-=======
 function isLegacySyntheticPostAuthorEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   return e.startsWith("legacy_post_") && e.endsWith("@phone.agrovibes");
@@ -208,7 +206,6 @@ function isLegacySyntheticPostAuthorEmail(email) {
  * Resolves which learn_users row should receive like/comment notifications for a home post.
  * Prefers real accounts over legacy backfill placeholders; updates home_posts.user_id when remapping.
  */
->>>>>>> c0e32aa23da51613b888a66fc3b1b11bad9c18b7
 async function resolveHomePostAuthorUserId(postRow) {
   const name = String(postRow.user_name || "").trim();
   const postId = postRow.id != null ? Number(postRow.id) : null;
