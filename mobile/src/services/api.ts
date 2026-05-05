@@ -165,6 +165,7 @@ export interface MessageThread {
   peerEmail?: string;
   lastMessage: string;
   lastAt: string;
+  unreadCount?: number;
 }
 
 export interface DirectMessageItem {
