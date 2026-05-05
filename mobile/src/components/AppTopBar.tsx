@@ -4,7 +4,6 @@ import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "rea
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
 import {
-  fetchMessageThreads,
   fetchRelationships,
   fetchSocialNotifications,
   markSocialNotificationRead,
@@ -20,7 +19,6 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { getLocalEngagementNotificationsForViewer, markLocalEngagementRead } from "../social/localEngagementStore";
-import { navigateToDirectInbox, navigateToUserSearch } from "../navigation/navigationRef";
 
 export function AppTopBar() {
   const { token, user } = useAuth();
@@ -38,7 +36,6 @@ export function AppTopBar() {
   const [postLikes, setPostLikes] = React.useState<any[]>([]);
   const [postComments, setPostComments] = React.useState<any[]>([]);
   const [lastSeenMs, setLastSeenMs] = React.useState(0);
-  const [messageUnreadCount, setMessageUnreadCount] = React.useState(0);
 
   const notificationSeenKey = React.useMemo(() => {
     const identity = String(user?.email || user?.id || user?.fullName || "guest").toLowerCase();
@@ -53,7 +50,6 @@ export function AppTopBar() {
     let remoteAccepted: any[] = [];
     let remotePostLikes: any[] = [];
     let remotePostComments: any[] = [];
-    let remoteMessageUnread = 0;
     if (token) {
       try {
         const remote = await fetchSocialNotifications(token);
@@ -64,14 +60,7 @@ export function AppTopBar() {
       } catch {
         // remote social endpoints may be unavailable; keep local notifications
       }
-      try {
-        const threads = await fetchMessageThreads(token);
-        remoteMessageUnread = (threads.threads || []).reduce((sum, t) => sum + Number(t.unreadCount || 0), 0);
-      } catch {
-        remoteMessageUnread = 0;
-      }
     }
-    setMessageUnreadCount(remoteMessageUnread);
     const mergedPending = [...(remoteReq || []), ...(local.pendingRequests || []).map((n) => ({ ...n, isLocal: true, actorName: n.actorName, followId: n.id, id: n.id }))];
     setPending(mergedPending);
     setAccepted([...(remoteAccepted || []), ...(local.acceptedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))]);
@@ -305,17 +294,6 @@ export function AppTopBar() {
       <View style={styles.topBar}>
         <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
         <View style={styles.rightSide}>
-          <Pressable style={styles.iconBadge} onPress={navigateToUserSearch}>
-            <Ionicons name="search-outline" size={16} color="#d8ff37" />
-          </Pressable>
-          <Pressable style={styles.iconBadge} onPress={navigateToDirectInbox}>
-            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#d8ff37" />
-            {messageUnreadCount > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{Math.min(99, messageUnreadCount)}</Text>
-              </View>
-            ) : null}
-          </Pressable>
           <Pressable style={styles.iconBadge} onPress={() => setOpen(true)}>
             <Ionicons name="notifications-outline" size={16} color="#d8ff37" />
             {unreadCount > 0 ? (

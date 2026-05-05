@@ -159,23 +159,6 @@ export interface SocialRelationship {
   canFollowBack: boolean;
 }
 
-export interface MessageThread {
-  peerUserId: number;
-  peerName: string;
-  peerEmail?: string;
-  lastMessage: string;
-  lastAt: string;
-  unreadCount?: number;
-}
-
-export interface DirectMessageItem {
-  id: number;
-  senderId: number;
-  receiverId: number;
-  body: string;
-  createdAt: string;
-}
-
 export interface SocialNotificationItem {
   id: number;
   type: "follow_request" | "follow_accept";
@@ -270,28 +253,21 @@ export async function fetchHomeStories() {
   return (await response.json()) as { stories: HomeStory[] };
 }
 
-export async function createHomeStory(payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string }) {
+export async function createHomeStory(
+  payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string },
+  token?: string | null
+) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API_BASE_URL}/v1/home/stories`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
     throw new Error("Failed to create story");
   }
   return (await response.json()) as { story: HomeStory };
-}
-
-export async function deleteHomeStory(storyId: number, userName: string) {
-  const response = await fetch(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}`, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userName })
-  });
-  if (!response.ok) {
-    throw new Error("Failed to delete story");
-  }
-  return (await response.json()) as { ok: true; deletedId: number };
 }
 
 export async function fetchHomePosts(token?: string | null) {
@@ -522,27 +498,6 @@ export async function fetchRelationships(token: string, userIds: number[]) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/relationships?userIds=${encodeURIComponent(qs)}`, token)) as {
     relationships: Record<number, SocialRelationship>;
   };
-}
-
-export async function fetchMessageThreads(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/threads`, token)) as {
-    threads: MessageThread[];
-  };
-}
-
-export async function fetchMessageThread(token: string, peerUserId: number) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
-    peer: { id: number; fullName: string; email?: string };
-    messages: DirectMessageItem[];
-  };
-}
-
-export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
-  })) as { message: DirectMessageItem };
 }
 
 async function signCloudinaryUpload(folder = "agrovibes") {

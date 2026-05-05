@@ -27,7 +27,6 @@ import { AppTopBar } from "../components/AppTopBar";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
-  deleteHomeStory,
   createHomePostComment,
   fetchHomePostComments,
   fetchHomePosts,
@@ -463,16 +462,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       }),
     [currentUserId, currentUserStoryKey, stories]
   );
-  const ownPlayableStory = useMemo(() => {
-    const candidates = ownStories.filter((s) => !!s.videoUrl || !!s.imageUrl);
-    if (candidates.length === 0) return null;
-    return [...candidates].sort((a, b) => {
-      const ta = Date.parse(String(a.createdAt || "")) || 0;
-      const tb = Date.parse(String(b.createdAt || "")) || 0;
-      if (ta !== tb) return tb - ta;
-      return Number(b.id || 0) - Number(a.id || 0);
-    })[0];
-  }, [ownStories]);
   const otherStories = useMemo(
     () =>
       stories.filter((s) => {
@@ -482,13 +471,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [currentUserStoryKey, stories]
   );
   const activeStory = playableStories[activeStoryIndex];
-  const isActiveStoryOwnedByViewer = useMemo(() => {
-    if (!activeStory) return false;
-    const sid = Number(activeStory.userId);
-    if (Number.isFinite(currentUserId) && currentUserId > 0 && sid > 0 && sid === currentUserId) return true;
-    const storyName = normalizeIdentity(activeStory.userName);
-    return storyName === "you" || storyName === currentUserStoryKey;
-  }, [activeStory, currentUserId, currentUserStoryKey]);
 
   const applyViewedStories = useCallback(
     (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
@@ -500,39 +482,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     progress.stopAnimation();
     progress.setValue(0);
   };
-
-  const onDeleteActiveStory = useCallback(() => {
-    if (!activeStory) return;
-    Alert.alert("Delete story", "Remove this story now?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => {
-          void (async () => {
-            const sid = Number(activeStory.id);
-            const viewer = user?.fullName || "You";
-            if (Number.isFinite(sid) && sid > 0) {
-              try {
-                await deleteHomeStory(sid, viewer);
-              } catch {
-                // proceed local-first so UI never blocks deletion on transient API failures
-              }
-            }
-            setOptimisticStories((prev) => prev.filter((s) => String(s.id) !== String(activeStory.id)));
-            setStories((prev) => prev.filter((s) => String(s.id) !== String(activeStory.id)));
-            setViewedStoryIds((prev) => {
-              if (!prev.has(activeStory.id)) return prev;
-              const next = new Set(prev);
-              next.delete(activeStory.id);
-              return next;
-            });
-            closeStory();
-          })();
-        }
-      }
-    ]);
-  }, [activeStory, closeStory, user?.fullName]);
 
   const nextStory = () => {
     if (activeStoryIndex >= playableStories.length - 1) {
@@ -881,7 +830,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           userName: user?.fullName || "You",
           district: post.location || "My Farm",
           ...media
-        });
+        }, token ?? null);
         const normalizedCreated = normalizeStoryRow(created.story as HomeStory & Record<string, unknown>);
         const serverStory: HomeStory = {
           ...normalizedCreated,
@@ -901,7 +850,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         onOpenCreate?.("story");
       }
     },
-    [applyViewedStories, onOpenCreate, user?.fullName, user?.id]
+    [applyViewedStories, onOpenCreate, token, user?.fullName, user?.id]
   );
 
   const togglePostLike = useCallback(
@@ -1134,7 +1083,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <Pressable
             style={styles.storyItem}
             onPress={() => {
-              const ownPlayable = ownPlayableStory;
+              const ownPlayable = ownStories.find((s) => !!s.videoUrl || !!s.imageUrl);
               if (!ownPlayable) {
                 onOpenCreate?.("story");
                 return;
@@ -1213,7 +1162,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, onOpenCreate, otherStories, ownPlayableStory, ownStories, playableStories, user?.fullName]
+    [activeHomeTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
@@ -1638,16 +1587,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
               </View>
             </View>
-            <View style={styles.storyViewerTopActions}>
-              {isActiveStoryOwnedByViewer ? (
-                <Pressable onPress={onDeleteActiveStory} hitSlop={10}>
-                  <Ionicons name="trash-outline" size={22} color="#fff" />
-                </Pressable>
-              ) : null}
-              <Pressable onPress={closeStory} hitSlop={10}>
-                <Ionicons name="close" size={26} color="#fff" />
-              </Pressable>
-            </View>
+            <Pressable onPress={closeStory} hitSlop={10}>
+              <Ionicons name="close" size={26} color="#fff" />
+            </Pressable>
           </View>
 
           <View
@@ -2233,7 +2175,6 @@ const styles = StyleSheet.create({
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
   storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
   storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
-  storyViewerTopActions: { flexDirection: "row", alignItems: "center", gap: 12 },
   storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
   storyViewerName: { color: "#fff", fontWeight: "800" },

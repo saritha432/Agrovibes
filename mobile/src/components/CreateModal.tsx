@@ -217,7 +217,7 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.back);
   const [entryFlashOn, setEntryFlashOn] = useState(false);
@@ -269,7 +269,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setShowStickerPanel(false);
       return;
     }
-    setCreateType(initialType);
+    setCreateType(initialType === "story" ? null : initialType);
     setCreateStep("preview");
     setEntryType(initialType ?? "story");
     setErrorText("");
@@ -559,7 +559,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           userName: user?.fullName?.trim() || "Farmer",
           district: user?.locationLabel?.trim() || "Unknown",
           ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
-        });
+        }, token ?? null);
       } else {
         if (!caption.trim()) {
           setErrorText("Caption is required.");
