@@ -147,7 +147,7 @@ export function AuthChoiceScreen() {
                 keyboardType="phone-pad"
                 placeholder={t("mobilePlaceholder")}
                 placeholderTextColor="#7f8b93"
-                style={styles.input}
+                style={[styles.input, styles.rowInput]}
               />
             </>
           ) : (
@@ -156,7 +156,7 @@ export function AuthChoiceScreen() {
               onChangeText={setLoginIdentifier}
               placeholder="Mobile, username, or 9876543210@phone.agrovibes"
               placeholderTextColor="#7f8b93"
-              style={styles.input}
+              style={[styles.input, styles.rowInput]}
               autoCapitalize="none"
             />
           )}
@@ -240,6 +240,7 @@ const styles = StyleSheet.create({
   },
   spaced: { marginTop: 10 },
   row: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 10 },
+  rowInput: { flex: 1, minWidth: 0 },
   primaryBtn: {
     marginTop: 12,
     alignItems: "center",

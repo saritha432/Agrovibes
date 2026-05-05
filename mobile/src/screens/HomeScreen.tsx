@@ -56,10 +56,11 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
-const homeTopTabs = ["Feed", "Reels", "Friends", "live"] as const;
-const friendLikeNames = ["Ramesh", "Sowndherya", "AgroRoots", "Meera", "Suresh"];
+const homeTopTabs = [ "Reels", "Friends", "live"] as const;
+const friendLikeNames = ["Sowndherya", "AgroRoots", "Meera", "Suresh", "Kavya"];
 const likeActiveColor = "#16a34a";
 const REEL_LIKE_COLOR = "#ffffff";
+const BLOCKED_STORY_NAMES = new Set(["ramesh"]);
 
 function normalizeIdentity(value: string) {
   return String(value || "")
@@ -68,6 +69,10 @@ function normalizeIdentity(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function filterBlockedStories(rows: HomeStory[]) {
+  return rows.filter((s) => !BLOCKED_STORY_NAMES.has(normalizeIdentity(s.userName)));
 }
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
@@ -569,7 +574,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     fetchHomeStories()
       .then((data) => {
         if (!mounted) return;
-        const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
+        const remoteRows = filterBlockedStories((data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>)));
         setStories(applyViewedStories(mergeStories(remoteRows, optimisticStories)));
       })
       .catch(() => {

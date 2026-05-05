@@ -2114,7 +2114,7 @@ router.get("/v1/home/stories", async (_req, res) => {
       res.json({
         stories: [
           { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-          { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false },
+          { id: 2, userName: "Sowndherya", district: "Nashik", avatarLabel: "S", hasNew: true, viewed: false },
           { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false },
           { id: 4, userName: "Meena", district: "Ludhiana", avatarLabel: "M", hasNew: true, viewed: false },
           { id: 5, userName: "Kisan Hub", district: "Pune", avatarLabel: "K", hasNew: false, viewed: true },
@@ -2129,7 +2129,7 @@ router.get("/v1/home/stories", async (_req, res) => {
     res.json({
       stories: [
         { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-        { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false }
+        { id: 2, userName: "Sowndherya", district: "Nashik", avatarLabel: "S", hasNew: true, viewed: false }
       ],
       source: "fallback",
       message: error.message
@@ -2244,7 +2244,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         posts: [
           {
             id: 1,
-            userName: "Ramesh Patel",
+            userName: "Sowndherya Patil",
             location: "Nashik",
             caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
             likesCount: 1284,
@@ -2265,7 +2265,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       posts: [
         {
           id: 1,
-          userName: "Ramesh Patel",
+          userName: "Sowndherya Patil",
           location: "Nashik",
           caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
           likesCount: 1284,
