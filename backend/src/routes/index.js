@@ -2024,6 +2024,33 @@ router.post("/v1/home/stories", async (req, res) => {
   }
 });
 
+router.delete("/v1/home/stories/:storyId", async (req, res) => {
+  try {
+    await ensureHomeStoriesTable();
+    const storyId = Number(req.params.storyId);
+    const userName = String((req.body || {}).userName || "").trim();
+    if (!Number.isFinite(storyId) || storyId <= 0 || !userName) {
+      res.status(400).json({ message: "Valid storyId and userName are required" });
+      return;
+    }
+    const deleted = await query(
+      `
+      DELETE FROM home_stories
+      WHERE id = $1 AND LOWER(TRIM(user_name)) = LOWER(TRIM($2))
+      RETURNING id
+      `,
+      [storyId, userName]
+    );
+    if (!deleted.rows[0]) {
+      res.status(404).json({ message: "Story not found or not owned by user" });
+      return;
+    }
+    res.json({ ok: true, deletedId: Number(deleted.rows[0].id) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete story", error: error.message });
+  }
+});
+
 router.get("/v1/home/posts", authOptional, async (req, res) => {
   try {
     await backfillHomePostUserIds();

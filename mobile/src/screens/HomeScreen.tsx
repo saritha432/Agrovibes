@@ -6,9 +6,11 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
+  Share,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,6 +26,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTopBar } from "../components/AppTopBar";
 import { useAuth } from "../auth/AuthContext";
 import {
+  createHomeStory,
+  deleteHomeStory,
   createHomePostComment,
   fetchHomePostComments,
   fetchHomePosts,
@@ -44,10 +48,11 @@ import {
   setLocalPostLikedByIdentity
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
+import type { CreateType } from "../components/CreateModal";
 
 interface HomeScreenProps {
   refreshToken?: number;
-  onOpenCreate?: () => void;
+  onOpenCreate?: (type?: CreateType) => void;
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
@@ -177,6 +182,49 @@ function inferParentFromMention(rows: HomeCommentRow[]): HomeCommentRow[] {
     seenChrono.push(cur);
   }
   return rows.map((r) => byId.get(String(r.id))!);
+}
+
+function normalizeStoryRow(raw: Partial<HomeStory> & Record<string, unknown>): HomeStory {
+  const userName = String(raw.userName ?? raw["user_name"] ?? "You");
+  const avatarLabelRaw = String(raw.avatarLabel ?? raw["avatar_label"] ?? userName.charAt(0) ?? "U").trim();
+  const video = (raw.videoUrl as string | null | undefined) ?? (raw["video_url"] as string | null | undefined) ?? null;
+  const image = (raw.imageUrl as string | null | undefined) ?? (raw["image_url"] as string | null | undefined) ?? null;
+  return {
+    id: Number(raw.id ?? Date.now()),
+    userId: raw.userId != null ? Number(raw.userId) : raw["user_id"] != null ? Number(raw["user_id"]) : undefined,
+    userName,
+    district: String(raw.district ?? "My Farm"),
+    avatarLabel: (avatarLabelRaw || "U").charAt(0).toUpperCase(),
+    hasNew: raw.hasNew != null ? !!raw.hasNew : raw["has_new"] != null ? !!raw["has_new"] : true,
+    viewed: !!raw.viewed,
+    videoUrl: video || undefined,
+    imageUrl: image || undefined,
+    createdAt:
+      typeof raw.createdAt === "string"
+        ? raw.createdAt
+        : typeof raw["created_at"] === "string"
+          ? String(raw["created_at"])
+          : undefined
+  };
+}
+
+function mergeStories(remote: HomeStory[], optimistic: HomeStory[]): HomeStory[] {
+  const byKey = new Map<string, HomeStory>();
+  const put = (s: HomeStory) => {
+    const key = `${normalizeIdentity(s.userName)}:${s.videoUrl || ""}:${s.imageUrl || ""}`;
+    byKey.set(key, s);
+  };
+  for (const s of remote) put(s);
+  for (const s of optimistic) {
+    if (!s.videoUrl && !s.imageUrl) continue;
+    const created = Date.parse(String(s.createdAt || "")) || Date.now();
+    if (Date.now() - created <= 24 * 60 * 60 * 1000) put(s);
+  }
+  return [...byKey.values()].sort((a, b) => {
+    const ta = Date.parse(String(a.createdAt || "")) || 0;
+    const tb = Date.parse(String(b.createdAt || "")) || 0;
+    return tb - ta;
+  });
 }
 
 function formatCommentRelativeTime(iso?: string): string {
@@ -331,6 +379,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
+  const [sharePost, setSharePost] = useState<HomePost | null>(null);
+  const [shareSearch, setShareSearch] = useState("");
+  const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
@@ -347,6 +398,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
+  const [storyViewport, setStoryViewport] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const progress = useRef(new Animated.Value(0)).current;
   const commentsFetchSeqRef = useRef(0);
 
@@ -355,7 +407,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     []
   );
   const reelViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 55, minimumViewTime: 120 }),
+    () => ({ itemVisiblePercentThreshold: 35, minimumViewTime: 0 }),
     []
   );
 
@@ -400,14 +452,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
   const currentUserStoryKey = useMemo(() => normalizeIdentity(user?.fullName || "You"), [user?.fullName]);
+  const currentUserId = Number(user?.id);
   const ownStories = useMemo(
     () =>
       stories.filter((s) => {
         const storyName = normalizeIdentity(s.userName);
+        const sid = Number(s.userId);
+        if (Number.isFinite(currentUserId) && currentUserId > 0 && sid > 0 && sid === currentUserId) return true;
         return storyName === "you" || storyName === currentUserStoryKey;
       }),
-    [currentUserStoryKey, stories]
+    [currentUserId, currentUserStoryKey, stories]
   );
+  const ownPlayableStory = useMemo(() => {
+    const candidates = ownStories.filter((s) => !!s.videoUrl || !!s.imageUrl);
+    if (candidates.length === 0) return null;
+    return [...candidates].sort((a, b) => {
+      const ta = Date.parse(String(a.createdAt || "")) || 0;
+      const tb = Date.parse(String(b.createdAt || "")) || 0;
+      if (ta !== tb) return tb - ta;
+      return Number(b.id || 0) - Number(a.id || 0);
+    })[0];
+  }, [ownStories]);
   const otherStories = useMemo(
     () =>
       stories.filter((s) => {
@@ -417,6 +482,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [currentUserStoryKey, stories]
   );
   const activeStory = playableStories[activeStoryIndex];
+  const isActiveStoryOwnedByViewer = useMemo(() => {
+    if (!activeStory) return false;
+    const sid = Number(activeStory.userId);
+    if (Number.isFinite(currentUserId) && currentUserId > 0 && sid > 0 && sid === currentUserId) return true;
+    const storyName = normalizeIdentity(activeStory.userName);
+    return storyName === "you" || storyName === currentUserStoryKey;
+  }, [activeStory, currentUserId, currentUserStoryKey]);
 
   const applyViewedStories = useCallback(
     (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
@@ -428,6 +500,39 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     progress.stopAnimation();
     progress.setValue(0);
   };
+
+  const onDeleteActiveStory = useCallback(() => {
+    if (!activeStory) return;
+    Alert.alert("Delete story", "Remove this story now?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            const sid = Number(activeStory.id);
+            const viewer = user?.fullName || "You";
+            if (Number.isFinite(sid) && sid > 0) {
+              try {
+                await deleteHomeStory(sid, viewer);
+              } catch {
+                // proceed local-first so UI never blocks deletion on transient API failures
+              }
+            }
+            setOptimisticStories((prev) => prev.filter((s) => String(s.id) !== String(activeStory.id)));
+            setStories((prev) => prev.filter((s) => String(s.id) !== String(activeStory.id)));
+            setViewedStoryIds((prev) => {
+              if (!prev.has(activeStory.id)) return prev;
+              const next = new Set(prev);
+              next.delete(activeStory.id);
+              return next;
+            });
+            closeStory();
+          })();
+        }
+      }
+    ]);
+  }, [activeStory, closeStory, user?.fullName]);
 
   const nextStory = () => {
     if (activeStoryIndex >= playableStories.length - 1) {
@@ -464,22 +569,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     fetchHomeStories()
       .then((data) => {
         if (!mounted) return;
-        setStories(applyViewedStories(data.stories));
+        const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
+        setStories(applyViewedStories(mergeStories(remoteRows, optimisticStories)));
       })
       .catch(() => {
         if (!mounted) return;
-        setStories(
-          applyViewedStories([
-          { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-          { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false },
-          { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false }
-          ])
-        );
+        setStories(applyViewedStories(mergeStories([], optimisticStories)));
       });
     return () => {
       mounted = false;
     };
-  }, [applyViewedStories, refreshToken]);
+  }, [applyViewedStories, optimisticStories, refreshToken]);
 
   useEffect(() => {
     if (!activeStory?.id || !isStoryOpen) return;
@@ -680,6 +780,128 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       })();
     },
     [token]
+  );
+
+  const onReelMomentumEnd = useCallback(
+    (offsetY: number) => {
+      if (reelSlotHeight <= 0 || tabPosts.length === 0) return;
+      const index = Math.max(0, Math.min(tabPosts.length - 1, Math.round(offsetY / reelSlotHeight)));
+      const post = tabPosts[index];
+      if (post?.videoUrl) setPlayingPostId(post.id);
+    },
+    [reelSlotHeight, tabPosts]
+  );
+
+  const buildShareLink = useCallback((post: HomePost) => {
+    return `https://agrovibes.app/reel/${encodeURIComponent(String(post.id))}`;
+  }, []);
+
+  const shareMessage = useCallback(
+    (post: HomePost) => {
+      const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
+      const link = buildShareLink(post);
+      return `${post.userName} shared a reel on AgroVibe${caption ? `\n${caption}` : ""}\n${link}`;
+    },
+    [buildShareLink]
+  );
+
+  const openExternalWithFallback = useCallback(async (primaryUrl: string, fallbackUrl: string) => {
+    try {
+      const supported = await Linking.canOpenURL(primaryUrl);
+      if (supported) {
+        await Linking.openURL(primaryUrl);
+        return;
+      }
+    } catch {
+      // fallback to web URL
+    }
+    await Linking.openURL(fallbackUrl);
+  }, []);
+
+  const onShareToSystem = useCallback(
+    async (post: HomePost) => {
+      try {
+        await Share.share({ message: shareMessage(post) });
+      } catch {
+        Alert.alert("Share failed", "Could not open system share.");
+      }
+    },
+    [shareMessage]
+  );
+
+  const onShareToWhatsApp = useCallback(
+    async (post: HomePost) => {
+      const msg = encodeURIComponent(shareMessage(post));
+      await openExternalWithFallback(`whatsapp://send?text=${msg}`, `https://wa.me/?text=${msg}`);
+    },
+    [openExternalWithFallback, shareMessage]
+  );
+
+  const onShareToMessenger = useCallback(
+    async (post: HomePost) => {
+      const link = encodeURIComponent(buildShareLink(post));
+      await openExternalWithFallback(
+        `fb-messenger://share?link=${link}`,
+        `https://www.messenger.com/share?link=${link}`
+      );
+    },
+    [buildShareLink, openExternalWithFallback]
+  );
+
+  const onShareToSnapchat = useCallback(
+    async (post: HomePost) => {
+      const link = encodeURIComponent(buildShareLink(post));
+      await openExternalWithFallback(`snapchat://share?link=${link}`, `https://www.snapchat.com/`);
+    },
+    [buildShareLink, openExternalWithFallback]
+  );
+
+  const onAddReelToStory = useCallback(
+    async (post: HomePost) => {
+      const media = post.videoUrl ? { videoUrl: post.videoUrl } : post.imageUrl ? { imageUrl: post.imageUrl } : null;
+      if (!media) {
+        Alert.alert("No media", "This reel has no media to add as story.");
+        return;
+      }
+      const optimistic: HomeStory = normalizeStoryRow({
+        id: Date.now() * -1,
+        userId: Number(user?.id) || undefined,
+        userName: user?.fullName || "You",
+        district: post.location || "My Farm",
+        avatarLabel: (user?.fullName || "U").charAt(0).toUpperCase(),
+        hasNew: true,
+        viewed: false,
+        ...media,
+        createdAt: new Date().toISOString()
+      });
+      setOptimisticStories((prev) => [optimistic, ...prev].slice(0, 20));
+      setStories((prev) => applyViewedStories(mergeStories(prev, [optimistic])));
+      try {
+        const created = await createHomeStory({
+          userName: user?.fullName || "You",
+          district: post.location || "My Farm",
+          ...media
+        });
+        const normalizedCreated = normalizeStoryRow(created.story as HomeStory & Record<string, unknown>);
+        const serverStory: HomeStory = {
+          ...normalizedCreated,
+          videoUrl: normalizedCreated.videoUrl || optimistic.videoUrl,
+          imageUrl: normalizedCreated.imageUrl || optimistic.imageUrl,
+          createdAt: normalizedCreated.createdAt || optimistic.createdAt
+        };
+        setOptimisticStories((prev) =>
+          [serverStory, ...prev.filter((s) => Number(s.id) !== Number(optimistic.id) && Number(s.id) !== Number(serverStory.id))].slice(0, 20)
+        );
+        setStories((prev) => applyViewedStories(mergeStories([serverStory, ...prev], [])));
+        setSharePost(null);
+        Alert.alert("Added", "Reel added to your story.");
+      } catch {
+        // fallback to existing create flow when API is unavailable
+        setSharePost(null);
+        onOpenCreate?.("story");
+      }
+    },
+    [applyViewedStories, onOpenCreate, user?.fullName, user?.id]
   );
 
   const togglePostLike = useCallback(
@@ -912,9 +1134,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <Pressable
             style={styles.storyItem}
             onPress={() => {
-              const ownPlayable = ownStories.find((s) => !!s.videoUrl || !!s.imageUrl);
+              const ownPlayable = ownPlayableStory;
               if (!ownPlayable) {
-                onOpenCreate?.();
+                onOpenCreate?.("story");
                 return;
               }
               const idx = playableStories.findIndex((s) => s.id === ownPlayable.id);
@@ -932,9 +1154,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <View style={styles.storyAvatarFill}>
                   <Text style={styles.storyInitial}>{(user?.fullName || "Y").charAt(0).toUpperCase()}</Text>
                 </View>
-                <View style={styles.yourStoryPlusBadge}>
+                <Pressable
+                  style={styles.yourStoryPlusBadge}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    onOpenCreate?.("story");
+                  }}
+                  hitSlop={8}
+                >
                   <Ionicons name="add" size={12} color="#fff" />
-                </View>
+                </Pressable>
               </View>
             </View>
             <Text style={styles.storyNameDark} numberOfLines={1}>
@@ -984,7 +1213,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
+    [activeHomeTab, onOpenCreate, otherStories, ownPlayableStory, ownStories, playableStories, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
@@ -1094,7 +1323,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Ionicons name="chatbubble-outline" size={28} color="#fff" />
                 <Text style={styles.reelActionCount}>{shownCommentsCount}</Text>
               </Pressable>
-              <Pressable style={styles.reelActionItem}>
+              <Pressable style={styles.reelActionItem} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={26} color="#fff" />
               </Pressable>
               <Pressable style={styles.reelActionItem}>
@@ -1118,6 +1347,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       legacyRelationshipByName,
       likeBusyByPostId,
       openCommentsForPost,
+      onAddReelToStory,
+      onShareToMessenger,
+      onShareToSnapchat,
+      onShareToSystem,
+      onShareToWhatsApp,
       playingPostId,
       reelSlotHeight,
       relationships,
@@ -1334,6 +1568,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 })}
                 onViewableItemsChanged={onViewableItemsChangedRef.current}
                 viewabilityConfig={reelViewabilityConfig}
+                onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
                 extraData={`${playingPostId}-${reelSlotHeight}`}
                 ListEmptyComponent={
                   <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
@@ -1403,19 +1638,37 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
               </View>
             </View>
-            <Pressable onPress={closeStory} hitSlop={10}>
-              <Ionicons name="close" size={26} color="#fff" />
-            </Pressable>
+            <View style={styles.storyViewerTopActions}>
+              {isActiveStoryOwnedByViewer ? (
+                <Pressable onPress={onDeleteActiveStory} hitSlop={10}>
+                  <Ionicons name="trash-outline" size={22} color="#fff" />
+                </Pressable>
+              ) : null}
+              <Pressable onPress={closeStory} hitSlop={10}>
+                <Ionicons name="close" size={26} color="#fff" />
+              </Pressable>
+            </View>
           </View>
 
-          <View style={styles.storyViewerBody}>
+          <View
+            style={styles.storyViewerBody}
+            onLayout={(e) =>
+              setStoryViewport({
+                width: Math.max(1, Math.round(e.nativeEvent.layout.width)),
+                height: Math.max(1, Math.round(e.nativeEvent.layout.height))
+              })
+            }
+          >
             {activeStory?.videoUrl ? (
-              <Video
-                style={styles.storyVideo}
-                source={{ uri: activeStory.videoUrl }}
-                resizeMode={ResizeMode.CONTAIN}
+              <ContainedExpoVideo
+                uri={activeStory.videoUrl}
                 shouldPlay
+                containerWidth={storyViewport.width || windowWidth}
+                containerHeight={storyViewport.height || Math.max(1, windowHeight - 140)}
+                fit="contain"
                 isLooping={false}
+                isMuted={false}
+                useNativeControls={false}
               />
             ) : activeStory?.imageUrl ? (
               <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="contain" />
@@ -1641,6 +1894,85 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={!!sharePost} transparent animationType="slide" onRequestClose={() => setSharePost(null)}>
+        <Pressable style={styles.shareBackdrop} onPress={() => setSharePost(null)}>
+          <Pressable style={[styles.shareSheet, { paddingBottom: Math.max(insets.bottom + 10, 20) }]} onPress={(e) => e.stopPropagation?.()}>
+            <View style={styles.shareHandle} />
+            <View style={styles.shareSearchRow}>
+              <Ionicons name="search" size={16} color="#b7ff37" />
+              <TextInput
+                value={shareSearch}
+                onChangeText={setShareSearch}
+                placeholder="Search"
+                placeholderTextColor="#97a0a8"
+                style={styles.shareSearchInput}
+              />
+              <Pressable style={styles.shareSearchAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
+                <Ionicons name="person-add-outline" size={16} color="#b7ff37" />
+              </Pressable>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sharePeopleRow}>
+              {(() => {
+                const viewer = normalizeIdentity(user?.fullName || "");
+                const seen = new Set<string>();
+                const list = tabPosts
+                  .map((p) => {
+                    const name = String(p.userName || "").trim();
+                    const key = normalizeIdentity(name);
+                    if (!name || !key || key === viewer || seen.has(key)) return null;
+                    seen.add(key);
+                    return name;
+                  })
+                  .filter((x): x is string => !!x)
+                  .filter((name) => {
+                    const q = normalizeIdentity(shareSearch);
+                    return !q || normalizeIdentity(name).includes(q);
+                  })
+                  .slice(0, 24);
+                return list.map((name) => (
+                  <Pressable key={name} style={styles.sharePersonItem} onPress={() => sharePost && onShareToSystem(sharePost)}>
+                    <View style={styles.sharePersonAvatar}>
+                      <Text style={styles.sharePersonAvatarText}>{(name[0] || "?").toUpperCase()}</Text>
+                    </View>
+                    <Text style={styles.sharePersonName} numberOfLines={1}>
+                      {name}
+                    </Text>
+                  </Pressable>
+                ));
+              })()}
+            </ScrollView>
+
+            <View style={styles.shareFooterRow}>
+              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onAddReelToStory(sharePost)}>
+                <View style={styles.shareFooterIcon}><Ionicons name="add-circle-outline" size={20} color="#b7ff37" /></View>
+                <Text style={styles.shareFooterText}>Add to story</Text>
+              </Pressable>
+              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
+                <View style={styles.shareFooterIcon}><Ionicons name="link-outline" size={20} color="#b7ff37" /></View>
+                <Text style={styles.shareFooterText}>Copy Link</Text>
+              </Pressable>
+              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
+                <View style={styles.shareFooterIcon}><Ionicons name="open-outline" size={20} color="#b7ff37" /></View>
+                <Text style={styles.shareFooterText}>Share To..</Text>
+              </Pressable>
+              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToWhatsApp(sharePost)}>
+                <View style={styles.shareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color="#b7ff37" /></View>
+                <Text style={styles.shareFooterText}>Whatsapp</Text>
+              </Pressable>
+              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToMessenger(sharePost)}>
+                <View style={styles.shareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color="#b7ff37" /></View>
+                <Text style={styles.shareFooterText}>Messenger</Text>
+              </Pressable>
+              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSnapchat(sharePost)}>
+                <View style={styles.shareFooterIcon}><Ionicons name="logo-snapchat" size={20} color="#b7ff37" /></View>
+                <Text style={styles.shareFooterText}>Snapchat</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -1901,6 +2233,7 @@ const styles = StyleSheet.create({
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
   storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
   storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
+  storyViewerTopActions: { flexDirection: "row", alignItems: "center", gap: 12 },
   storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
   storyViewerName: { color: "#fff", fontWeight: "800" },
@@ -2084,5 +2417,81 @@ const styles = StyleSheet.create({
     backgroundColor: "#b7ff37",
     alignItems: "center",
     justifyContent: "center"
-  }
+  },
+  shareBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end"
+  },
+  shareSheet: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    backgroundColor: "#1d2126",
+    borderTopWidth: 1,
+    borderColor: "#343b43",
+    paddingHorizontal: 10,
+    paddingTop: 8
+  },
+  shareHandle: {
+    width: 52,
+    height: 3,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 8,
+    backgroundColor: "#b7ff37"
+  },
+  shareSearchRow: {
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: "#29303a",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    gap: 8
+  },
+  shareSearchInput: { flex: 1, color: "#eef4f8", fontSize: 12, fontWeight: "600" },
+  shareSearchAction: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#222933"
+  },
+  sharePeopleRow: {
+    paddingTop: 12,
+    paddingBottom: 10,
+    gap: 10
+  },
+  sharePersonItem: { width: 62, alignItems: "center", gap: 6 },
+  sharePersonAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#343b43",
+    borderWidth: 1,
+    borderColor: "#4a525c"
+  },
+  sharePersonAvatarText: { color: "#d8ff37", fontWeight: "900", fontSize: 16 },
+  sharePersonName: { color: "#d5dde4", fontSize: 10, fontWeight: "700", maxWidth: 62, textAlign: "center" },
+  shareFooterRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#343b43",
+    paddingTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8
+  },
+  shareFooterAction: { alignItems: "center", gap: 6, flex: 1 },
+  shareFooterIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#2a3139",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  shareFooterText: { color: "#c7ced5", fontSize: 9, fontWeight: "700", textAlign: "center" }
 });

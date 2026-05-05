@@ -36,8 +36,8 @@ export function AppNavigator() {
           children={() => (
             <HomeScreen
               refreshToken={homeRefreshToken}
-              onOpenCreate={() => {
-                setCreatePresetType(null);
+              onOpenCreate={(type) => {
+                setCreatePresetType(type ?? null);
                 setCreateOpen(true);
               }}
             />

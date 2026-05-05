@@ -122,6 +122,7 @@ export interface CommunityQuestion {
 
 export interface HomeStory {
   id: number;
+  userId?: number | null;
   userName: string;
   district: string;
   avatarLabel: string;
@@ -129,6 +130,7 @@ export interface HomeStory {
   viewed: boolean;
   videoUrl?: string | null;
   imageUrl?: string | null;
+  createdAt?: string;
 }
 
 export interface HomePost {
@@ -261,6 +263,18 @@ export async function createHomeStory(payload: { userName: string; district: str
     throw new Error("Failed to create story");
   }
   return (await response.json()) as { story: HomeStory };
+}
+
+export async function deleteHomeStory(storyId: number, userName: string) {
+  const response = await fetch(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userName })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to delete story");
+  }
+  return (await response.json()) as { ok: true; deletedId: number };
 }
 
 export async function fetchHomePosts(token?: string | null) {
