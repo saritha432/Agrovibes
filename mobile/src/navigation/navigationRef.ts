@@ -8,3 +8,21 @@ export function navigateToCart() {
     navigationRef.navigate("Main", { screen: "Market", params: { screen: "Cart" } });
   }
 }
+
+export function navigateToDirectInbox() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("DirectInbox");
+  }
+}
+
+export function navigateToEditProfile() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("EditProfile");
+  }
+}
+
+export function navigateToUserSearch() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("UserSearch");
+  }
+}
