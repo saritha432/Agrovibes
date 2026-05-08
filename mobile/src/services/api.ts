@@ -59,6 +59,24 @@ export interface AdminUserRecord {
   messagesReceivedCount: number;
 }
 
+export interface UserSearchRecord {
+  id: number;
+  fullName: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  website?: string | null;
+  locationLabel?: string | null;
+  createdAt: string;
+  postsCount: number;
+  reelsCount: number;
+  followersCount: number;
+  followingCount: number;
+  viewerStatus: FollowStatus;
+  reverseStatus?: FollowStatus;
+  canFollowBack: boolean;
+}
+
 async function parseJsonOrThrow(response: Response) {
   const text = await response.text();
   let parsed: any = null;
@@ -146,6 +164,20 @@ export async function fetchAdminUsers(token: string, params: { search?: string; 
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return (await fetchWithAuth(`${API_BASE_URL}/v1/admin/users${suffix}`, token)) as {
     users: AdminUserRecord[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+}
+
+export async function fetchUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/users${suffix}`, token)) as {
+    users: UserSearchRecord[];
     total: number;
     limit: number;
     offset: number;

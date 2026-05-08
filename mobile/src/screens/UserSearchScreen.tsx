@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -12,7 +12,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { fetchHomePosts, fetchSocialNetwork, sendFollowRequest } from "../services/api";
+import { fetchUsers, sendFollowRequest } from "../services/api";
 import {
   getLocalFollowNetworkByIdentity,
   sendLocalFollowRequestByIdentity
@@ -22,6 +22,8 @@ type SearchUser = {
   id?: number;
   key?: string;
   name: string;
+  username?: string | null;
+  avatarUrl?: string | null;
   isFollowing: boolean;
 };
 
@@ -45,35 +47,29 @@ export function UserSearchScreen() {
   const [users, setUsers] = useState<SearchUser[]>([]);
   const [busyName, setBusyName] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (searchText = "") => {
     const list: SearchUser[] = [];
     const seen = new Set<string>();
     const selfName = normalizeName(user?.fullName || "");
     const identity = { name: user?.fullName || "", key: user?.email || String(user?.id || "") };
 
-    if (token && user?.id) {
+    if (token) {
       try {
-        const [{ posts }, network] = await Promise.all([fetchHomePosts(token), fetchSocialNetwork(token, user.id)]);
-        for (const p of posts) {
-          const n = normalizeName(p.userName);
+        const { users: remoteUsers } = await fetchUsers(token, { search: searchText, limit: 100 });
+        for (const remoteUser of remoteUsers) {
+          const n = normalizeName(remoteUser.fullName);
           if (!n || n === selfName || seen.has(n)) continue;
           seen.add(n);
-          list.push({ id: p.userId || undefined, key: p.userId ? String(p.userId) : undefined, name: p.userName, isFollowing: false });
+          list.push({
+            id: remoteUser.id,
+            key: String(remoteUser.id),
+            name: remoteUser.fullName,
+            username: remoteUser.username,
+            avatarUrl: remoteUser.avatarUrl,
+            isFollowing: remoteUser.viewerStatus === "accepted" || remoteUser.viewerStatus === "pending"
+          });
         }
-        const followingSet = new Set(network.following.map((f) => normalizeName(f.name)));
-        for (const f of network.following) {
-          const n = normalizeName(f.name);
-          if (!n || n === selfName) continue;
-          if (!seen.has(n)) {
-            list.push({ id: f.key && /^\d+$/.test(f.key) ? Number(f.key) : undefined, key: f.key, name: f.name, isFollowing: true });
-            seen.add(n);
-          }
-        }
-        setUsers(
-          list
-            .map((u) => ({ ...u, isFollowing: u.isFollowing || followingSet.has(normalizeName(u.name)) }))
-            .sort((a, b) => a.name.localeCompare(b.name))
-        );
+        setUsers(list.sort((a, b) => a.name.localeCompare(b.name)));
         return;
       } catch {
         /* fall through to local */
@@ -96,9 +92,16 @@ export function UserSearchScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load])
+      void load(query);
+    }, [load, query])
   );
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      void load(query);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [load, query]);
 
   const filtered = useMemo(() => {
     const q = normalizeName(query);
