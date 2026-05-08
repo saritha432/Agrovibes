@@ -19,7 +19,6 @@ let socialFollowsTableReady = false;
 let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
-let directMessagesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
 
@@ -176,25 +175,6 @@ async function ensureHomePostCommentsTable() {
     `ALTER TABLE home_post_comments ADD COLUMN IF NOT EXISTS parent_comment_id INT REFERENCES home_post_comments(id) ON DELETE CASCADE`
   );
   homePostCommentsTableReady = true;
-}
-
-async function ensureDirectMessagesTable() {
-  if (directMessagesTableReady) return;
-  await ensureLearnUsersTable();
-  await query(
-    `
-    CREATE TABLE IF NOT EXISTS direct_messages (
-      id SERIAL PRIMARY KEY,
-      sender_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
-      receiver_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
-      body TEXT NOT NULL,
-      is_read BOOLEAN NOT NULL DEFAULT false,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-    `
-  );
-  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
-  directMessagesTableReady = true;
 }
 
 function isLegacySyntheticPostAuthorEmail(email) {
@@ -789,10 +769,12 @@ function normalizeHomePostRow(row) {
 
 async function ensureHomeStoriesTable() {
   if (homeStoriesTableReady) return;
+  await ensureLearnUsersTable();
   await query(
     `
     CREATE TABLE IF NOT EXISTS home_stories (
       id SERIAL PRIMARY KEY,
+      user_id INT REFERENCES learn_users(id) ON DELETE SET NULL,
       user_name TEXT NOT NULL,
       district TEXT NOT NULL,
       avatar_label TEXT NOT NULL,
@@ -805,6 +787,7 @@ async function ensureHomeStoriesTable() {
     `
   );
   // Lightweight migration for older deployments.
+  await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS user_id INT REFERENCES learn_users(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS video_url TEXT`);
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS image_url TEXT`);
   homeStoriesTableReady = true;
@@ -2141,7 +2124,7 @@ router.get("/v1/home/stories", async (_req, res) => {
   }
 });
 
-router.post("/v1/home/stories", async (req, res) => {
+router.post("/v1/home/stories", authOptional, async (req, res) => {
   try {
     await ensureHomeStoriesTable();
     const { userName, district, videoUrl, imageUrl } = req.body || {};
@@ -2155,53 +2138,30 @@ router.post("/v1/home/stories", async (req, res) => {
     }
 
     const avatarLabel = String(userName).trim().charAt(0).toUpperCase() || "U";
+    const actorUserIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const actorUserId = Number.isFinite(actorUserIdRaw) && actorUserIdRaw > 0 ? actorUserIdRaw : null;
     const result = await query(
       `
-      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url, image_url)
-      VALUES ($1, $2, $3, true, false, $4, $5)
+      INSERT INTO home_stories (user_id, user_name, district, avatar_label, has_new, viewed, video_url, image_url)
+      VALUES ($1, $2, $3, $4, true, false, $5, $6)
       RETURNING
         id,
+        user_id AS "userId",
         user_name AS "userName",
         district,
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
         video_url AS "videoUrl",
-        image_url AS "imageUrl"
+        image_url AS "imageUrl",
+        created_at AS "createdAt"
       `,
-      [userName, district, avatarLabel, videoUrl || null, imageUrl || null]
+      [actorUserId, userName, district, avatarLabel, videoUrl || null, imageUrl || null]
     );
 
     res.status(201).json({ story: result.rows[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to create story", error: error.message });
-  }
-});
-
-router.delete("/v1/home/stories/:storyId", async (req, res) => {
-  try {
-    await ensureHomeStoriesTable();
-    const storyId = Number(req.params.storyId);
-    const userName = String((req.body || {}).userName || "").trim();
-    if (!Number.isFinite(storyId) || storyId <= 0 || !userName) {
-      res.status(400).json({ message: "Valid storyId and userName are required" });
-      return;
-    }
-    const deleted = await query(
-      `
-      DELETE FROM home_stories
-      WHERE id = $1 AND LOWER(TRIM(user_name)) = LOWER(TRIM($2))
-      RETURNING id
-      `,
-      [storyId, userName]
-    );
-    if (!deleted.rows[0]) {
-      res.status(404).json({ message: "Story not found or not owned by user" });
-      return;
-    }
-    res.json({ ok: true, deletedId: Number(deleted.rows[0].id) });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to delete story", error: error.message });
   }
 });
 
