@@ -1878,6 +1878,8 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         SELECT
           CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END AS peer_id,
           dm.id,
+          dm.sender_id,
+          dm.receiver_id,
           dm.body,
           dm.created_at,
           ROW_NUMBER() OVER (
@@ -1891,6 +1893,8 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         t.peer_id AS "peerUserId",
         u.full_name AS "peerName",
         u.email AS "peerEmail",
+        t.sender_id AS "lastSenderId",
+        t.receiver_id AS "lastReceiverId",
         t.body AS "lastMessage",
         t.created_at AS "lastAt",
         COALESCE((

@@ -45,6 +45,11 @@ export function AppTopBar() {
     return `agrovibes.notifications.lastSeen.${identity}`;
   }, [user?.email, user?.fullName, user?.id]);
 
+  const viewerUserId = React.useMemo(() => {
+    const parsed = Number(user?.id);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [user?.id]);
+
   const loadNotifications = React.useCallback(async () => {
     if (!user?.fullName) return;
     const local = await getLocalFollowNotificationsByIdentity({ name: user.fullName, key: user.email || String(user.id || "") });
@@ -66,7 +71,17 @@ export function AppTopBar() {
       }
       try {
         const threads = await fetchMessageThreads(token);
-        remoteMessageUnread = (threads.threads || []).reduce((sum, t) => sum + Number(t.unreadCount || 0), 0);
+        remoteMessageUnread = (threads.threads || []).reduce((sum, t) => {
+          const hasUnreadCount = t.unreadCount != null;
+          const unreadCount = Number(t.unreadCount || 0);
+          if (Number.isFinite(unreadCount) && unreadCount > 0) {
+            return sum + unreadCount;
+          }
+          if (!hasUnreadCount && viewerUserId && Number(t.lastSenderId) > 0 && Number(t.lastSenderId) !== viewerUserId) {
+            return sum + 1;
+          }
+          return sum;
+        }, 0);
       } catch {
         remoteMessageUnread = 0;
       }
@@ -156,7 +171,7 @@ export function AppTopBar() {
         })
       );
     }
-  }, [token, user?.email, user?.fullName, user?.id]);
+  }, [token, user?.email, user?.fullName, user?.id, viewerUserId]);
 
   React.useEffect(() => {
     loadNotifications();

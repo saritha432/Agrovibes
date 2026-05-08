@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 
 function resolveApiBaseUrl() {
-  const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  const envUrl = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_API_BASE_URL;
   if (envUrl && envUrl.trim().length > 0) {
     return envUrl.trim().replace(/\/$/, "");
   }
@@ -163,6 +163,8 @@ export interface MessageThread {
   peerUserId: number;
   peerName: string;
   peerEmail?: string;
+  lastSenderId?: number;
+  lastReceiverId?: number;
   lastMessage: string;
   lastAt: string;
   unreadCount?: number;
