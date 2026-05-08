@@ -16,7 +16,18 @@ export const API_BASE_URL = resolveApiBaseUrl();
 
 export interface AuthResponse {
   token: string;
-  user: { id: number; email: string; fullName: string; role: "student" | "instructor" | "admin"; phone?: string };
+  user: {
+    id: number;
+    email: string;
+    fullName: string;
+    role: "student" | "instructor" | "admin";
+    phone?: string;
+    username?: string;
+    avatarUrl?: string;
+    bio?: string;
+    website?: string;
+    locationLabel?: string;
+  };
   isNewUser?: boolean;
 }
 
@@ -79,6 +90,24 @@ export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
     body: JSON.stringify(payload)
   });
   return (await parseJsonOrThrow(response)) as AuthResponse;
+}
+
+export async function updateMyProfile(
+  token: string,
+  payload: {
+    fullName: string;
+    username?: string;
+    bio?: string;
+    website?: string;
+    locationLabel?: string;
+    avatarUrl?: string;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as AuthResponse;
 }
 
 export async function resetPasswordWithOtp(payload: { phone: string; code: string; newPassword: string }) {
@@ -517,6 +546,27 @@ export async function fetchRelationships(token: string, userIds: number[]) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/relationships?userIds=${encodeURIComponent(qs)}`, token)) as {
     relationships: Record<number, SocialRelationship>;
   };
+}
+
+export async function fetchMessageThreads(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/threads`, token)) as {
+    threads: MessageThread[];
+  };
+}
+
+export async function fetchMessageThread(token: string, peerUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
+    peer: { id: number; fullName: string; email?: string };
+    messages: DirectMessageItem[];
+  };
+}
+
+export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  })) as { message: DirectMessageItem };
 }
 
 async function signCloudinaryUpload(folder = "agrovibes") {

@@ -21,6 +21,11 @@ import { SecurityVerificationScreen } from "../screens/onboarding/SecurityVerifi
 import { InitialSetupScreen } from "../screens/InitialSetupScreen";
 import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
 import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
+import { EditProfileScreen } from "../screens/EditProfileScreen";
+import { UserSearchScreen } from "../screens/UserSearchScreen";
+import { PublicProfileScreen } from "../screens/PublicProfileScreen";
+import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
+import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
 import type { LearnStackParamList } from "./LearnStackNavigator";
 
@@ -53,6 +58,11 @@ export type RootStackParamList = {
   SecurityVerification: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   InstructorStudio: undefined;
+  EditProfile: undefined;
+  UserSearch: undefined;
+  PublicProfile: { userId?: number; userName: string; userKey?: string };
+  DirectInbox: undefined;
+  DirectChat: { peerUserId: number; peerName: string; peerKey?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -80,6 +90,11 @@ export function RootNavigator() {
       <Stack.Screen name="SecurityVerification" component={SecurityVerificationScreen} />
       <Stack.Screen name="Main" component={AppNavigator} />
       <Stack.Screen name="InstructorStudio" component={InstructorStudioScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: "Edit Profile" }} />
+      <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: true, title: "Search" }} />
+      <Stack.Screen name="PublicProfile" component={PublicProfileScreen} options={{ headerShown: true, title: "Profile" }} />
+      <Stack.Screen name="DirectInbox" component={DirectInboxScreen} options={{ headerShown: true, title: "Messages" }} />
+      <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

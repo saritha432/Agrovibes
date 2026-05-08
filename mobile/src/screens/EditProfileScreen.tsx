@@ -16,7 +16,7 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { uploadImageFile } from "../services/api";
+import { updateMyProfile, uploadImageFile } from "../services/api";
 
 const TEXT = "#0f0f0f";
 const MUTED = "#7a7a7a";
@@ -35,14 +35,15 @@ function safeHandle(value: string) {
 export function EditProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { user, updateUser } = useAuth();
+  const { user, token, signIn, updateUser } = useAuth();
   const [fullName, setFullName] = useState(user?.fullName || "");
-  const [username, setUsername] = useState(() => safeHandle((user?.email || "").split("@")[0] || ""));
-  const [bio, setBio] = useState("");
-  const [website, setWebsite] = useState("");
+  const [username, setUsername] = useState(() => safeHandle(user?.username || (user?.email || "").split("@")[0] || ""));
+  const [bio, setBio] = useState(user?.bio || "");
+  const [website, setWebsite] = useState(user?.website || "");
   const [location, setLocation] = useState(user?.locationLabel || "");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [isUploadingPhoto, setUploadingPhoto] = useState(false);
+  const [isSaving, setSaving] = useState(false);
 
   const initials = useMemo(() => {
     return String(fullName || user?.fullName || "U")
@@ -59,9 +60,29 @@ export function EditProfileScreen() {
       Alert.alert("Name required", "Please enter your name.");
       return;
     }
-    await updateUser({ fullName: name, locationLabel: location.trim() || undefined, avatarUrl: avatarUrl || undefined });
-    Alert.alert("Saved", "Profile updated.");
-    navigation.goBack();
+    const payload = {
+      fullName: name,
+      username: safeHandle(username) || undefined,
+      bio: bio.trim() || undefined,
+      website: website.trim() || undefined,
+      locationLabel: location.trim() || undefined,
+      avatarUrl: avatarUrl || undefined
+    };
+    setSaving(true);
+    try {
+      if (token) {
+        const updated = await updateMyProfile(token, payload);
+        await signIn({ token: updated.token || token, user: updated.user });
+      } else {
+        await updateUser(payload);
+      }
+      Alert.alert("Saved", "Profile updated.");
+      navigation.goBack();
+    } catch (error: any) {
+      Alert.alert("Save failed", error?.message ? String(error.message) : "Could not update profile.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const pickProfilePhoto = async () => {
@@ -84,7 +105,19 @@ export function EditProfileScreen() {
     try {
       const uploaded = await uploadImageFile(localUri);
       setAvatarUrl(uploaded.url);
-      await updateUser({ avatarUrl: uploaded.url });
+      if (token && user?.fullName) {
+        const updated = await updateMyProfile(token, {
+          fullName: fullName.trim() || user.fullName,
+          username: safeHandle(username) || undefined,
+          bio: bio.trim() || undefined,
+          website: website.trim() || undefined,
+          locationLabel: location.trim() || undefined,
+          avatarUrl: uploaded.url
+        });
+        await signIn({ token: updated.token || token, user: updated.user });
+      } else {
+        await updateUser({ avatarUrl: uploaded.url });
+      }
       Alert.alert("Updated", "Profile picture uploaded.");
     } catch (error: any) {
       // Keep local uri so user sees immediate change in development even if cloud upload is unavailable.
@@ -165,9 +198,9 @@ export function EditProfileScreen() {
           </View>
         </View>
 
-        <Pressable style={styles.saveBtn} onPress={save}>
+        <Pressable style={[styles.saveBtn, isSaving ? styles.saveBtnDisabled : null]} onPress={save} disabled={isSaving}>
           <Ionicons name="checkmark" size={18} color="#fff" />
-          <Text style={styles.saveText}>Done</Text>
+          <Text style={styles.saveText}>{isSaving ? "Saving..." : "Done"}</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -218,5 +251,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8
   },
+  saveBtnDisabled: { opacity: 0.65 },
   saveText: { color: "#fff", fontSize: 15, fontWeight: "800" }
 });

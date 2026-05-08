@@ -30,6 +30,7 @@ import {
   removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
+import { navigateToDirectInbox, navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
 
 const TEAL = "#0f9b8e";
 const CREAM = "#f5f3ee";
@@ -173,7 +174,7 @@ export function ProfileScreen() {
 
   const profileModel = useMemo(() => {
     if (!user) return null;
-    const handle = safeHandle(user.fullName || user.email);
+    const handle = user.username ? `@${user.username.replace(/^@+/, "")}` : safeHandle(user.fullName || user.email);
     const initials = String(user.fullName || user.email || "U")
       .split(" ")
       .filter(Boolean)
@@ -191,8 +192,7 @@ export function ProfileScreen() {
 
   const bioText = useMemo(() => {
     if (!user) return "";
-    if (user.locationLabel && user.locationLabel.length > 24) return user.locationLabel;
-    return `${user.fullName} — growing and trading fresh produce. Share tips and connect with the community.`;
+    return user.bio?.trim() || `${user.fullName} — growing and trading fresh produce. Share tips and connect with the community.`;
   }, [user]);
 
   const locationDisplay = useMemo(() => {
@@ -253,18 +253,18 @@ export function ProfileScreen() {
         {/* Profile-specific top bar (matches reference layout) */}
         <View style={styles.topBar}>
           <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
-          <Pressable style={styles.locationPill} onPress={() => Alert.alert("Location", "Location picker can be wired next.")}>
+          <Pressable style={styles.locationPill} onPress={navigateToEditProfile}>
             <Ionicons name="location-outline" size={14} color={LIME} />
             <Text style={styles.locationPillText} numberOfLines={1}>
-              Nashik, MH
+              {locationDisplay}
             </Text>
             <Ionicons name="chevron-down" size={12} color="#c8d4cf" />
           </Pressable>
           <View style={styles.topBarIcons}>
-            <Pressable hitSlop={8} onPress={() => Alert.alert("Search", "Search coming soon.")}>
+            <Pressable hitSlop={8} onPress={navigateToUserSearch}>
               <Ionicons name="search-outline" size={18} color="#e8f0ec" />
             </Pressable>
-            <Pressable hitSlop={8} onPress={() => Alert.alert("Messages", "Messaging coming soon.")}>
+            <Pressable hitSlop={8} onPress={navigateToDirectInbox}>
               <Ionicons name="chatbubble-ellipses-outline" size={18} color="#e8f0ec" />
             </Pressable>
             <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => Alert.alert("Cart", "Cart coming soon.")}>
@@ -307,7 +307,11 @@ export function ProfileScreen() {
               <View style={styles.headerMidRow}>
                 <View style={styles.avatarWrap}>
                   <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{profileModel?.initials}</Text>
+                    {user.avatarUrl ? (
+                      <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                    ) : (
+                      <Text style={styles.avatarText}>{profileModel?.initials}</Text>
+                    )}
                   </View>
                   <View style={styles.shieldBadge}>
                     <Ionicons name="shield-checkmark" size={12} color="#1a1a1a" />
@@ -342,6 +346,7 @@ export function ProfileScreen() {
                 {roleLabel} <Text style={styles.wheatEmoji}>🌾</Text>
               </Text>
               <Text style={styles.bio}>{bioText}</Text>
+              {user.website ? <Text style={styles.websiteText}>{user.website}</Text> : null}
               <View style={styles.locRow}>
                 <Ionicons name="location-outline" size={14} color={MUTED} />
                 <Text style={styles.locText}>{locationDisplay}</Text>
@@ -357,7 +362,7 @@ export function ProfileScreen() {
               </View>
 
               <View style={styles.profileActionsRow}>
-                <Pressable style={styles.editProfileBtnCompact} onPress={() => Alert.alert("Edit profile", "Profile editing coming soon.")}>
+                <Pressable style={styles.editProfileBtnCompact} onPress={navigateToEditProfile}>
                   <Ionicons name="create-outline" size={18} color="#fff" />
                   <Text style={styles.editProfileBtnText} numberOfLines={1}>
                     Edit Profile
@@ -372,7 +377,7 @@ export function ProfileScreen() {
                     {isFollowing ? "Following" : "Follow"}
                   </Text>
                 </Pressable>
-                <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Message", "Messaging coming soon.")}>
+                <Pressable style={styles.iconActionSquare} onPress={navigateToDirectInbox}>
                   <Ionicons name="chatbubble-outline" size={20} color={TEXT} />
                 </Pressable>
                 <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Share", "Share coming soon.")}>
@@ -597,6 +602,7 @@ const styles = StyleSheet.create({
     borderColor: "#d4ebe6"
   },
   avatarText: { color: TEAL, fontSize: 28, fontWeight: "900" },
+  avatarImage: { width: "100%", height: "100%", borderRadius: 43 },
   shieldBadge: {
     position: "absolute",
     right: -2,
@@ -631,6 +637,7 @@ const styles = StyleSheet.create({
   roleLine: { marginTop: 6, color: MUTED, fontWeight: "700", fontSize: 13 },
   wheatEmoji: { fontSize: 13 },
   bio: { marginTop: 8, color: TEXT, fontWeight: "600", fontSize: 13, lineHeight: 19 },
+  websiteText: { marginTop: 5, color: TEAL, fontWeight: "800", fontSize: 12 },
   locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
   locText: { color: MUTED, fontWeight: "700", fontSize: 12 },
   ratingRow: {

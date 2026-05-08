@@ -66,6 +66,10 @@ async function ensureLearnUsersTable() {
   );
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS phone TEXT UNIQUE`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS avatar_url TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS bio TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS website TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
   learnUsersTableReady = true;
 }
 
@@ -181,6 +185,35 @@ function isLegacySyntheticPostAuthorEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   return e.startsWith("legacy_post_") && e.endsWith("@phone.agrovibes");
 }
+
+function authUserFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.fullName,
+    role: row.role,
+    phone: row.phone || undefined,
+    username: row.username || undefined,
+    avatarUrl: row.avatarUrl || undefined,
+    bio: row.bio || undefined,
+    website: row.website || undefined,
+    locationLabel: row.locationLabel || undefined
+  };
+}
+
+const authUserSelect = `
+  id,
+  email,
+  full_name AS "fullName",
+  role,
+  phone,
+  username,
+  avatar_url AS "avatarUrl",
+  bio,
+  website,
+  location_label AS "locationLabel"
+`;
 
 /**
  * Resolves which learn_users row should receive like/comment notifications for a home post.
@@ -938,12 +971,12 @@ router.post("/v1/auth/register", async (req, res) => {
       `
       INSERT INTO learn_users (email, password_hash, full_name, role, username, phone)
       VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, email, full_name AS "fullName", role, phone, username
+      RETURNING ${authUserSelect}
       `,
       [storeEmail, passwordHash, String(fullName).trim(), safeRole, normalizedUsername, normalizedPhone]
     );
 
-    const user = result.rows[0];
+    const user = authUserFromRow(result.rows[0]);
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.status(201).json({ token, user });
   } catch (error) {
@@ -975,7 +1008,7 @@ router.post("/v1/auth/login", async (req, res) => {
 
     const result = await query(
       `
-      SELECT id, email, password_hash AS "passwordHash", full_name AS "fullName", role, phone, username
+      SELECT ${authUserSelect}, password_hash AS "passwordHash"
       FROM learn_users
       WHERE LOWER(TRIM(email)) = $1
          OR LOWER(TRIM(username)) = $1
@@ -1005,7 +1038,7 @@ router.post("/v1/auth/login", async (req, res) => {
       return;
     }
 
-    const user = { id: userRow.id, email: userRow.email, fullName: userRow.fullName, role: userRow.role, phone: userRow.phone };
+    const user = authUserFromRow(userRow);
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.json({ token, user });
   } catch (error) {
@@ -1211,7 +1244,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
       await ensureLearnUsersTable();
       const lookup = await query(
         `
-        SELECT id, email, full_name AS "fullName", role, phone
+        SELECT ${authUserSelect}
         FROM learn_users
         WHERE phone = $1
         LIMIT 1
@@ -1219,7 +1252,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
         [phone]
       );
 
-      user = lookup.rows[0];
+      user = authUserFromRow(lookup.rows[0]);
       if (!user) {
         isNewUser = true;
         const tempPassword = crypto.randomBytes(24).toString("hex");
@@ -1228,11 +1261,11 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
           `
           INSERT INTO learn_users (email, password_hash, full_name, role, phone)
           VALUES ($1, $2, $3, 'student', $4)
-          RETURNING id, email, full_name AS "fullName", role, phone
+          RETURNING ${authUserSelect}
           `,
           [syntheticEmail, passwordHash, "Farmer", phone]
         );
-        user = created.rows[0];
+        user = authUserFromRow(created.rows[0]);
       }
     } catch (_e) {
       user = phoneUserMemory.get(phone);
@@ -1400,7 +1433,74 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
 });
 
 router.get("/v1/auth/me", authRequired, async (req, res) => {
-  res.json({ user: req.user });
+  try {
+    await ensureLearnUsersTable();
+    const result = await query(`SELECT ${authUserSelect} FROM learn_users WHERE id = $1 LIMIT 1`, [req.user.userId]);
+    const user = authUserFromRow(result.rows[0]);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load profile", error: error.message });
+  }
+});
+
+router.put("/v1/auth/me", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    const fullName = String(req.body?.fullName || "").trim();
+    const usernameRaw = String(req.body?.username || "").trim().toLowerCase();
+    const username = usernameRaw
+      ? usernameRaw
+          .replace(/[^a-z0-9_.]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+      : null;
+    const bio = String(req.body?.bio || "").trim().slice(0, 150) || null;
+    const website = String(req.body?.website || "").trim().slice(0, 200) || null;
+    const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 120) || null;
+    const avatarUrl = String(req.body?.avatarUrl || "").trim().slice(0, 1000) || null;
+
+    if (!fullName) {
+      res.status(400).json({ message: "Name is required" });
+      return;
+    }
+    if (usernameRaw && !username) {
+      res.status(400).json({ message: "Username can only include letters, numbers, underscores, and dots" });
+      return;
+    }
+
+    const updated = await query(
+      `
+      UPDATE learn_users
+      SET
+        full_name = $1,
+        username = $2,
+        bio = $3,
+        website = $4,
+        location_label = $5,
+        avatar_url = $6
+      WHERE id = $7
+      RETURNING ${authUserSelect}
+      `,
+      [fullName, username, bio, website, locationLabel, avatarUrl, req.user.userId]
+    );
+    const user = authUserFromRow(updated.rows[0]);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName, phone: user.phone });
+    res.json({ token, user });
+  } catch (error) {
+    const msg = String(error.message || "");
+    if (msg.includes("duplicate key") || msg.includes("unique")) {
+      res.status(409).json({ message: "Username already taken" });
+      return;
+    }
+    res.status(500).json({ message: "Failed to update profile", error: error.message });
+  }
 });
 
 router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) => {
