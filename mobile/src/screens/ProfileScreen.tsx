@@ -15,6 +15,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import {
+  fetchSavedHomePosts,
   fetchHomePosts,
   fetchProfileStats,
   HomePost,
@@ -49,13 +50,14 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
-type GalleryTab = "Posts" | "Reels" | "Tagged";
+type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
+  const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [followersList, setFollowersList] = useState<
@@ -80,15 +82,22 @@ export function ProfileScreen() {
 
   useEffect(() => {
     let mounted = true;
-    fetchHomePosts(token || null)
-      .then((data) => {
+    const load = async () => {
+      try {
+        const [homeData, savedData] = await Promise.all([
+          fetchHomePosts(token || null),
+          token ? fetchSavedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] })
+        ]);
         if (!mounted) return;
-        setAllPosts(data.posts);
-      })
-      .catch(() => {
+        setAllPosts(homeData.posts);
+        setSavedPosts(savedData.posts);
+      } catch {
         if (!mounted) return;
         setAllPosts([]);
-      });
+        setSavedPosts([]);
+      }
+    };
+    void load();
     return () => {
       mounted = false;
     };
@@ -161,9 +170,10 @@ export function ProfileScreen() {
 
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
+    if (activeGalleryTab === "Saved") return savedPosts.filter((p) => !!p.videoUrl);
     if (activeGalleryTab === "Tagged") return [];
     return userPosts.filter((p) => !p.videoUrl);
-  }, [activeGalleryTab, userPosts]);
+  }, [activeGalleryTab, savedPosts, userPosts]);
 
   const profileModel = useMemo(() => {
     if (!user) return null;
@@ -373,6 +383,7 @@ export function ProfileScreen() {
                   [
                     { key: "Posts" as const, icon: "grid-outline" as const },
                     { key: "Reels" as const, icon: "play-circle-outline" as const },
+                    { key: "Saved" as const, icon: "bookmark-outline" as const },
                     { key: "Tagged" as const, icon: "pricetag-outline" as const }
                   ] as const
                 ).map((t) => (
@@ -407,15 +418,24 @@ export function ProfileScreen() {
                   ))
                 ) : (
                   <View style={styles.placeholderGridRow}>
-                    <View style={[styles.gridPlaceholder, styles.gridPastelA, { width: gridTileSize, height: gridTileSize }]}>
-                      <Ionicons name="leaf-outline" size={32} color="#7a6b2e" />
-                    </View>
-                    <View style={[styles.gridPlaceholder, styles.gridPastelB, { width: gridTileSize, height: gridTileSize }]}>
-                      <Ionicons name="nutrition-outline" size={32} color="#8b3d4a" />
-                    </View>
-                    <View style={[styles.gridPlaceholder, styles.gridPastelC, { width: gridTileSize, height: gridTileSize }]}>
-                      <Ionicons name="rose-outline" size={32} color="#2d6b4a" />
-                    </View>
+                    {activeGalleryTab === "Saved" ? (
+                      <View style={styles.emptyWrap}>
+                        <Ionicons name="bookmark-outline" size={22} color={MUTED} />
+                        <Text style={styles.emptyText}>Saved reels will appear here.</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <View style={[styles.gridPlaceholder, styles.gridPastelA, { width: gridTileSize, height: gridTileSize }]}>
+                          <Ionicons name="leaf-outline" size={32} color="#7a6b2e" />
+                        </View>
+                        <View style={[styles.gridPlaceholder, styles.gridPastelB, { width: gridTileSize, height: gridTileSize }]}>
+                          <Ionicons name="nutrition-outline" size={32} color="#8b3d4a" />
+                        </View>
+                        <View style={[styles.gridPlaceholder, styles.gridPastelC, { width: gridTileSize, height: gridTileSize }]}>
+                          <Ionicons name="rose-outline" size={32} color="#2d6b4a" />
+                        </View>
+                      </>
+                    )}
                   </View>
                 )}
               </View>

@@ -19,6 +19,7 @@ let socialFollowsTableReady = false;
 let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
+let homePostSavesTableReady = false;
 let directMessagesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
@@ -180,6 +181,23 @@ async function ensureHomePostCommentsTable() {
     `ALTER TABLE home_post_comments ADD COLUMN IF NOT EXISTS parent_comment_id INT REFERENCES home_post_comments(id) ON DELETE CASCADE`
   );
   homePostCommentsTableReady = true;
+}
+
+async function ensureHomePostSavesTable() {
+  if (homePostSavesTableReady) return;
+  await ensureHomePostsTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_post_saves (
+      post_id INT NOT NULL REFERENCES home_posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (post_id, user_id)
+    )
+    `
+  );
+  homePostSavesTableReady = true;
 }
 
 async function ensureDirectMessagesTable() {
@@ -2470,6 +2488,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
     const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
     const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
     const result = await query(
@@ -2477,7 +2496,8 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       SELECT
         p.id,
         COALESCE(p.user_id, u.id) AS "userId",
-        p.user_name AS "userName",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
         p.location,
         p.caption,
         p.likes_count AS "likesCount",
@@ -2493,8 +2513,16 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
             SELECT 1 FROM home_post_likes hpl
             WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
           )
-        END AS "viewerHasLiked"
+        END AS "viewerHasLiked",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_saves hps
+            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+          )
+        END AS "viewerHasSaved"
       FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
         SELECT id
         FROM learn_users
@@ -2595,6 +2623,91 @@ router.post("/v1/home/posts", async (req, res) => {
     res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostSavesTable();
+    const viewerId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        true AS "viewerHasSaved",
+        hps.created_at AS "savedAt"
+      FROM home_post_saves hps
+      JOIN home_posts p ON p.id = hps.post_id
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      WHERE hps.user_id = $1
+      ORDER BY hps.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId]
+    );
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load saved posts", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/save", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostSavesTable();
+    const postId = Number(req.params.postId);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const post = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!post.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    await query(
+      `
+      INSERT INTO home_post_saves (post_id, user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (post_id, user_id) DO NOTHING
+      `,
+      [postId, userId]
+    );
+    res.json({ saved: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to save post", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostSavesTable();
+    const postId = Number(req.params.postId);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    await query(`DELETE FROM home_post_saves WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
+    res.json({ saved: false });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unsave post", error: error.message });
   }
 });
 
