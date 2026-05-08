@@ -35,6 +35,7 @@ import {
   HomePost,
   HomeStory,
   likeHomePost,
+  sendDirectMessage,
   sendFollowRequest,
   unfollowUser,
   unlikeHomePost
@@ -231,6 +232,19 @@ function mergeStories(remote: HomeStory[], optimistic: HomeStory[]): HomeStory[]
   });
 }
 
+function dedupeHomePosts(rows: HomePost[]): HomePost[] {
+  const seen = new Set<string>();
+  const out: HomePost[] = [];
+  for (const post of rows) {
+    const mediaKey = post.videoUrl ? `video:${post.videoUrl}` : post.imageUrl ? `image:${post.imageUrl}` : `id:${post.id}`;
+    const key = post.videoUrl ? `${mediaKey}:${normalizeIdentity(post.userName)}:${post.caption}` : `id:${post.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(post);
+  }
+  return out;
+}
+
 function formatCommentRelativeTime(iso?: string): string {
   if (!iso) return "";
   const t = Date.parse(iso);
@@ -385,6 +399,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
   const [shareSearch, setShareSearch] = useState("");
+  const [shareBusyUserId, setShareBusyUserId] = useState<number | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [commentDraft, setCommentDraft] = useState("");
@@ -560,7 +575,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         );
         if (!mounted) return;
         setPosts(
-          data.posts.map((p) => ({
+          dedupeHomePosts(data.posts).map((p) => ({
             ...p,
             viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
             likesCount: Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
@@ -759,6 +774,69 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       return `${post.userName} shared a reel on AgroVibe${caption ? `\n${caption}` : ""}\n${link}`;
     },
     [buildShareLink]
+  );
+
+  const reelChatMessage = useCallback(
+    (post: HomePost) => {
+      const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
+      return `[AgroVibe Reel]\n${JSON.stringify({
+        id: post.id,
+        author: post.userName,
+        caption,
+        videoUrl: post.videoUrl || null,
+        imageUrl: post.imageUrl || post.thumbnailUrl || null,
+        thumbnailUrl: post.thumbnailUrl || post.imageUrl || null,
+        link: buildShareLink(post)
+      })}`;
+    },
+    [buildShareLink]
+  );
+
+  const shareRecipients = useMemo(() => {
+    const viewerName = normalizeIdentity(user?.fullName || "");
+    const viewerId = Number(user?.id);
+    const seen = new Set<string>();
+    return posts
+      .map((p) => {
+        const name = String(p.userName || "").trim();
+        const userId = Number(p.userId || 0);
+        const key = userId > 0 ? `id:${userId}` : `name:${normalizeIdentity(name)}`;
+        if (!name || !key || seen.has(key)) return null;
+        if ((userId > 0 && userId === viewerId) || normalizeIdentity(name) === viewerName) return null;
+        seen.add(key);
+        return { id: userId > 0 ? userId : null, name };
+      })
+      .filter((item): item is { id: number | null; name: string } => !!item)
+      .filter((item) => {
+        const q = normalizeIdentity(shareSearch);
+        return !q || normalizeIdentity(item.name).includes(q);
+      })
+      .slice(0, 24);
+  }, [posts, shareSearch, user?.fullName, user?.id]);
+
+  const onSendReelToChat = useCallback(
+    async (post: HomePost, recipient: { id: number | null; name: string }) => {
+      if (!token) {
+        Alert.alert("Login required", "Please log in to send reels in chat.");
+        return;
+      }
+      if (!recipient.id) {
+        Alert.alert("Chat unavailable", "This user cannot receive messages yet.");
+        return;
+      }
+      setShareBusyUserId(recipient.id);
+      try {
+        await sendDirectMessage(token, recipient.id, reelChatMessage(post));
+        setSharePost(null);
+        setShareSearch("");
+        Alert.alert("Sent", `Reel sent to ${recipient.name}.`);
+      } catch {
+        Alert.alert("Send failed", "Could not send this reel. Try again.");
+      } finally {
+        setShareBusyUserId(null);
+      }
+    },
+    [reelChatMessage, token]
   );
 
   const openExternalWithFallback = useCallback(async (primaryUrl: string, fallbackUrl: string) => {
@@ -1864,34 +1942,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sharePeopleRow}>
-              {(() => {
-                const viewer = normalizeIdentity(user?.fullName || "");
-                const seen = new Set<string>();
-                const list = tabPosts
-                  .map((p) => {
-                    const name = String(p.userName || "").trim();
-                    const key = normalizeIdentity(name);
-                    if (!name || !key || key === viewer || seen.has(key)) return null;
-                    seen.add(key);
-                    return name;
-                  })
-                  .filter((x): x is string => !!x)
-                  .filter((name) => {
-                    const q = normalizeIdentity(shareSearch);
-                    return !q || normalizeIdentity(name).includes(q);
-                  })
-                  .slice(0, 24);
-                return list.map((name) => (
-                  <Pressable key={name} style={styles.sharePersonItem} onPress={() => sharePost && onShareToSystem(sharePost)}>
+              {shareRecipients.length ? (
+                shareRecipients.map((recipient) => (
+                  <Pressable
+                    key={`${recipient.id || "name"}-${recipient.name}`}
+                    style={styles.sharePersonItem}
+                    onPress={() => sharePost && onSendReelToChat(sharePost, recipient)}
+                    disabled={shareBusyUserId === recipient.id}
+                  >
                     <View style={styles.sharePersonAvatar}>
-                      <Text style={styles.sharePersonAvatarText}>{(name[0] || "?").toUpperCase()}</Text>
+                      {shareBusyUserId === recipient.id ? (
+                        <Ionicons name="checkmark" size={18} color="#d8ff37" />
+                      ) : (
+                        <Text style={styles.sharePersonAvatarText}>{(recipient.name[0] || "?").toUpperCase()}</Text>
+                      )}
                     </View>
                     <Text style={styles.sharePersonName} numberOfLines={1}>
-                      {name}
+                      {recipient.name}
                     </Text>
                   </Pressable>
-                ));
-              })()}
+                ))
+              ) : (
+                <Text style={styles.shareNoPeopleText}>No chats found</Text>
+              )}
             </ScrollView>
 
             <View style={styles.shareFooterRow}>
@@ -2424,6 +2497,7 @@ const styles = StyleSheet.create({
   },
   sharePersonAvatarText: { color: "#d8ff37", fontWeight: "900", fontSize: 16 },
   sharePersonName: { color: "#d5dde4", fontSize: 10, fontWeight: "700", maxWidth: 62, textAlign: "center" },
+  shareNoPeopleText: { color: "#97a0a8", fontSize: 12, fontWeight: "700", paddingVertical: 18, paddingHorizontal: 8 },
   shareFooterRow: {
     borderTopWidth: 1,
     borderTopColor: "#343b43",

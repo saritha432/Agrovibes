@@ -49,13 +49,6 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
-const HIGHLIGHTS = [
-  { key: "harvest", label: "Harvest", icon: "leaf-outline" as const, border: "#c9b458" },
-  { key: "products", label: "Products", icon: "nutrition-outline" as const, border: "#e07a8a" },
-  { key: "tips", label: "Tips", icon: "bulb-outline" as const, border: "#7ec8c3" },
-  { key: "market", label: "Market", icon: "storefront-outline" as const, border: "#5a9e8f" }
-];
-
 type GalleryTab = "Posts" | "Reels" | "Tagged";
 
 export function ProfileScreen() {
@@ -250,37 +243,13 @@ export function ProfileScreen() {
   return (
     <>
       <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
-        {/* Profile-specific top bar (matches reference layout) */}
         <View style={styles.topBar}>
-          <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
-          <Pressable style={styles.locationPill} onPress={navigateToEditProfile}>
-            <Ionicons name="location-outline" size={14} color={LIME} />
-            <Text style={styles.locationPillText} numberOfLines={1}>
-              {locationDisplay}
-            </Text>
-            <Ionicons name="chevron-down" size={12} color="#c8d4cf" />
-          </Pressable>
           <View style={styles.topBarIcons}>
             <Pressable hitSlop={8} onPress={navigateToUserSearch}>
               <Ionicons name="search-outline" size={18} color="#e8f0ec" />
             </Pressable>
-            <Pressable hitSlop={8} onPress={navigateToDirectInbox}>
-              <Ionicons name="chatbubble-ellipses-outline" size={18} color="#e8f0ec" />
-            </Pressable>
-            <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => Alert.alert("Cart", "Cart coming soon.")}>
-              <Ionicons name="cart-outline" size={18} color="#e8f0ec" />
-              <View style={[styles.miniBadge, styles.miniBadgeTeal]}>
-                <Text style={styles.miniBadgeText}>6</Text>
-              </View>
-            </Pressable>
-            <Pressable hitSlop={8} style={styles.iconWithBadge} onPress={() => {}}>
+            <Pressable hitSlop={8} onPress={() => Alert.alert("Notifications", "Notifications are available from the home top bar.")}>
               <Ionicons name="notifications-outline" size={18} color="#e8f0ec" />
-              <View style={[styles.miniBadge, styles.miniBadgeRed]}>
-                <Text style={styles.miniBadgeText}>5</Text>
-              </View>
-            </Pressable>
-            <Pressable hitSlop={8} onPress={() => {}}>
-              <Ionicons name="person-circle-outline" size={22} color="#e8f0ec" />
             </Pressable>
           </View>
         </View>
@@ -398,19 +367,6 @@ export function ProfileScreen() {
               </Pressable>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.highlightsScroll}>
-              {HIGHLIGHTS.map((h) => (
-                <Pressable key={h.key} style={styles.highlightItem} onPress={() => Alert.alert(h.label, "Highlights coming soon.")}>
-                  <View style={[styles.highlightRing, { borderColor: h.border }]}>
-                    <View style={styles.highlightInner}>
-                      <Ionicons name={h.icon} size={22} color={TEXT} />
-                    </View>
-                  </View>
-                  <Text style={styles.highlightLabel}>{h.label}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
             <View style={styles.gallerySection}>
               <View style={styles.iconTabsRow}>
                 {(
@@ -521,41 +477,14 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
     backgroundColor: "#262626",
     paddingHorizontal: 10,
     paddingVertical: 8,
     paddingTop: 10,
     gap: 6
   },
-  logoImage: { width: 72, height: 18 },
-  locationPill: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#333333",
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    maxWidth: 120
-  },
-  locationPillText: { flex: 1, color: "#e8f0ec", fontSize: 11, fontWeight: "700" },
   topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconWithBadge: { position: "relative" },
-  miniBadge: {
-    position: "absolute",
-    right: -6,
-    top: -5,
-    minWidth: 14,
-    height: 14,
-    borderRadius: 7,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 3
-  },
-  miniBadgeTeal: { backgroundColor: "#2dd4bf" },
-  miniBadgeRed: { backgroundColor: "#f87171" },
-  miniBadgeText: { color: "#111", fontSize: 9, fontWeight: "900" },
 
   card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#e5e2dc", padding: 16 },
   cardTitle: { fontSize: 20, fontWeight: "900", color: TEXT },
@@ -709,27 +638,6 @@ const styles = StyleSheet.create({
   studioText: { flex: 1, fontWeight: "900", color: TEAL, fontSize: 14 },
   logoutLink: { marginTop: 10, alignSelf: "center", paddingVertical: 6 },
   logoutLinkText: { color: MUTED, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
-
-  highlightsScroll: { paddingHorizontal: 12, paddingVertical: 14, gap: 16, flexDirection: "row", alignItems: "flex-start" },
-  highlightItem: { alignItems: "center", marginRight: 4 },
-  highlightRing: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 3,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 3
-  },
-  highlightInner: {
-    flex: 1,
-    width: "100%",
-    borderRadius: 30,
-    backgroundColor: "#f0ebe4",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  highlightLabel: { marginTop: 6, fontSize: 12, fontWeight: "800", color: TEXT },
 
   gallerySection: { marginHorizontal: 12, marginBottom: 16 },
   iconTabsRow: { flexDirection: "row", justifyContent: "space-around", borderBottomWidth: 1, borderColor: "#e5e2dc", paddingBottom: 4 },

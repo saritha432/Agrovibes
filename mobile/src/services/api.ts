@@ -39,6 +39,26 @@ export interface AuthResponse {
   isNewUser?: boolean;
 }
 
+export interface AdminUserRecord {
+  id: number;
+  email: string;
+  fullName: string;
+  role: "student" | "instructor" | "admin";
+  phone?: string | null;
+  username?: string | null;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  website?: string | null;
+  locationLabel?: string | null;
+  createdAt: string;
+  postsCount: number;
+  reelsCount: number;
+  followersCount: number;
+  followingCount: number;
+  messagesSentCount: number;
+  messagesReceivedCount: number;
+}
+
 async function parseJsonOrThrow(response: Response) {
   const text = await response.text();
   let parsed: any = null;
@@ -116,6 +136,20 @@ export async function updateMyProfile(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as AuthResponse;
+}
+
+export async function fetchAdminUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/admin/users${suffix}`, token)) as {
+    users: AdminUserRecord[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
 }
 
 export async function resetPasswordWithOtp(payload: { phone: string; code: string; newPassword: string }) {
@@ -564,7 +598,7 @@ export async function fetchMessageThreads(token: string) {
 
 export async function fetchMessageThread(token: string, peerUserId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
-    peer: { id: number; fullName: string; email?: string };
+    peer: { id: number; fullName: string; email?: string; phone?: string };
     messages: DirectMessageItem[];
   };
 }
