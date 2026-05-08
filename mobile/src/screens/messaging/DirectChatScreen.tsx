@@ -101,7 +101,7 @@ export function DirectChatScreen() {
       <FlatList
         ref={listRef}
         data={messages}
-        keyExtractor={(m) => m.id}
+        keyExtractor={(m) => String(m.id)}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => (
