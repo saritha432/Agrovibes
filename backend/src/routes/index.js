@@ -19,6 +19,7 @@ let socialFollowsTableReady = false;
 let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
+let directMessagesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
 
@@ -179,6 +180,25 @@ async function ensureHomePostCommentsTable() {
     `ALTER TABLE home_post_comments ADD COLUMN IF NOT EXISTS parent_comment_id INT REFERENCES home_post_comments(id) ON DELETE CASCADE`
   );
   homePostCommentsTableReady = true;
+}
+
+async function ensureDirectMessagesTable() {
+  if (directMessagesTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS direct_messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      receiver_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      is_read BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
+  directMessagesTableReady = true;
 }
 
 function isLegacySyntheticPostAuthorEmail(email) {
