@@ -820,6 +820,21 @@ function normalizeHomePostRow(row) {
   return base;
 }
 
+function dedupeHomePostRows(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    const post = normalizeHomePostRow(row);
+    const name = String(post.userName || "").trim().toLowerCase();
+    const caption = String(post.caption || "").trim();
+    const key = post.videoUrl ? `video:${post.videoUrl}:${name}:${caption}` : `id:${post.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(post);
+  }
+  return out;
+}
+
 async function ensureHomeStoriesTable() {
   if (homeStoriesTableReady) return;
   await ensureLearnUsersTable();
@@ -1467,6 +1482,90 @@ router.get("/v1/auth/me", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/admin/users", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    await ensureHomePostsTable();
+    await ensureSocialFollowsTable();
+    await ensureDirectMessagesTable();
+
+    const limitRaw = Number(req.query.limit || 100);
+    const offsetRaw = Number(req.query.offset || 0);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+    const offset = Math.max(Number.isFinite(offsetRaw) ? offsetRaw : 0, 0);
+    const search = String(req.query.search || "").trim();
+    const searchLike = `%${search.toLowerCase()}%`;
+
+    const usersResult = await query(
+      `
+      SELECT
+        u.id,
+        u.email,
+        u.full_name AS "fullName",
+        u.role,
+        u.phone,
+        u.username,
+        u.avatar_url AS "avatarUrl",
+        u.bio,
+        u.website,
+        u.location_label AS "locationLabel",
+        u.created_at AS "createdAt",
+        COUNT(*) OVER()::INT AS "totalCount",
+        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
+        COALESCE(posts.reels_count, 0)::INT AS "reelsCount",
+        COALESCE(followers.followers_count, 0)::INT AS "followersCount",
+        COALESCE(following.following_count, 0)::INT AS "followingCount",
+        COALESCE(sent.messages_sent_count, 0)::INT AS "messagesSentCount",
+        COALESCE(received.messages_received_count, 0)::INT AS "messagesReceivedCount"
+      FROM learn_users u
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS posts_count,
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+        FROM home_posts p
+        WHERE p.user_id = u.id
+      ) posts ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS followers_count
+        FROM social_follows f
+        WHERE f.following_id = u.id AND f.status = 'accepted'
+      ) followers ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS following_count
+        FROM social_follows f
+        WHERE f.follower_id = u.id AND f.status = 'accepted'
+      ) following ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS messages_sent_count
+        FROM direct_messages dm
+        WHERE dm.sender_id = u.id
+      ) sent ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS messages_received_count
+        FROM direct_messages dm
+        WHERE dm.receiver_id = u.id
+      ) received ON TRUE
+      WHERE (
+        $1::TEXT = ''
+        OR LOWER(COALESCE(u.full_name, '')) LIKE $2
+        OR LOWER(COALESCE(u.email, '')) LIKE $2
+        OR LOWER(COALESCE(u.username, '')) LIKE $2
+        OR COALESCE(u.phone, '') LIKE $3
+      )
+      ORDER BY u.created_at DESC, u.id DESC
+      LIMIT $4 OFFSET $5
+      `,
+      [search, searchLike, `%${search.replace(/\D/g, "")}%`, limit, offset]
+    );
+
+    const users = usersResult.rows.map(({ totalCount, ...user }) => user);
+    const total = Number(usersResult.rows[0]?.totalCount || 0);
+    res.json({ users, total, limit, offset });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to list users", error: error.message });
+  }
+});
+
 router.put("/v1/auth/me", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
@@ -2031,7 +2130,7 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
       return;
     }
 
-    const peerRes = await query(`SELECT id, full_name AS "fullName", email FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    const peerRes = await query(`SELECT id, full_name AS "fullName", email, phone FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
     if (!peerRes.rows[0]) {
       res.status(404).json({ message: "Peer user not found" });
       return;
@@ -2057,7 +2156,7 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     );
 
     res.json({
-      peer: { id: peerRes.rows[0].id, fullName: peerRes.rows[0].fullName, email: peerRes.rows[0].email },
+      peer: { id: peerRes.rows[0].id, fullName: peerRes.rows[0].fullName, email: peerRes.rows[0].email, phone: peerRes.rows[0].phone },
       messages: rows.rows
     });
   } catch (error) {
@@ -2316,7 +2415,13 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
           )
         END AS "viewerHasLiked"
       FROM home_posts p
-      LEFT JOIN learn_users u ON LOWER(TRIM(u.full_name)) = LOWER(TRIM(p.user_name))
+      LEFT JOIN LATERAL (
+        SELECT id
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) u ON TRUE
       ORDER BY p.created_at DESC
       LIMIT 50
       `,
@@ -2343,7 +2448,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       return;
     }
 
-    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+    res.json({ posts: dedupeHomePostRows(result.rows) });
   } catch (error) {
     res.json({
       posts: [

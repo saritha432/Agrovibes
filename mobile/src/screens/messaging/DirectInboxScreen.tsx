@@ -33,6 +33,11 @@ function formatTime(ts: number) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function previewMessage(body: string) {
+  if (String(body || "").startsWith("[AgroVibe Reel]")) return "Shared a reel";
+  return body;
+}
+
 export function DirectInboxScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, token } = useAuth();
@@ -131,7 +136,7 @@ export function DirectInboxScreen() {
                   <Text style={styles.time}>{formatTime(new Date(item.lastAt).getTime())}</Text>
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>
-                  {item.lastMessage}
+                  {previewMessage(item.lastMessage)}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={BORDER} />
