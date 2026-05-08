@@ -6,6 +6,14 @@ function resolveApiBaseUrl() {
     return envUrl.trim().replace(/\/$/, "");
   }
 
+  const webLocation = (globalThis as { location?: { hostname?: string } }).location;
+  if (Platform.OS === "web" && webLocation?.hostname) {
+    const host = webLocation.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      return "https://agrovibes.onrender.com/api";
+    }
+  }
+
   if (Platform.OS === "android") {
     return "http://10.0.2.2:5000/api";
   }
