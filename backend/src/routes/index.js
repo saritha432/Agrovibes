@@ -1566,6 +1566,86 @@ router.get("/v1/admin/users", authRequired, requireRole("admin"), async (req, re
   }
 });
 
+router.get("/v1/users", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    await ensureHomePostsTable();
+    await ensureSocialFollowsTable();
+
+    const viewerId = Number(req.user.userId);
+    const limitRaw = Number(req.query.limit || 100);
+    const offsetRaw = Number(req.query.offset || 0);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+    const offset = Math.max(Number.isFinite(offsetRaw) ? offsetRaw : 0, 0);
+    const search = String(req.query.search || "").trim();
+    const searchLike = `%${search.toLowerCase()}%`;
+
+    const result = await query(
+      `
+      SELECT
+        u.id,
+        u.full_name AS "fullName",
+        u.username,
+        u.avatar_url AS "avatarUrl",
+        u.bio,
+        u.website,
+        u.location_label AS "locationLabel",
+        u.created_at AS "createdAt",
+        COUNT(*) OVER()::INT AS "totalCount",
+        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
+        COALESCE(posts.reels_count, 0)::INT AS "reelsCount",
+        COALESCE(followers.followers_count, 0)::INT AS "followersCount",
+        COALESCE(following.following_count, 0)::INT AS "followingCount",
+        CASE
+          WHEN u.id = $1 THEN 'self'
+          ELSE COALESCE(viewer_follow.status, 'none')
+        END AS "viewerStatus",
+        COALESCE(reverse_follow.status, 'none') AS "reverseStatus"
+      FROM learn_users u
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS posts_count,
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+        FROM home_posts p
+        WHERE p.user_id = u.id
+      ) posts ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS followers_count
+        FROM social_follows f
+        WHERE f.following_id = u.id AND f.status = 'accepted'
+      ) followers ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS following_count
+        FROM social_follows f
+        WHERE f.follower_id = u.id AND f.status = 'accepted'
+      ) following ON TRUE
+      LEFT JOIN social_follows viewer_follow ON viewer_follow.follower_id = $1 AND viewer_follow.following_id = u.id
+      LEFT JOIN social_follows reverse_follow ON reverse_follow.follower_id = u.id AND reverse_follow.following_id = $1
+      WHERE (
+        $2::TEXT = ''
+        OR LOWER(COALESCE(u.full_name, '')) LIKE $3
+        OR LOWER(COALESCE(u.username, '')) LIKE $3
+      )
+      ORDER BY
+        CASE WHEN u.id = $1 THEN 1 ELSE 0 END ASC,
+        u.created_at DESC,
+        u.id DESC
+      LIMIT $4 OFFSET $5
+      `,
+      [viewerId, search, searchLike, limit, offset]
+    );
+
+    const users = result.rows.map(({ totalCount, reverseStatus, ...row }) => ({
+      ...row,
+      canFollowBack: reverseStatus === "accepted" && row.viewerStatus !== "accepted" && row.viewerStatus !== "pending"
+    }));
+    const total = Number(result.rows[0]?.totalCount || 0);
+    res.json({ users, total, limit, offset });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to list users", error: error.message });
+  }
+});
+
 router.put("/v1/auth/me", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
