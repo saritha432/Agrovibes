@@ -1954,6 +1954,36 @@ router.post("/v1/social/follow/unfollow", authRequired, async (req, res) => {
   }
 });
 
+router.post("/v1/social/follow/remove-follower", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const actorUserId = Number(req.user.userId);
+    const targetUserId = Number(req.body?.targetUserId);
+    if (!Number.isFinite(targetUserId)) {
+      res.status(400).json({ message: "targetUserId is required" });
+      return;
+    }
+    if (targetUserId === actorUserId) {
+      res.status(400).json({ message: "Invalid remove follower target" });
+      return;
+    }
+
+    await query(
+      `
+      UPDATE social_follows
+      SET status = 'declined', responded_at = NOW(), updated_at = NOW()
+      WHERE follower_id = $1 AND following_id = $2 AND status IN ('accepted', 'pending')
+      `,
+      [targetUserId, actorUserId]
+    );
+
+    const [actorCounts, targetCounts] = await Promise.all([socialCountsForUser(actorUserId), socialCountsForUser(targetUserId)]);
+    res.json({ ok: true, actorCounts, targetCounts });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to remove follower", error: error.message });
+  }
+});
+
 /**
  * Upsert follow rows from client-side (AsyncStorage) history into social_follows.
  * Body: { edges: [{ peerFullName, relation: "i_follow" | "follows_me", status: "accepted" | "pending" }] }
