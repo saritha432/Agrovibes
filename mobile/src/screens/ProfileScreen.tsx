@@ -18,9 +18,11 @@ import {
   fetchSavedHomePosts,
   fetchHomePosts,
   fetchProfileStats,
+  fetchSocialNetwork,
   HomePost,
+  removeFollower,
   sendFollowRequest,
-  unfollowUser
+  unfollowUser,
 } from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
@@ -60,11 +62,12 @@ export function ProfileScreen() {
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
-  const [followersList, setFollowersList] = useState<
-    Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>
-  >([]);
+  const [followersList, setFollowersList] = useState<Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>(
+    []
+  );
   const [followingList, setFollowingList] = useState<Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>>([]);
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
+  const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Posts");
   const [isFollowing, setFollowing] = useState(false);
   const isMountedRef = useRef(true);
@@ -79,6 +82,12 @@ export function ProfileScreen() {
       .replace(/[^a-z0-9]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  const normalizeKey = (v?: string) => String(v || "").trim().toLowerCase();
+  const personUniqueId = (person: { name: string; key?: string }) => `${normalizeKey(person.key)}::${normalizeName(person.name)}`;
+  const parsePersonUserId = (person: { key?: string }) => {
+    const raw = String(person.key || "").trim();
+    return /^\d+$/.test(raw) ? Number(raw) : null;
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -121,7 +130,7 @@ export function ProfileScreen() {
 
     if (token && user?.id) {
       try {
-        const stats = await fetchProfileStats(token, user.id);
+        const [stats, network] = await Promise.all([fetchProfileStats(token, user.id), fetchSocialNetwork(token, user.id)]);
         const localCounts = await getLocalFollowCountsByIdentity({
           name: user.fullName,
           key: user.email || String(user.id)
@@ -131,10 +140,22 @@ export function ProfileScreen() {
           key: user.email || String(user.id)
         });
         if (!isMountedRef.current) return;
-        setFollowersCount(Number(stats.followersCount || 0) + Number(localCounts.followersCount || 0));
-        setFollowingCount(Number(stats.followingCount || 0) + Number(localCounts.followingCount || 0));
-        setFollowersList(localNetwork.followers);
-        setFollowingList(localNetwork.following);
+        const mergedFollowers = [...(network.followers || []), ...(localNetwork.followers || [])];
+        const mergedFollowing = [...(network.following || []), ...(localNetwork.following || [])];
+        const followersDedup = new Map<string, { name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>();
+        const followingDedup = new Map<string, { name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>();
+        for (const person of mergedFollowers) {
+          const id = personUniqueId(person);
+          if (!followersDedup.has(id)) followersDedup.set(id, person);
+        }
+        for (const person of mergedFollowing) {
+          const id = personUniqueId(person);
+          if (!followingDedup.has(id)) followingDedup.set(id, person);
+        }
+        setFollowersCount(Math.max(Number(stats.followersCount || 0), followersDedup.size));
+        setFollowingCount(Math.max(Number(stats.followingCount || 0), followingDedup.size));
+        setFollowersList(Array.from(followersDedup.values()));
+        setFollowingList(Array.from(followingDedup.values()));
       } catch {
         if (!isMountedRef.current) return;
         const localCounts = await getLocalFollowCountsByIdentity({
@@ -248,6 +269,40 @@ export function ProfileScreen() {
       { name: person.name, key: person.key }
     );
     await refreshMergedFollowStats();
+  };
+
+  const removeFollowerFromList = async (person: { name: string; key?: string }) => {
+    if (!user?.fullName) return;
+    const targetId = parsePersonUserId(person);
+    if (token && targetId && user?.id) {
+      try {
+        await removeFollower(token, targetId);
+        await refreshMergedFollowStats();
+        return;
+      } catch {
+        /* fall back to local */
+      }
+    }
+    await removeLocalFollowByIdentity(
+      { name: person.name, key: person.key },
+      { name: user.fullName, key: user.email || String(user.id || "") }
+    );
+    await refreshMergedFollowStats();
+  };
+
+  const openPersonChat = (person: { name: string; key?: string }) => {
+    const peerUserId = parsePersonUserId(person);
+    if (!peerUserId) {
+      Alert.alert("Unavailable", "Chat is available only for synced users.");
+      return;
+    }
+    navigation.navigate("DirectChat", { peerUserId, peerName: person.name, peerKey: person.key || String(peerUserId) });
+    setActiveListType(null);
+  };
+
+  const toggleFollowingActions = (person: { name: string; key?: string }) => {
+    const rowId = personUniqueId(person);
+    setFollowingActionMenuFor((prev) => (prev === rowId ? null : rowId));
   };
 
   return (
@@ -438,12 +493,31 @@ export function ProfileScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={!!activeListType} transparent animationType="slide" onRequestClose={() => setActiveListType(null)}>
-        <Pressable style={styles.overlay} onPress={() => setActiveListType(null)}>
+      <Modal
+        visible={!!activeListType}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setFollowingActionMenuFor(null);
+          setActiveListType(null);
+        }}
+      >
+        <Pressable
+          style={styles.overlay}
+          onPress={() => {
+            setFollowingActionMenuFor(null);
+            setActiveListType(null);
+          }}
+        >
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{activeListType === "followers" ? "Followers" : "Following"}</Text>
-              <Pressable onPress={() => setActiveListType(null)}>
+              <Pressable
+                onPress={() => {
+                  setFollowingActionMenuFor(null);
+                  setActiveListType(null);
+                }}
+              >
                 <Ionicons name="close" size={22} color={TEAL} />
               </Pressable>
             </View>
@@ -451,30 +525,47 @@ export function ProfileScreen() {
               {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
                 <Text style={styles.sheetEmpty}>No users found.</Text>
               ) : (
-                (activeListType === "followers" ? followersList : followingList).map((person, idx) => (
-                  <View key={`${person.key || person.name}-${idx}`} style={styles.personRow}>
-                    <Text style={styles.personName}>{person.name}</Text>
-                    {activeListType === "followers" ? (
-                      person.viewerStatus === "accepted" ? (
-                        <View style={styles.followingPill}>
-                          <Text style={styles.followingPillText}>Following</Text>
-                        </View>
-                      ) : person.viewerStatus === "pending" ? (
-                        <View style={styles.requestedPill}>
-                          <Text style={styles.requestedPillText}>Requested</Text>
+                (activeListType === "followers" ? followersList : followingList).map((person, idx) => {
+                  const rowId = personUniqueId(person);
+                  const isFollowingMenuOpen = activeListType === "following" && followingActionMenuFor === rowId;
+                  return (
+                    <View key={`${person.key || person.name}-${idx}`} style={[styles.personRow, isFollowingMenuOpen ? styles.personRowMenuOpen : null]}>
+                      <Text style={styles.personName}>{person.name}</Text>
+                      {activeListType === "followers" ? (
+                        <View style={styles.personActionsRow}>
+                          <Pressable style={styles.messageBtn} onPress={() => openPersonChat(person)}>
+                            <Text style={styles.messageBtnText}>Message</Text>
+                          </Pressable>
+                          <Pressable style={styles.iconDangerBtn} onPress={() => void removeFollowerFromList(person)}>
+                            <Ionicons name="close" size={16} color="#fff" />
+                          </Pressable>
                         </View>
                       ) : (
-                        <Pressable style={styles.followBackBtn} onPress={() => followBackFromFollowersList(person)}>
-                          <Text style={styles.followBackBtnText}>Follow Back</Text>
-                        </Pressable>
-                      )
-                    ) : (
-                      <Pressable style={styles.unfollowBtn} onPress={() => unfollowFromFollowingList(person)}>
-                        <Text style={styles.unfollowBtnText}>Unfollow</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                ))
+                        <View style={styles.personActionsRow}>
+                          <Pressable style={styles.messageBtn} onPress={() => openPersonChat(person)}>
+                            <Text style={styles.messageBtnText}>Message</Text>
+                          </Pressable>
+                          <Pressable style={styles.iconMoreBtn} hitSlop={10} onPress={() => toggleFollowingActions(person)}>
+                            <Ionicons name="ellipsis-vertical" size={17} color={TEXT} />
+                          </Pressable>
+                        {isFollowingMenuOpen ? (
+                          <View style={styles.followingMenuInlineRow}>
+                            <Pressable
+                              style={styles.followingMenuItem}
+                              onPress={() => {
+                                setFollowingActionMenuFor(null);
+                                void unfollowFromFollowingList(person);
+                              }}
+                            >
+                              <Text style={styles.followingMenuItemText}>Unfollow</Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })
               )}
             </ScrollView>
           </Pressable>
@@ -706,7 +797,53 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: "#1d2126"
   },
-  personName: { color: TEXT, fontWeight: "800" },
+  personRowMenuOpen: { zIndex: 40 },
+  personName: { color: TEXT, fontWeight: "800", flex: 1, marginRight: 10 },
+  personActionsRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0, position: "relative" },
+  messageBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  messageBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
+  iconDangerBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#6b1f1f",
+    borderWidth: 1,
+    borderColor: "#a93838",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  iconMoreBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#374151",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2
+  },
+  followingMenuInlineRow: {
+    position: "absolute",
+    right: 42,
+    top: 2,
+    minWidth: 132,
+    borderRadius: 10,
+    backgroundColor: "#0f172a",
+    borderWidth: 1,
+    borderColor: "#334155",
+    overflow: "hidden",
+    zIndex: 20
+  },
+  followingMenuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  followingMenuItemText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 12
+  },
   followBackBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   followBackBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },

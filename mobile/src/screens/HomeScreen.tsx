@@ -59,7 +59,7 @@ interface HomeScreenProps {
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 const homeTopTabs = [ "Reels", "Friends", "live"] as const;
-const likeActiveColor = "#16a34a";
+const likeActiveColor = "#C9FF35";
 const REEL_LIKE_COLOR = "#ffffff";
 
 function normalizeIdentity(value: string) {

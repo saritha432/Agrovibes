@@ -569,6 +569,18 @@ export async function unfollowUser(token: string, targetUserId: number) {
   };
 }
 
+export async function removeFollower(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/remove-follower`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId })
+  })) as {
+    ok: boolean;
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
 export async function respondToFollowRequest(token: string, followId: number, action: "accept" | "decline") {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/${followId}/respond`, token, {
     method: "POST",
