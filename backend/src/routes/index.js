@@ -15,6 +15,12 @@ let learnUsersTableReady = false;
 let learnEnrollmentsReady = false;
 let learnProgressReady = false;
 let phoneOtpTableReady = false;
+let socialFollowsTableReady = false;
+let socialNotificationsTableReady = false;
+let homePostLikesTableReady = false;
+let homePostCommentsTableReady = false;
+let homePostSavesTableReady = false;
+let directMessagesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
 
@@ -61,6 +67,11 @@ async function ensureLearnUsersTable() {
     `
   );
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS phone TEXT UNIQUE`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS avatar_url TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS bio TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS website TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
   learnUsersTableReady = true;
 }
 
@@ -88,6 +99,277 @@ async function ensurePhoneOtpTable() {
   phoneOtpTableReady = true;
 }
 
+async function ensureSocialFollowsTable() {
+  if (socialFollowsTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS social_follows (
+      id SERIAL PRIMARY KEY,
+      follower_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      following_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      UNIQUE (follower_id, following_id)
+    )
+    `
+  );
+  await query(`ALTER TABLE social_follows ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`);
+  await query(`ALTER TABLE social_follows ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE social_follows ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+  socialFollowsTableReady = true;
+}
+
+async function ensureSocialNotificationsTable() {
+  if (socialNotificationsTableReady) return;
+  await ensureSocialFollowsTable();
+  await ensureHomePostsTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS social_notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      actor_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      follow_id INT REFERENCES social_follows(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      is_read BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(`ALTER TABLE social_notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE social_notifications ADD COLUMN IF NOT EXISTS post_id INT`);
+  await query(`ALTER TABLE social_notifications ADD COLUMN IF NOT EXISTS comment_excerpt TEXT`);
+  socialNotificationsTableReady = true;
+}
+
+async function ensureHomePostLikesTable() {
+  if (homePostLikesTableReady) return;
+  await ensureHomePostsTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_post_likes (
+      post_id INT NOT NULL REFERENCES home_posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (post_id, user_id)
+    )
+    `
+  );
+  homePostLikesTableReady = true;
+}
+
+async function ensureHomePostCommentsTable() {
+  if (homePostCommentsTableReady) return;
+  await ensureHomePostsTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_post_comments (
+      id SERIAL PRIMARY KEY,
+      post_id INT NOT NULL REFERENCES home_posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(
+    `ALTER TABLE home_post_comments ADD COLUMN IF NOT EXISTS parent_comment_id INT REFERENCES home_post_comments(id) ON DELETE CASCADE`
+  );
+  homePostCommentsTableReady = true;
+}
+
+async function ensureHomePostSavesTable() {
+  if (homePostSavesTableReady) return;
+  await ensureHomePostsTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_post_saves (
+      post_id INT NOT NULL REFERENCES home_posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (post_id, user_id)
+    )
+    `
+  );
+  homePostSavesTableReady = true;
+}
+
+async function ensureDirectMessagesTable() {
+  if (directMessagesTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS direct_messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      receiver_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      is_read BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
+  directMessagesTableReady = true;
+}
+
+function isLegacySyntheticPostAuthorEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  return e.startsWith("legacy_post_") && e.endsWith("@phone.agrovibes");
+}
+
+function authUserFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.fullName,
+    role: row.role,
+    phone: row.phone || undefined,
+    username: row.username || undefined,
+    avatarUrl: row.avatarUrl || undefined,
+    bio: row.bio || undefined,
+    website: row.website || undefined,
+    locationLabel: row.locationLabel || undefined
+  };
+}
+
+const authUserSelect = `
+  id,
+  email,
+  full_name AS "fullName",
+  role,
+  phone,
+  username,
+  avatar_url AS "avatarUrl",
+  bio,
+  website,
+  location_label AS "locationLabel"
+`;
+
+/**
+ * Resolves which learn_users row should receive like/comment notifications for a home post.
+ * Prefers real accounts over legacy backfill placeholders; updates home_posts.user_id when remapping.
+ */
+async function resolveHomePostAuthorUserId(postRow) {
+  const name = String(postRow.user_name || "").trim();
+  const postId = postRow.id != null ? Number(postRow.id) : null;
+
+  const persistAuthor = async (uid) => {
+    if (uid && Number.isFinite(postId) && postId > 0) {
+      await query(`UPDATE home_posts SET user_id = $1 WHERE id = $2`, [uid, postId]);
+    }
+  };
+
+  const direct = postRow.user_id != null ? Number(postRow.user_id) : null;
+  if (direct && Number.isFinite(direct) && direct > 0) {
+    const ur = await query(`SELECT id, email FROM learn_users WHERE id = $1 LIMIT 1`, [direct]);
+    if (ur.rows[0]) {
+      const email = String(ur.rows[0].email || "");
+      if (!isLegacySyntheticPostAuthorEmail(email)) return direct;
+    }
+  }
+
+  if (name) {
+    const nameMatchSql = `
+      LOWER(TRIM(REGEXP_REPLACE(COALESCE(full_name, ''), '\\s+', ' ', 'g')))
+      = LOWER(TRIM(REGEXP_REPLACE($1::text, '\\s+', ' ', 'g')))
+    `;
+    let r = await query(
+      `
+      SELECT id FROM learn_users
+      WHERE ${nameMatchSql}
+        AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [name]
+    );
+    if (!r.rows[0]) {
+      r = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE ${nameMatchSql}
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [name]
+      );
+    }
+    if (r.rows[0]) {
+      const uid = Number(r.rows[0].id);
+      await persistAuthor(uid);
+      return uid;
+    }
+
+    const slug = slugUsernameFromName(name);
+    if (slug) {
+      let r2 = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+          AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [slug]
+      );
+      if (!r2.rows[0]) {
+        r2 = await query(
+          `
+          SELECT id FROM learn_users
+          WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+          ORDER BY id ASC
+          LIMIT 1
+          `,
+          [slug]
+        );
+      }
+      if (r2.rows[0]) {
+        const uid = Number(r2.rows[0].id);
+        await persistAuthor(uid);
+        return uid;
+      }
+    }
+
+    let r3 = await query(
+      `
+      SELECT id FROM learn_users
+      WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        AND NOT (LOWER(TRIM(email)) LIKE 'legacy_post_%@phone.agrovibes')
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [name]
+    );
+    if (!r3.rows[0]) {
+      r3 = await query(
+        `
+        SELECT id FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [name]
+      );
+    }
+    if (r3.rows[0]) {
+      const uid = Number(r3.rows[0].id);
+      await persistAuthor(uid);
+      return uid;
+    }
+  }
+
+  if (direct && Number.isFinite(direct) && direct > 0) return direct;
+  return null;
+}
+
 function normalizeIndiaPhone(rawPhone) {
   const digits = String(rawPhone || "").replace(/\D/g, "");
   if (digits.length === 10) return `+91${digits}`;
@@ -97,6 +379,22 @@ function normalizeIndiaPhone(rawPhone) {
     return String(rawPhone);
   }
   return null;
+}
+
+function slugUsernameFromName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 30);
+}
+
+/** Same synthetic email shape as mobile register (`{digits}@phone.agrovibes`). */
+function syntheticPhoneEmailFromIdentifier(normalizedIdentifier) {
+  const digits = String(normalizedIdentifier || "").replace(/\D/g, "");
+  if (digits.length < 10) return null;
+  return `${digits.slice(-10)}@phone.agrovibes`.toLowerCase();
 }
 
 function phoneDigitsOnly(phone) {
@@ -136,7 +434,11 @@ function msg91Mode() {
 }
 
 function staticOtpCode() {
-  return String(process.env.STATIC_OTP_CODE || "").trim();
+  const fromEnv = String(process.env.STATIC_OTP_CODE || "").trim();
+  if (fromEnv) return fromEnv;
+  // Static OTP fallback for development/testing.
+  // If you are using this in production, set STATIC_OTP_CODE explicitly.
+  return "525252";
 }
 
 async function sendTwilioVerifyOtp(phone) {
@@ -491,6 +793,7 @@ async function ensureHomePostsTable() {
     `
     CREATE TABLE IF NOT EXISTS home_posts (
       id SERIAL PRIMARY KEY,
+      user_id INT REFERENCES learn_users(id) ON DELETE SET NULL,
       user_name TEXT NOT NULL,
       location TEXT NOT NULL,
       caption TEXT NOT NULL,
@@ -507,6 +810,7 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_url TEXT`);
   await query(`ALTER TABLE home_posts ALTER COLUMN video_url DROP NOT NULL`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_urls TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS user_id INT REFERENCES learn_users(id) ON DELETE SET NULL`);
   homePostsTableReady = true;
 }
 
@@ -534,12 +838,29 @@ function normalizeHomePostRow(row) {
   return base;
 }
 
+function dedupeHomePostRows(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    const post = normalizeHomePostRow(row);
+    const name = String(post.userName || "").trim().toLowerCase();
+    const caption = String(post.caption || "").trim();
+    const key = post.videoUrl ? `video:${post.videoUrl}:${name}:${caption}` : `id:${post.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(post);
+  }
+  return out;
+}
+
 async function ensureHomeStoriesTable() {
   if (homeStoriesTableReady) return;
+  await ensureLearnUsersTable();
   await query(
     `
     CREATE TABLE IF NOT EXISTS home_stories (
       id SERIAL PRIMARY KEY,
+      user_id INT REFERENCES learn_users(id) ON DELETE SET NULL,
       user_name TEXT NOT NULL,
       district TEXT NOT NULL,
       avatar_label TEXT NOT NULL,
@@ -552,9 +873,114 @@ async function ensureHomeStoriesTable() {
     `
   );
   // Lightweight migration for older deployments.
+  await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS user_id INT REFERENCES learn_users(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS video_url TEXT`);
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS image_url TEXT`);
   homeStoriesTableReady = true;
+}
+
+async function backfillHomePostUserIds() {
+  await ensureHomePostsTable();
+  await ensureLearnUsersTable();
+  const legacyPosts = await query(
+    `
+    SELECT id, user_name AS "userName"
+    FROM home_posts
+    WHERE user_id IS NULL
+    ORDER BY id ASC
+    `
+  );
+  if (!legacyPosts.rows.length) return;
+
+  const fallbackPasswordHash = await bcrypt.hash(`legacy-${Date.now()}-${Math.random()}`, 10);
+  for (const post of legacyPosts.rows) {
+    const displayName = String(post.userName || "").trim() || "Farmer";
+    const normalizedName = displayName.toLowerCase();
+    let userId = null;
+
+    const existingByName = await query(
+      `
+      SELECT id
+      FROM learn_users
+      WHERE LOWER(TRIM(full_name)) = $1
+      LIMIT 1
+      `,
+      [normalizedName]
+    );
+    if (existingByName.rows[0]?.id) {
+      userId = existingByName.rows[0].id;
+    }
+
+    if (!userId) {
+      const maybeUsername = slugUsernameFromName(displayName) || null;
+      if (maybeUsername) {
+        const existingByUsername = await query(
+          `
+          SELECT id
+          FROM learn_users
+          WHERE LOWER(TRIM(username)) = $1
+          LIMIT 1
+          `,
+          [maybeUsername]
+        );
+        if (existingByUsername.rows[0]?.id) {
+          userId = existingByUsername.rows[0].id;
+        }
+      }
+    }
+
+    if (!userId) {
+      const syntheticEmail = `legacy_post_${post.id}@phone.agrovibes`;
+      const created = await query(
+        `
+        INSERT INTO learn_users (email, password_hash, full_name, role, username)
+        VALUES ($1, $2, $3, 'student', $4)
+        RETURNING id
+        `,
+        [syntheticEmail, fallbackPasswordHash, displayName, null]
+      );
+      userId = created.rows[0]?.id || null;
+    }
+
+    if (userId) {
+      await query(`UPDATE home_posts SET user_id = $2 WHERE id = $1`, [post.id, userId]);
+    }
+  }
+}
+
+async function socialCountsForUser(userId) {
+  const uid = Number(userId);
+  const [followersRes, followingRes] = await Promise.all([
+    query(`SELECT COUNT(*)::INT AS count FROM social_follows WHERE following_id = $1 AND status = 'accepted'`, [uid]),
+    query(`SELECT COUNT(*)::INT AS count FROM social_follows WHERE follower_id = $1 AND status = 'accepted'`, [uid])
+  ]);
+  return {
+    followersCount: followersRes.rows[0]?.count || 0,
+    followingCount: followingRes.rows[0]?.count || 0
+  };
+}
+
+async function relationshipForUsers(viewerUserId, targetUserId) {
+  const viewerId = Number(viewerUserId);
+  const targetId = Number(targetUserId);
+  const result = await query(
+    `
+    SELECT follower_id AS "followerId", following_id AS "followingId", status
+    FROM social_follows
+    WHERE (follower_id = $1 AND following_id = $2)
+       OR (follower_id = $2 AND following_id = $1)
+    `,
+    [viewerId, targetId]
+  );
+  const viewerEdge = result.rows.find((r) => Number(r.followerId) === viewerId && Number(r.followingId) === targetId);
+  const reverseEdge = result.rows.find((r) => Number(r.followerId) === targetId && Number(r.followingId) === viewerId);
+  const viewerStatus = viewerEdge?.status || "none";
+  const reverseStatus = reverseEdge?.status || "none";
+  return {
+    viewerStatus,
+    reverseStatus,
+    canFollowBack: reverseStatus === "accepted" && viewerStatus !== "accepted" && viewerStatus !== "pending"
+  };
 }
 
 router.get("/health", async (_req, res) => {
@@ -576,11 +1002,19 @@ router.get("/v1/bootstrap", (_req, res) => {
 router.post("/v1/auth/register", async (req, res) => {
   try {
     await ensureLearnUsersTable();
-    const { email, password, fullName, role } = req.body || {};
-    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const { email, password, fullName, role, username, phone } = req.body || {};
+    let storeEmail = String(email || "").trim().toLowerCase();
+    if (storeEmail.endsWith("@phone.agrovibes")) {
+      const localDigits = storeEmail.split("@")[0].replace(/\D/g, "");
+      if (localDigits.length >= 10) {
+        storeEmail = `${localDigits.slice(-10)}@phone.agrovibes`;
+      }
+    }
+    const normalizedUsername = String(username || "").trim().toLowerCase() || null;
+    const normalizedPhone = normalizeIndiaPhone(phone || (storeEmail.endsWith("@phone.agrovibes") ? storeEmail.split("@")[0] : null));
     const safeRole = ["student", "instructor", "admin"].includes(String(role)) ? String(role) : "student";
 
-    if (!normalizedEmail || !password || String(password).length < 6 || !fullName) {
+    if (!storeEmail || !password || String(password).length < 6 || !fullName) {
       res.status(400).json({ message: "email, fullName and password (min 6 chars) are required" });
       return;
     }
@@ -588,20 +1022,20 @@ router.post("/v1/auth/register", async (req, res) => {
     const passwordHash = await bcrypt.hash(String(password), 10);
     const result = await query(
       `
-      INSERT INTO learn_users (email, password_hash, full_name, role)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, email, full_name AS "fullName", role
+      INSERT INTO learn_users (email, password_hash, full_name, role, username, phone)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING ${authUserSelect}
       `,
-      [normalizedEmail, passwordHash, String(fullName).trim(), safeRole]
+      [storeEmail, passwordHash, String(fullName).trim(), safeRole, normalizedUsername, normalizedPhone]
     );
 
-    const user = result.rows[0];
+    const user = authUserFromRow(result.rows[0]);
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.status(201).json({ token, user });
   } catch (error) {
     const msg = String(error.message || "");
     if (msg.includes("duplicate key") || msg.includes("already exists") || msg.includes("unique")) {
-      res.status(409).json({ message: "Email already registered" });
+      res.status(409).json({ message: "Email, phone, or username already registered" });
       return;
     }
     res.status(500).json({ message: "Failed to register", error: error.message });
@@ -611,34 +1045,53 @@ router.post("/v1/auth/register", async (req, res) => {
 router.post("/v1/auth/login", async (req, res) => {
   try {
     await ensureLearnUsersTable();
-    const { email, password } = req.body || {};
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    if (!normalizedEmail || !password) {
-      res.status(400).json({ message: "email and password are required" });
+    const { email, identifier, password } = req.body || {};
+    const normalizedIdentifier = String(identifier || email || "").trim().toLowerCase();
+    const phoneIdentifier = normalizeIndiaPhone(normalizedIdentifier);
+    const syntheticPhoneEmail = syntheticPhoneEmailFromIdentifier(normalizedIdentifier);
+    if (!normalizedIdentifier || !password) {
+      res.status(400).json({ message: "identifier (email/phone/username) and password are required" });
       return;
     }
 
+    const idDigits = phoneIdentifier ? phoneDigitsOnly(phoneIdentifier) : "";
+    const phoneDigitsLast10 = idDigits.length >= 10 ? idDigits.slice(-10) : "";
+
+    const syntheticLocal = syntheticPhoneEmail ? syntheticPhoneEmail.split("@")[0] : "";
+
     const result = await query(
       `
-      SELECT id, email, password_hash AS "passwordHash", full_name AS "fullName", role
+      SELECT ${authUserSelect}, password_hash AS "passwordHash"
       FROM learn_users
-      WHERE email = $1
+      WHERE LOWER(TRIM(email)) = $1
+         OR LOWER(TRIM(username)) = $1
+         OR ($2::TEXT IS NOT NULL AND $4::TEXT <> '' AND (
+              phone = $2
+              OR RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $4
+            ))
+         OR ($3::TEXT IS NOT NULL AND LOWER(TRIM(email)) = $3)
+         OR ($5::TEXT <> '' AND LOWER(TRIM(email)) LIKE '%@phone.agrovibes'
+             AND RIGHT(REGEXP_REPLACE(SPLIT_PART(LOWER(TRIM(email)), '@', 1), '[^0-9]', '', 'g'), 10) = $5)
       LIMIT 1
       `,
-      [normalizedEmail]
+      [normalizedIdentifier, phoneIdentifier, syntheticPhoneEmail, phoneDigitsLast10, syntheticLocal]
     );
     const userRow = result.rows[0];
     if (!userRow) {
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
-    const ok = await bcrypt.compare(String(password), String(userRow.passwordHash));
+    const hash = String(userRow.passwordHash);
+    let ok = await bcrypt.compare(String(password), hash);
+    if (!ok) {
+      ok = await bcrypt.compare(String(password).trim(), hash);
+    }
     if (!ok) {
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
 
-    const user = { id: userRow.id, email: userRow.email, fullName: userRow.fullName, role: userRow.role };
+    const user = authUserFromRow(userRow);
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.json({ token, user });
   } catch (error) {
@@ -844,7 +1297,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
       await ensureLearnUsersTable();
       const lookup = await query(
         `
-        SELECT id, email, full_name AS "fullName", role, phone
+        SELECT ${authUserSelect}
         FROM learn_users
         WHERE phone = $1
         LIMIT 1
@@ -852,7 +1305,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
         [phone]
       );
 
-      user = lookup.rows[0];
+      user = authUserFromRow(lookup.rows[0]);
       if (!user) {
         isNewUser = true;
         const tempPassword = crypto.randomBytes(24).toString("hex");
@@ -861,11 +1314,11 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
           `
           INSERT INTO learn_users (email, password_hash, full_name, role, phone)
           VALUES ($1, $2, $3, 'student', $4)
-          RETURNING id, email, full_name AS "fullName", role, phone
+          RETURNING ${authUserSelect}
           `,
           [syntheticEmail, passwordHash, "Farmer", phone]
         );
-        user = created.rows[0];
+        user = authUserFromRow(created.rows[0]);
       }
     } catch (_e) {
       user = phoneUserMemory.get(phone);
@@ -902,8 +1355,951 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
   }
 });
 
+router.post("/v1/auth/phone/reset-password", async (req, res) => {
+  try {
+    const provider = otpProvider();
+    const phone = normalizeIndiaPhone(req.body?.phone);
+    const code = String(req.body?.code || "").replace(/\D/g, "");
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!phone || code.length !== 6) {
+      res.status(400).json({ message: "Phone and 6-digit OTP are required" });
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      res.status(400).json({ message: "New password (min 6 chars) is required" });
+      return;
+    }
+
+    const staticCode = staticOtpCode();
+    const isStaticOtp = Boolean(staticCode && code === staticCode);
+
+    let otpRow = null;
+    let otpRowFromDb = false;
+    if (!isStaticOtp) {
+      try {
+        await ensurePhoneOtpTable();
+        const otpRows = await query(
+          `
+          SELECT id, otp_hash AS "otpHash", attempts, provider_request_id AS "providerRequestId"
+          FROM phone_otp_codes
+          WHERE phone = $1
+            AND used = false
+            AND expires_at > NOW()
+          ORDER BY created_at DESC
+          LIMIT 1
+          `,
+          [phone]
+        );
+        otpRow = otpRows.rows[0] || null;
+        otpRowFromDb = Boolean(otpRow);
+      } catch (_e) {
+        const rows = phoneOtpMemory.get(phone) || [];
+        otpRow = rows.find((row) => !row.used && row.expiresAt > Date.now()) || null;
+        otpRowFromDb = false;
+      }
+
+      if (!otpRow && provider !== "twilio") {
+        res.status(400).json({ message: "OTP expired. Please request a new code." });
+        return;
+      }
+
+      if (otpRow && Number(otpRow.attempts || 0) >= 5) {
+        res.status(429).json({ message: "Maximum attempts exceeded. Request OTP again." });
+        return;
+      }
+    }
+
+    let isValidOtp = false;
+    if (isStaticOtp) {
+      isValidOtp = true;
+    } else if (provider === "twilio") {
+      isValidOtp = await verifyTwilioOtp(phone, code);
+    } else if (msg91Mode() === "widget" && otpRow?.providerRequestId) {
+      const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
+      const widgetId = String(process.env.MSG91_WIDGET_ID || "").trim();
+      try {
+        const verifyResponse = await fetch("https://api.msg91.com/api/v5/widget/verifyOtp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", token: authKey },
+          body: JSON.stringify({
+            widgetId,
+            tokenAuth: authKey,
+            reqId: otpRow.providerRequestId,
+            otp: code
+          })
+        });
+        isValidOtp = verifyResponse.ok;
+      } catch (_e) {
+        isValidOtp = false;
+      }
+    } else {
+      const otpHash = hashOtp(phone, code);
+      isValidOtp = otpRow && otpHash === otpRow.otpHash;
+    }
+
+    if (!isValidOtp) {
+      if (otpRowFromDb && otpRow?.id) {
+        await query(`UPDATE phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [otpRow.id]);
+      } else if (otpRow) {
+        otpRow.attempts = Number(otpRow.attempts || 0) + 1;
+      }
+      res.status(401).json({ message: "Invalid OTP" });
+      return;
+    }
+
+    if (!isStaticOtp) {
+      if (otpRowFromDb && otpRow?.id) {
+        await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [otpRow.id]);
+      } else if (otpRow) {
+        otpRow.used = true;
+      }
+    }
+
+    await ensureLearnUsersTable();
+    const phoneDigits = phone.replace(/\D/g, "");
+    const last10 = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const updated = await query(
+      `
+      UPDATE learn_users
+      SET password_hash = $1
+      WHERE phone = $2
+         OR ($3 <> '' AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $3)
+      RETURNING id, email
+      `,
+      [passwordHash, phone, last10]
+    );
+
+    if (!updated.rows?.length) {
+      res.status(404).json({ message: "Phone number not registered" });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("reset-password failed", error);
+    res.status(500).json({ message: "Failed to reset password", error: error?.message || String(error) });
+  }
+});
+
 router.get("/v1/auth/me", authRequired, async (req, res) => {
-  res.json({ user: req.user });
+  try {
+    await ensureLearnUsersTable();
+    const result = await query(`SELECT ${authUserSelect} FROM learn_users WHERE id = $1 LIMIT 1`, [req.user.userId]);
+    const user = authUserFromRow(result.rows[0]);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load profile", error: error.message });
+  }
+});
+
+router.get("/v1/admin/users", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    await ensureHomePostsTable();
+    await ensureSocialFollowsTable();
+    await ensureDirectMessagesTable();
+
+    const limitRaw = Number(req.query.limit || 100);
+    const offsetRaw = Number(req.query.offset || 0);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+    const offset = Math.max(Number.isFinite(offsetRaw) ? offsetRaw : 0, 0);
+    const search = String(req.query.search || "").trim();
+    const searchLike = `%${search.toLowerCase()}%`;
+
+    const usersResult = await query(
+      `
+      SELECT
+        u.id,
+        u.email,
+        u.full_name AS "fullName",
+        u.role,
+        u.phone,
+        u.username,
+        u.avatar_url AS "avatarUrl",
+        u.bio,
+        u.website,
+        u.location_label AS "locationLabel",
+        u.created_at AS "createdAt",
+        COUNT(*) OVER()::INT AS "totalCount",
+        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
+        COALESCE(posts.reels_count, 0)::INT AS "reelsCount",
+        COALESCE(followers.followers_count, 0)::INT AS "followersCount",
+        COALESCE(following.following_count, 0)::INT AS "followingCount",
+        COALESCE(sent.messages_sent_count, 0)::INT AS "messagesSentCount",
+        COALESCE(received.messages_received_count, 0)::INT AS "messagesReceivedCount"
+      FROM learn_users u
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS posts_count,
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+        FROM home_posts p
+        WHERE p.user_id = u.id
+      ) posts ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS followers_count
+        FROM social_follows f
+        WHERE f.following_id = u.id AND f.status = 'accepted'
+      ) followers ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS following_count
+        FROM social_follows f
+        WHERE f.follower_id = u.id AND f.status = 'accepted'
+      ) following ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS messages_sent_count
+        FROM direct_messages dm
+        WHERE dm.sender_id = u.id
+      ) sent ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS messages_received_count
+        FROM direct_messages dm
+        WHERE dm.receiver_id = u.id
+      ) received ON TRUE
+      WHERE (
+        $1::TEXT = ''
+        OR LOWER(COALESCE(u.full_name, '')) LIKE $2
+        OR LOWER(COALESCE(u.email, '')) LIKE $2
+        OR LOWER(COALESCE(u.username, '')) LIKE $2
+        OR COALESCE(u.phone, '') LIKE $3
+      )
+      ORDER BY u.created_at DESC, u.id DESC
+      LIMIT $4 OFFSET $5
+      `,
+      [search, searchLike, `%${search.replace(/\D/g, "")}%`, limit, offset]
+    );
+
+    const users = usersResult.rows.map(({ totalCount, ...user }) => user);
+    const total = Number(usersResult.rows[0]?.totalCount || 0);
+    res.json({ users, total, limit, offset });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to list users", error: error.message });
+  }
+});
+
+router.get("/v1/users", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    await ensureHomePostsTable();
+    await ensureSocialFollowsTable();
+
+    const viewerId = Number(req.user.userId);
+    const limitRaw = Number(req.query.limit || 100);
+    const offsetRaw = Number(req.query.offset || 0);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 100, 1), 500);
+    const offset = Math.max(Number.isFinite(offsetRaw) ? offsetRaw : 0, 0);
+    const search = String(req.query.search || "").trim();
+    const searchLike = `%${search.toLowerCase()}%`;
+
+    const result = await query(
+      `
+      SELECT
+        u.id,
+        u.full_name AS "fullName",
+        u.username,
+        u.avatar_url AS "avatarUrl",
+        u.bio,
+        u.website,
+        u.location_label AS "locationLabel",
+        u.created_at AS "createdAt",
+        COUNT(*) OVER()::INT AS "totalCount",
+        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
+        COALESCE(posts.reels_count, 0)::INT AS "reelsCount",
+        COALESCE(followers.followers_count, 0)::INT AS "followersCount",
+        COALESCE(following.following_count, 0)::INT AS "followingCount",
+        CASE
+          WHEN u.id = $1 THEN 'self'
+          ELSE COALESCE(viewer_follow.status, 'none')
+        END AS "viewerStatus",
+        COALESCE(reverse_follow.status, 'none') AS "reverseStatus"
+      FROM learn_users u
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS posts_count,
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+        FROM home_posts p
+        WHERE p.user_id = u.id
+      ) posts ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS followers_count
+        FROM social_follows f
+        WHERE f.following_id = u.id AND f.status = 'accepted'
+      ) followers ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INT AS following_count
+        FROM social_follows f
+        WHERE f.follower_id = u.id AND f.status = 'accepted'
+      ) following ON TRUE
+      LEFT JOIN social_follows viewer_follow ON viewer_follow.follower_id = $1 AND viewer_follow.following_id = u.id
+      LEFT JOIN social_follows reverse_follow ON reverse_follow.follower_id = u.id AND reverse_follow.following_id = $1
+      WHERE (
+        $2::TEXT = ''
+        OR LOWER(COALESCE(u.full_name, '')) LIKE $3
+        OR LOWER(COALESCE(u.username, '')) LIKE $3
+      )
+      ORDER BY
+        CASE WHEN u.id = $1 THEN 1 ELSE 0 END ASC,
+        u.created_at DESC,
+        u.id DESC
+      LIMIT $4 OFFSET $5
+      `,
+      [viewerId, search, searchLike, limit, offset]
+    );
+
+    const users = result.rows.map(({ totalCount, reverseStatus, ...row }) => ({
+      ...row,
+      canFollowBack: reverseStatus === "accepted" && row.viewerStatus !== "accepted" && row.viewerStatus !== "pending"
+    }));
+    const total = Number(result.rows[0]?.totalCount || 0);
+    res.json({ users, total, limit, offset });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to list users", error: error.message });
+  }
+});
+
+router.put("/v1/auth/me", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    const fullName = String(req.body?.fullName || "").trim();
+    const usernameRaw = String(req.body?.username || "").trim().toLowerCase();
+    const username = usernameRaw
+      ? usernameRaw
+          .replace(/[^a-z0-9_.]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+      : null;
+    const bio = String(req.body?.bio || "").trim().slice(0, 150) || null;
+    const website = String(req.body?.website || "").trim().slice(0, 200) || null;
+    const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 120) || null;
+    const avatarUrl = String(req.body?.avatarUrl || "").trim().slice(0, 1000) || null;
+
+    if (!fullName) {
+      res.status(400).json({ message: "Name is required" });
+      return;
+    }
+    if (usernameRaw && !username) {
+      res.status(400).json({ message: "Username can only include letters, numbers, underscores, and dots" });
+      return;
+    }
+
+    const updated = await query(
+      `
+      UPDATE learn_users
+      SET
+        full_name = $1,
+        username = $2,
+        bio = $3,
+        website = $4,
+        location_label = $5,
+        avatar_url = $6
+      WHERE id = $7
+      RETURNING ${authUserSelect}
+      `,
+      [fullName, username, bio, website, locationLabel, avatarUrl, req.user.userId]
+    );
+    const user = authUserFromRow(updated.rows[0]);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName, phone: user.phone });
+    res.json({ token, user });
+  } catch (error) {
+    const msg = String(error.message || "");
+    if (msg.includes("duplicate key") || msg.includes("unique")) {
+      res.status(409).json({ message: "Username already taken" });
+      return;
+    }
+    res.status(500).json({ message: "Failed to update profile", error: error.message });
+  }
+});
+
+router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId)) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+    const counts = await socialCountsForUser(targetUserId);
+    const relation =
+      Number(req.user.userId) === targetUserId
+        ? { viewerStatus: "self", reverseStatus: "self", canFollowBack: false }
+        : await relationshipForUsers(req.user.userId, targetUserId);
+    res.json({ ...counts, ...relation });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load profile stats", error: error.message });
+  }
+});
+
+/** Accepted followers + following + pending outgoing (for profile lists). Viewer must match userId. */
+router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId) || Number(req.user.userId) !== targetUserId) {
+      res.status(403).json({ message: "You can only load your own follow network" });
+      return;
+    }
+
+    const followersRes = await query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.follower_id
+      WHERE f.following_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    );
+    const followingRes = await query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.following_id
+      WHERE f.follower_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    );
+    const pendingOutRes = await query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.following_id
+      WHERE f.follower_id = $1 AND f.status = 'pending'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    );
+
+    const followingAcceptedIds = new Set(followingRes.rows.map((r) => Number(r.userId)));
+    const pendingFollowingIds = new Set(pendingOutRes.rows.map((r) => Number(r.userId)));
+
+    const followers = followersRes.rows.map((row) => {
+      const uid = Number(row.userId);
+      const iFollow = followingAcceptedIds.has(uid);
+      const iPending = pendingFollowingIds.has(uid);
+      const viewerStatus = iFollow ? "accepted" : iPending ? "pending" : "none";
+      return {
+        name: row.fullName,
+        key: String(row.userId),
+        viewerStatus,
+        canFollowBack: viewerStatus === "none"
+      };
+    });
+
+    const following = followingRes.rows.map((row) => ({
+      name: row.fullName,
+      key: String(row.userId),
+      viewerStatus: "accepted",
+      canFollowBack: false
+    }));
+
+    res.json({ followers, following });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load follow network", error: error.message });
+  }
+});
+
+router.get("/v1/social/relationships", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const raw = String(req.query.userIds || "");
+    const ids = raw
+      .split(",")
+      .map((v) => Number(String(v).trim()))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    const uniqueIds = [...new Set(ids)].filter((id) => id !== Number(req.user.userId)).slice(0, 80);
+    if (!uniqueIds.length) {
+      res.json({ relationships: {} });
+      return;
+    }
+
+    const result = await query(
+      `
+      SELECT follower_id AS "followerId", following_id AS "followingId", status
+      FROM social_follows
+      WHERE (follower_id = $1 AND following_id = ANY($2::INT[]))
+         OR (following_id = $1 AND follower_id = ANY($2::INT[]))
+      `,
+      [req.user.userId, uniqueIds]
+    );
+    const map = {};
+    for (const uid of uniqueIds) {
+      const viewerEdge = result.rows.find((r) => Number(r.followerId) === Number(req.user.userId) && Number(r.followingId) === uid);
+      const reverseEdge = result.rows.find((r) => Number(r.followingId) === Number(req.user.userId) && Number(r.followerId) === uid);
+      const viewerStatus = viewerEdge?.status || "none";
+      const reverseStatus = reverseEdge?.status || "none";
+      map[uid] = {
+        viewerStatus,
+        reverseStatus,
+        canFollowBack: reverseStatus === "accepted" && viewerStatus !== "accepted" && viewerStatus !== "pending"
+      };
+    }
+    res.json({ relationships: map });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load relationships", error: error.message });
+  }
+});
+
+router.post("/v1/social/follow/request", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const actorUserId = Number(req.user.userId);
+    const targetUserId = Number(req.body?.targetUserId);
+    if (!Number.isFinite(targetUserId)) {
+      res.status(400).json({ message: "targetUserId is required" });
+      return;
+    }
+    if (targetUserId === actorUserId) {
+      res.status(400).json({ message: "You cannot follow yourself" });
+      return;
+    }
+
+    const userExists = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [targetUserId]);
+    if (!userExists.rows[0]) {
+      res.status(404).json({ message: "Target user not found" });
+      return;
+    }
+
+    const existing = await query(
+      `SELECT id, status FROM social_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1`,
+      [actorUserId, targetUserId]
+    );
+
+    let followRow = null;
+    if (!existing.rows[0]) {
+      const inserted = await query(
+        `
+        INSERT INTO social_follows (follower_id, following_id, status, updated_at, responded_at)
+        VALUES ($1, $2, 'pending', NOW(), NULL)
+        RETURNING id, status
+        `,
+        [actorUserId, targetUserId]
+      );
+      followRow = inserted.rows[0];
+    } else if (existing.rows[0].status === "accepted") {
+      followRow = existing.rows[0];
+    } else if (existing.rows[0].status === "pending") {
+      followRow = existing.rows[0];
+    } else {
+      const updated = await query(
+        `
+        UPDATE social_follows
+        SET status = 'pending', updated_at = NOW(), responded_at = NULL
+        WHERE id = $1
+        RETURNING id, status
+        `,
+        [existing.rows[0].id]
+      );
+      followRow = updated.rows[0];
+    }
+
+    if (followRow?.status === "pending") {
+      await query(
+        `
+        INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read)
+        VALUES ($1, $2, $3, 'follow_request', false)
+        `,
+        [targetUserId, actorUserId, followRow.id]
+      );
+    }
+
+    const [actorCounts, targetCounts] = await Promise.all([socialCountsForUser(actorUserId), socialCountsForUser(targetUserId)]);
+    res.status(201).json({
+      follow: { id: followRow.id, status: followRow.status, followerId: actorUserId, followingId: targetUserId },
+      actorCounts,
+      targetCounts
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to request follow", error: error.message });
+  }
+});
+
+router.post("/v1/social/follow/unfollow", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const actorUserId = Number(req.user.userId);
+    const targetUserId = Number(req.body?.targetUserId);
+    if (!Number.isFinite(targetUserId)) {
+      res.status(400).json({ message: "targetUserId is required" });
+      return;
+    }
+    if (targetUserId === actorUserId) {
+      res.status(400).json({ message: "Invalid unfollow target" });
+      return;
+    }
+
+    await query(
+      `
+      UPDATE social_follows
+      SET status = 'declined', responded_at = NOW(), updated_at = NOW()
+      WHERE follower_id = $1 AND following_id = $2 AND status IN ('accepted', 'pending')
+      `,
+      [actorUserId, targetUserId]
+    );
+
+    const [actorCounts, targetCounts] = await Promise.all([socialCountsForUser(actorUserId), socialCountsForUser(targetUserId)]);
+    res.json({ ok: true, actorCounts, targetCounts });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unfollow", error: error.message });
+  }
+});
+
+/**
+ * Upsert follow rows from client-side (AsyncStorage) history into social_follows.
+ * Body: { edges: [{ peerFullName, relation: "i_follow" | "follows_me", status: "accepted" | "pending" }] }
+ * peerFullName must match learn_users.full_name (case-insensitive). No notifications are created here.
+ */
+router.post("/v1/social/follow/sync-local", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const me = Number(req.user.userId);
+    const raw = Array.isArray(req.body?.edges) ? req.body.edges : [];
+    const edges = raw.slice(0, 120);
+    let imported = 0;
+    /** @type {{ peerFullName: string; relation: string; status: string }[]} */
+    const synced = [];
+
+    for (const edge of edges) {
+      const peerFullName = String(edge.peerFullName || "").trim();
+      const relation = String(edge.relation || "").trim();
+      const status = edge.status === "accepted" ? "accepted" : edge.status === "pending" ? "pending" : null;
+      if (!peerFullName || !status || !["i_follow", "follows_me"].includes(relation)) continue;
+
+      const peerRes = await query(
+        `SELECT id FROM learn_users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) LIMIT 1`,
+        [peerFullName]
+      );
+      const peerId = peerRes.rows[0]?.id != null ? Number(peerRes.rows[0].id) : null;
+      if (!peerId || peerId === me) continue;
+
+      const followerId = relation === "i_follow" ? me : peerId;
+      const followingId = relation === "i_follow" ? peerId : me;
+
+      await query(
+        `
+        INSERT INTO social_follows (follower_id, following_id, status, updated_at, responded_at)
+        VALUES ($1, $2, $3, NOW(), CASE WHEN $3 = 'pending' THEN NULL ELSE NOW() END)
+        ON CONFLICT (follower_id, following_id)
+        DO UPDATE SET
+          status = EXCLUDED.status,
+          updated_at = NOW(),
+          responded_at = CASE
+            WHEN EXCLUDED.status = 'pending' THEN NULL
+            ELSE COALESCE(social_follows.responded_at, NOW())
+          END
+        `,
+        [followerId, followingId, status]
+      );
+      imported += 1;
+      synced.push({ peerFullName, relation, status });
+    }
+
+    const counts = await socialCountsForUser(me);
+    res.json({ ok: true, imported, synced, followersCount: counts.followersCount, followingCount: counts.followingCount });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to sync local follows", error: error.message });
+  }
+});
+
+router.post("/v1/social/follow/:followId/respond", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const followId = Number(req.params.followId);
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    if (!Number.isFinite(followId) || !["accept", "decline"].includes(action)) {
+      res.status(400).json({ message: "Valid followId and action(accept/decline) are required" });
+      return;
+    }
+
+    const followRes = await query(
+      `
+      SELECT id, follower_id AS "followerId", following_id AS "followingId", status
+      FROM social_follows
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [followId]
+    );
+    const follow = followRes.rows[0];
+    if (!follow) {
+      res.status(404).json({ message: "Follow request not found" });
+      return;
+    }
+    if (Number(follow.followingId) !== Number(req.user.userId)) {
+      res.status(403).json({ message: "You cannot respond to this request" });
+      return;
+    }
+    if (follow.status !== "pending") {
+      res.status(409).json({ message: "Request already resolved" });
+      return;
+    }
+
+    const nextStatus = action === "accept" ? "accepted" : "declined";
+    const updated = await query(
+      `
+      UPDATE social_follows
+      SET status = $2, responded_at = NOW(), updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, follower_id AS "followerId", following_id AS "followingId", status
+      `,
+      [followId, nextStatus]
+    );
+    const updatedFollow = updated.rows[0];
+
+    await query(
+      `
+      UPDATE social_notifications
+      SET is_read = true
+      WHERE follow_id = $1 AND user_id = $2 AND type = 'follow_request'
+      `,
+      [followId, req.user.userId]
+    );
+
+    if (nextStatus === "accepted") {
+      await query(
+        `
+        INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read)
+        VALUES ($1, $2, $3, 'follow_accept', false)
+        `,
+        [updatedFollow.followerId, updatedFollow.followingId, followId]
+      );
+    }
+
+    const [actorCounts, targetCounts] = await Promise.all([
+      socialCountsForUser(updatedFollow.followerId),
+      socialCountsForUser(updatedFollow.followingId)
+    ]);
+
+    res.json({
+      follow: updatedFollow,
+      actorCounts,
+      targetCounts
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to respond to follow request", error: error.message });
+  }
+});
+
+router.get("/v1/social/notifications", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const currentUserId = Number(req.user.userId);
+    await ensureHomePostsTable();
+    const result = await query(
+      `
+      SELECT
+        n.id,
+        n.type,
+        n.is_read AS "isRead",
+        n.created_at AS "createdAt",
+        n.follow_id AS "followId",
+        n.actor_id AS "actorId",
+        n.post_id AS "postId",
+        n.comment_excerpt AS "commentExcerpt",
+        u.full_name AS "actorName",
+        COALESCE(f.status, 'pending') AS "followStatus",
+        CASE
+          WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
+          ELSE false
+        END AS "postIsReel"
+      FROM social_notifications n
+      JOIN learn_users u ON u.id = n.actor_id
+      LEFT JOIN social_follows f ON f.id = n.follow_id
+      LEFT JOIN home_posts p ON p.id = n.post_id
+      WHERE n.user_id = $1
+      ORDER BY n.created_at DESC
+      LIMIT 100
+      `,
+      [currentUserId]
+    );
+
+    const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
+    const followAccepted = result.rows.filter((r) => r.type === "follow_accept" && !r.isRead);
+    const postLikes = result.rows.filter((r) => r.type === "post_like" && !r.isRead);
+    const postComments = result.rows.filter(
+      (r) => (r.type === "post_comment" || r.type === "comment_reply") && !r.isRead
+    );
+    res.json({
+      followRequests,
+      followAccepted,
+      postLikes,
+      postComments,
+      unreadCount: followRequests.length + followAccepted.length + postLikes.length + postComments.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load notifications", error: error.message });
+  }
+});
+
+router.post("/v1/social/notifications/:notificationId/read", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const notificationId = Number(req.params.notificationId);
+    if (!Number.isFinite(notificationId)) {
+      res.status(400).json({ message: "Valid notificationId is required" });
+      return;
+    }
+    const updated = await query(
+      `
+      UPDATE social_notifications
+      SET is_read = true
+      WHERE id = $1 AND user_id = $2
+      RETURNING id
+      `,
+      [notificationId, req.user.userId]
+    );
+    if (!updated.rows[0]) {
+      res.status(404).json({ message: "Notification not found" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update notification", error: error.message });
+  }
+});
+
+router.get("/v1/messages/threads", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const result = await query(
+      `
+      WITH thread_rows AS (
+        SELECT
+          CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END AS peer_id,
+          dm.id,
+          dm.sender_id,
+          dm.receiver_id,
+          dm.body,
+          dm.created_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END
+            ORDER BY dm.created_at DESC
+          ) AS rn
+        FROM direct_messages dm
+        WHERE dm.sender_id = $1 OR dm.receiver_id = $1
+      )
+      SELECT
+        t.peer_id AS "peerUserId",
+        u.full_name AS "peerName",
+        u.email AS "peerEmail",
+        t.sender_id AS "lastSenderId",
+        t.receiver_id AS "lastReceiverId",
+        t.body AS "lastMessage",
+        t.created_at AS "lastAt",
+        COALESCE((
+          SELECT COUNT(*)::INT
+          FROM direct_messages dm2
+          WHERE dm2.sender_id = t.peer_id
+            AND dm2.receiver_id = $1
+            AND dm2.is_read = false
+        ), 0) AS "unreadCount"
+      FROM thread_rows t
+      JOIN learn_users u ON u.id = t.peer_id
+      WHERE t.rn = 1
+      ORDER BY t.created_at DESC
+      `
+      ,
+      [me]
+    );
+    res.json({ threads: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load message threads", error: error.message });
+  }
+});
+
+router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+
+    const peerRes = await query(`SELECT id, full_name AS "fullName", email, phone FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+
+    await query(`UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`, [peerUserId, me]);
+
+    const rows = await query(
+      `
+      SELECT
+        id,
+        sender_id AS "senderId",
+        receiver_id AS "receiverId",
+        body,
+        created_at AS "createdAt"
+      FROM direct_messages
+      WHERE (sender_id = $1 AND receiver_id = $2)
+         OR (sender_id = $2 AND receiver_id = $1)
+      ORDER BY created_at ASC
+      LIMIT 500
+      `,
+      [me, peerUserId]
+    );
+
+    res.json({
+      peer: { id: peerRes.rows[0].id, fullName: peerRes.rows[0].fullName, email: peerRes.rows[0].email, phone: peerRes.rows[0].phone },
+      messages: rows.rows
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load message thread", error: error.message });
+  }
+});
+
+router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    const body = String(req.body?.text || "").trim();
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    if (!body) {
+      res.status(400).json({ message: "Message text is required" });
+      return;
+    }
+
+    const peerRes = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+
+    const ins = await query(
+      `
+      INSERT INTO direct_messages (sender_id, receiver_id, body, is_read)
+      VALUES ($1, $2, $3, false)
+      RETURNING
+        id,
+        sender_id AS "senderId",
+        receiver_id AS "receiverId",
+        body,
+        created_at AS "createdAt"
+      `,
+      [me, peerUserId, body]
+    );
+    res.status(201).json({ message: ins.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to send message", error: error.message });
+  }
 });
 
 router.get("/v1/marketplace/listings", async (_req, res) => {
@@ -927,11 +2323,7 @@ router.get("/v1/marketplace/listings", async (_req, res) => {
     res.json({ listings: result.rows });
   } catch (error) {
     res.json({
-      listings: [
-        { id: 1, cropName: "Tomato", district: "Nashik", pricePerKg: 28, verifiedOnly: true, listingType: "produce" },
-        { id: 2, cropName: "Onion", district: "Nagpur", pricePerKg: 25, verifiedOnly: true, listingType: "produce" },
-        { id: 3, cropName: "Soybean", district: "Indore", pricePerKg: 42, verifiedOnly: false, listingType: "produce" }
-      ],
+      listings: [],
       source: "fallback",
       message: error.message
     });
@@ -964,28 +2356,7 @@ router.get("/v1/community/questions", async (_req, res) => {
     res.json({ questions: result.rows });
   } catch (error) {
     res.json({
-      questions: [
-        {
-          id: 1,
-          userName: "Mahesh Rao",
-          district: "Nagpur",
-          textContent: "The leaves on my orange trees are turning yellow. Any remedy?",
-          upvotes: 45,
-          answersCount: 2,
-          isResolved: true,
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 2,
-          userName: "Pradeep Kumar",
-          district: "Indore",
-          textContent: "Heavy whitefly infestation on soybean. How to control organically?",
-          upvotes: 21,
-          answersCount: 3,
-          isResolved: false,
-          createdAt: new Date().toISOString()
-        }
-      ],
+      questions: [],
       source: "fallback",
       message: error.message
     });
@@ -1003,13 +2374,15 @@ router.get("/v1/home/stories", async (_req, res) => {
       `
       SELECT
         id,
+        user_id AS "userId",
         user_name AS "userName",
         district,
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
         video_url AS "videoUrl",
-        image_url AS "imageUrl"
+        image_url AS "imageUrl",
+        created_at AS "createdAt"
       FROM home_stories
       WHERE created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
       ORDER BY created_at DESC
@@ -1017,34 +2390,17 @@ router.get("/v1/home/stories", async (_req, res) => {
       `
     );
 
-    if (result.rows.length === 0) {
-      res.json({
-        stories: [
-          { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-          { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false },
-          { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false },
-          { id: 4, userName: "Meena", district: "Ludhiana", avatarLabel: "M", hasNew: true, viewed: false },
-          { id: 5, userName: "Kisan Hub", district: "Pune", avatarLabel: "K", hasNew: false, viewed: true },
-          { id: 6, userName: "Agri News", district: "Delhi", avatarLabel: "A", hasNew: true, viewed: false }
-        ]
-      });
-      return;
-    }
-
     res.json({ stories: result.rows });
   } catch (error) {
     res.json({
-      stories: [
-        { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-        { id: 2, userName: "Ramesh", district: "Nashik", avatarLabel: "R", hasNew: true, viewed: false }
-      ],
+      stories: [],
       source: "fallback",
       message: error.message
     });
   }
 });
 
-router.post("/v1/home/stories", async (req, res) => {
+router.post("/v1/home/stories", authOptional, async (req, res) => {
   try {
     await ensureHomeStoriesTable();
     const { userName, district, videoUrl, imageUrl } = req.body || {};
@@ -1058,21 +2414,25 @@ router.post("/v1/home/stories", async (req, res) => {
     }
 
     const avatarLabel = String(userName).trim().charAt(0).toUpperCase() || "U";
+    const actorUserIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const actorUserId = Number.isFinite(actorUserIdRaw) && actorUserIdRaw > 0 ? actorUserIdRaw : null;
     const result = await query(
       `
-      INSERT INTO home_stories (user_name, district, avatar_label, has_new, viewed, video_url, image_url)
-      VALUES ($1, $2, $3, true, false, $4, $5)
+      INSERT INTO home_stories (user_id, user_name, district, avatar_label, has_new, viewed, video_url, image_url)
+      VALUES ($1, $2, $3, $4, true, false, $5, $6)
       RETURNING
         id,
+        user_id AS "userId",
         user_name AS "userName",
         district,
         avatar_label AS "avatarLabel",
         has_new AS "hasNew",
         viewed,
         video_url AS "videoUrl",
-        image_url AS "imageUrl"
+        image_url AS "imageUrl",
+        created_at AS "createdAt"
       `,
-      [userName, district, avatarLabel, videoUrl || null, imageUrl || null]
+      [actorUserId, userName, district, avatarLabel, videoUrl || null, imageUrl || null]
     );
 
     res.status(201).json({ story: result.rows[0] });
@@ -1081,64 +2441,64 @@ router.post("/v1/home/stories", async (req, res) => {
   }
 });
 
-router.get("/v1/home/posts", async (_req, res) => {
+router.get("/v1/home/posts", authOptional, async (req, res) => {
   try {
+    await backfillHomePostUserIds();
     await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
     const result = await query(
       `
       SELECT
-        id,
-        user_name AS "userName",
-        location,
-        caption,
-        likes_count AS "likesCount",
-        comments_count AS "commentsCount",
-        video_url AS "videoUrl",
-        image_url AS "imageUrl",
-        image_urls AS "image_urls",
-        thumbnail_url AS "thumbnailUrl",
-        created_at AS "createdAt"
-      FROM home_posts
-      ORDER BY created_at DESC
+        p.id,
+        COALESCE(p.user_id, u.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_likes hpl
+            WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
+          )
+        END AS "viewerHasLiked",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_saves hps
+            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+          )
+        END AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT id
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) u ON TRUE
+      ORDER BY p.created_at DESC
       LIMIT 50
-      `
+      `,
+      [viewerId]
     );
 
-    if (result.rows.length === 0) {
-      res.json({
-        posts: [
-          {
-            id: 1,
-            userName: "Ramesh Patel",
-            location: "Nashik",
-            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-            likesCount: 1284,
-            commentsCount: 92,
-            videoUrl: "https://example.com/video/tomato.mp4",
-            thumbnailUrl: null,
-            createdAt: new Date().toISOString()
-          }
-        ]
-      });
-      return;
-    }
-
-    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+    res.json({ posts: dedupeHomePostRows(result.rows) });
   } catch (error) {
     res.json({
-      posts: [
-        {
-          id: 1,
-          userName: "Ramesh Patel",
-          location: "Nashik",
-          caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-          likesCount: 1284,
-          commentsCount: 92,
-          videoUrl: "https://example.com/video/tomato.mp4",
-          thumbnailUrl: null,
-          createdAt: new Date().toISOString()
-        }
-      ],
+      posts: [],
       source: "fallback",
       message: error.message
     });
@@ -1148,7 +2508,7 @@ router.get("/v1/home/posts", async (_req, res) => {
 router.post("/v1/home/posts", async (req, res) => {
   try {
     await ensureHomePostsTable();
-    const { userName, location, caption, videoUrl, imageUrl, imageUrls, thumbnailUrl } = req.body || {};
+    const { userId, userName, location, caption, videoUrl, imageUrl, imageUrls, thumbnailUrl } = req.body || {};
 
     const urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
     const primaryImage = urlList[0] || (typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null);
@@ -1167,10 +2527,11 @@ router.post("/v1/home/posts", async (req, res) => {
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_name, location, caption, video_url, image_url, image_urls, thumbnail_url)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING
         id,
+        user_id AS "userId",
         user_name AS "userName",
         location,
         caption,
@@ -1182,12 +2543,305 @@ router.post("/v1/home/posts", async (req, res) => {
         thumbnail_url AS "thumbnailUrl",
         created_at AS "createdAt"
       `,
-      [userName, location, caption, videoUrl || null, primaryImage, imageUrlsJson, thumbnailUrl || null]
+      [userId || null, userName, location, caption, videoUrl || null, primaryImage, imageUrlsJson, thumbnailUrl || null]
     );
 
     res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostSavesTable();
+    const viewerId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        true AS "viewerHasSaved",
+        hps.created_at AS "savedAt"
+      FROM home_post_saves hps
+      JOIN home_posts p ON p.id = hps.post_id
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      WHERE hps.user_id = $1
+      ORDER BY hps.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId]
+    );
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load saved posts", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/save", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostSavesTable();
+    const postId = Number(req.params.postId);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const post = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!post.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    await query(
+      `
+      INSERT INTO home_post_saves (post_id, user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (post_id, user_id) DO NOTHING
+      `,
+      [postId, userId]
+    );
+    res.json({ saved: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to save post", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostSavesTable();
+    const postId = Number(req.params.postId);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    await query(`DELETE FROM home_post_saves WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
+    res.json({ saved: false });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unsave post", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/like", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostLikesTable();
+    await ensureSocialNotificationsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId)) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const actorUserId = Number(req.user.userId);
+    const postRes = await query(
+      `SELECT id, user_id, user_name, likes_count, video_url FROM home_posts WHERE id = $1 LIMIT 1`,
+      [postId]
+    );
+    if (!postRes.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const post = postRes.rows[0];
+    const insertLike = await query(
+      `INSERT INTO home_post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT (post_id, user_id) DO NOTHING RETURNING post_id`,
+      [postId, actorUserId]
+    );
+    if (!insertLike.rows[0]) {
+      const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1`, [postId]);
+      const liked = await query(`SELECT 1 FROM home_post_likes WHERE post_id = $1 AND user_id = $2`, [postId, actorUserId]);
+      res.json({
+        liked: !!liked.rows[0],
+        likesCount: Number(cur.rows[0]?.likesCount || 0)
+      });
+      return;
+    }
+    const updated = await query(
+      `UPDATE home_posts SET likes_count = likes_count + 1 WHERE id = $1 RETURNING likes_count AS "likesCount"`,
+      [postId]
+    );
+    const authorUserId = await resolveHomePostAuthorUserId(post);
+    if (authorUserId && authorUserId !== actorUserId) {
+      await query(
+        `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+         VALUES ($1, $2, NULL, 'post_like', false, $3, NULL)`,
+        [authorUserId, actorUserId, postId]
+      );
+    }
+    res.json({ liked: true, likesCount: Number(updated.rows[0]?.likesCount || 0) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to like post", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/unlike", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostLikesTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId)) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const actorUserId = Number(req.user.userId);
+    const del = await query(`DELETE FROM home_post_likes WHERE post_id = $1 AND user_id = $2 RETURNING post_id`, [
+      postId,
+      actorUserId
+    ]);
+    if (del.rows[0]) {
+      await query(`UPDATE home_posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = $1`, [postId]);
+    }
+    const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1`, [postId]);
+    res.json({ liked: false, likesCount: Number(cur.rows[0]?.likesCount || 0) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unlike post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/:postId/comments", async (req, res) => {
+  try {
+    await ensureHomePostCommentsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId)) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const postCheck = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!postCheck.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        c.id::text AS id,
+        c.body AS text,
+        u.full_name AS "user",
+        c.created_at AS "createdAt",
+        c.parent_comment_id AS "parentCommentId"
+      FROM home_post_comments c
+      JOIN learn_users u ON u.id = c.user_id
+      WHERE c.post_id = $1
+      ORDER BY c.created_at ASC
+      `,
+      [postId]
+    );
+    res.json({
+      comments: result.rows.map((row) => ({
+        id: String(row.id),
+        user: row.user,
+        text: row.text,
+        likes: 0,
+        createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
+        parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load comments", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostCommentsTable();
+    await ensureSocialNotificationsTable();
+    const postId = Number(req.params.postId);
+    const body = String((req.body || {}).text || "").trim();
+    if (!Number.isFinite(postId) || !body) {
+      res.status(400).json({ message: "Valid postId and text are required" });
+      return;
+    }
+    const actorUserId = Number(req.user.userId);
+    const parentRaw = (req.body || {}).parentCommentId;
+    const parentCommentPk =
+      parentRaw != null && parentRaw !== "" && Number.isFinite(Number(parentRaw)) && Number(parentRaw) > 0
+        ? Number(parentRaw)
+        : null;
+
+    const postRes = await query(`SELECT id, user_id, user_name FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!postRes.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const post = postRes.rows[0];
+
+    if (parentCommentPk) {
+      const parentRow = await query(
+        `SELECT id, post_id, user_id FROM home_post_comments WHERE id = $1 LIMIT 1`,
+        [parentCommentPk]
+      );
+      if (!parentRow.rows[0] || Number(parentRow.rows[0].post_id) !== postId) {
+        res.status(400).json({ message: "Invalid parent comment for this post" });
+        return;
+      }
+    }
+
+    const excerpt = body.length > 160 ? `${body.slice(0, 157)}...` : body;
+    const ins = await query(
+      `
+      INSERT INTO home_post_comments (post_id, user_id, body, parent_comment_id)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, body, created_at AS "createdAt", parent_comment_id AS "parentCommentId"
+      `,
+      [postId, actorUserId, body, parentCommentPk]
+    );
+    await query(`UPDATE home_posts SET comments_count = comments_count + 1 WHERE id = $1`, [postId]);
+
+    const authorUserId = await resolveHomePostAuthorUserId(post);
+    let parentCommentAuthorId = null;
+    if (parentCommentPk) {
+      const pu = await query(`SELECT user_id FROM home_post_comments WHERE id = $1 LIMIT 1`, [parentCommentPk]);
+      parentCommentAuthorId = pu.rows[0] != null ? Number(pu.rows[0].user_id) : null;
+    }
+
+    if (parentCommentAuthorId && parentCommentAuthorId !== actorUserId) {
+      await query(
+        `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+         VALUES ($1, $2, NULL, 'comment_reply', false, $3, $4)`,
+        [parentCommentAuthorId, actorUserId, postId, excerpt]
+      );
+    }
+
+    if (authorUserId && authorUserId !== actorUserId) {
+      const skipPostOwnerNotif =
+        parentCommentPk && parentCommentAuthorId != null && authorUserId === parentCommentAuthorId;
+      if (!skipPostOwnerNotif) {
+        await query(
+          `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+           VALUES ($1, $2, NULL, 'post_comment', false, $3, $4)`,
+          [authorUserId, actorUserId, postId, excerpt]
+        );
+      }
+    }
+
+    const actor = await query(`SELECT full_name AS "fullName" FROM learn_users WHERE id = $1`, [actorUserId]);
+    const row = ins.rows[0];
+    const cc = await query(`SELECT comments_count AS "commentsCount" FROM home_posts WHERE id = $1`, [postId]);
+    res.status(201).json({
+      comment: {
+        id: String(row.id),
+        user: actor.rows[0]?.fullName || "Member",
+        text: row.body,
+        likes: 0,
+        createdAt: row.createdAt,
+        parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
+      },
+      commentsCount: Number(cc.rows[0]?.commentsCount ?? 0)
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to add comment", error: error.message });
   }
 });
 

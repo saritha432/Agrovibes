@@ -2,16 +2,10 @@ import React from "react";
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { AppNavigator } from "./AppNavigator";
-import { AuthScreen } from "../screens/AuthScreen";
 import { InstructorStudioScreen } from "../screens/InstructorStudioScreen";
 import { SplashScreen } from "../screens/SplashScreen";
 import { AuthChoiceScreen } from "../screens/onboarding/AuthChoiceScreen";
 import { OtpVerifyScreen } from "../screens/onboarding/OtpVerifyScreen";
-import { EnableLocationScreen } from "../screens/onboarding/EnableLocationScreen";
-import { AllowNotificationScreen } from "../screens/onboarding/AllowNotificationScreen";
-import { ChooseLanguageScreen } from "../screens/onboarding/ChooseLanguageScreen";
-import { FirstTimeRoleScreen } from "../screens/onboarding/FirstTimeRoleScreen";
-import { FirstTimeCropsScreen } from "../screens/onboarding/FirstTimeCropsScreen";
 import { PersonalInfoScreen } from "../screens/onboarding/PersonalInfoScreen";
 import { RoleSelectionScreen } from "../screens/onboarding/RoleSelectionScreen";
 import { BuyerInterestsScreen } from "../screens/onboarding/BuyerInterestsScreen";
@@ -25,6 +19,13 @@ import { ExpertCredentialsScreen } from "../screens/onboarding/ExpertCredentials
 import { ExpertVerificationScreen } from "../screens/onboarding/ExpertVerificationScreen";
 import { SecurityVerificationScreen } from "../screens/onboarding/SecurityVerificationScreen";
 import { InitialSetupScreen } from "../screens/InitialSetupScreen";
+import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
+import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
+import { EditProfileScreen } from "../screens/EditProfileScreen";
+import { UserSearchScreen } from "../screens/UserSearchScreen";
+import { PublicProfileScreen } from "../screens/PublicProfileScreen";
+import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
+import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
 import type { LearnStackParamList } from "./LearnStackNavigator";
 
@@ -39,14 +40,10 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Splash: undefined;
   InitialSetup: undefined;
-  AuthChoice: undefined;
-  AuthEmail: undefined;
+  AuthChoice: { initialMode?: "register" | "login" } | undefined;
   OtpVerify: { phone: string };
-  EnableLocation: undefined;
-  AllowNotification: undefined;
-  ChooseLanguage: undefined;
-  FirstTimeRole: undefined;
-  FirstTimeCrops: undefined;
+  ForgotPassword: undefined;
+  ForgotPasswordOtp: { phone: string };
   PersonalInfo: undefined;
   RoleSelection: undefined;
   BuyerInterests: undefined;
@@ -61,6 +58,11 @@ export type RootStackParamList = {
   SecurityVerification: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   InstructorStudio: undefined;
+  EditProfile: undefined;
+  UserSearch: undefined;
+  PublicProfile: { userId?: number; userName: string; userKey?: string };
+  DirectInbox: undefined;
+  DirectChat: { peerUserId: number; peerName: string; peerKey?: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -71,13 +73,9 @@ export function RootNavigator() {
       <Stack.Screen name="Splash" component={SplashScreen} />
       <Stack.Screen name="InitialSetup" component={InitialSetupScreen} />
       <Stack.Screen name="AuthChoice" component={AuthChoiceScreen} />
-      <Stack.Screen name="AuthEmail" component={AuthScreen} />
       <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
-      <Stack.Screen name="EnableLocation" component={EnableLocationScreen} />
-      <Stack.Screen name="AllowNotification" component={AllowNotificationScreen} />
-      <Stack.Screen name="ChooseLanguage" component={ChooseLanguageScreen} />
-      <Stack.Screen name="FirstTimeRole" component={FirstTimeRoleScreen} />
-      <Stack.Screen name="FirstTimeCrops" component={FirstTimeCropsScreen} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <Stack.Screen name="ForgotPasswordOtp" component={ForgotPasswordOtpResetScreen} />
       <Stack.Screen name="PersonalInfo" component={PersonalInfoScreen} />
       <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />
       <Stack.Screen name="BuyerInterests" component={BuyerInterestsScreen} />
@@ -92,6 +90,11 @@ export function RootNavigator() {
       <Stack.Screen name="SecurityVerification" component={SecurityVerificationScreen} />
       <Stack.Screen name="Main" component={AppNavigator} />
       <Stack.Screen name="InstructorStudio" component={InstructorStudioScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: "Edit Profile" }} />
+      <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: true, title: "Search" }} />
+      <Stack.Screen name="PublicProfile" component={PublicProfileScreen} options={{ headerShown: true, title: "Profile" }} />
+      <Stack.Screen name="DirectInbox" component={DirectInboxScreen} options={{ headerShown: true, title: "Messages" }} />
+      <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

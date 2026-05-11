@@ -7,10 +7,11 @@
     "node": "20.x"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --port 8082",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web",
+    "web": "expo start --web --port 8082",
+    "web:8083": "expo start --web --port 8083",
     "build:web": "node ./node_modules/expo/bin/cli export --platform web",
     "vercel-build": "node ./node_modules/expo/bin/cli export --platform web",
     "build:android:preview": "eas build --platform android --profile preview",
@@ -29,6 +30,9 @@
     "expo-image-picker": "~15.1.0",
     "expo-linear-gradient": "~13.0.2",
     "expo-media-library": "~16.0.5",
+    "metro": "0.80.12",
+    "metro-config": "0.80.12",
+    "metro-core": "0.80.12",
     "nativewind": "^4.2.3",
     "react": "18.2.0",
     "react-dom": "18.2.0",

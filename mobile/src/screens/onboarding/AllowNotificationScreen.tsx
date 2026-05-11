@@ -2,6 +2,9 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
+import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 
 const GREEN = "#b9f530";
@@ -9,16 +12,26 @@ const BG = "#1d2126";
 
 export function AllowNotificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { user, updateUser } = useAuth();
+  const { t, language } = useLanguage();
+
+  const goNext = async () => {
+    await updateUser({ preferredLanguage: language });
+    if (user?.id != null) {
+      await markLaunchSetupComplete(user.id);
+    }
+    navigation.reset({ index: 0, routes: [{ name: "Main" }] });
+  };
 
   return (
     <View style={styles.screen}>
       <View style={styles.illustrationWrap}>
         <View style={styles.illustration} />
       </View>
-      <Text style={styles.title}>Allow{"\n"}Notification</Text>
-      <Text style={styles.subtitle}>Stay updated on crop alerts, market prices and service reminders.</Text>
-      <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("ChooseLanguage")}>
-        <Text style={styles.primaryText}>Turn On Push Notification</Text>
+      <Text style={styles.title}>{t("allowNotificationTitle")}</Text>
+      <Text style={styles.subtitle}>{t("allowNotificationSubtitle")}</Text>
+      <Pressable style={styles.primaryBtn} onPress={goNext}>
+        <Text style={styles.primaryText}>{t("allowNotificationBtn")}</Text>
       </Pressable>
     </View>
   );

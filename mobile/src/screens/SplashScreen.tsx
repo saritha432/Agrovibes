@@ -3,33 +3,14 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
-import { isLaunchSetupComplete } from "../onboarding/launchSetup";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 export function SplashScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { token, user, loading: authLoading } = useAuth();
-  const [launchSetupDone, setLaunchSetupDone] = React.useState<boolean | null>(null);
-
-  React.useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!user?.id) {
-        setLaunchSetupDone(false);
-        return;
-      }
-      const done = await isLaunchSetupComplete(user.id);
-      if (!mounted) return;
-      setLaunchSetupDone(done);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [user?.id]);
-
   React.useEffect(() => {
     const hasSession = Boolean(token || user);
-    if (authLoading || (hasSession && launchSetupDone == null)) return;
+    if (authLoading) return;
     if (!hasSession) {
       navigation.dispatch(
         CommonActions.reset({
@@ -39,14 +20,13 @@ export function SplashScreen() {
       );
       return;
     }
-    const dest = !hasSession ? "AuthChoice" : launchSetupDone ? "Main" : "EnableLocation";
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: dest as keyof RootStackParamList }]
+        routes: [{ name: "Main" }]
       })
     );
-  }, [authLoading, token, user, navigation, launchSetupDone]);
+  }, [authLoading, token, user, navigation]);
 
   return (
     <View style={styles.root}>

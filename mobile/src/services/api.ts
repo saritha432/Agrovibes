@@ -1,9 +1,17 @@
 import { Platform } from "react-native";
 
 function resolveApiBaseUrl() {
-  const envUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
+  const envUrl = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_API_BASE_URL;
   if (envUrl && envUrl.trim().length > 0) {
     return envUrl.trim().replace(/\/$/, "");
+  }
+
+  const webLocation = (globalThis as { location?: { hostname?: string } }).location;
+  if (Platform.OS === "web" && webLocation?.hostname) {
+    const host = webLocation.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      return "https://agrovibes.onrender.com/api";
+    }
   }
 
   if (Platform.OS === "android") {
@@ -16,8 +24,57 @@ export const API_BASE_URL = resolveApiBaseUrl();
 
 export interface AuthResponse {
   token: string;
-  user: { id: number; email: string; fullName: string; role: "student" | "instructor" | "admin"; phone?: string };
+  user: {
+    id: number;
+    email: string;
+    fullName: string;
+    role: "student" | "instructor" | "admin";
+    phone?: string;
+    username?: string;
+    avatarUrl?: string;
+    bio?: string;
+    website?: string;
+    locationLabel?: string;
+  };
   isNewUser?: boolean;
+}
+
+export interface AdminUserRecord {
+  id: number;
+  email: string;
+  fullName: string;
+  role: "student" | "instructor" | "admin";
+  phone?: string | null;
+  username?: string | null;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  website?: string | null;
+  locationLabel?: string | null;
+  createdAt: string;
+  postsCount: number;
+  reelsCount: number;
+  followersCount: number;
+  followingCount: number;
+  messagesSentCount: number;
+  messagesReceivedCount: number;
+}
+
+export interface UserSearchRecord {
+  id: number;
+  fullName: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  website?: string | null;
+  locationLabel?: string | null;
+  createdAt: string;
+  postsCount: number;
+  reelsCount: number;
+  followersCount: number;
+  followingCount: number;
+  viewerStatus: FollowStatus;
+  reverseStatus?: FollowStatus;
+  canFollowBack: boolean;
 }
 
 async function parseJsonOrThrow(response: Response) {
@@ -38,7 +95,14 @@ async function parseJsonOrThrow(response: Response) {
   return parsed;
 }
 
-export async function authRegister(payload: { email: string; password: string; fullName: string; role?: string }) {
+export async function authRegister(payload: {
+  email: string;
+  password: string;
+  fullName: string;
+  role?: string;
+  username?: string;
+  phone?: string;
+}) {
   const response = await fetch(`${API_BASE_URL}/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,7 +111,7 @@ export async function authRegister(payload: { email: string; password: string; f
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
-export async function authLogin(payload: { email: string; password: string }) {
+export async function authLogin(payload: { email?: string; identifier?: string; password: string }) {
   const response = await fetch(`${API_BASE_URL}/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -72,6 +136,61 @@ export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
     body: JSON.stringify(payload)
   });
   return (await parseJsonOrThrow(response)) as AuthResponse;
+}
+
+export async function updateMyProfile(
+  token: string,
+  payload: {
+    fullName: string;
+    username?: string;
+    bio?: string;
+    website?: string;
+    locationLabel?: string;
+    avatarUrl?: string;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as AuthResponse;
+}
+
+export async function fetchAdminUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/admin/users${suffix}`, token)) as {
+    users: AdminUserRecord[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+}
+
+export async function fetchUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/users${suffix}`, token)) as {
+    users: UserSearchRecord[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+}
+
+export async function resetPasswordWithOtp(payload: { phone: string; code: string; newPassword: string }) {
+  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return (await parseJsonOrThrow(response)) as { success: boolean };
 }
 
 export async function fetchWithAuth(url: string, token: string | null, init: RequestInit = {}) {
@@ -106,6 +225,7 @@ export interface CommunityQuestion {
 
 export interface HomeStory {
   id: number;
+  userId?: number | null;
   userName: string;
   district: string;
   avatarLabel: string;
@@ -113,10 +233,12 @@ export interface HomeStory {
   viewed: boolean;
   videoUrl?: string | null;
   imageUrl?: string | null;
+  createdAt?: string;
 }
 
 export interface HomePost {
   id: number;
+  userId?: number | null;
   userName: string;
   location: string;
   caption: string;
@@ -128,6 +250,61 @@ export interface HomePost {
   imageUrls?: string[];
   thumbnailUrl?: string;
   createdAt: string;
+  /** Present when posts are loaded with an auth token (server-tracked like). */
+  viewerHasLiked?: boolean;
+  /** Present when posts are loaded with an auth token (server-tracked save). */
+  viewerHasSaved?: boolean;
+  savedAt?: string;
+}
+
+export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
+
+export interface SocialRelationship {
+  viewerStatus: FollowStatus;
+  reverseStatus: FollowStatus;
+  canFollowBack: boolean;
+}
+
+export interface MessageThread {
+  peerUserId: number;
+  peerName: string;
+  peerEmail?: string;
+  lastSenderId?: number;
+  lastReceiverId?: number;
+  lastMessage: string;
+  lastAt: string;
+  unreadCount?: number;
+}
+
+export interface DirectMessageItem {
+  id: number;
+  senderId: number;
+  receiverId: number;
+  body: string;
+  createdAt: string;
+}
+
+export interface SocialNotificationItem {
+  id: number;
+  type: "follow_request" | "follow_accept";
+  isRead: boolean;
+  createdAt: string;
+  followId: number;
+  actorId: number;
+  actorName: string;
+  followStatus: FollowStatus;
+}
+
+export interface SocialPostActivityNotification {
+  id: number;
+  type: "post_like" | "post_comment" | "comment_reply";
+  isRead: boolean;
+  createdAt: string;
+  actorId: number;
+  actorName: string;
+  postId: number | null;
+  postIsReel?: boolean;
+  commentExcerpt?: string | null;
 }
 
 export type CourseLevel = "Beginner" | "Intermediate" | "Advanced";
@@ -201,10 +378,15 @@ export async function fetchHomeStories() {
   return (await response.json()) as { stories: HomeStory[] };
 }
 
-export async function createHomeStory(payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string }) {
+export async function createHomeStory(
+  payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string },
+  token?: string | null
+) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API_BASE_URL}/v1/home/stories`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
@@ -213,12 +395,74 @@ export async function createHomeStory(payload: { userName: string; district: str
   return (await response.json()) as { story: HomeStory };
 }
 
-export async function fetchHomePosts() {
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts`);
+export async function fetchHomePosts(token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
   return (await response.json()) as { posts: HomePost[] };
+}
+
+export async function likeHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/like`, token, {
+    method: "POST"
+  })) as { liked: boolean; likesCount: number };
+}
+
+export async function unlikeHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unlike`, token, {
+    method: "POST"
+  })) as { liked: boolean; likesCount: number };
+}
+
+export async function fetchSavedHomePosts(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+}
+
+export async function saveHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/save`, token, {
+    method: "POST"
+  })) as { saved: boolean };
+}
+
+export async function unsaveHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unsave`, token, {
+    method: "POST"
+  })) as { saved: boolean };
+}
+
+export async function fetchHomePostComments(postId: number, token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to load comments");
+  }
+  return (await response.json()) as {
+    comments: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string }[];
+  };
+}
+
+export async function createHomePostComment(
+  token: string,
+  postId: number,
+  text: string,
+  options?: { parentCommentId?: number | null }
+) {
+  const body: { text: string; parentCommentId?: number } = { text };
+  if (options?.parentCommentId != null && Number.isFinite(options.parentCommentId) && options.parentCommentId > 0) {
+    body.parentCommentId = Number(options.parentCommentId);
+  }
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })) as {
+    comment: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string };
+    commentsCount: number;
+  };
 }
 
 export async function fetchLearnCourses() {
@@ -280,6 +524,7 @@ export async function updateCourse(token: string, courseId: string, payload: Cou
 }
 
 export async function createHomePost(payload: {
+  userId?: number;
   userName: string;
   location: string;
   caption: string;
@@ -297,6 +542,124 @@ export async function createHomePost(payload: {
     throw new Error("Failed to create post");
   }
   return (await response.json()) as { post: HomePost };
+}
+
+export async function sendFollowRequest(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/request`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId })
+  })) as {
+    follow: { id: number; status: FollowStatus; followerId: number; followingId: number };
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
+export async function unfollowUser(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/unfollow`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId })
+  })) as {
+    ok: boolean;
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
+export async function respondToFollowRequest(token: string, followId: number, action: "accept" | "decline") {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/${followId}/respond`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action })
+  })) as {
+    follow: { id: number; status: FollowStatus; followerId: number; followingId: number };
+    actorCounts: { followersCount: number; followingCount: number };
+    targetCounts: { followersCount: number; followingCount: number };
+  };
+}
+
+export async function fetchProfileStats(token: string, userId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/profile-stats/${encodeURIComponent(String(userId))}`, token)) as {
+    followersCount: number;
+    followingCount: number;
+    viewerStatus: FollowStatus;
+    reverseStatus: FollowStatus;
+    canFollowBack: boolean;
+  };
+}
+
+export async function syncLocalFollowEdgesToServer(
+  token: string,
+  payload: {
+    edges: Array<{ peerFullName: string; relation: "i_follow" | "follows_me"; status: "accepted" | "pending" }>;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/sync-local`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as {
+    ok: boolean;
+    imported: number;
+    synced?: Array<{ peerFullName: string; relation: string; status: string }>;
+    followersCount: number;
+    followingCount: number;
+  };
+}
+
+export async function fetchSocialNetwork(token: string, userId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/network/${encodeURIComponent(String(userId))}`, token)) as {
+    followers: Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>;
+    following: Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>;
+  };
+}
+
+export async function fetchSocialNotifications(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications`, token)) as {
+    followRequests: SocialNotificationItem[];
+    followAccepted: SocialNotificationItem[];
+    postLikes?: SocialPostActivityNotification[];
+    postComments?: SocialPostActivityNotification[];
+    unreadCount: number;
+  };
+}
+
+export async function markSocialNotificationRead(token: string, notificationId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications/${encodeURIComponent(String(notificationId))}/read`, token, {
+    method: "POST"
+  })) as { ok: boolean };
+}
+
+export async function fetchRelationships(token: string, userIds: number[]) {
+  const cleaned = [...new Set(userIds.filter((v) => Number.isFinite(v) && v > 0))];
+  if (!cleaned.length) return { relationships: {} as Record<number, SocialRelationship> };
+  const qs = cleaned.join(",");
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/relationships?userIds=${encodeURIComponent(qs)}`, token)) as {
+    relationships: Record<number, SocialRelationship>;
+  };
+}
+
+export async function fetchMessageThreads(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/threads`, token)) as {
+    threads: MessageThread[];
+  };
+}
+
+export async function fetchMessageThread(token: string, peerUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
+    peer: { id: number; fullName: string; email?: string; phone?: string };
+    messages: DirectMessageItem[];
+  };
+}
+
+export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  })) as { message: DirectMessageItem };
 }
 
 async function signCloudinaryUpload(folder = "agrovibes") {
