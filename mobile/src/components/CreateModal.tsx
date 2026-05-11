@@ -281,6 +281,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
   const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
   const [showStickerPanel, setShowStickerPanel] = useState(false);
+  const [showEditPanel, setShowEditPanel] = useState(false);
   const [showAudioPanel, setShowAudioPanel] = useState(false);
   const [selectedAudioTrackId, setSelectedAudioTrackId] = useState<string | null>(null);
   const [audioPreviewTrackId, setAudioPreviewTrackId] = useState<string | null>(null);
@@ -297,6 +298,18 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const audioPreviewRef = useRef<Audio.Sound | null>(null);
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
+
+  const openCreativePanel = React.useCallback((panel: "text" | "filter" | "overlay") => {
+    setShowEditPanel(false);
+    setShowCreativeTextPanel(false);
+    setShowCreativeFilterPanel(false);
+    setShowStickerPanel(false);
+    setTimeout(() => {
+      if (panel === "text") setShowCreativeTextPanel(true);
+      if (panel === "filter") setShowCreativeFilterPanel(true);
+      if (panel === "overlay") setShowStickerPanel(true);
+    }, 0);
+  }, []);
 
   async function validateVideoSize(uri: string, maxMb: number) {
     if (Platform.OS === "web") return;
@@ -352,6 +365,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setShowCreativeTextPanel(false);
       setShowCreativeFilterPanel(false);
       setShowStickerPanel(false);
+      setShowEditPanel(false);
       setShowAudioPanel(false);
       void stopAudioPreview();
       return;
@@ -373,6 +387,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowCreativeTextPanel(false);
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
+    setShowEditPanel(false);
     setShowAudioPanel(false);
     setSelectedAudioTrackId(null);
     setAudioPreviewTrackId(null);
@@ -454,6 +469,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowCreativeTextPanel(false);
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
+    setShowEditPanel(false);
     setShowAudioPanel(false);
     void stopAudioPreview();
     onClose();
@@ -549,9 +565,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     <View style={[styles.igLeftTools, styles.igLeftToolsElevated]} pointerEvents="box-none">
       <Pressable
         onPress={() => {
-          setShowCreativeFilterPanel(false);
-          setShowStickerPanel(false);
-          setShowCreativeTextPanel(true);
+          openCreativePanel("text");
         }}
         hitSlop={8}
       >
@@ -559,9 +573,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
       <Pressable
         onPress={() => {
-          setShowCreativeTextPanel(false);
-          setShowStickerPanel(false);
-          setShowCreativeFilterPanel(true);
+          openCreativePanel("filter");
         }}
         hitSlop={8}
       >
@@ -569,9 +581,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
       <Pressable
         onPress={() => {
-          setShowCreativeTextPanel(false);
-          setShowCreativeFilterPanel(false);
-          setShowStickerPanel(true);
+          openCreativePanel("overlay");
         }}
         hitSlop={8}
       >
@@ -939,7 +949,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <Ionicons name="timer-outline" size={18} color={entryTimerOn ? "#b7ff37" : "#e8e8e8"} />
               </Pressable>
             </View>
-          </View>
 
           <Pressable style={styles.igAddAudioPill} onPress={() => setShowAudioPanel(true)}>
             <Ionicons name="musical-notes" size={16} color="#b7ff37" />
@@ -954,13 +963,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
                 <Text style={styles.igCamRailLabel}>Audio</Text>
               </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => setShowCreativeFilterPanel(true)}>
+              <Pressable style={styles.igCamRailRow} onPress={() => openCreativePanel("filter")}>
                 <View style={styles.igCamRailIcon}>
                   <Ionicons name="sparkles" size={16} color="#b7ff37" />
                 </View>
                 <Text style={styles.igCamRailLabel}>Effects</Text>
               </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => setShowCreativeTextPanel(true)}>
+              <Pressable style={styles.igCamRailRow} onPress={() => openCreativePanel("text")}>
                 <View style={styles.igCamRailIcon}>
                   <Text style={styles.igCamRailAa}>Aa</Text>
                 </View>
@@ -1076,7 +1085,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </Text>
               </Pressable>
             </View>
-            {createType === "story" || createType === "reel" ? renderCreativeToolbar() : null}
+            {createType === "story" ? renderCreativeToolbar() : null}
             <View style={styles.igMediaPreviewWrap}>
               {createType === "story" ? (
                 selectedUri ? (
@@ -1176,33 +1185,25 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       id: "text",
                       label: "Text",
                       icon: "text-outline" as const,
-                      onPress: () => {
-                        setShowCreativeFilterPanel(false);
-                        setShowStickerPanel(false);
-                        setShowCreativeTextPanel(true);
-                      }
+                      onPress: () => openCreativePanel("text")
                     },
                     {
                       id: "overlay",
                       label: "Overlay",
                       icon: "images-outline" as const,
-                      onPress: () => Alert.alert("Overlay", "Overlay editor coming soon.")
+                      onPress: () => openCreativePanel("overlay")
                     },
                     {
                       id: "filter",
                       label: "Filter",
                       icon: "color-filter-outline" as const,
-                      onPress: () => {
-                        setShowCreativeTextPanel(false);
-                        setShowStickerPanel(false);
-                        setShowCreativeFilterPanel(true);
-                      }
+                      onPress: () => openCreativePanel("filter")
                     },
                     {
                       id: "edit",
                       label: "Edit",
                       icon: "options-outline" as const,
-                      onPress: () => Alert.alert("Edit", "Advanced editing tools coming soon.")
+                      onPress: () => setShowEditPanel(true)
                     }
                   ].map((tool) => (
                     <Pressable key={tool.id} style={styles.igPostToolPill} onPress={tool.onPress}>
@@ -1211,18 +1212,20 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     </Pressable>
                   ))}
                 </View>
-                <View style={styles.igPostNextRow}>
-                  <Pressable
-                    onPress={() => {
-                      void proceedToCompose();
-                    }}
-                    disabled={!canProceedFromPreview || isSubmitting}
-                    style={[styles.igPostNextBtn, !canProceedFromPreview ? styles.igPostNextBtnDisabled : null]}
-                  >
-                    <Text style={styles.igPostNextText}>Continue</Text>
-                    <Ionicons name="arrow-forward" size={16} color="#111" />
-                  </Pressable>
-                </View>
+                {createType === "post" ? (
+                  <View style={styles.igPostNextRow}>
+                    <Pressable
+                      onPress={() => {
+                        void proceedToCompose();
+                      }}
+                      disabled={!canProceedFromPreview || isSubmitting}
+                      style={[styles.igPostNextBtn, !canProceedFromPreview ? styles.igPostNextBtnDisabled : null]}
+                    >
+                      <Text style={styles.igPostNextText}>Continue</Text>
+                      <Ionicons name="arrow-forward" size={16} color="#111" />
+                    </Pressable>
+                  </View>
+                ) : null}
               </>
             ) : null}
             {errorText ? <Text style={styles.igErrorText}>{errorText}</Text> : null}
@@ -1501,6 +1504,51 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           </View>
           <Pressable style={styles.creativePanelDone} onPress={() => setShowStickerPanel(false)}>
             <Text style={styles.creativePanelDoneText}>Done</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={showEditPanel} transparent animationType="fade" onRequestClose={() => setShowEditPanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowEditPanel(false)}>
+        <Pressable style={styles.editPanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <View style={styles.editPanelHandle} />
+          <Text style={styles.editPanelTitle}>Edit</Text>
+          <Pressable
+            style={styles.editPanelRow}
+            onPress={() => {
+              openCreativePanel("text");
+            }}
+          >
+            <View style={styles.editPanelRowLeft}>
+              <Ionicons name="text-outline" size={18} color="#111" />
+              <Text style={styles.editPanelRowText}>Text</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#7f8b88" />
+          </Pressable>
+          <Pressable
+            style={styles.editPanelRow}
+            onPress={() => {
+              openCreativePanel("filter");
+            }}
+          >
+            <View style={styles.editPanelRowLeft}>
+              <Ionicons name="color-filter-outline" size={18} color="#111" />
+              <Text style={styles.editPanelRowText}>Filter</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#7f8b88" />
+          </Pressable>
+          <Pressable
+            style={styles.editPanelRow}
+            onPress={() => {
+              openCreativePanel("overlay");
+            }}
+          >
+            <View style={styles.editPanelRowLeft}>
+              <Ionicons name="images-outline" size={18} color="#111" />
+              <Text style={styles.editPanelRowText}>Overlay</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#7f8b88" />
           </Pressable>
         </Pressable>
       </Pressable>
@@ -2074,6 +2122,44 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   stickerEmoji: { fontSize: 26 },
+  editPanelCard: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 18,
+    borderWidth: 1,
+    borderColor: "#e5ece8"
+  },
+  editPanelHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#d6dedb",
+    marginBottom: 10
+  },
+  editPanelTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#1b2422",
+    marginBottom: 10
+  },
+  editPanelRow: {
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e5ece8",
+    backgroundColor: "#f8faf9",
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  editPanelRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  editPanelRowText: { color: "#1b2422", fontSize: 14, fontWeight: "800" },
   audioSearchInput: {
     marginTop: 8,
     borderWidth: 1,
