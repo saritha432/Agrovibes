@@ -59,10 +59,8 @@ interface HomeScreenProps {
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 const homeTopTabs = [ "Reels", "Friends", "live"] as const;
-const friendLikeNames = ["Sowndherya", "AgroRoots", "Meera", "Suresh", "Kavya"];
 const likeActiveColor = "#16a34a";
 const REEL_LIKE_COLOR = "#ffffff";
-const BLOCKED_STORY_NAMES = new Set(["ramesh"]);
 
 function normalizeIdentity(value: string) {
   return String(value || "")
@@ -71,10 +69,6 @@ function normalizeIdentity(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function filterBlockedStories(rows: HomeStory[]) {
-  return rows.filter((s) => !BLOCKED_STORY_NAMES.has(normalizeIdentity(s.userName)));
 }
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
@@ -96,6 +90,7 @@ type HomeCommentRow = {
 const COMMENT_REPLY_INDENT = 14;
 /** Show "View more replies" only when a comment has more than this many direct replies (i.e. 3+ → link). */
 const REPLY_PREVIEW_VISIBLE = 2;
+const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 
 function sortCommentsByTime(a: HomeCommentRow, b: HomeCommentRow) {
   const ta = Date.parse(a.createdAt || "") || 0;
@@ -218,20 +213,26 @@ function normalizeStoryRow(raw: Partial<HomeStory> & Record<string, unknown>): H
 function mergeStories(remote: HomeStory[], optimistic: HomeStory[]): HomeStory[] {
   const byKey = new Map<string, HomeStory>();
   const put = (s: HomeStory) => {
+    if (!isStoryFresh(s)) return;
     const key = `${normalizeIdentity(s.userName)}:${s.videoUrl || ""}:${s.imageUrl || ""}`;
     byKey.set(key, s);
   };
   for (const s of remote) put(s);
   for (const s of optimistic) {
     if (!s.videoUrl && !s.imageUrl) continue;
-    const created = Date.parse(String(s.createdAt || "")) || Date.now();
-    if (Date.now() - created <= 24 * 60 * 60 * 1000) put(s);
+    if (isStoryFresh(s)) put(s);
   }
   return [...byKey.values()].sort((a, b) => {
     const ta = Date.parse(String(a.createdAt || "")) || 0;
     const tb = Date.parse(String(b.createdAt || "")) || 0;
     return tb - ta;
   });
+}
+
+function isStoryFresh(story: Pick<HomeStory, "createdAt">) {
+  if (!story.createdAt) return false;
+  const created = Date.parse(String(story.createdAt));
+  return Number.isFinite(created) && Date.now() - created <= STORY_TTL_MS;
 }
 
 function dedupeHomePosts(rows: HomePost[]): HomePost[] {
@@ -286,9 +287,9 @@ function readVideoNaturalSize(event: unknown): { width: number; height: number }
   if (ns && typeof ns.width === "number" && typeof ns.height === "number" && ns.width > 0 && ns.height > 0) {
     return { width: ns.width, height: ns.height };
   }
-  const target = e["target"] as HTMLVideoElement | undefined;
-  if (target && target.videoWidth > 0 && target.videoHeight > 0) {
-    return { width: target.videoWidth, height: target.videoHeight };
+  const target = e["target"] as { videoWidth?: number; videoHeight?: number } | undefined;
+  if (target && Number(target.videoWidth) > 0 && Number(target.videoHeight) > 0) {
+    return { width: Number(target.videoWidth), height: Number(target.videoHeight) };
   }
   return null;
 }
@@ -456,7 +457,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   );
 
   const tabPosts = useMemo(() => {
-    if (activeHomeTab === "Feed") return posts;
     if (activeHomeTab === "Reels" || activeHomeTab === "live") return posts.filter((p) => !!p.videoUrl);
     if (activeHomeTab === "Friends") return posts.filter((p) => !!p.videoUrl && p.likesCount > 0);
     return posts;
@@ -544,7 +544,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     fetchHomeStories()
       .then((data) => {
         if (!mounted) return;
-        const remoteRows = filterBlockedStories((data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>)));
+        const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
         setStories(applyViewedStories(mergeStories(remoteRows, optimisticStories)));
       })
       .catch(() => {
@@ -1564,11 +1564,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <Text style={styles.caption}>
             <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
           </Text>
-          {activeHomeTab === "Friends" ? (
-            <Text style={styles.friendLikeMeta}>
-              Liked by {friendLikeNames[index % friendLikeNames.length]} and {Math.max(1, Math.floor(post.likesCount / 3))} others
-            </Text>
-          ) : null}
           <Pressable onPress={() => openCommentsForPost(post)}>
             <Text style={styles.comments}>View all {shownCommentsCount} comments</Text>
           </Pressable>
@@ -1595,15 +1590,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   );
 
   const emptyTabTitle =
-    activeHomeTab === "Feed"
-      ? "No posts yet"
-      : activeHomeTab === "Friends"
-        ? "No friend-liked reels yet"
-        : activeHomeTab === "live"
-          ? "No live reels yet"
-          : activeHomeTab === "Reels"
-            ? "No reels yet"
-            : "Nothing here yet";
+    activeHomeTab === "Friends"
+      ? "No friend-liked reels yet"
+      : activeHomeTab === "live"
+        ? "No live reels yet"
+        : activeHomeTab === "Reels"
+          ? "No reels yet"
+          : "Nothing here yet";
 
   const useFullScreenReelLayout = activeHomeTab === "Reels" || activeHomeTab === "live";
 
@@ -1940,7 +1933,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <TextInput
                   value={commentDraft}
                   onChangeText={setCommentDraft}
-                  placeholder={replyingTo ? "Write a reply…" : "Add comment for PureFarm..."}
+                  placeholder={replyingTo ? "Write a reply…" : "Add a comment..."}
                   placeholderTextColor="#6b7280"
                   style={styles.commentInput}
                 />

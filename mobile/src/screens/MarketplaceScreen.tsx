@@ -151,21 +151,8 @@ export function MarketplaceScreen() {
       })
       .catch(() => {
         if (!mounted) return;
-        setErrorMessage("Showing sample products.");
-        setListings([
-          { id: 1, cropName: "Organic Strawberries", district: "Arshi Smart Farm", pricePerKg: 180, verifiedOnly: true },
-          { id: 2, cropName: "Hybrid Tomato Seeds (Anka)", district: "Mahyo Agri", pricePerKg: 320, verifiedOnly: true },
-          { id: 3, cropName: "NPK Fertilizer 19-19-19", district: "Coromandel Agri", pricePerKg: 1450, verifiedOnly: true },
-          { id: 4, cropName: "Portable Sprayer (16L)", district: "Green Tools", pricePerKg: 2200, verifiedOnly: true },
-          { id: 5, cropName: "Vermicompost (Premium)", district: "Earthworm Co", pricePerKg: 890, verifiedOnly: true },
-          { id: 6, cropName: "Drip Irrigation Kit (1 acre)", district: "Irrigation Hub", pricePerKg: 560, verifiedOnly: true },
-          { id: 7, cropName: "Basmati Rice (Premium)", district: "Punjab Grains", pricePerKg: 120, verifiedOnly: true },
-          { id: 8, cropName: "Alphonso Mango (Ratnagiri)", district: "Konkan Fruits", pricePerKg: 450, verifiedOnly: true },
-          { id: 9, cropName: "Wheat Seeds HD-3086", district: "Krishi Seeds", pricePerKg: 65, verifiedOnly: false },
-          { id: 10, cropName: "Neem Oil Pesticide", district: "Trusted Brand", pricePerKg: 220, verifiedOnly: false },
-          { id: 11, cropName: "Fresh Cow Milk (Toned)", district: "Nashik Dairy Co-op", pricePerKg: 56, verifiedOnly: true },
-          { id: 12, cropName: "Organic Cow Ghee 500ml", district: "Gopal Farms", pricePerKg: 650, verifiedOnly: true }
-        ]);
+        setErrorMessage("Unable to load products.");
+        setListings([]);
       });
     return () => {
       mounted = false;

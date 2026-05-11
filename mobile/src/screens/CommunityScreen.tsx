@@ -17,10 +17,7 @@ export function CommunityScreen() {
       })
       .catch(() => {
         if (!mounted) return;
-        setQuestions([
-          { id: 1, userName: "Mahesh Rao", district: "Nagpur", textContent: "Yellow leaves on orange trees. Remedy?", upvotes: 45, answersCount: 2, isResolved: true, createdAt: "2026-04-10" },
-          { id: 2, userName: "Pradeep Kumar", district: "Indore", textContent: "Whitefly in soybean, organic control?", upvotes: 21, answersCount: 3, isResolved: false, createdAt: "2026-04-11" }
-        ]);
+        setQuestions([]);
       });
     return () => {
       mounted = false;
