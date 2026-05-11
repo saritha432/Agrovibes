@@ -58,7 +58,7 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
-const homeTopTabs = [ "Reels", "Friends", "live"] as const;
+const homeTopTabs = ["Feed", "Friends", "live"] as const;
 const likeActiveColor = "#C9FF35";
 const REEL_LIKE_COLOR = "#ffffff";
 
@@ -414,7 +414,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [commentInteractions, setCommentInteractions] = useState<Record<string, { liked: boolean; disliked: boolean }>>({});
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
-  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
+  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -457,10 +457,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   );
 
   const tabPosts = useMemo(() => {
-    if (activeHomeTab === "Reels" || activeHomeTab === "live") return posts.filter((p) => !!p.videoUrl);
-    if (activeHomeTab === "Friends") return posts.filter((p) => p.likesCount > 0 && (!!p.videoUrl || !!p.imageUrl || !!p.imageUrls?.length));
+    if (activeHomeTab === "Feed") return posts;
+    if (activeHomeTab === "Friends") return posts.filter((p) => !!p.videoUrl && p.likesCount > 0);
+    if (activeHomeTab === "live") return posts.filter((p) => !!p.videoUrl);
     return posts;
   }, [activeHomeTab, posts]);
+  const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
   useEffect(() => {
     if (tabPosts.length === 0) {
@@ -1189,7 +1191,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={[styles.storyRowWrapDark, styles.storyRowScrollCompact]}
+          style={[isReelSurfaceTab ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
           contentContainerStyle={styles.storyRow}
         >
           <Pressable
@@ -1223,11 +1225,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   }}
                   hitSlop={8}
                 >
-                  <Ionicons name="add" size={12} color="#fff" />
+                  <Ionicons name="add" size={12} color="#111" />
                 </Pressable>
                 </View>
               </View>
-            <Text style={styles.storyNameDark} numberOfLines={1}>
+            <Text style={isReelSurfaceTab ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
               Your story
             </Text>
           </Pressable>
@@ -1257,24 +1259,36 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   </View>
                 </View>
               </View>
-              <Text style={styles.storyNameDark} numberOfLines={1}>
+              <Text style={isReelSurfaceTab ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
                 {story.userName}
               </Text>
             </Pressable>
           ))}
         </ScrollView>
-        <View style={styles.homeTopTabsRowDark}>
+        <View style={isReelSurfaceTab ? styles.homeTopTabsRowDark : styles.homeTopTabsRow}>
           {homeTopTabs.map((tab) => (
             <Pressable key={tab} onPress={() => setActiveHomeTab(tab)} style={styles.homeTopTabPressable}>
-              <View style={[styles.homeTopTabPillDark, activeHomeTab === tab ? styles.homeTopTabPillActiveDark : null]}>
-                <Text style={[styles.homeTopTabTextDark, activeHomeTab === tab ? styles.homeTopTabTextActiveDark : null]}>{tab}</Text>
+              <View
+                style={[
+                  isReelSurfaceTab ? styles.homeTopTabPillDark : styles.homeTopTabPill,
+                  activeHomeTab === tab ? (isReelSurfaceTab ? styles.homeTopTabPillActiveDark : styles.homeTopTabPillActive) : null
+                ]}
+              >
+                <Text
+                  style={[
+                    isReelSurfaceTab ? styles.homeTopTabTextDark : styles.homeTopTabText,
+                    activeHomeTab === tab ? (isReelSurfaceTab ? styles.homeTopTabTextActiveDark : styles.homeTopTabTextActive) : null
+                  ]}
+                >
+                  {tab}
+                </Text>
               </View>
             </Pressable>
           ))}
         </View>
       </View>
     ),
-    [activeHomeTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
+    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
@@ -1594,17 +1608,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const emptyTabTitle =
     activeHomeTab === "Friends"
-      ? "No friend-liked posts or reels yet"
+      ? "No friend-liked videos yet"
       : activeHomeTab === "live"
         ? "No live reels yet"
-        : activeHomeTab === "Reels"
-          ? "No reels yet"
+        : activeHomeTab === "Feed"
+          ? "No feed posts yet"
           : "Nothing here yet";
 
-  const useFullScreenReelLayout = activeHomeTab === "Reels" || activeHomeTab === "live" || activeHomeTab === "Friends";
+  const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
   return (
-    <View style={[styles.screen, styles.screenDark]}>
+    <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
       {useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
@@ -1646,12 +1660,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         renderItem={renderPost}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
-            <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
-              <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
-              <Text style={styles.emptyTabSubDark}>Create a reel to start filling this section.</Text>
+            <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
+              <Text style={isReelSurfaceTab ? styles.emptyTabTitleDark : styles.emptyTabTitle}>{emptyTabTitle}</Text>
+              <Text style={isReelSurfaceTab ? styles.emptyTabSubDark : styles.emptyTabSub}>Create a reel to start filling this section.</Text>
           </View>
         }
-          contentContainerStyle={[styles.feedBottom, styles.feedBottomDark]}
+          contentContainerStyle={[styles.feedBottom, isReelSurfaceTab ? styles.feedBottomDark : null]}
         onViewableItemsChanged={onViewableItemsChangedRef.current}
         viewabilityConfig={viewabilityConfig}
       />
@@ -2207,8 +2221,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  storyRingNew: { backgroundColor: "#16a34a" },
-  storyRingViewed: { backgroundColor: "#9ca3af" },
+  storyRingNew: { backgroundColor: "#d8ff37" },
+  storyRingViewed: { backgroundColor: "#d8ff37" },
   storyInner: {
     width: 60,
     height: 60,
@@ -2234,7 +2248,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#0a9f46",
+    backgroundColor: "#d8ff37",
     borderWidth: 2,
     borderColor: "#fff",
     alignItems: "center",
