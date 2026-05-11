@@ -458,7 +458,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const tabPosts = useMemo(() => {
     if (activeHomeTab === "Reels" || activeHomeTab === "live") return posts.filter((p) => !!p.videoUrl);
-    if (activeHomeTab === "Friends") return posts.filter((p) => !!p.videoUrl && p.likesCount > 0);
+    if (activeHomeTab === "Friends") return posts.filter((p) => p.likesCount > 0 && (!!p.videoUrl || !!p.imageUrl || !!p.imageUrls?.length));
     return posts;
   }, [activeHomeTab, posts]);
 
@@ -1315,6 +1315,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const nextPost = tabPosts[index + 1];
       const thumbUri = post.thumbnailUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
+      const reelPoster = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || nextPost?.imageUrl || nextPost?.thumbnailUrl;
       const musicLabel =
         post.caption?.replace(/^\[REEL\]\s*/i, "").trim().slice(0, 36) || "Original audio";
 
@@ -1332,6 +1333,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 isMuted={Platform.OS === "web"}
                 useNativeControls={false}
               />
+            ) : reelPoster ? (
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
             ) : (
               <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
             )}
@@ -1591,14 +1594,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const emptyTabTitle =
     activeHomeTab === "Friends"
-      ? "No friend-liked reels yet"
+      ? "No friend-liked posts or reels yet"
       : activeHomeTab === "live"
         ? "No live reels yet"
         : activeHomeTab === "Reels"
           ? "No reels yet"
           : "Nothing here yet";
 
-  const useFullScreenReelLayout = activeHomeTab === "Reels" || activeHomeTab === "live";
+  const useFullScreenReelLayout = activeHomeTab === "Reels" || activeHomeTab === "live" || activeHomeTab === "Friends";
 
   return (
     <View style={[styles.screen, styles.screenDark]}>
