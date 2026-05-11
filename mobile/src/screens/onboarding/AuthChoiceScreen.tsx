@@ -1,11 +1,10 @@
-import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
-import { useLanguage } from "../../localization/LanguageContext";
+import { useLanguage, type AppLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister } from "../../services/api";
@@ -40,7 +39,7 @@ export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "AuthChoice">>();
   const { signIn } = useAuth();
-  const { t } = useLanguage();
+  const { t, language, setLanguage } = useLanguage();
   const initialMode = route.params?.initialMode === "login" ? "login" : "register";
   const [mode, setMode] = React.useState<"register" | "login">(initialMode);
   const [phone, setPhone] = React.useState("");
@@ -101,11 +100,6 @@ export function AuthChoiceScreen() {
     }
   };
 
-  const toggleMode = () => {
-    setMode((prev) => (prev === "register" ? "login" : "register"));
-    setErrorText("");
-  };
-
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -113,6 +107,39 @@ export function AuthChoiceScreen() {
         <Text style={styles.subtag}>
           {mode === "register" ? t("createSubtitle") : t("loginSubtitle")}
         </Text>
+      </View>
+
+      <View style={styles.langRow}>
+        {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
+          <Pressable
+            key={lang}
+            style={[styles.langChip, language === lang ? styles.langChipActive : null]}
+            onPress={() => setLanguage(lang)}
+          >
+            <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.modeSegment}>
+        <Pressable
+          style={[styles.modeSegmentBtn, mode === "register" ? styles.modeSegmentBtnActive : null]}
+          onPress={() => {
+            setMode("register");
+            setErrorText("");
+          }}
+        >
+          <Text style={[styles.modeSegmentText, mode === "register" ? styles.modeSegmentTextActive : null]}>{t("getStarted")}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.modeSegmentBtn, mode === "login" ? styles.modeSegmentBtnActive : null]}
+          onPress={() => {
+            setMode("login");
+            setErrorText("");
+          }}
+        >
+          <Text style={[styles.modeSegmentText, mode === "login" ? styles.modeSegmentTextActive : null]}>{t("login")}</Text>
+        </Pressable>
       </View>
 
       <View style={styles.card}>
@@ -194,9 +221,6 @@ export function AuthChoiceScreen() {
           </Pressable>
         ) : null}
 
-        <Pressable onPress={toggleMode} style={styles.secondaryBtn}>
-          <Text style={styles.secondaryText}>{mode === "register" ? t("iHaveAccount") : t("createNewAccount")}</Text>
-        </Pressable>
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
         <Text style={styles.helperText}>
           {mode === "register" ? "Already registered users can switch to login." : "Use the same mobile number used while registering."}
@@ -209,7 +233,32 @@ export function AuthChoiceScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 52 },
-  header: { marginBottom: 22 },
+  header: { marginBottom: 14 },
+  langRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 14 },
+  langChip: {
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#20262d"
+  },
+  langChipActive: { backgroundColor: GREEN, borderColor: GREEN },
+  langChipText: { color: "#9aa5ad", fontSize: 11, fontWeight: "800" },
+  langChipTextActive: { color: "#1b1f23" },
+  modeSegment: {
+    flexDirection: "row",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    overflow: "hidden",
+    marginBottom: 16,
+    backgroundColor: "#20262d"
+  },
+  modeSegmentBtn: { flex: 1, paddingVertical: 12, alignItems: "center", justifyContent: "center" },
+  modeSegmentBtnActive: { backgroundColor: GREEN },
+  modeSegmentText: { color: "#9aa5ad", fontWeight: "800", fontSize: 13 },
+  modeSegmentTextActive: { color: "#1b1f23" },
   label: { color: GREEN, fontWeight: "900", fontSize: 24, letterSpacing: -0.2 },
   subtag: { marginTop: 8, color: "#909ba4", fontWeight: "600", fontSize: 12 },
   card: {
@@ -251,17 +300,6 @@ const styles = StyleSheet.create({
   },
   forgotPasswordLink: { marginTop: 10, alignSelf: "center" },
   forgotPasswordText: { color: "#8bc76f", fontWeight: "800", fontSize: 12 },
-  secondaryBtn: {
-    marginTop: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#666f7a",
-    paddingVertical: 11,
-    backgroundColor: "#232930"
-  },
-  secondaryText: { color: "#d8dde3", fontWeight: "700", fontSize: 13 },
   disabled: { opacity: 0.55 },
   primaryBtnText: { color: "#1b1f23", fontWeight: "900", fontSize: 13 },
   helperText: { marginTop: 10, color: "#8b98a1", fontSize: 11, fontWeight: "600" },

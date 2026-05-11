@@ -663,7 +663,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           );
           setLegacyFollowStateByName((prev) => ({ ...prev, [legacyKey]: "none" }));
           setLegacyRelationshipByName((prev) => ({
-            ...prev,
+        ...prev,
             [legacyKey]: { ...(prev[legacyKey] || { canFollowBack: false }), viewerStatus: "none", canFollowBack: true }
           }));
           return;
@@ -1087,7 +1087,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           createdAt: createdIso,
           parentCommentId: res.comment.parentCommentId ?? parentIdStr
         };
-        setCommentsByPost((prev) => {
+    setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
           const withoutDup = list.filter((c) => String(c.id) !== row.id);
           return { ...prev, [post.id]: [...withoutDup, row] };
@@ -1225,8 +1225,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 >
                   <Ionicons name="add" size={12} color="#fff" />
                 </Pressable>
+                </View>
               </View>
-            </View>
             <Text style={styles.storyNameDark} numberOfLines={1}>
               Your story
             </Text>
@@ -1486,7 +1486,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   <Text style={styles.followChipText}>{followLabel}</Text>
                 </Pressable>
               ) : null}
-              <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+            <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
             </View>
           </View>
 
@@ -1644,21 +1644,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           </View>
         </View>
       ) : (
-        <FlatList
-          data={tabPosts}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderPost}
-          ListHeaderComponent={listHeader}
-          ListEmptyComponent={
+      <FlatList
+        data={tabPosts}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderPost}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={
             <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
               <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
               <Text style={styles.emptyTabSubDark}>Create a reel to start filling this section.</Text>
-            </View>
-          }
+          </View>
+        }
           contentContainerStyle={[styles.feedBottom, styles.feedBottomDark]}
-          onViewableItemsChanged={onViewableItemsChangedRef.current}
-          viewabilityConfig={viewabilityConfig}
-        />
+        onViewableItemsChanged={onViewableItemsChangedRef.current}
+        viewabilityConfig={viewabilityConfig}
+      />
       )}
 
       <Modal
@@ -1842,19 +1842,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                         <View style={styles.commentRowInsta}>
                           <View style={styles.commentAvatarSq}>
                             <Text style={styles.commentAvatarSqText}>{(c.user[0] || "?").toUpperCase()}</Text>
-                          </View>
+                      </View>
                           <View style={styles.commentMainCol}>
                             <View style={styles.commentHeaderRow}>
                               <Text style={styles.commentUserName} numberOfLines={1}>
                                 {c.user}
                               </Text>
                               {rel ? <Text style={styles.commentTime}>{rel}</Text> : null}
-                            </View>
+                      </View>
                             <Text style={styles.commentBodyText}>{c.text}</Text>
                             <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
                               <Text style={styles.commentReplyText}>Reply</Text>
                             </Pressable>
-                          </View>
+                      </View>
                           <View style={styles.commentActionsCol}>
                             <Pressable
                               hitSlop={8}
@@ -1875,7 +1875,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                                 color={inter.disliked ? "#f87171" : "#9ca3af"}
                               />
                             </Pressable>
-                          </View>
+                    </View>
                         </View>
                       </View>
                     );
@@ -1949,7 +1949,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 </Pressable>
               </View>
           </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={!!activeReelOptionsPost} transparent animationType="slide" onRequestClose={() => setActiveReelOptionsPost(null)}>
