@@ -35,10 +35,12 @@ import {
   HomePost,
   HomeStory,
   likeHomePost,
+  saveHomePost,
   sendDirectMessage,
   sendFollowRequest,
   unfollowUser,
-  unlikeHomePost
+  unlikeHomePost,
+  unsaveHomePost
 } from "../services/api";
 import {
   addLocalCommentForPost,
@@ -398,6 +400,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
+  const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
   const [shareSearch, setShareSearch] = useState("");
   const [shareBusyUserId, setShareBusyUserId] = useState<number | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
@@ -416,6 +419,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
+  const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
   const [storyViewport, setStoryViewport] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const progress = useRef(new Animated.Value(0)).current;
@@ -1025,6 +1029,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [token, user?.email, user?.fullName, user?.id]
   );
 
+  const togglePostSave = useCallback(
+    async (post: HomePost) => {
+      if (!token) {
+        Alert.alert("Login required", "Please log in to save reels.");
+        return;
+      }
+      const nextSaved = !post.viewerHasSaved;
+      setSaveBusyByPostId((prev) => ({ ...prev, [post.id]: true }));
+      setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, viewerHasSaved: nextSaved } : p)));
+      try {
+        const res = nextSaved ? await saveHomePost(token, post.id) : await unsaveHomePost(token, post.id);
+        setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, viewerHasSaved: res.saved } : p)));
+        setActiveReelOptionsPost((current) => (current?.id === post.id ? { ...current, viewerHasSaved: res.saved } : current));
+      } catch {
+        setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, viewerHasSaved: !nextSaved } : p)));
+        Alert.alert("Save failed", "Could not update saved reels. Please try again.");
+      } finally {
+        setSaveBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
+      }
+    },
+    [token]
+  );
+
   const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
     if (!text || !activeCommentsPost) return;
@@ -1360,7 +1387,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Pressable style={styles.reelActionItem} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={26} color="#fff" />
               </Pressable>
-              <Pressable style={styles.reelActionItem}>
+              <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={26} color="#fff" />
               </Pressable>
               {thumbUri ? (
@@ -1389,9 +1416,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       playingPostId,
       reelSlotHeight,
       relationships,
+      saveBusyByPostId,
       tabPosts,
       toggleFollow,
       togglePostLike,
+      togglePostSave,
       user?.fullName,
       user?.id,
       windowHeight,
@@ -1923,6 +1952,64 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal visible={!!activeReelOptionsPost} transparent animationType="slide" onRequestClose={() => setActiveReelOptionsPost(null)}>
+        <Pressable style={styles.shareBackdrop} onPress={() => setActiveReelOptionsPost(null)}>
+          <Pressable
+            style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22) }]}
+            onPress={(e) => e.stopPropagation?.()}
+          >
+            <View style={styles.shareHandle} />
+            <Text style={styles.reelOptionsTitle}>Reel options</Text>
+            <Pressable
+              style={styles.reelOptionRow}
+              disabled={!activeReelOptionsPost || !!saveBusyByPostId[activeReelOptionsPost.id]}
+              onPress={async () => {
+                if (!activeReelOptionsPost) return;
+                await togglePostSave(activeReelOptionsPost);
+                setActiveReelOptionsPost(null);
+              }}
+            >
+              <View style={styles.reelOptionIcon}>
+                <Ionicons
+                  name={activeReelOptionsPost?.viewerHasSaved ? "bookmark" : "bookmark-outline"}
+                  size={22}
+                  color="#d8ff37"
+                />
+              </View>
+              <View style={styles.reelOptionTextCol}>
+                <Text style={styles.reelOptionTitle}>
+                  {activeReelOptionsPost?.viewerHasSaved ? "Remove from saved" : "Save"}
+                </Text>
+                <Text style={styles.reelOptionSub}>Saved reels appear in your profile.</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              style={styles.reelOptionRow}
+              onPress={() => {
+                if (activeReelOptionsPost) setSharePost(activeReelOptionsPost);
+                setActiveReelOptionsPost(null);
+              }}
+            >
+              <View style={styles.reelOptionIcon}>
+                <Ionicons name="paper-plane-outline" size={22} color="#d8ff37" />
+              </View>
+              <View style={styles.reelOptionTextCol}>
+                <Text style={styles.reelOptionTitle}>Share</Text>
+                <Text style={styles.reelOptionSub}>Send this reel to chat or other apps.</Text>
+              </View>
+            </Pressable>
+            <Pressable style={styles.reelOptionRow} onPress={() => setActiveReelOptionsPost(null)}>
+              <View style={styles.reelOptionIcon}>
+                <Ionicons name="close-outline" size={23} color="#d8ff37" />
+              </View>
+              <View style={styles.reelOptionTextCol}>
+                <Text style={styles.reelOptionTitle}>Cancel</Text>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={!!sharePost} transparent animationType="slide" onRequestClose={() => setSharePost(null)}>
         <Pressable style={styles.shareBackdrop} onPress={() => setSharePost(null)}>
           <Pressable style={[styles.shareSheet, { paddingBottom: Math.max(insets.bottom + 10, 20) }]} onPress={(e) => e.stopPropagation?.()}>
@@ -2439,6 +2526,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  reelOptionsSheet: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    backgroundColor: "#1d2126",
+    borderTopWidth: 1,
+    borderColor: "#343b43",
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    gap: 10
+  },
+  reelOptionsTitle: { color: "#eef4f8", fontSize: 16, fontWeight: "900", paddingBottom: 4 },
+  reelOptionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#303842"
+  },
+  reelOptionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2a3139"
+  },
+  reelOptionTextCol: { flex: 1, minWidth: 0 },
+  reelOptionTitle: { color: "#f8fafc", fontSize: 14, fontWeight: "900" },
+  reelOptionSub: { color: "#97a0a8", fontSize: 11, fontWeight: "700", marginTop: 3 },
   shareBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

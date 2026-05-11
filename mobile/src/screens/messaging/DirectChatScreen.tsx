@@ -20,13 +20,13 @@ import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { fetchMessageThread, sendDirectMessage, type DirectMessageItem } from "../../services/api";
 
-const BG = "#ffffff";
-const TEXT = "#0f0f0f";
-const MUTED = "#8e8e8e";
-const BORDER = "#dbdbdb";
-const TEAL = "#0f9b8e";
-const BUBBLE_PEER = "#efefef";
-const INPUT_BG = "#fafafa";
+const BG = "#000000";
+const TEXT = "#f8fafc";
+const MUTED = "#97a0a8";
+const BORDER = "#303842";
+const YELLOW = "#d8ff37";
+const BUBBLE_PEER = "#1d2126";
+const INPUT_BG = "#111418";
 
 function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -131,7 +131,7 @@ export function DirectChatScreen() {
     >
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
         <Pressable hitSlop={12} style={styles.headerIcon} onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={28} color={TEXT} />
+          <Ionicons name="chevron-back" size={28} color={YELLOW} />
         </Pressable>
         <View style={styles.headerCenter}>
           <View style={styles.headerAvatar}>
@@ -143,10 +143,10 @@ export function DirectChatScreen() {
         </View>
         <View style={styles.headerRight}>
           <Pressable hitSlop={8} onPress={openVoiceCall}>
-            <Ionicons name="call-outline" size={22} color={TEXT} />
+            <Ionicons name="call-outline" size={22} color={YELLOW} />
           </Pressable>
           <Pressable hitSlop={8} onPress={openVideoCall}>
-            <Ionicons name="videocam-outline" size={24} color={TEXT} />
+            <Ionicons name="videocam-outline" size={24} color={YELLOW} />
           </Pressable>
         </View>
       </View>
@@ -216,7 +216,7 @@ export function DirectChatScreen() {
 
       <View style={[styles.composer, { paddingBottom: bottomPad }]}>
         <Pressable style={styles.composerIcon} onPress={() => {}}>
-          <Ionicons name="camera-outline" size={26} color={TEXT} />
+          <Ionicons name="camera-outline" size={26} color={YELLOW} />
         </Pressable>
         <TextInput
           value={draft}
@@ -233,7 +233,7 @@ export function DirectChatScreen() {
           onPress={send}
           disabled={!draft.trim()}
         >
-          <Ionicons name="send" size={18} color={draft.trim() ? "#fff" : MUTED} />
+          <Ionicons name="send" size={18} color={draft.trim() ? "#111" : MUTED} />
         </Pressable>
       </View>
       <Modal visible={!!activeCall} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setActiveCall(null)}>
@@ -298,7 +298,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: BORDER
+    borderBottomColor: BORDER,
+    backgroundColor: BG
   },
   headerIcon: { width: 40, alignItems: "flex-start" },
   headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
@@ -306,11 +307,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#e8f4f1",
+    backgroundColor: "#111418",
     alignItems: "center",
     justifyContent: "center"
   },
-  headerAvatarText: { fontSize: 14, fontWeight: "800", color: TEAL },
+  headerAvatarText: { fontSize: 14, fontWeight: "800", color: YELLOW },
   headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT, maxWidth: 180 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 14, width: 80, justifyContent: "flex-end" },
   listContent: { paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 },
@@ -318,14 +319,14 @@ const styles = StyleSheet.create({
   bubbleRowSelf: { justifyContent: "flex-end" },
   bubbleRowPeer: { justifyContent: "flex-start" },
   bubble: { maxWidth: "78%", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleSelf: { backgroundColor: TEAL },
+  bubbleSelf: { backgroundColor: YELLOW },
   bubblePeer: { backgroundColor: BUBBLE_PEER },
   reelBubbleWrap: { maxWidth: "84%", alignItems: "flex-end" },
   bubbleText: { fontSize: 15, lineHeight: 20 },
-  bubbleTextSelf: { color: "#fff" },
+  bubbleTextSelf: { color: "#111" },
   bubbleTextPeer: { color: TEXT },
   bubbleMeta: { marginTop: 4, fontSize: 11, alignSelf: "flex-end" },
-  bubbleMetaSelf: { color: "rgba(255,255,255,0.8)" },
+  bubbleMetaSelf: { color: "rgba(0,0,0,0.62)" },
   bubbleMetaPeer: { color: MUTED },
   reelMeta: { color: MUTED, marginTop: 3, marginRight: 4 },
   sharedReelCard: {
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
     height: 248,
     borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "#151515",
+    backgroundColor: "#111418",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)"
   },
@@ -341,7 +342,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#262626"
+    backgroundColor: "#1d2126"
   },
   sharedReelMedia: { width: "100%", height: "100%" },
   sharedReelPlayBadge: {
@@ -353,7 +354,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.92)"
+    backgroundColor: YELLOW
   },
   sharedReelOverlay: {
     position: "absolute",
@@ -398,12 +399,12 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#e8e8e8",
+    backgroundColor: "#1d2126",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 2
   },
-  sendBtnActive: { backgroundColor: TEAL },
+  sendBtnActive: { backgroundColor: YELLOW },
   callScreen: {
     flex: 1,
     backgroundColor: "#121212",
@@ -427,7 +428,7 @@ const styles = StyleSheet.create({
     width: 130,
     height: 130,
     borderRadius: 65,
-    backgroundColor: TEAL,
+    backgroundColor: YELLOW,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -456,7 +457,7 @@ const styles = StyleSheet.create({
     borderRadius: 59,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: TEAL,
+    backgroundColor: YELLOW,
     borderWidth: 3,
     borderColor: "rgba(255,255,255,0.28)"
   },
@@ -464,9 +465,9 @@ const styles = StyleSheet.create({
     width: 82,
     height: 82,
     borderRadius: 41,
-    backgroundColor: "rgba(15,155,142,0.85)"
+    backgroundColor: "rgba(216,255,55,0.85)"
   },
-  callAvatarText: { color: "#fff", fontSize: 42, fontWeight: "900" },
+  callAvatarText: { color: "#111", fontSize: 42, fontWeight: "900" },
   callName: { marginTop: 18, color: "#fff", fontSize: 25, fontWeight: "900", textAlign: "center" },
   callStatus: { marginTop: 8, color: "rgba(255,255,255,0.72)", fontSize: 15, fontWeight: "700" },
   callControls: {

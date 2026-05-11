@@ -1,5 +1,5 @@
 import React from "react";
-import { FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { FlatList, Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage, type AppLanguage } from "../localization/LanguageContext";
@@ -64,19 +64,24 @@ const SLIDES = [
     inverted: true
   }
 ] as const;
-const CAROUSEL_SLIDES = [SLIDES[SLIDES.length - 1], ...SLIDES, SLIDES[0]] as const;
+const FIRST_WORDMARK = require("../../assets/Cropvibe1.png");
+const PATTERN_IMAGE = require("../../assets/cropvibe2.png");
+const COLORS = {
+  dark: "#242424",
+  ink: "#151711",
+  lime: "#b8ff19",
+  limeSoft: "#d7ff74",
+  muted: "#d8ded4",
+  mutedDark: "#384215"
+};
 
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { language, setLanguage, t } = useLanguage();
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = React.useState(0);
-  const virtualIndexRef = React.useRef(1);
-  const pauseUntilRef = React.useRef(0);
-  const loopFixTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const indexRef = React.useRef(0);
   const listRef = React.useRef<FlatList<(typeof SLIDES)[number]>>(null);
-
-  const MAX_VIRTUAL = SLIDES.length + 1;
 
   const finish = () => {
     navigation.reset({ index: 0, routes: [{ name: "AuthChoice" }] });
@@ -86,78 +91,21 @@ export function InitialSetupScreen() {
     navigation.reset({ index: 0, routes: [{ name: "AuthChoice", params: { initialMode: "login" } }] });
   };
 
-  const pauseAutoplay = React.useCallback((ms = 5000) => {
-    pauseUntilRef.current = Date.now() + ms;
-  }, []);
-
-  const scrollToVirtualIndex = React.useCallback(
-    (virtualIndex: number, animated: boolean) => {
-      const clamped = Math.max(0, Math.min(virtualIndex, MAX_VIRTUAL));
-      const applyScroll = () => {
-        listRef.current?.scrollToOffset({ offset: clamped * width, animated });
-      };
-      applyScroll();
-      if (
-        !animated &&
-        typeof requestAnimationFrame !== "undefined" &&
-        (clamped === 1 || clamped === SLIDES.length)
-      ) {
-        requestAnimationFrame(() => {
-          listRef.current?.scrollToOffset({ offset: clamped * width, animated: false });
-        });
-      }
-      virtualIndexRef.current = clamped;
-      const logicalIndex = (clamped - 1 + SLIDES.length) % SLIDES.length;
-      setIndex(logicalIndex);
+  const scrollToSlide = React.useCallback(
+    (nextIndex: number, animated: boolean) => {
+      const normalizedIndex = (nextIndex + SLIDES.length) % SLIDES.length;
+      indexRef.current = normalizedIndex;
+      setIndex(normalizedIndex);
+      listRef.current?.scrollToOffset({ offset: normalizedIndex * width, animated });
     },
-    [width, MAX_VIRTUAL]
+    [width]
   );
 
-  const clearLoopFixTimer = React.useCallback(() => {
-    if (loopFixTimeoutRef.current) {
-      clearTimeout(loopFixTimeoutRef.current);
-      loopFixTimeoutRef.current = null;
-    }
-  }, []);
-
-  const scheduleLoopResetIfStillOnClone = React.useCallback(() => {
-    clearLoopFixTimer();
-    loopFixTimeoutRef.current = setTimeout(() => {
-      loopFixTimeoutRef.current = null;
-      if (virtualIndexRef.current === MAX_VIRTUAL) {
-        scrollToVirtualIndex(1, false);
-      }
-    }, 520);
-  }, [MAX_VIRTUAL, clearLoopFixTimer, scrollToVirtualIndex]);
-
   React.useEffect(() => {
-    // Keep the list aligned to the first real slide when screen width changes.
-    listRef.current?.scrollToOffset({ offset: virtualIndexRef.current * width, animated: false });
+    // Keep the current slide aligned when orientation or web viewport width changes.
+    listRef.current?.scrollToOffset({ offset: indexRef.current * width, animated: false });
   }, [width]);
 
-  React.useEffect(() => {
-    const timer = setInterval(() => {
-      if (Date.now() < pauseUntilRef.current) return;
-      const v = virtualIndexRef.current;
-      if (v >= MAX_VIRTUAL) {
-        scrollToVirtualIndex(1, false);
-        return;
-      }
-      if (v === MAX_VIRTUAL - 1) {
-        scrollToVirtualIndex(MAX_VIRTUAL, true);
-        scheduleLoopResetIfStillOnClone();
-        return;
-      }
-      scrollToVirtualIndex(v + 1, true);
-    }, 3200);
-
-    return () => {
-      clearInterval(timer);
-      clearLoopFixTimer();
-    };
-  }, [MAX_VIRTUAL, clearLoopFixTimer, scheduleLoopResetIfStillOnClone, scrollToVirtualIndex]);
-
-  const atFirstSlide = index === 0;
   const atLastSlide = index === SLIDES.length - 1;
 
   return (
@@ -166,72 +114,42 @@ export function InitialSetupScreen() {
         <FlatList
           ref={listRef}
           style={styles.list}
-          data={CAROUSEL_SLIDES}
+          data={SLIDES}
           horizontal
           pagingEnabled
+          snapToInterval={width}
+          snapToAlignment="start"
           bounces={false}
           decelerationRate="fast"
           showsHorizontalScrollIndicator={false}
-          initialScrollIndex={1}
           getItemLayout={(_, itemIndex) => ({
             length: width,
             offset: width * itemIndex,
             index: itemIndex
           })}
           keyExtractor={(_, i) => String(i)}
-          onScrollBeginDrag={() => {
-            clearLoopFixTimer();
-            pauseAutoplay();
-          }}
           onMomentumScrollEnd={(e) => {
-            const virtualIndex = Math.round(e.nativeEvent.contentOffset.x / width);
-            if (virtualIndex === 0) {
-              clearLoopFixTimer();
-              // Moved left from first real slide into clone of last slide.
-              scrollToVirtualIndex(SLIDES.length, false);
-              return;
-            }
-            if (virtualIndex === MAX_VIRTUAL) {
-              clearLoopFixTimer();
-              // Moved right from last real slide into clone of first slide.
-              scrollToVirtualIndex(1, false);
-              return;
-            }
-            virtualIndexRef.current = virtualIndex;
-            setIndex(virtualIndex - 1);
+            const nextIndex = Math.round(e.nativeEvent.contentOffset.x / width);
+            const clampedIndex = Math.max(0, Math.min(nextIndex, SLIDES.length - 1));
+            indexRef.current = clampedIndex;
+            setIndex(clampedIndex);
           }}
           renderItem={({ item }) => (
             <View style={[styles.page, { width, height }, item.inverted ? styles.pageInverted : null]}>
               <View style={styles.topBarWrap}>
-                <View style={styles.topBar} />
+                <View style={[styles.topBar, item.inverted ? styles.topBarDark : null]} />
               </View>
               <View style={styles.content}>
                 {item.mode === "brand" ? (
-                  <View style={styles.brandWrap}>
-                    <Text style={styles.logoWord}>{t(item.titleKey)}</Text>
-                    <Text style={styles.logoSub}>{t(item.subtitleKey)}</Text>
+                  <View style={styles.logoOnlyWrap}>
+                    <Image source={FIRST_WORDMARK} style={styles.logoImage} resizeMode="contain" />
                   </View>
                 ) : item.mode === "pattern" ? (
-                  <View style={styles.patternScreenWrap}>
-                    <View style={styles.patternCard}>
-                      <View style={styles.patternRow}>
-                        <View style={[styles.tile, styles.tileDark]} />
-                        <View style={[styles.tile, styles.tileLime]} />
-                        <View style={[styles.tile, styles.tileDark]} />
-                      </View>
-                      <View style={styles.patternRow}>
-                        <View style={[styles.tile, styles.tileLime]} />
-                        <View style={[styles.tile, styles.tileDark]} />
-                        <View style={[styles.tile, styles.tileLime]} />
-                      </View>
-                      <View style={styles.patternRow}>
-                        <View style={[styles.tile, styles.tileDark]} />
-                        <View style={[styles.tile, styles.tileLime]} />
-                        <View style={[styles.tile, styles.tileDark]} />
-                      </View>
+                  <View style={styles.heroWrap}>
+                    <View style={styles.heroLogoArea}>
+                      <Image source={FIRST_WORDMARK} style={styles.logoImage} resizeMode="contain" />
                     </View>
-                    <Text style={styles.logoWord}>{t(item.titleKey)}</Text>
-                    <Text style={styles.logoSub}>{t(item.subtitleKey)}</Text>
+                    <Image source={PATTERN_IMAGE} style={styles.heroPatternImage} resizeMode="cover" />
                   </View>
                 ) : (
                   <View style={styles.copyWrap}>
@@ -245,43 +163,14 @@ export function InitialSetupScreen() {
             </View>
           )}
         />
-        <Pressable
-          style={styles.arrowHitLeft}
-          disabled={atFirstSlide}
-          onPress={() => {
-            if (atFirstSlide) return;
-            pauseAutoplay(3500);
-            scrollToVirtualIndex(virtualIndexRef.current - 1, true);
-          }}
-          hitSlop={4}
-        >
-          <View style={[styles.arrowBtn, atFirstSlide ? styles.arrowBtnDisabled : null]}>
-            <Text style={[styles.arrowText, atFirstSlide ? styles.arrowTextDisabled : null]}>‹</Text>
-          </View>
-        </Pressable>
-        <Pressable
-          style={styles.arrowHitRight}
-          disabled={atLastSlide}
-          onPress={() => {
-            if (atLastSlide) return;
-            pauseAutoplay(3500);
-            scrollToVirtualIndex(virtualIndexRef.current + 1, true);
-          }}
-          hitSlop={4}
-        >
-          <View style={[styles.arrowBtn, atLastSlide ? styles.arrowBtnDisabled : null]}>
-            <Text style={[styles.arrowText, atLastSlide ? styles.arrowTextDisabled : null]}>›</Text>
-          </View>
-        </Pressable>
       </View>
-      <View style={styles.stableFooter}>
+      <View style={[styles.stableFooter, atLastSlide ? styles.stableFooterWithActions : null]}>
         <View style={styles.paginationRow}>
           {SLIDES.map((_, dotIndex) => (
             <Pressable
               key={`dot-${dotIndex}`}
               onPress={() => {
-                pauseAutoplay(3500);
-                scrollToVirtualIndex(dotIndex + 1, true);
+                scrollToSlide(dotIndex, true);
               }}
               hitSlop={8}
             >
@@ -289,128 +178,94 @@ export function InitialSetupScreen() {
             </Pressable>
           ))}
         </View>
-        <View style={styles.langRow}>
-          {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
-            <Pressable key={lang} style={[styles.langChip, language === lang ? styles.langChipActive : null]} onPress={() => setLanguage(lang)}>
-              <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.actionRow}>
-          <Pressable style={styles.signInBtn} onPress={openLogin}>
-            <Text style={styles.signInText}>{t("login")}</Text>
-          </Pressable>
-          <Pressable style={styles.getStartedBtn} onPress={finish}>
-            <Text style={styles.getStartedText}>{t("getStarted")}</Text>
-          </Pressable>
-        </View>
+        {atLastSlide ? (
+          <>
+            <View style={styles.langRow}>
+              {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
+                <Pressable key={lang} style={[styles.langChip, language === lang ? styles.langChipActive : null]} onPress={() => setLanguage(lang)}>
+                  <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.actionStack}>
+              <Pressable style={styles.getStartedBtn} onPress={finish}>
+                <Text style={styles.getStartedText}>{t("getStarted")}</Text>
+              </Pressable>
+              <Pressable style={styles.signInBtn} onPress={openLogin}>
+                <Text style={styles.signInText}>{t("login")}</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#11161b" },
+  root: { flex: 1, backgroundColor: COLORS.dark },
   carouselShell: { flex: 1, position: "relative" },
   list: { flex: 1 },
-  page: { backgroundColor: "#1d2126", paddingHorizontal: 22, paddingTop: 8, paddingBottom: 14, justifyContent: "space-between" },
-  pageInverted: { backgroundColor: "#c7ff2f" },
-  topBarWrap: { height: 24, justifyContent: "center", alignItems: "center" },
-  topBar: { width: 86, height: 4, borderRadius: 2, backgroundColor: "#b9f530", opacity: 0.85 },
+  page: { backgroundColor: COLORS.dark, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12, justifyContent: "space-between" },
+  pageInverted: { backgroundColor: COLORS.lime },
+  topBarWrap: { height: 20, justifyContent: "center", alignItems: "center" },
+  topBar: { width: 86, height: 3, borderRadius: 2, backgroundColor: COLORS.lime, opacity: 0.95 },
+  topBarDark: { backgroundColor: COLORS.ink },
   content: { flex: 1 },
-  brandWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  patternScreenWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 18 },
-  patternCard: {
-    width: 96,
-    height: 96,
-    borderRadius: 18,
-    padding: 8,
-    backgroundColor: "#21262b",
-    borderWidth: 1,
-    borderColor: "#313841"
+  logoOnlyWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  heroWrap: { flex: 1, marginHorizontal: -18, justifyContent: "space-between" },
+  heroLogoArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },
+  logoImage: { width: "82%", height: 62 },
+  heroPatternImage: { width: "100%", height: "43%" },
+  logoSub: { color: COLORS.limeSoft, fontWeight: "700", textAlign: "center", fontSize: 12, letterSpacing: 0.2 },
+  copyWrap: { paddingTop: 22 },
+  slideTag: { color: COLORS.lime, fontSize: 20, fontWeight: "400", marginBottom: 7, letterSpacing: 0.2 },
+  slideTagInverted: { color: COLORS.mutedDark },
+  copyText: {
+    color: COLORS.lime,
+    fontWeight: "600",
+    fontSize: 32,
+    lineHeight: 40,
+    letterSpacing: 0,
+    textTransform: "capitalize"
   },
-  patternRow: { flex: 1, flexDirection: "row", gap: 6, marginBottom: 6 },
-  tile: { flex: 1, borderRadius: 9 },
-  tileDark: { backgroundColor: "#171c20" },
-  tileLime: { backgroundColor: "#b9f530" },
-  logoWord: { color: "#b9f530", fontWeight: "900", fontSize: 34, letterSpacing: 1.2, textAlign: "center", marginBottom: 4 },
-  logoSub: { color: "#c8d0d6", fontWeight: "600", textAlign: "center", fontSize: 10 },
-  copyWrap: { paddingTop: 20 },
-  slideTag: { color: "#8bc76f", fontSize: 12, fontWeight: "700", marginBottom: 8 },
-  slideTagInverted: { color: "#476112" },
-  copyText: { color: "#b9f530", fontWeight: "900", fontSize: 31, lineHeight: 36, letterSpacing: -0.2 },
-  copyTextInverted: { color: "#1b1f23" },
-  copySubText: { marginTop: 10, color: "#bdc7c4", fontWeight: "600", lineHeight: 20, fontSize: 13 },
-  copySubTextInverted: { color: "#2f3d16" },
-  pageFooterSpace: { height: 132 },
+  copyTextInverted: { color: COLORS.ink },
+  copySubText: { marginTop: 9, color: COLORS.muted, fontWeight: "400", lineHeight: 18, fontSize: 16 },
+  copySubTextInverted: { color: COLORS.mutedDark },
+  pageFooterSpace: { height: 74 },
   stableFooter: {
     position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 14
+    left: 18,
+    right: 18,
+    bottom: 16
   },
-  actionRow: { marginTop: 10, flexDirection: "row", gap: 8 },
+  stableFooterWithActions: { bottom: 18 },
+  actionStack: { marginTop: 10, gap: 8 },
   signInBtn: {
-    flex: 1,
-    height: 40,
-    borderRadius: 7,
+    height: 36,
+    borderRadius: 3,
     borderWidth: 1,
-    borderColor: "#4f6414",
-    backgroundColor: "#1b1f23",
+    borderColor: COLORS.ink,
+    backgroundColor: "#f7ffd9",
     alignItems: "center",
     justifyContent: "center"
   },
-  signInText: { color: "#d4e8a2", fontWeight: "800", fontSize: 13 },
+  signInText: { color: COLORS.ink, fontWeight: "900", fontSize: 12 },
   getStartedBtn: {
-    flex: 1,
-    height: 40,
-    borderRadius: 7,
-    backgroundColor: "#1b1f23",
+    height: 36,
+    borderRadius: 3,
+    backgroundColor: COLORS.ink,
     alignItems: "center",
     justifyContent: "center"
   },
-  getStartedText: { color: "#b9f530", fontWeight: "900", fontSize: 14 },
+  getStartedText: { color: COLORS.lime, fontWeight: "900", fontSize: 12 },
   langRow: { marginTop: 10, flexDirection: "row", gap: 8, justifyContent: "center" },
-  langChip: { borderWidth: 1, borderColor: "#4f6414", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: "#1b1f23" },
-  langChipActive: { backgroundColor: "#1b1f23", borderColor: "#1b1f23" },
-  langChipText: { color: "#d4e8a2", fontSize: 11, fontWeight: "700" },
-  langChipTextActive: { color: "#b9f530" },
-  arrowHitLeft: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 170,
-    width: 48,
-    justifyContent: "center",
-    paddingLeft: 4,
-    zIndex: 2
-  },
-  arrowHitRight: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 170,
-    width: 48,
-    justifyContent: "center",
-    alignItems: "flex-end",
-    paddingRight: 4,
-    zIndex: 2
-  },
-  arrowBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#4f6414",
-    backgroundColor: "rgba(27, 31, 35, 0.92)",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  arrowBtnDisabled: { opacity: 0.35, borderColor: "#3a424c" },
-  arrowText: { color: "#b9f530", fontSize: 18, fontWeight: "900", lineHeight: 19 },
-  arrowTextDisabled: { color: "#6b7a82" },
+  langChip: { borderWidth: 1, borderColor: COLORS.ink, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: "transparent" },
+  langChipActive: { backgroundColor: COLORS.ink, borderColor: COLORS.ink },
+  langChipText: { color: COLORS.mutedDark, fontSize: 10, fontWeight: "800" },
+  langChipTextActive: { color: COLORS.lime },
   paginationRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 5 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#445449" },
-  dotActive: { width: 16, backgroundColor: "#b9f530" }
+  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "rgba(184, 255, 25, 0.25)" },
+  dotActive: { width: 22, backgroundColor: COLORS.lime }
 });
 

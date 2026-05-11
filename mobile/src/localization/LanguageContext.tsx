@@ -35,7 +35,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     onboardingBrandSubtitle: "Your Field, Your Future",
     onboardingSlide3Tag: "Discover",
     onboardingSlide3Title: "Share Your\nFarming Journey",
-    onboardingSlide3Subtitle: "Post daily updates, discuss crop health, and connect with farmers across the community.",
+    onboardingSlide3Subtitle: "Post reels, showcase your products, and learn from other farmers across the community.",
     onboardingSlide4Tag: "Marketplace",
     onboardingSlide4Title: "Buy & Sell With Ease",
     onboardingSlide4Subtitle: "Sell your farm produce and reach buyers directly for better prices and simple deals.",

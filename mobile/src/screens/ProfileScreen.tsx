@@ -15,6 +15,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import {
+  fetchSavedHomePosts,
   fetchHomePosts,
   fetchProfileStats,
   HomePost,
@@ -30,15 +31,15 @@ import {
   removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
-import { navigateToDirectInbox, navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
+import { navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
 
-const TEAL = "#0f9b8e";
-const CREAM = "#f5f3ee";
-const CARD = "#ffffff";
-const TEXT = "#1a2e2a";
-const MUTED = "#5c6b66";
-const BEIGE_FOLLOW = "#ebe4d8";
-const LIME = "#d4e157";
+const TEAL = "#d8ff37";
+const CREAM = "#000000";
+const CARD = "#111418";
+const TEXT = "#f8fafc";
+const MUTED = "#97a0a8";
+const BEIGE_FOLLOW = "#1d2126";
+const LIME = "#d8ff37";
 
 function safeHandle(name: string) {
   const base = String(name || "user")
@@ -49,13 +50,14 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
-type GalleryTab = "Posts" | "Reels" | "Tagged";
+type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
+  const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [followersList, setFollowersList] = useState<
@@ -80,15 +82,22 @@ export function ProfileScreen() {
 
   useEffect(() => {
     let mounted = true;
-    fetchHomePosts(token || null)
-      .then((data) => {
+    const load = async () => {
+      try {
+        const [homeData, savedData] = await Promise.all([
+          fetchHomePosts(token || null),
+          token ? fetchSavedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] })
+        ]);
         if (!mounted) return;
-        setAllPosts(data.posts);
-      })
-      .catch(() => {
+        setAllPosts(homeData.posts);
+        setSavedPosts(savedData.posts);
+      } catch {
         if (!mounted) return;
         setAllPosts([]);
-      });
+        setSavedPosts([]);
+      }
+    };
+    void load();
     return () => {
       mounted = false;
     };
@@ -161,9 +170,10 @@ export function ProfileScreen() {
 
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
+    if (activeGalleryTab === "Saved") return savedPosts.filter((p) => !!p.videoUrl);
     if (activeGalleryTab === "Tagged") return [];
     return userPosts.filter((p) => !p.videoUrl);
-  }, [activeGalleryTab, userPosts]);
+  }, [activeGalleryTab, savedPosts, userPosts]);
 
   const profileModel = useMemo(() => {
     if (!user) return null;
@@ -246,10 +256,10 @@ export function ProfileScreen() {
         <View style={styles.topBar}>
           <View style={styles.topBarIcons}>
             <Pressable hitSlop={8} onPress={navigateToUserSearch}>
-              <Ionicons name="search-outline" size={18} color="#e8f0ec" />
+              <Ionicons name="search-outline" size={18} color={LIME} />
             </Pressable>
             <Pressable hitSlop={8} onPress={() => Alert.alert("Notifications", "Notifications are available from the home top bar.")}>
-              <Ionicons name="notifications-outline" size={18} color="#e8f0ec" />
+              <Ionicons name="notifications-outline" size={18} color={LIME} />
             </Pressable>
           </View>
         </View>
@@ -259,7 +269,7 @@ export function ProfileScreen() {
             <Text style={styles.cardTitle}>Welcome</Text>
             <Text style={styles.cardSub}>Start from the launch screens to create your account.</Text>
             <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
-              <Ionicons name="log-in-outline" size={18} color="#fff" />
+              <Ionicons name="log-in-outline" size={18} color="#111" />
               <Text style={styles.primaryBtnText}>Get Started</Text>
             </Pressable>
           </View>
@@ -268,9 +278,6 @@ export function ProfileScreen() {
             <View style={styles.profileCard}>
               <View style={styles.handleRow}>
                 <Text style={styles.handleText}>{profileModel?.handle}</Text>
-                <Pressable hitSlop={10} onPress={() => Alert.alert("Share", "Share profile coming soon.")}>
-                  <Ionicons name="share-outline" size={20} color={TEXT} />
-                </Pressable>
               </View>
 
               <View style={styles.headerMidRow}>
@@ -323,7 +330,7 @@ export function ProfileScreen() {
               <View style={styles.ratingRow}>
                 <View style={styles.starsRow}>
                   {([0, 1, 2, 3] as const).map((i) => (
-                    <Ionicons key={i} name="star" size={17} color="#ca8a04" style={styles.starIcon} />
+                    <Ionicons key={i} name="star" size={17} color={LIME} style={styles.starIcon} />
                   ))}
                   <Ionicons name="star-outline" size={17} color={TEXT} style={[styles.starIcon, styles.starOutline]} />
                 </View>
@@ -332,7 +339,7 @@ export function ProfileScreen() {
 
               <View style={styles.profileActionsRow}>
                 <Pressable style={styles.editProfileBtnCompact} onPress={navigateToEditProfile}>
-                  <Ionicons name="create-outline" size={18} color="#fff" />
+                  <Ionicons name="create-outline" size={18} color="#111" />
                   <Text style={styles.editProfileBtnText} numberOfLines={1}>
                     Edit Profile
                   </Text>
@@ -345,9 +352,6 @@ export function ProfileScreen() {
                   <Text style={styles.followCompactBtnText} numberOfLines={1}>
                     {isFollowing ? "Following" : "Follow"}
                   </Text>
-                </Pressable>
-                <Pressable style={styles.iconActionSquare} onPress={navigateToDirectInbox}>
-                  <Ionicons name="chatbubble-outline" size={20} color={TEXT} />
                 </Pressable>
                 <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Share", "Share coming soon.")}>
                   <Ionicons name="share-outline" size={20} color={TEXT} />
@@ -373,6 +377,7 @@ export function ProfileScreen() {
                   [
                     { key: "Posts" as const, icon: "grid-outline" as const },
                     { key: "Reels" as const, icon: "play-circle-outline" as const },
+                    { key: "Saved" as const, icon: "bookmark-outline" as const },
                     { key: "Tagged" as const, icon: "pricetag-outline" as const }
                   ] as const
                 ).map((t) => (
@@ -396,26 +401,35 @@ export function ProfileScreen() {
                         <Image source={{ uri: post.imageUrl }} style={styles.gridImage} resizeMode="cover" />
                       ) : post.videoUrl ? (
                         <View style={[styles.gridPlaceholder, styles.gridVideoBg]}>
-                          <Ionicons name="play-circle" size={28} color="#fff" />
+                          <Ionicons name="play-circle" size={28} color={LIME} />
                         </View>
                       ) : (
                         <View style={[styles.gridPlaceholder, styles.gridPastelA]}>
-                          <Ionicons name="leaf-outline" size={28} color="#7a6b2e" />
+                          <Ionicons name="leaf-outline" size={28} color={LIME} />
                         </View>
                       )}
                     </View>
                   ))
                 ) : (
                   <View style={styles.placeholderGridRow}>
-                    <View style={[styles.gridPlaceholder, styles.gridPastelA, { width: gridTileSize, height: gridTileSize }]}>
-                      <Ionicons name="leaf-outline" size={32} color="#7a6b2e" />
-                    </View>
-                    <View style={[styles.gridPlaceholder, styles.gridPastelB, { width: gridTileSize, height: gridTileSize }]}>
-                      <Ionicons name="nutrition-outline" size={32} color="#8b3d4a" />
-                    </View>
-                    <View style={[styles.gridPlaceholder, styles.gridPastelC, { width: gridTileSize, height: gridTileSize }]}>
-                      <Ionicons name="rose-outline" size={32} color="#2d6b4a" />
-                    </View>
+                    {activeGalleryTab === "Saved" ? (
+                      <View style={styles.emptyWrap}>
+                        <Ionicons name="bookmark-outline" size={22} color={MUTED} />
+                        <Text style={styles.emptyText}>Saved reels will appear here.</Text>
+                      </View>
+                    ) : (
+                      <>
+                        <View style={[styles.gridPlaceholder, styles.gridPastelA, { width: gridTileSize, height: gridTileSize }]}>
+                          <Ionicons name="leaf-outline" size={32} color={LIME} />
+                        </View>
+                        <View style={[styles.gridPlaceholder, styles.gridPastelB, { width: gridTileSize, height: gridTileSize }]}>
+                          <Ionicons name="nutrition-outline" size={32} color={LIME} />
+                        </View>
+                        <View style={[styles.gridPlaceholder, styles.gridPastelC, { width: gridTileSize, height: gridTileSize }]}>
+                          <Ionicons name="rose-outline" size={32} color={LIME} />
+                        </View>
+                      </>
+                    )}
                   </View>
                 )}
               </View>
@@ -478,7 +492,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    backgroundColor: "#262626",
+    backgroundColor: "#000000",
     paddingHorizontal: 10,
     paddingVertical: 8,
     paddingTop: 10,
@@ -486,7 +500,7 @@ const styles = StyleSheet.create({
   },
   topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
 
-  card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#e5e2dc", padding: 16 },
+  card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#303842", padding: 16 },
   cardTitle: { fontSize: 20, fontWeight: "900", color: TEXT },
   cardSub: { marginTop: 6, color: MUTED, fontWeight: "600", lineHeight: 18 },
   primaryBtn: {
@@ -499,7 +513,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8
   },
-  primaryBtnText: { color: "#fff", fontWeight: "900" },
+  primaryBtnText: { color: "#111", fontWeight: "900" },
 
   profileCard: {
     marginHorizontal: 12,
@@ -508,9 +522,9 @@ const styles = StyleSheet.create({
     backgroundColor: CARD,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#ebe6df",
+    borderColor: "#303842",
     shadowColor: "#000",
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.18,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2
@@ -524,11 +538,11 @@ const styles = StyleSheet.create({
     width: 86,
     height: 86,
     borderRadius: 43,
-    backgroundColor: "#e8f4f1",
+    backgroundColor: "#1d2126",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "#d4ebe6"
+    borderColor: LIME
   },
   avatarText: { color: TEAL, fontSize: 28, fontWeight: "900" },
   avatarImage: { width: "100%", height: "100%", borderRadius: 43 },
@@ -557,7 +571,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#e6f7f4",
+    backgroundColor: "#1d2126",
+    borderWidth: 1,
+    borderColor: "#303842",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999
@@ -598,7 +614,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6
   },
-  editProfileBtnText: { color: "#fff", fontWeight: "900", fontSize: 14 },
+  editProfileBtnText: { color: "#111", fontWeight: "900", fontSize: 14 },
   followCompactBtn: {
     flex: 1,
     minWidth: 0,
@@ -611,9 +627,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     borderWidth: 1,
-    borderColor: "#dcd3c8"
+    borderColor: "#303842"
   },
-  followWideBtnActive: { backgroundColor: "#dce8e4", borderColor: TEAL },
+  followWideBtnActive: { backgroundColor: "rgba(216,255,55,0.18)", borderColor: TEAL },
   followCompactBtnText: { color: TEXT, fontWeight: "900", fontSize: 14 },
   iconActionSquare: {
     width: 46,
@@ -623,7 +639,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#dcd3c8"
+    borderColor: "#303842"
   },
 
   studioBtn: {
@@ -633,26 +649,26 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderColor: "#ebe6df"
+    borderColor: "#303842"
   },
   studioText: { flex: 1, fontWeight: "900", color: TEAL, fontSize: 14 },
   logoutLink: { marginTop: 10, alignSelf: "center", paddingVertical: 6 },
   logoutLinkText: { color: MUTED, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
 
   gallerySection: { marginHorizontal: 12, marginBottom: 16 },
-  iconTabsRow: { flexDirection: "row", justifyContent: "space-around", borderBottomWidth: 1, borderColor: "#e5e2dc", paddingBottom: 4 },
+  iconTabsRow: { flexDirection: "row", justifyContent: "space-around", borderBottomWidth: 1, borderColor: "#303842", paddingBottom: 4 },
   iconTab: { alignItems: "center", minWidth: 56, paddingVertical: 6 },
-  iconTabUnderline: { marginTop: 6, height: 2, width: 28, backgroundColor: TEXT, borderRadius: 2 },
+  iconTabUnderline: { marginTop: 6, height: 2, width: 28, backgroundColor: LIME, borderRadius: 2 },
   iconTabSpacer: { marginTop: 6, height: 2, width: 28 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
-  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#eee" },
+  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#1d2126", borderWidth: 1, borderColor: "#303842" },
   gridImage: { width: "100%", height: "100%" },
   gridPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 12 },
-  gridVideoBg: { backgroundColor: "#2d3b38" },
-  gridPastelA: { backgroundColor: "#f5ebc4" },
-  gridPastelB: { backgroundColor: "#f5d4d9" },
-  gridPastelC: { backgroundColor: "#d4ebd4" },
+  gridVideoBg: { backgroundColor: "#1d2126" },
+  gridPastelA: { backgroundColor: "#1d2126" },
+  gridPastelB: { backgroundColor: "#111418" },
+  gridPastelC: { backgroundColor: "#1d2126" },
   placeholderGridRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
 
   emptyWrap: {
@@ -671,7 +687,9 @@ const styles = StyleSheet.create({
     maxHeight: "72%",
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 16
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderColor: "#303842"
   },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sheetTitle: { color: TEXT, fontWeight: "900", fontSize: 17 },
@@ -682,19 +700,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     borderWidth: 1,
-    borderColor: "#e5e2dc",
+    borderColor: "#303842",
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: CREAM
+    backgroundColor: "#1d2126"
   },
   personName: { color: TEXT, fontWeight: "800" },
   followBackBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  followBackBtnText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  followBackBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedPillText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followingPill: { backgroundColor: "#1f6f43", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  followingPillText: { color: "#e8fff2", fontWeight: "800", fontSize: 12 },
+  followingPill: { backgroundColor: "rgba(216,255,55,0.18)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followingPillText: { color: LIME, fontWeight: "800", fontSize: 12 },
   unfollowBtn: { backgroundColor: "#111827", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 }
 });

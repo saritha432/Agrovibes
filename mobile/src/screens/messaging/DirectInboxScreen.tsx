@@ -14,11 +14,12 @@ import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { fetchMessageThreads } from "../../services/api";
 
-const BG = "#ffffff";
-const TEXT = "#0f0f0f";
-const MUTED = "#8e8e8e";
-const BORDER = "#dbdbdb";
-const TEAL = "#0f9b8e";
+const BG = "#000000";
+const TEXT = "#f8fafc";
+const MUTED = "#97a0a8";
+const BORDER = "#303842";
+const YELLOW = "#d8ff37";
+const CARD = "#111418";
 
 function formatTime(ts: number) {
   const d = new Date(ts);
@@ -54,9 +55,12 @@ export function DirectInboxScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
+      headerStyle: { backgroundColor: BG },
+      headerTintColor: YELLOW,
+      headerTitleStyle: { color: YELLOW, fontWeight: "900" },
       headerRight: () => (
         <Pressable onPress={openNewMessage} hitSlop={12} style={{ paddingHorizontal: 8 }}>
-          <Ionicons name="create-outline" size={26} color="#0f0f0f" />
+          <Ionicons name="create-outline" size={26} color={YELLOW} />
         </Pressable>
       )
     });
@@ -158,7 +162,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 36,
     borderRadius: 10,
-    backgroundColor: "#efefef"
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER
   },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, color: TEXT, paddingVertical: 0 },
@@ -169,19 +175,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: BORDER,
-    gap: 12
+    gap: 12,
+    backgroundColor: BG
   },
   avatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#e8f4f1",
+    backgroundColor: CARD,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: BORDER
+    borderWidth: 1,
+    borderColor: YELLOW
   },
-  avatarText: { fontSize: 22, fontWeight: "800", color: TEAL },
+  avatarText: { fontSize: 22, fontWeight: "800", color: YELLOW },
   rowBody: { flex: 1, minWidth: 0 },
   rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   peerName: { flex: 1, fontSize: 15, fontWeight: "700", color: TEXT },
