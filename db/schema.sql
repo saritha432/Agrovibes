@@ -203,12 +203,14 @@ CREATE TABLE IF NOT EXISTS home_posts (
 
 CREATE TABLE IF NOT EXISTS home_stories (
   id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES learn_users(id) ON DELETE SET NULL,
   user_name TEXT NOT NULL,
   district TEXT NOT NULL,
   avatar_label TEXT NOT NULL,
   has_new BOOLEAN NOT NULL DEFAULT true,
   viewed BOOLEAN NOT NULL DEFAULT false,
   video_url TEXT,
+  image_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

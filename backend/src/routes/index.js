@@ -2323,11 +2323,7 @@ router.get("/v1/marketplace/listings", async (_req, res) => {
     res.json({ listings: result.rows });
   } catch (error) {
     res.json({
-      listings: [
-        { id: 1, cropName: "Tomato", district: "Nashik", pricePerKg: 28, verifiedOnly: true, listingType: "produce" },
-        { id: 2, cropName: "Onion", district: "Nagpur", pricePerKg: 25, verifiedOnly: true, listingType: "produce" },
-        { id: 3, cropName: "Soybean", district: "Indore", pricePerKg: 42, verifiedOnly: false, listingType: "produce" }
-      ],
+      listings: [],
       source: "fallback",
       message: error.message
     });
@@ -2360,28 +2356,7 @@ router.get("/v1/community/questions", async (_req, res) => {
     res.json({ questions: result.rows });
   } catch (error) {
     res.json({
-      questions: [
-        {
-          id: 1,
-          userName: "Mahesh Rao",
-          district: "Nagpur",
-          textContent: "The leaves on my orange trees are turning yellow. Any remedy?",
-          upvotes: 45,
-          answersCount: 2,
-          isResolved: true,
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 2,
-          userName: "Pradeep Kumar",
-          district: "Indore",
-          textContent: "Heavy whitefly infestation on soybean. How to control organically?",
-          upvotes: 21,
-          answersCount: 3,
-          isResolved: false,
-          createdAt: new Date().toISOString()
-        }
-      ],
+      questions: [],
       source: "fallback",
       message: error.message
     });
@@ -2406,7 +2381,8 @@ router.get("/v1/home/stories", async (_req, res) => {
         has_new AS "hasNew",
         viewed,
         video_url AS "videoUrl",
-        image_url AS "imageUrl"
+        image_url AS "imageUrl",
+        created_at AS "createdAt"
       FROM home_stories
       WHERE created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
       ORDER BY created_at DESC
@@ -2414,27 +2390,10 @@ router.get("/v1/home/stories", async (_req, res) => {
       `
     );
 
-    if (result.rows.length === 0) {
-      res.json({
-        stories: [
-          { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-          { id: 2, userName: "Sowndherya", district: "Nashik", avatarLabel: "S", hasNew: true, viewed: false },
-          { id: 3, userName: "Suresh", district: "Indore", avatarLabel: "S", hasNew: true, viewed: false },
-          { id: 4, userName: "Meena", district: "Ludhiana", avatarLabel: "M", hasNew: true, viewed: false },
-          { id: 5, userName: "Kisan Hub", district: "Pune", avatarLabel: "K", hasNew: false, viewed: true },
-          { id: 6, userName: "Agri News", district: "Delhi", avatarLabel: "A", hasNew: true, viewed: false }
-        ]
-      });
-      return;
-    }
-
     res.json({ stories: result.rows });
   } catch (error) {
     res.json({
-      stories: [
-        { id: 1, userName: "You", district: "Nashik", avatarLabel: "Y", hasNew: false, viewed: true },
-        { id: 2, userName: "Sowndherya", district: "Nashik", avatarLabel: "S", hasNew: true, viewed: false }
-      ],
+      stories: [],
       source: "fallback",
       message: error.message
     });
@@ -2536,43 +2495,10 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       [viewerId]
     );
 
-    if (result.rows.length === 0) {
-      res.json({
-        posts: [
-          {
-            id: 1,
-            userName: "Sowndherya Patil",
-            location: "Nashik",
-            caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-            likesCount: 1284,
-            commentsCount: 92,
-            videoUrl: "https://example.com/video/tomato.mp4",
-            thumbnailUrl: null,
-            createdAt: new Date().toISOString(),
-            viewerHasLiked: false
-          }
-        ]
-      });
-      return;
-    }
-
     res.json({ posts: dedupeHomePostRows(result.rows) });
   } catch (error) {
     res.json({
-      posts: [
-        {
-          id: 1,
-          userName: "Sowndherya Patil",
-          location: "Nashik",
-          caption: "Fresh tomatoes available this week at Rs35/kg. Contact us now!",
-          likesCount: 1284,
-          commentsCount: 92,
-          videoUrl: "https://example.com/video/tomato.mp4",
-          thumbnailUrl: null,
-          createdAt: new Date().toISOString(),
-          viewerHasLiked: false
-        }
-      ],
+      posts: [],
       source: "fallback",
       message: error.message
     });

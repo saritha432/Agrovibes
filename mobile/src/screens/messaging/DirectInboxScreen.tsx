@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useLayoutEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -46,25 +46,6 @@ export function DirectInboxScreen() {
   const [threads, setThreads] = useState<
     Array<{ peerUserId: number; peerName: string; peerEmail?: string; lastMessage: string; lastAt: string }>
   >([]);
-
-  const openNewMessage = useCallback(async () => {
-    const peerName = "Demo Farmer";
-    const peerUserId = 1;
-    navigation.navigate("DirectChat", { peerUserId, peerName, peerKey: String(peerUserId) });
-  }, [navigation]);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerStyle: { backgroundColor: BG },
-      headerTintColor: YELLOW,
-      headerTitleStyle: { color: YELLOW, fontWeight: "900" },
-      headerRight: () => (
-        <Pressable onPress={openNewMessage} hitSlop={12} style={{ paddingHorizontal: 8 }}>
-          <Ionicons name="create-outline" size={26} color={YELLOW} />
-        </Pressable>
-      )
-    });
-  }, [navigation, openNewMessage]);
 
   const load = useCallback(async () => {
     if (!token) {
