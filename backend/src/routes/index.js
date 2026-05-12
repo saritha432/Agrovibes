@@ -812,6 +812,8 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_urls TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS user_id INT REFERENCES learn_users(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS tagged_user_ids JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_label TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_audio_url TEXT`);
   homePostsTableReady = true;
 }
 
@@ -2515,6 +2517,8 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         p.thumbnail_url AS "thumbnailUrl",
         p.created_at AS "createdAt",
         p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
         CASE
           WHEN $1::integer IS NULL THEN false
           ELSE EXISTS (
@@ -2557,7 +2561,19 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
 router.post("/v1/home/posts", async (req, res) => {
   try {
     await ensureHomePostsTable();
-    const { userId, userName, location, caption, videoUrl, imageUrl, imageUrls, thumbnailUrl, taggedUserIds } = req.body || {};
+    const {
+      userId,
+      userName,
+      location,
+      caption,
+      videoUrl,
+      imageUrl,
+      imageUrls,
+      thumbnailUrl,
+      taggedUserIds,
+      musicLabel,
+      musicAudioUrl
+    } = req.body || {};
 
     const urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
     const primaryImage = urlList[0] || (typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null);
@@ -2578,11 +2594,15 @@ router.post("/v1/home/posts", async (req, res) => {
       ? [...new Set(taggedUserIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))]
       : [];
     const taggedJson = JSON.stringify(cleanTagged);
+    const cleanMusicLabel =
+      typeof musicLabel === "string" && musicLabel.trim() ? musicLabel.trim().slice(0, 240) : null;
+    const cleanMusicAudioUrl =
+      typeof musicAudioUrl === "string" && musicAudioUrl.trim() ? musicAudioUrl.trim().slice(0, 2000) : null;
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
       RETURNING
         id,
         user_id AS "userId",
@@ -2596,6 +2616,8 @@ router.post("/v1/home/posts", async (req, res) => {
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
         tagged_user_ids AS "tagged_user_ids",
+        music_label AS "musicLabel",
+        music_audio_url AS "musicAudioUrl",
         created_at AS "createdAt"
       `,
       [
@@ -2607,7 +2629,9 @@ router.post("/v1/home/posts", async (req, res) => {
         primaryImage,
         imageUrlsJson,
         thumbnailUrl || null,
-        taggedJson
+        taggedJson,
+        cleanMusicLabel,
+        cleanMusicAudioUrl
       ]
     );
 
@@ -2641,6 +2665,8 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         p.thumbnail_url AS "thumbnailUrl",
         p.created_at AS "createdAt",
         p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1
@@ -2684,6 +2710,8 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.thumbnail_url AS "thumbnailUrl",
         p.created_at AS "createdAt",
         p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1

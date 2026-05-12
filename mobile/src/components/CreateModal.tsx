@@ -831,6 +831,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             }
           }
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
+          const reelAudio =
+            createType === "reel" && selectedAudioTrack
+              ? {
+                  musicLabel: `${selectedAudioTrack.title} · ${selectedAudioTrack.artist}`.slice(0, 240),
+                  musicAudioUrl: selectedAudioTrack.previewUrl
+                }
+              : {};
           await createHomePost({
             userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
@@ -838,7 +845,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             videoUrl: mediaUrl,
             thumbnailUrl: thumbnailUrl.trim() || derivedThumb || undefined,
-            ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
+            ...(taggedIds.length ? { taggedUserIds: taggedIds } : {}),
+            ...reelAudio
           });
         } else {
           const urls: string[] = [];
