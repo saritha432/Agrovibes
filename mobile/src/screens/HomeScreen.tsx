@@ -365,6 +365,7 @@ function ContainedExpoVideo({
   const isWeb = Platform.OS === "web";
   const isCover = fit === "cover";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const videoRef = useRef<Video | null>(null);
 
   useEffect(() => {
     setNatural(null);
@@ -390,6 +391,16 @@ function ContainedExpoVideo({
 
   const resizeMode = isCover ? ResizeMode.COVER : ResizeMode.CONTAIN;
 
+  useEffect(() => {
+    const ref = videoRef.current;
+    if (!ref) return;
+    if (shouldPlay) {
+      ref.playAsync().catch(() => {});
+    } else {
+      ref.pauseAsync().catch(() => {});
+    }
+  }, [shouldPlay, uri]);
+
   return (
     <View
       style={{
@@ -400,6 +411,9 @@ function ContainedExpoVideo({
       }}
     >
       <Video
+        ref={(r) => {
+          videoRef.current = r;
+        }}
         source={{ uri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
@@ -447,7 +461,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
-  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
+  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -460,7 +474,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const commentsFetchSeqRef = useRef(0);
 
   const viewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 65, minimumViewTime: 200 }),
+    () => ({ itemVisiblePercentThreshold: 35, minimumViewTime: 0 }),
     []
   );
   const reelViewabilityConfig = useMemo(
@@ -474,7 +488,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         .filter((v) => v.isViewable && v.item != null)
         .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
         .sort((a, b) => a.index - b.index);
-      const withVideo = ordered.find((c) => !!c.post.videoUrl);
+      // Prefer the last visible video while scrolling down so the next reel starts promptly.
+      const withVideo = [...ordered].reverse().find((c) => !!c.post.videoUrl) ?? ordered.find((c) => !!c.post.videoUrl);
       setPlayingPostId(withVideo ? withVideo.post.id : null);
     },
     []
