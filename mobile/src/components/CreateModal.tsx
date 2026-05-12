@@ -17,7 +17,7 @@ import {
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { ResizeMode, Video } from "expo-av";
+import { Audio, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
@@ -43,6 +43,7 @@ const createModes: { key: CreateType; label: string }[] = [
 type CreativeFilterId = "none" | "warm" | "cool" | "mono" | "vivid" | "sunset" | "noir";
 type CreativeFontId = "classic" | "modern" | "strong" | "neon";
 type CreativeTextColor = "white" | "black" | "yellow" | "pink" | "blue" | "green";
+type CreativeAudioTrack = { id: string; title: string; artist: string; previewUrl: string };
 
 const FILTER_OPTIONS: { id: CreativeFilterId; label: string }[] = [
   { id: "none", label: "Normal" },
@@ -55,6 +56,26 @@ const FILTER_OPTIONS: { id: CreativeFilterId; label: string }[] = [
 ];
 
 const STICKER_EMOJIS = ["🌾", "🚜", "🌿", "🍅", "☀️", "💧", "🐄", "🌻", "🌽", "🥕"];
+const AUDIO_TRACKS: CreativeAudioTrack[] = [
+  {
+    id: "sunrise",
+    title: "Sunrise Fields",
+    artist: "AgroVibes",
+    previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+  },
+  {
+    id: "tractor-beat",
+    title: "Tractor Beat",
+    artist: "AgroVibes",
+    previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
+  },
+  {
+    id: "rainfall",
+    title: "Rainfall Mood",
+    artist: "AgroVibes",
+    previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+  }
+];
 
 const TEXT_COLOR_OPTIONS: { id: CreativeTextColor; hex: string }[] = [
   { id: "white", hex: "#FFFFFF" },
@@ -163,6 +184,7 @@ type MediaCreativeProps = {
   font: CreativeFontId;
   textColor: CreativeTextColor;
   textBackground: boolean;
+  musicLabel?: string;
   shouldPlay?: boolean;
 };
 
@@ -175,7 +197,7 @@ type RecentGridAsset = {
 };
 
 const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
-  { uri, isVideo, filter, overlayText, font, textColor, textBackground, shouldPlay = true },
+  { uri, isVideo, filter, overlayText, font, textColor, textBackground, musicLabel, shouldPlay = true },
   ref
 ) {
   const tint = filterTint(filter);
@@ -211,6 +233,23 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
           {overlayText}
         </Text>
       ) : null}
+      {musicLabel ? (
+        <View
+          style={{
+            position: "absolute",
+            left: 12,
+            right: 12,
+            bottom: 14,
+            borderRadius: 14,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            alignSelf: "center"
+          }}
+        >
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700", textAlign: "center" }}>♪ {musicLabel}</Text>
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -242,14 +281,35 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
   const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
   const [showStickerPanel, setShowStickerPanel] = useState(false);
+  const [showEditPanel, setShowEditPanel] = useState(false);
+  const [showAudioPanel, setShowAudioPanel] = useState(false);
+  const [selectedAudioTrackId, setSelectedAudioTrackId] = useState<string | null>(null);
+  const [audioPreviewTrackId, setAudioPreviewTrackId] = useState<string | null>(null);
+  const [audioQuery, setAudioQuery] = useState("");
+  const [audioSearchResults, setAudioSearchResults] = useState<CreativeAudioTrack[]>([]);
+  const [audioSearchLoading, setAudioSearchLoading] = useState(false);
+  const [audioSearchError, setAudioSearchError] = useState("");
   const [recentGridAssets, setRecentGridAssets] = useState<RecentGridAsset[]>([]);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   const [entryMultiSelect, setEntryMultiSelect] = useState(false);
   /** Snapshot of preview with text+filter for single-image post/reel (captured when leaving preview). */
   const [composedImageUri, setComposedImageUri] = useState<string | null>(null);
   const previewCaptureRef = useRef<View>(null);
+  const audioPreviewRef = useRef<Audio.Sound | null>(null);
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
+
+  const openCreativePanel = React.useCallback((panel: "text" | "filter" | "overlay") => {
+    setShowEditPanel(false);
+    setShowCreativeTextPanel(false);
+    setShowCreativeFilterPanel(false);
+    setShowStickerPanel(false);
+    setTimeout(() => {
+      if (panel === "text") setShowCreativeTextPanel(true);
+      if (panel === "filter") setShowCreativeFilterPanel(true);
+      if (panel === "overlay") setShowStickerPanel(true);
+    }, 0);
+  }, []);
 
   async function validateVideoSize(uri: string, maxMb: number) {
     if (Platform.OS === "web") return;
@@ -262,11 +322,52 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
   }
 
+  const stopAudioPreview = React.useCallback(async () => {
+    const sound = audioPreviewRef.current;
+    if (!sound) return;
+    try {
+      await sound.stopAsync();
+      await sound.unloadAsync();
+    } catch {
+      // ignore preview cleanup errors
+    }
+    audioPreviewRef.current = null;
+    setAudioPreviewTrackId(null);
+  }, []);
+
+  const previewAudioTrack = React.useCallback(
+    async (track: CreativeAudioTrack) => {
+      if (audioPreviewTrackId === track.id) {
+        await stopAudioPreview();
+        return;
+      }
+      await stopAudioPreview();
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false
+        });
+        const sound = new Audio.Sound();
+        await sound.loadAsync({ uri: track.previewUrl }, { shouldPlay: true, isLooping: true });
+        audioPreviewRef.current = sound;
+        setAudioPreviewTrackId(track.id);
+      } catch {
+        setErrorText("Could not preview this audio track.");
+      }
+    },
+    [audioPreviewTrackId, stopAudioPreview]
+  );
+
   React.useEffect(() => {
     if (!visible) {
       setShowCreativeTextPanel(false);
       setShowCreativeFilterPanel(false);
       setShowStickerPanel(false);
+      setShowEditPanel(false);
+      setShowAudioPanel(false);
+      void stopAudioPreview();
       return;
     }
     setCreateType(initialType === "story" ? null : initialType);
@@ -286,10 +387,69 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowCreativeTextPanel(false);
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
+    setShowEditPanel(false);
+    setShowAudioPanel(false);
+    setSelectedAudioTrackId(null);
+    setAudioPreviewTrackId(null);
+    setAudioQuery("");
+    setAudioSearchResults([]);
+    setAudioSearchLoading(false);
+    setAudioSearchError("");
     setComposedImageUri(null);
     setEntrySelectedIds([]);
     setEntryMultiSelect(false);
-  }, [visible, initialType]);
+  }, [visible, initialType, stopAudioPreview]);
+
+  React.useEffect(() => {
+    return () => {
+      void stopAudioPreview();
+    };
+  }, [stopAudioPreview]);
+
+  React.useEffect(() => {
+    if (!showAudioPanel) return;
+    const q = audioQuery.trim();
+    if (q.length < 2) {
+      setAudioSearchLoading(false);
+      setAudioSearchError("");
+      setAudioSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      try {
+        setAudioSearchLoading(true);
+        setAudioSearchError("");
+        const response = await fetch(
+          `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&entity=song&limit=20`
+        );
+        const data = (await response.json()) as {
+          results?: Array<{ trackId?: number; trackName?: string; artistName?: string; previewUrl?: string }>;
+        };
+        const tracks: CreativeAudioTrack[] = (data.results ?? [])
+          .filter((item) => !!item.previewUrl && !!item.trackName)
+          .map((item, idx) => ({
+            id: `itunes-${item.trackId ?? `${item.trackName ?? "track"}-${idx}`}`,
+            title: item.trackName ?? "Unknown",
+            artist: item.artistName ?? "Unknown artist",
+            previewUrl: item.previewUrl ?? ""
+          }));
+        if (!cancelled) setAudioSearchResults(tracks);
+      } catch {
+        if (!cancelled) {
+          setAudioSearchResults([]);
+          setAudioSearchError("Could not fetch songs. Check internet and try again.");
+        }
+      } finally {
+        if (!cancelled) setAudioSearchLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [audioQuery, showAudioPanel]);
 
   React.useEffect(() => {
     if (!visible || createType) return;
@@ -309,6 +469,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowCreativeTextPanel(false);
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
+    setShowEditPanel(false);
+    setShowAudioPanel(false);
+    void stopAudioPreview();
     onClose();
   };
 
@@ -402,9 +565,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     <View style={[styles.igLeftTools, styles.igLeftToolsElevated]} pointerEvents="box-none">
       <Pressable
         onPress={() => {
-          setShowCreativeFilterPanel(false);
-          setShowStickerPanel(false);
-          setShowCreativeTextPanel(true);
+          openCreativePanel("text");
         }}
         hitSlop={8}
       >
@@ -412,9 +573,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
       <Pressable
         onPress={() => {
-          setShowCreativeTextPanel(false);
-          setShowStickerPanel(false);
-          setShowCreativeFilterPanel(true);
+          openCreativePanel("filter");
         }}
         hitSlop={8}
       >
@@ -422,9 +581,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
       <Pressable
         onPress={() => {
-          setShowCreativeTextPanel(false);
-          setShowCreativeFilterPanel(false);
-          setShowStickerPanel(true);
+          openCreativePanel("overlay");
         }}
         hitSlop={8}
       >
@@ -558,6 +715,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         await createHomeStory({
           userName: user?.fullName?.trim() || "Farmer",
           district: user?.locationLabel?.trim() || "Unknown",
+          ...(selectedAudioLabel ? { musicLabel: selectedAudioLabel } : {}),
           ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
         }, token ?? null);
       } else {
@@ -659,6 +817,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const canProceedFromPreview =
     (createType === "story" ? !!selectedUri : pickedPostAssets.length > 0) || createType === "live";
   const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
+  const audioTracksToShow = audioQuery.trim().length >= 2 ? audioSearchResults : AUDIO_TRACKS;
+  const selectedAudioTrack =
+    [...audioSearchResults, ...AUDIO_TRACKS].find((t) => t.id === selectedAudioTrackId) ?? null;
+  const selectedAudioLabel = selectedAudioTrack ? `${selectedAudioTrack.title} - ${selectedAudioTrack.artist}` : "";
 
   return (
     <>
@@ -756,10 +918,24 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         ) : (
         <View style={[styles.igCameraEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
           <View style={styles.igCamTopRow}>
-            <Pressable style={styles.igCamIconSq} onPress={handleClose} hitSlop={10}>
-              <Ionicons name="close" size={22} color="#fff" />
+            <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
             </Pressable>
-            <View style={styles.igCamTopCenter}>
+            <Text style={styles.igCamTopTitle}>Story</Text>
+            <Pressable
+              onPress={() => {
+                if (entryType === "live") {
+                  setCreateType("live");
+                  return;
+                }
+                openEntryGallery();
+              }}
+            >
+              <Text style={styles.igCamTopShare}>Share</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.igCamTopCenter}>
               <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
                 <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#b7ff37" />
               </Pressable>
@@ -773,39 +949,27 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <Ionicons name="timer-outline" size={18} color={entryTimerOn ? "#b7ff37" : "#e8e8e8"} />
               </Pressable>
             </View>
-            <Pressable
-              style={styles.igCamIconSq}
-              onPress={() =>
-                Alert.alert("Settings", "Live and advanced camera options are available from the mode bar.", [
-                  { text: "Go Live", onPress: () => setEntryType("live") },
-                  { text: "OK", style: "cancel" }
-                ])
-              }
-            >
-              <Ionicons name="settings-sharp" size={19} color="#b7ff37" />
-            </Pressable>
-          </View>
 
-          <Pressable style={styles.igAddAudioPill} onPress={() => Alert.alert("Audio", "Add music or audio after you capture — coming soon.")}>
+          <Pressable style={styles.igAddAudioPill} onPress={() => setShowAudioPanel(true)}>
             <Ionicons name="musical-notes" size={16} color="#b7ff37" />
-            <Text style={styles.igAddAudioText}>Add Audio</Text>
+            <Text style={styles.igAddAudioText}>{selectedAudioTrack ? selectedAudioTrack.title : "Add Audio"}</Text>
           </Pressable>
 
           <View style={styles.igCamBody}>
             <View style={styles.igCamLeftRail} pointerEvents="box-none">
-              <Pressable style={styles.igCamRailRow} onPress={() => Alert.alert("Audio", "Browse audio tracks — coming soon.")}>
+              <Pressable style={styles.igCamRailRow} onPress={() => setShowAudioPanel(true)}>
                 <View style={styles.igCamRailIcon}>
                   <Ionicons name="musical-note" size={16} color="#b7ff37" />
                 </View>
                 <Text style={styles.igCamRailLabel}>Audio</Text>
               </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => setShowCreativeFilterPanel(true)}>
+              <Pressable style={styles.igCamRailRow} onPress={() => openCreativePanel("filter")}>
                 <View style={styles.igCamRailIcon}>
                   <Ionicons name="sparkles" size={16} color="#b7ff37" />
                 </View>
                 <Text style={styles.igCamRailLabel}>Effects</Text>
               </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => setShowCreativeTextPanel(true)}>
+              <Pressable style={styles.igCamRailRow} onPress={() => openCreativePanel("text")}>
                 <View style={styles.igCamRailIcon}>
                   <Text style={styles.igCamRailAa}>Aa</Text>
                 </View>
@@ -820,12 +984,19 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             </View>
 
             <View style={styles.igCamViewfinder}>
-              <View style={styles.igCrosshair} pointerEvents="none">
-                <View style={styles.igCrosshairLineH} />
-                <View style={styles.igCrosshairLineV} />
-                <View style={styles.igCrosshairBurst}>
-                  <Ionicons name="sparkles" size={12} color="#38bdf8" />
+              {recentGridAssets[0] ? (
+                <Image source={{ uri: recentGridAssets[0].uri }} style={styles.igCamViewfinderMedia} resizeMode="cover" />
+              ) : (
+                <View style={styles.igCamViewfinderFallback}>
+                  <Ionicons name="camera-outline" size={42} color="rgba(255,255,255,0.65)" />
                 </View>
+              )}
+              <View style={styles.igCamViewfinderShade} pointerEvents="none" />
+              <View style={styles.igCamGuideFrame} pointerEvents="none">
+                <View style={styles.igCamGuideCornerTL} />
+                <View style={styles.igCamGuideCornerTR} />
+                <View style={styles.igCamGuideCornerBL} />
+                <View style={styles.igCamGuideCornerBR} />
               </View>
             </View>
           </View>
@@ -914,7 +1085,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </Text>
               </Pressable>
             </View>
-            {createType === "story" || createType === "reel" ? renderCreativeToolbar() : null}
+            {createType === "story" ? renderCreativeToolbar() : null}
             <View style={styles.igMediaPreviewWrap}>
               {createType === "story" ? (
                 selectedUri ? (
@@ -927,6 +1098,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       font={creativeFont}
                       textColor={creativeTextColor}
                       textBackground={creativeTextBackground}
+                      musicLabel={selectedAudioLabel}
                     />
                   ) : (
                     <MediaWithCreative
@@ -938,6 +1110,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       font={creativeFont}
                       textColor={creativeTextColor}
                       textBackground={creativeTextBackground}
+                      musicLabel={selectedAudioLabel}
                     />
                   )
                 ) : (
@@ -966,6 +1139,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                         font={creativeFont}
                         textColor={creativeTextColor}
                         textBackground={creativeTextBackground}
+                        musicLabel={selectedAudioLabel}
                       />
                     </View>
                   )}
@@ -980,6 +1154,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     font={creativeFont}
                     textColor={creativeTextColor}
                     textBackground={creativeTextBackground}
+                    musicLabel={selectedAudioLabel}
                   />
                 ) : (
                   <MediaWithCreative
@@ -991,6 +1166,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     font={creativeFont}
                     textColor={creativeTextColor}
                     textBackground={creativeTextBackground}
+                    musicLabel={selectedAudioLabel}
                   />
                 )
               ) : (
@@ -1004,38 +1180,30 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               <>
                 <View style={styles.igPostToolsRow}>
                   {[
-                    { id: "audio", label: "Audio", icon: "musical-note-outline" as const, onPress: () => Alert.alert("Audio", "Audio picker coming soon.") },
+                    { id: "audio", label: "Audio", icon: "musical-note-outline" as const, onPress: () => setShowAudioPanel(true) },
                     {
                       id: "text",
                       label: "Text",
                       icon: "text-outline" as const,
-                      onPress: () => {
-                        setShowCreativeFilterPanel(false);
-                        setShowStickerPanel(false);
-                        setShowCreativeTextPanel(true);
-                      }
+                      onPress: () => openCreativePanel("text")
                     },
                     {
                       id: "overlay",
                       label: "Overlay",
                       icon: "images-outline" as const,
-                      onPress: () => Alert.alert("Overlay", "Overlay editor coming soon.")
+                      onPress: () => openCreativePanel("overlay")
                     },
                     {
                       id: "filter",
                       label: "Filter",
                       icon: "color-filter-outline" as const,
-                      onPress: () => {
-                        setShowCreativeTextPanel(false);
-                        setShowStickerPanel(false);
-                        setShowCreativeFilterPanel(true);
-                      }
+                      onPress: () => openCreativePanel("filter")
                     },
                     {
                       id: "edit",
                       label: "Edit",
                       icon: "options-outline" as const,
-                      onPress: () => Alert.alert("Edit", "Advanced editing tools coming soon.")
+                      onPress: () => setShowEditPanel(true)
                     }
                   ].map((tool) => (
                     <Pressable key={tool.id} style={styles.igPostToolPill} onPress={tool.onPress}>
@@ -1044,18 +1212,20 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     </Pressable>
                   ))}
                 </View>
-                <View style={styles.igPostNextRow}>
-                  <Pressable
-                    onPress={() => {
-                      void proceedToCompose();
-                    }}
-                    disabled={!canProceedFromPreview || isSubmitting}
-                    style={[styles.igPostNextBtn, !canProceedFromPreview ? styles.igPostNextBtnDisabled : null]}
-                  >
-                    <Text style={styles.igPostNextText}>Continue</Text>
-                    <Ionicons name="arrow-forward" size={16} color="#111" />
-                  </Pressable>
-                </View>
+                {createType === "post" ? (
+                  <View style={styles.igPostNextRow}>
+                    <Pressable
+                      onPress={() => {
+                        void proceedToCompose();
+                      }}
+                      disabled={!canProceedFromPreview || isSubmitting}
+                      style={[styles.igPostNextBtn, !canProceedFromPreview ? styles.igPostNextBtnDisabled : null]}
+                    >
+                      <Text style={styles.igPostNextText}>Continue</Text>
+                      <Ionicons name="arrow-forward" size={16} color="#111" />
+                    </Pressable>
+                  </View>
+                ) : null}
               </>
             ) : null}
             {errorText ? <Text style={styles.igErrorText}>{errorText}</Text> : null}
@@ -1102,10 +1272,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       ["location-outline", "Add location"],
                       ["people-outline", "Audience"]
                     ].map(([icon, label]) => (
-                      <Pressable key={label} style={styles.igComposeOptionRow} onPress={() => Alert.alert(label, `${label} coming soon.`)}>
+                      <Pressable
+                        key={label}
+                        style={styles.igComposeOptionRow}
+                        onPress={() => (label === "Add audio" ? setShowAudioPanel(true) : Alert.alert(label, `${label} coming soon.`))}
+                      >
                         <View style={styles.igComposeOptionLeft}>
                           <Ionicons name={icon as any} size={18} color="#d8ff37" />
-                          <Text style={styles.igComposeOptionText}>{label}</Text>
+                          <Text style={styles.igComposeOptionText}>
+                            {label === "Add audio" && selectedAudioTrack ? `Audio: ${selectedAudioTrack.title}` : label}
+                          </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={17} color="#97a0a8" />
                       </Pressable>
@@ -1140,10 +1316,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       ["location-outline", "Add location"],
                       ["people-outline", "Audience"]
                     ].map(([icon, label]) => (
-                      <Pressable key={label} style={styles.igComposeOptionRow} onPress={() => Alert.alert(label, `${label} coming soon.`)}>
+                      <Pressable
+                        key={label}
+                        style={styles.igComposeOptionRow}
+                        onPress={() => (label === "Add audio" ? setShowAudioPanel(true) : Alert.alert(label, `${label} coming soon.`))}
+                      >
                         <View style={styles.igComposeOptionLeft}>
                           <Ionicons name={icon as any} size={18} color="#d8ff37" />
-                          <Text style={styles.igComposeOptionText}>{label}</Text>
+                          <Text style={styles.igComposeOptionText}>
+                            {label === "Add audio" && selectedAudioTrack ? `Audio: ${selectedAudioTrack.title}` : label}
+                          </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={17} color="#97a0a8" />
                       </Pressable>
@@ -1326,6 +1508,139 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         </Pressable>
       </Pressable>
     </Modal>
+
+    <Modal visible={showEditPanel} transparent animationType="fade" onRequestClose={() => setShowEditPanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowEditPanel(false)}>
+        <Pressable style={styles.editPanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <View style={styles.editPanelHandle} />
+          <Text style={styles.editPanelTitle}>Edit</Text>
+          <Pressable
+            style={styles.editPanelRow}
+            onPress={() => {
+              openCreativePanel("text");
+            }}
+          >
+            <View style={styles.editPanelRowLeft}>
+              <Ionicons name="text-outline" size={18} color="#111" />
+              <Text style={styles.editPanelRowText}>Text</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#7f8b88" />
+          </Pressable>
+          <Pressable
+            style={styles.editPanelRow}
+            onPress={() => {
+              openCreativePanel("filter");
+            }}
+          >
+            <View style={styles.editPanelRowLeft}>
+              <Ionicons name="color-filter-outline" size={18} color="#111" />
+              <Text style={styles.editPanelRowText}>Filter</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#7f8b88" />
+          </Pressable>
+          <Pressable
+            style={styles.editPanelRow}
+            onPress={() => {
+              openCreativePanel("overlay");
+            }}
+          >
+            <View style={styles.editPanelRowLeft}>
+              <Ionicons name="images-outline" size={18} color="#111" />
+              <Text style={styles.editPanelRowText}>Overlay</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#7f8b88" />
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal
+      visible={showAudioPanel}
+      transparent
+      animationType="fade"
+      onRequestClose={() => {
+        setShowAudioPanel(false);
+        void stopAudioPreview();
+      }}
+    >
+      <Pressable
+        style={styles.creativePanelBackdrop}
+        onPress={() => {
+          setShowAudioPanel(false);
+          void stopAudioPreview();
+        }}
+      >
+        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <Text style={styles.creativePanelTitle}>Add audio</Text>
+          <Text style={styles.creativePanelHint}>Select a music track for your story or reel.</Text>
+          <TextInput
+            value={audioQuery}
+            onChangeText={setAudioQuery}
+            style={styles.audioSearchInput}
+            placeholder="Search any song..."
+            placeholderTextColor="#8b9793"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {audioSearchLoading ? (
+            <View style={styles.audioSearchStateRow}>
+              <ActivityIndicator size="small" color="#0a9f46" />
+              <Text style={styles.audioSearchStateText}>Searching songs...</Text>
+            </View>
+          ) : null}
+          {audioSearchError ? <Text style={styles.audioSearchErrorText}>{audioSearchError}</Text> : null}
+          <View style={styles.audioTrackList}>
+            {audioTracksToShow.map((track) => {
+              const selected = selectedAudioTrackId === track.id;
+              const playing = audioPreviewTrackId === track.id;
+              return (
+                <Pressable
+                  key={track.id}
+                  style={[styles.audioTrackRow, selected ? styles.audioTrackRowSelected : null]}
+                  onPress={() => setSelectedAudioTrackId(track.id)}
+                >
+                  <View style={styles.audioTrackMeta}>
+                    <Text style={styles.audioTrackTitle}>{track.title}</Text>
+                    <Text style={styles.audioTrackArtist}>{track.artist}</Text>
+                  </View>
+                  <Pressable
+                    style={styles.audioTrackPlayBtn}
+                    onPress={() => {
+                      void previewAudioTrack(track);
+                    }}
+                  >
+                    <Ionicons name={playing ? "pause" : "play"} size={16} color="#111" />
+                  </Pressable>
+                </Pressable>
+              );
+            })}
+            {!audioSearchLoading && audioQuery.trim().length >= 2 && !audioTracksToShow.length ? (
+              <Text style={styles.audioSearchStateText}>No playable preview found for this search.</Text>
+            ) : null}
+          </View>
+          <View style={styles.audioActionsRow}>
+            <Pressable
+              style={styles.secondaryBtn}
+              onPress={() => {
+                setSelectedAudioTrackId(null);
+                void stopAudioPreview();
+              }}
+            >
+              <Text style={styles.secondaryBtnText}>Remove</Text>
+            </Pressable>
+            <Pressable
+              style={styles.audioDoneBtn}
+              onPress={() => {
+                setShowAudioPanel(false);
+                void stopAudioPreview();
+              }}
+            >
+              <Text style={styles.primaryBtnText}>Done</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
     </>
   );
 }
@@ -1445,23 +1760,25 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 2,
-    marginBottom: 10
+    paddingHorizontal: 4,
+    marginBottom: 8
   },
-  igCamIconSq: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#111418",
-    borderWidth: 1,
-    borderColor: "#303842",
+  igCamTopGhostBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0,0,0,0.28)",
     alignItems: "center",
     justifyContent: "center"
   },
+  igCamTopTitle: { color: "#f8fafc", fontSize: 16, fontWeight: "800" },
+  igCamTopShare: { color: "#d8ff37", fontSize: 14, fontWeight: "900" },
   igCamTopCenter: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 10
   },
   igCamRoundControl: {
     minWidth: 40,
@@ -1500,14 +1817,15 @@ const styles = StyleSheet.create({
   igCamBody: {
     flex: 1,
     flexDirection: "row",
-    marginTop: 4,
+    marginTop: 2,
     minHeight: 280
   },
   igCamLeftRail: {
-    width: 98,
-    justifyContent: "center",
-    gap: 10,
+    width: 80,
+    justifyContent: "flex-start",
+    gap: 16,
     paddingRight: 4,
+    paddingTop: 12,
     zIndex: 2
   },
   igCamRailRow: {
@@ -1516,12 +1834,10 @@ const styles = StyleSheet.create({
     gap: 8
   },
   igCamRailIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#111418",
-    borderWidth: 1,
-    borderColor: "#303842",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(0,0,0,0.38)",
     alignItems: "center",
     justifyContent: "center"
   },
@@ -1537,39 +1853,71 @@ const styles = StyleSheet.create({
   igCamRailAa: { color: "#d8ff37", fontSize: 14, fontWeight: "900" },
   igCamViewfinder: {
     flex: 1,
-    marginLeft: -6,
-    borderRadius: 5,
+    marginLeft: -4,
+    borderRadius: 14,
     overflow: "hidden",
-    backgroundColor: "#343434",
+    backgroundColor: "#232323",
     borderWidth: 1,
-    borderColor: "#303842"
+    borderColor: "#2f2f2f"
   },
-  igCrosshair: {
+  igCamViewfinderMedia: {
+    width: "100%",
+    height: "100%"
+  },
+  igCamViewfinderFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2e2e2e"
+  },
+  igCamViewfinderShade: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center"
+    backgroundColor: "rgba(0,0,0,0.2)"
   },
-  igCrosshairLineH: {
+  igCamGuideFrame: {
+    ...StyleSheet.absoluteFillObject,
+    margin: 22,
+    borderRadius: 12
+  },
+  igCamGuideCornerTL: {
     position: "absolute",
-    width: "72%",
-    height: 2,
-    backgroundColor: "rgba(216,255,55,0.88)",
-    borderRadius: 1
+    top: 0,
+    left: 0,
+    width: 18,
+    height: 18,
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
+    borderColor: "rgba(216,255,55,0.95)"
   },
-  igCrosshairLineV: {
+  igCamGuideCornerTR: {
     position: "absolute",
-    width: 2,
-    height: "58%",
-    backgroundColor: "rgba(216,255,55,0.88)",
-    borderRadius: 1
+    top: 0,
+    right: 0,
+    width: 18,
+    height: 18,
+    borderTopWidth: 2,
+    borderRightWidth: 2,
+    borderColor: "rgba(216,255,55,0.95)"
   },
-  igCrosshairBurst: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    alignItems: "center",
-    justifyContent: "center"
+  igCamGuideCornerBL: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    width: 18,
+    height: 18,
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
+    borderColor: "rgba(216,255,55,0.95)"
+  },
+  igCamGuideCornerBR: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 18,
+    height: 18,
+    borderBottomWidth: 2,
+    borderRightWidth: 2,
+    borderColor: "rgba(216,255,55,0.95)"
   },
   igCamErrorBanner: {
     color: "#7f1d1d",
@@ -1774,6 +2122,92 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   stickerEmoji: { fontSize: 26 },
+  editPanelCard: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 18,
+    borderWidth: 1,
+    borderColor: "#e5ece8"
+  },
+  editPanelHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#d6dedb",
+    marginBottom: 10
+  },
+  editPanelTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#1b2422",
+    marginBottom: 10
+  },
+  editPanelRow: {
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e5ece8",
+    backgroundColor: "#f8faf9",
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  editPanelRowLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  editPanelRowText: { color: "#1b2422", fontSize: 14, fontWeight: "800" },
+  audioSearchInput: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#1b2422",
+    fontSize: 14,
+    backgroundColor: "#f8faf9",
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none" } as const) : null)
+  },
+  audioSearchStateRow: { marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  audioSearchStateText: { marginTop: 10, color: "#62706c", fontSize: 12, fontWeight: "600" },
+  audioSearchErrorText: { marginTop: 8, color: "#b91c1c", fontSize: 12, fontWeight: "700" },
+  audioTrackList: { marginTop: 8, gap: 10 },
+  audioTrackRow: {
+    minHeight: 54,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    backgroundColor: "#f8faf9",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  audioTrackRowSelected: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
+  audioTrackMeta: { flex: 1, paddingRight: 10 },
+  audioTrackTitle: { color: "#1b2422", fontSize: 14, fontWeight: "800" },
+  audioTrackArtist: { color: "#62706c", fontSize: 12, marginTop: 2 },
+  audioTrackPlayBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#d8ff37",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  audioActionsRow: { flexDirection: "row", gap: 8, marginTop: 12 },
+  audioDoneBtn: {
+    flex: 1,
+    backgroundColor: "#0a9f46",
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10
+  },
   igBottomControls: {
     flexDirection: "row",
     alignItems: "center",

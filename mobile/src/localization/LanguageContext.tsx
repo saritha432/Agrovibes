@@ -33,7 +33,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     resetPassword: "Reset Password",
     onboardingBrandTitle: "CROPVIBE",
     onboardingBrandSubtitle: "Your Field, Your Future",
-    onboardingSlide3Tag: "Discover",
+    onboardingSlide3Tag: "Media",
     onboardingSlide3Title: "Share Your\nFarming Journey",
     onboardingSlide3Subtitle: "Post reels, showcase your products, and learn from other farmers across the community.",
     onboardingSlide4Tag: "Marketplace",

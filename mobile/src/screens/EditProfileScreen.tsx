@@ -45,6 +45,23 @@ export function EditProfileScreen() {
   const [isUploadingPhoto, setUploadingPhoto] = useState(false);
   const [isSaving, setSaving] = useState(false);
 
+  type payloadFallback = {
+    fullName?: string;
+    username?: string;
+    bio?: string;
+    website?: string;
+    locationLabel?: string;
+    avatarUrl?: string;
+  };
+  const buildPersistedUser = (serverUser: any, patch: payloadFallback) => {
+    const baseUser = user || ({} as any);
+    return {
+      ...baseUser,
+      ...(serverUser || {}),
+      ...patch
+    };
+  };
+
   const initials = useMemo(() => {
     return String(fullName || user?.fullName || "U")
       .split(" ")
@@ -72,7 +89,9 @@ export function EditProfileScreen() {
     try {
       if (token) {
         const updated = await updateMyProfile(token, payload);
-        await signIn({ token: updated.token || token, user: updated.user });
+        const nextToken = updated.token || token;
+        const mergedUser = buildPersistedUser(updated.user, payload);
+        await signIn({ token: nextToken, user: mergedUser });
       } else {
         await updateUser(payload);
       }
@@ -114,7 +133,16 @@ export function EditProfileScreen() {
           locationLabel: location.trim() || undefined,
           avatarUrl: uploaded.url
         });
-        await signIn({ token: updated.token || token, user: updated.user });
+        const nextToken = updated.token || token;
+        const mergedUser = buildPersistedUser(updated.user, {
+          fullName: fullName.trim() || user.fullName,
+          username: safeHandle(username) || undefined,
+          bio: bio.trim() || undefined,
+          website: website.trim() || undefined,
+          locationLabel: location.trim() || undefined,
+          avatarUrl: uploaded.url
+        });
+        await signIn({ token: nextToken, user: mergedUser });
       } else {
         await updateUser({ avatarUrl: uploaded.url });
       }

@@ -233,6 +233,7 @@ export interface HomeStory {
   viewed: boolean;
   videoUrl?: string | null;
   imageUrl?: string | null;
+  musicLabel?: string | null;
   createdAt?: string;
 }
 
@@ -379,7 +380,7 @@ export async function fetchHomeStories() {
 }
 
 export async function createHomeStory(
-  payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string },
+  payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string; musicLabel?: string },
   token?: string | null
 ) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
