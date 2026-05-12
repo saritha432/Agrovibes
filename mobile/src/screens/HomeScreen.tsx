@@ -71,6 +71,29 @@ function normalizeIdentity(value: string) {
     .trim();
 }
 
+/** Stable key for grouping stories by author (prefer server user id). */
+function storyAuthorKey(s: HomeStory): string {
+  const sid = Number(s.userId);
+  if (Number.isFinite(sid) && sid > 0) return `uid:${sid}`;
+  const n = normalizeIdentity(s.userName);
+  if (n && n !== "you") return `name:${n}`;
+  return `row:${s.id}`;
+}
+
+function storyHasMedia(s: HomeStory) {
+  return !!(s.videoUrl || s.imageUrl);
+}
+
+function storyTimeMs(s: HomeStory) {
+  const t = Date.parse(String(s.createdAt || ""));
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Oldest first (left-to-right segments like Instagram). */
+function sortStoriesForPlayback(rows: HomeStory[]) {
+  return [...rows].sort((a, b) => storyTimeMs(a) - storyTimeMs(b) || a.id - b.id);
+}
+
 function postImageGallery(post: HomePost | null | undefined): string[] {
   if (!post) return [];
   if (post.imageUrls?.length) return post.imageUrls;
@@ -85,6 +108,14 @@ type HomeCommentRow = {
   likes: number;
   createdAt?: string;
   parentCommentId?: string;
+};
+
+type OtherStoryGroup = {
+  key: string;
+  userId: number | null;
+  userName: string;
+  avatarLabel: string;
+  stories: HomeStory[];
 };
 
 const COMMENT_REPLY_INDENT = 14;
@@ -414,6 +445,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [commentInteractions, setCommentInteractions] = useState<Record<string, { liked: boolean; disliked: boolean }>>({});
   const [isStoryOpen, setStoryOpen] = useState(false);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
+  const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
   const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Reels");
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
@@ -473,30 +506,75 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     });
   }, [tabPosts]);
 
-  const playableStories = useMemo(() => stories.filter((s) => !!s.videoUrl || !!s.imageUrl), [stories]);
-  const currentUserStoryKey = useMemo(() => normalizeIdentity(user?.fullName || "You"), [user?.fullName]);
   const currentUserId = Number(user?.id);
+  const currentUserStoryKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const n = normalizeIdentity(user?.fullName || "");
+    const u = normalizeIdentity(String(user?.username || "").replace(/^@+/, ""));
+    if (n) keys.add(n);
+    if (u) keys.add(u);
+    return keys;
+  }, [user?.fullName, user?.username]);
+
   const ownStories = useMemo(
     () =>
       stories.filter((s) => {
-        const storyName = normalizeIdentity(s.userName);
         const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && sid > 0 && sid === currentUserId) return true;
-        return storyName === "you" || storyName === currentUserStoryKey;
+        if (Number.isFinite(currentUserId) && currentUserId > 0 && Number.isFinite(sid) && sid > 0) {
+          return sid === currentUserId;
+        }
+        const storyName = normalizeIdentity(s.userName);
+        if (!storyName || storyName === "you") return false;
+        return currentUserStoryKeys.has(storyName);
       }),
-    [currentUserId, currentUserStoryKey, stories]
+    [currentUserId, currentUserStoryKeys, stories]
   );
   const otherStories = useMemo(
     () =>
       stories.filter((s) => {
-        const storyName = normalizeIdentity(s.userName);
         const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && sid > 0 && sid === currentUserId) return false;
-        return storyName !== "you" && storyName !== currentUserStoryKey;
+        if (Number.isFinite(currentUserId) && currentUserId > 0 && Number.isFinite(sid) && sid > 0) {
+          return sid !== currentUserId;
+        }
+        const storyName = normalizeIdentity(s.userName);
+        if (!storyName || storyName === "you") return true;
+        return !currentUserStoryKeys.has(storyName);
       }),
-    [currentUserId, currentUserStoryKey, stories]
+    [currentUserId, currentUserStoryKeys, stories]
   );
-  const activeStory = playableStories[activeStoryIndex];
+
+  const ownPlayableStories = useMemo(
+    () => sortStoriesForPlayback(ownStories.filter((s) => storyHasMedia(s))),
+    [ownStories]
+  );
+
+  const otherStoryGroups = useMemo(() => {
+    const playable = otherStories.filter((s) => storyHasMedia(s));
+    const byKey = new Map<string, HomeStory[]>();
+    for (const s of playable) {
+      const k = storyAuthorKey(s);
+      const arr = byKey.get(k) ?? [];
+      arr.push(s);
+      byKey.set(k, arr);
+    }
+    const groups: OtherStoryGroup[] = [];
+    for (const [key, list] of byKey) {
+      const sorted = sortStoriesForPlayback(list);
+      const head = sorted[0];
+      const uid = Number(head.userId);
+      groups.push({
+        key,
+        userId: Number.isFinite(uid) && uid > 0 ? uid : null,
+        userName: head.userName,
+        avatarLabel: head.avatarLabel,
+        stories: sorted
+      });
+    }
+    groups.sort((a, b) => storyTimeMs(b.stories[b.stories.length - 1]) - storyTimeMs(a.stories[a.stories.length - 1]));
+    return groups;
+  }, [otherStories]);
+
+  const activeStory = storyPlaybackQueue[activeStoryIndex];
 
   const applyViewedStories = useCallback(
     (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
@@ -505,12 +583,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const closeStory = () => {
     setStoryOpen(false);
+    setStoryPlaybackQueue([]);
     progress.stopAnimation();
     progress.setValue(0);
   };
 
   const nextStory = () => {
-    if (activeStoryIndex >= playableStories.length - 1) {
+    if (activeStoryIndex >= storyPlaybackQueue.length - 1) {
       closeStory();
       return;
     }
@@ -527,7 +606,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   };
 
   useEffect(() => {
-    if (!isStoryOpen) return;
+    if (!isStoryOpen || storyPlaybackQueue.length === 0) return;
     progress.setValue(0);
     Animated.timing(progress, {
       toValue: 1,
@@ -537,7 +616,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       if (finished) nextStory();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStoryOpen, activeStoryIndex]);
+  }, [isStoryOpen, activeStoryIndex, storyPlaybackQueue.length]);
 
   useEffect(() => {
     let mounted = true;
@@ -1195,20 +1274,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <Pressable
             style={styles.storyItem}
             onPress={() => {
-              const ownPlayable = ownStories.find((s) => !!s.videoUrl || !!s.imageUrl);
-              if (!ownPlayable) {
+              if (!ownPlayableStories.length) {
                 onOpenCreate?.("story");
                 return;
               }
-              const idx = playableStories.findIndex((s) => s.id === ownPlayable.id);
-              setActiveStoryIndex(Math.max(idx, 0));
+              setStoryPlaybackQueue(ownPlayableStories);
+              setActiveStoryIndex(0);
               setStoryOpen(true);
             }}
           >
             <View
               style={[
                 styles.storyRing,
-                ownStories.some((s) => !s.viewed && (!!s.videoUrl || !!s.imageUrl)) ? styles.storyRingNew : styles.storyRingViewed
+                ownPlayableStories.some((s) => !s.viewed) ? styles.storyRingNew : styles.storyRingViewed
               ]}
             >
               <View style={styles.storyInner}>
@@ -1232,33 +1310,39 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </Text>
           </Pressable>
 
-          {otherStories.map((story) => (
+          {otherStoryGroups.map((group) => (
             <Pressable
-              key={story.id}
+              key={group.key}
               style={styles.storyItem}
               onPress={() => {
-                if (!story.videoUrl && !story.imageUrl) return;
+                const first = group.stories[0];
+                if (!first || (!first.videoUrl && !first.imageUrl)) return;
                 setViewedStoryIds((prev) => {
-                  if (prev.has(story.id)) return prev;
+                  if (prev.has(first.id)) return prev;
                   const next = new Set(prev);
-                  next.add(story.id);
+                  next.add(first.id);
                   return next;
                 });
-                setStories((prev) => prev.map((s) => (s.id === story.id ? { ...s, viewed: true } : s)));
-                const idx = playableStories.findIndex((s) => s.id === story.id);
-                setActiveStoryIndex(Math.max(idx, 0));
+                setStories((prev) => prev.map((s) => (s.id === first.id ? { ...s, viewed: true } : s)));
+                setStoryPlaybackQueue(group.stories);
+                setActiveStoryIndex(0);
                 setStoryOpen(true);
               }}
             >
-              <View style={[styles.storyRing, story.viewed ? styles.storyRingViewed : styles.storyRingNew]}>
+              <View
+                style={[
+                  styles.storyRing,
+                  group.stories.some((s) => !s.viewed) ? styles.storyRingNew : styles.storyRingViewed
+                ]}
+              >
                 <View style={styles.storyInner}>
                   <View style={styles.storyAvatarFill}>
-                    <Text style={styles.storyInitial}>{story.avatarLabel}</Text>
+                    <Text style={styles.storyInitial}>{group.avatarLabel}</Text>
                   </View>
                 </View>
               </View>
               <Text style={styles.storyNameDark} numberOfLines={1}>
-                {story.userName}
+                {group.userName}
               </Text>
             </Pressable>
           ))}
@@ -1274,7 +1358,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, onOpenCreate, otherStories, ownStories, playableStories, user?.fullName]
+    [activeHomeTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
@@ -1663,7 +1747,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       >
         <View style={styles.storyViewerRoot}>
           <View style={styles.storyProgressRow}>
-            {playableStories.map((s, idx) => {
+            {storyPlaybackQueue.map((s, idx) => {
               const isPast = idx < activeStoryIndex;
               const isActive = idx === activeStoryIndex;
               const width = isActive
