@@ -61,6 +61,8 @@ function reelGridStillUri(post: HomePost): string | null {
   if (th) return th;
   const img = post.imageUrl?.trim();
   if (img) return img;
+  const carousel0 = post.imageUrls?.find((u) => typeof u === "string" && u.trim())?.trim();
+  if (carousel0) return carousel0;
   return null;
 }
 
@@ -497,7 +499,10 @@ export function ProfileScreen() {
                           </Pressable>
                         );
                       }
-                      const shouldPlayTile = !activeReel && post.id === singleGridVideoPreviewId;
+                      /** On native, paused grid decoders often show black; web keeps a single live tile to reduce GPU speckle. */
+                      const shouldPlayTile =
+                        !activeReel &&
+                        (Platform.OS === "web" ? post.id === singleGridVideoPreviewId : true);
                       return (
                         <Pressable
                           key={post.id}
