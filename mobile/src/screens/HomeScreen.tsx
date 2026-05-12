@@ -20,7 +20,7 @@ import {
   type ViewStyle,
   type ViewToken
 } from "react-native";
-import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { Audio, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTopBar } from "../components/AppTopBar";
@@ -62,6 +62,12 @@ const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 const homeTopTabs = ["Feed", "Friends", "live"] as const;
 const likeActiveColor = "#C9FF35";
 const REEL_LIKE_COLOR = "#ffffff";
+/** Filled heart + count when viewer has liked (short-form style). */
+const REEL_HEART_LIKED_COLOR = "#FF4B8C";
+
+function isReelPost(post: HomePost) {
+  return /^\[REEL\]/i.test(String(post.caption || "").trim());
+}
 
 function normalizeIdentity(value: string) {
   return String(value || "")
@@ -464,29 +470,15 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
 
 type ReelSeekBarProps = {
   progressRatio: number;
-  onSeek: (ratio: number) => void;
 };
 
-function ReelSeekBar({ progressRatio, onSeek }: ReelSeekBarProps) {
-  const [trackWidth, setTrackWidth] = useState(0);
+/** Passive progress strip (no thumb, no scrub) — Instagram-style reel completion line. */
+function ReelSeekBar({ progressRatio }: ReelSeekBarProps) {
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
-  const seekAtX = (x: number) => {
-    if (trackWidth <= 0) return;
-    onSeek(clamp(x / trackWidth));
-  };
   const safeRatio = clamp(progressRatio);
   return (
-    <View
-      style={styles.reelSeekTrack}
-      onLayout={(e) => setTrackWidth(Math.max(1, Math.round(e.nativeEvent.layout.width)))}
-      onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
-      onResponderGrant={(e) => seekAtX(e.nativeEvent.locationX)}
-      onResponderMove={(e) => seekAtX(e.nativeEvent.locationX)}
-      onResponderRelease={(e) => seekAtX(e.nativeEvent.locationX)}
-    >
+    <View style={styles.reelSeekTrack} pointerEvents="none">
       <View style={[styles.reelSeekFill, { width: `${safeRatio * 100}%` }]} />
-      <View style={[styles.reelSeekThumb, { left: `${safeRatio * 100}%`, marginLeft: -6 }]} />
     </View>
   );
 }
@@ -498,9 +490,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const postsRef = useRef<HomePost[]>([]);
+  postsRef.current = posts;
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
+  const [reelViewerOpen, setReelViewerOpen] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+  const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
+  const reelBackgroundMusicRef = useRef<{ postId: number; sound: Audio.Sound } | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
   const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
   const [shareSearch, setShareSearch] = useState("");
@@ -532,6 +529,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const commentsFetchSeqRef = useRef(0);
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
   const lastActiveReelIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    void Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false
+    });
+  }, []);
 
   const viewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 35, minimumViewTime: 0 }),
@@ -578,6 +585,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   }, [activeHomeTab, posts, followingUserIds]);
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
   const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
+
+  const openPostFromFeed = useCallback((post: HomePost) => {
+    if (post.videoUrl && isReelPost(post)) {
+      const list = tabPosts.filter((p) => p.videoUrl && isReelPost(p));
+      const ordered = list.length ? list : [post];
+      const ix = ordered.findIndex((p) => p.id === post.id);
+      const initialIndex = ix >= 0 ? ix : 0;
+      setPlayingPostId(post.id);
+      setReelViewerOpen({ posts: ordered, initialIndex });
+      return;
+    }
+    if (post.videoUrl || postImageGallery(post).length) setActivePost(post);
+  }, [tabPosts]);
 
   useEffect(() => {
     if (tabPosts.length === 0) {
@@ -957,6 +977,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [reelSlotHeight, tabPosts]
   );
 
+  const onReelViewerMomentumEnd = useCallback(
+    (offsetY: number) => {
+      if (!reelViewerOpen || windowHeight <= 0) return;
+      const { posts: viewerPosts } = reelViewerOpen;
+      if (!viewerPosts.length) return;
+      const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / windowHeight)));
+      const post = viewerPosts[index];
+      if (post?.videoUrl) setPlayingPostId(post.id);
+    },
+    [reelViewerOpen, windowHeight]
+  );
+
   const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
     if (!status.isLoaded) return;
     const position = Number(status.positionMillis || 0);
@@ -968,18 +1000,45 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     });
   }, []);
 
-  const seekReelToRatio = useCallback(
-    (postId: number, ratio: number) => {
-      const clamped = Math.max(0, Math.min(1, ratio));
-      const cur = reelProgressByPostId[postId];
-      if (cur?.duration) {
-        const nextPos = Math.round(cur.duration * clamped);
-        setReelProgressByPostId((prev) => ({ ...prev, [postId]: { position: nextPos, duration: cur.duration } }));
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    let cancelled = false;
+    const run = async () => {
+      const existing = reelBackgroundMusicRef.current;
+      if (existing) {
+        try {
+          await existing.sound.unloadAsync();
+        } catch {
+          //
+        }
+        reelBackgroundMusicRef.current = null;
       }
-      void reelVideoHandlesRef.current[postId]?.seekToRatio(clamped);
-    },
-    [reelProgressByPostId]
-  );
+      if (playingPostId == null) return;
+      const post =
+        postsRef.current.find((p) => p.id === playingPostId) ?? reelViewerOpen?.posts.find((p) => p.id === playingPostId);
+      const url = post?.musicAudioUrl?.trim();
+      if (!url) return;
+      try {
+        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, isLooping: true, volume: 1 });
+        if (cancelled) {
+          await sound.unloadAsync();
+          return;
+        }
+        reelBackgroundMusicRef.current = { postId: playingPostId, sound };
+      } catch {
+        //
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+      const cur = reelBackgroundMusicRef.current;
+      if (cur) {
+        void cur.sound.unloadAsync();
+        reelBackgroundMusicRef.current = null;
+      }
+    };
+  }, [playingPostId, reelViewerOpen]);
 
   useEffect(() => {
     const prev = lastActiveReelIdRef.current;
@@ -1436,7 +1495,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             <View
               style={[
                 styles.storyRing,
-                ownPlayableStories.some((s) => !s.viewed) ? styles.storyRingNew : styles.storyRingViewed
+                ownPlayableStories.length
+                  ? ownPlayableStories.some((s) => !s.viewed)
+                    ? styles.storyRingNew
+                    : styles.storyRingViewed
+                  : isReelSurfaceTab
+                    ? styles.storyRingEmptyDark
+                    : styles.storyRingEmptyLight
               ]}
             >
               <View style={styles.storyInner}>
@@ -1520,12 +1585,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.fullName]
+    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
-      const pageH = reelSlotHeight > 0 ? reelSlotHeight : Math.max(420, windowHeight * 0.62);
+      const pageH = reelViewerOpen
+        ? windowHeight
+        : reelSlotHeight > 0
+          ? reelSlotHeight
+          : Math.max(420, windowHeight * 0.62);
       const isActive = playingPostId === post.id && !!post.videoUrl;
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
@@ -1559,17 +1628,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                     : "Follow";
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
-      const nextPost = tabPosts[index + 1];
+      const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
+      const nextPost = reelRowPosts[index + 1];
       const thumbUri = post.thumbnailUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
       const reelPoster = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || nextPost?.imageUrl || nextPost?.thumbnailUrl;
       const musicLabel =
-        post.caption?.replace(/^\[REEL\]\s*/i, "").trim().slice(0, 36) || "Original audio";
+        (post.musicLabel && post.musicLabel.trim()) ||
+        post.caption?.replace(/^\[REEL\]\s*/i, "").trim().slice(0, 36) ||
+        "Original audio";
       const reelProgress = reelProgressByPostId[post.id];
       const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
+      const hasAttachedReelMusic = !!post.musicAudioUrl?.trim();
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: windowWidth }]}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => (post.videoUrl ? setActivePost(post) : null)}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => {
+              if (!post.videoUrl || reelViewerOpen) return;
+              openPostFromFeed(post);
+            }}
+          >
             {post.videoUrl ? (
               <ContainedExpoVideo
                 ref={(r) => {
@@ -1581,7 +1660,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 containerHeight={pageH}
                 fit="cover"
                 isLooping
-                isMuted={Platform.OS === "web"}
+                isMuted={hasAttachedReelMusic || Platform.OS === "web"}
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
@@ -1592,12 +1671,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             )}
           </Pressable>
           <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.88)"]}
-            locations={[0.35, 1]}
+            colors={["transparent", "rgba(0,0,0,0.45)", "rgba(0,0,0,0.92)"]}
+            locations={[0.25, 0.55, 1]}
             style={styles.reelGradient}
             pointerEvents="none"
           />
-          <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(12, insets.bottom + 8) }]} pointerEvents="box-none">
+          <View
+            style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]}
+            pointerEvents="box-none"
+          >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
                 <View style={styles.reelAvatarSq}>
@@ -1609,10 +1691,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 {!isOwnPost ? (
                   <Pressable
                     onPress={() => toggleFollow(postUserId > 0 ? postUserId : null, post.userName, currentFollowStatus)}
-                    style={styles.reelFollowOutline}
+                    style={[
+                      styles.reelFollowBtn,
+                      followLabel === "Following"
+                        ? styles.reelFollowFollowing
+                        : followLabel === "Requested"
+                          ? styles.reelFollowRequested
+                          : styles.reelFollowDefault
+                    ]}
                     disabled={(postUserId > 0 && !!followBusyByUserId[postUserId]) || currentFollowStatus === "pending"}
                   >
-                    <Text style={styles.reelFollowOutlineText}>{followLabel}</Text>
+                    <Text
+                      style={[
+                        styles.reelFollowBtnText,
+                        followLabel === "Following"
+                          ? styles.reelFollowBtnTextLime
+                          : followLabel === "Requested"
+                            ? styles.reelFollowBtnTextMuted
+                            : styles.reelFollowBtnTextOnDark
+                      ]}
+                    >
+                      {followLabel}
+                    </Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -1622,7 +1722,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   {musicLabel}
                 </Text>
               </View>
-              <Text style={styles.reelCaptionDark} numberOfLines={2}>
+              <Text style={styles.reelCaptionDark} numberOfLines={3}>
                 {post.caption}
               </Text>
             </View>
@@ -1630,17 +1730,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Pressable style={styles.reelActionItem} onPress={() => togglePostLike(post)} disabled={!!likeBusyByPostId[post.id]}>
                 <Ionicons
                   name={post.viewerHasLiked ? "heart" : "heart-outline"}
-                  size={30}
-                  color={post.viewerHasLiked ? likeActiveColor : REEL_LIKE_COLOR}
+                  size={32}
+                  color={post.viewerHasLiked ? REEL_HEART_LIKED_COLOR : REEL_LIKE_COLOR}
                 />
-                <Text style={styles.reelActionCount}>{post.likesCount}</Text>
+                <Text style={[styles.reelActionCount, post.viewerHasLiked ? styles.reelActionCountLiked : null]}>
+                  {post.likesCount}
+                </Text>
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => openCommentsForPost(post)}>
                 <Ionicons name="chatbubble-outline" size={28} color="#fff" />
                 <Text style={styles.reelActionCount}>{shownCommentsCount}</Text>
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setSharePost(post)}>
-                <Ionicons name="paper-plane-outline" size={26} color="#fff" />
+                <Ionicons name="paper-plane-outline" size={28} color="#fff" />
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={26} color="#fff" />
@@ -1654,7 +1756,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           </View>
           {post.videoUrl ? (
             <View style={styles.reelSeekWrap} pointerEvents="box-none">
-              <ReelSeekBar progressRatio={progressRatio} onSeek={(ratio) => seekReelToRatio(post.id, ratio)} />
+              <ReelSeekBar progressRatio={progressRatio} />
             </View>
           ) : null}
         </View>
@@ -1681,13 +1783,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       tabPosts,
       toggleFollow,
       togglePostLike,
-      seekReelToRatio,
       onReelStatusUpdate,
       togglePostSave,
       user?.fullName,
       user?.id,
       windowHeight,
-      windowWidth
+      windowWidth,
+      reelViewerOpen,
+      openPostFromFeed
     ]
   );
 
@@ -1755,7 +1858,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
             {post.videoUrl ? (
-              <Pressable style={styles.videoTapArea} onPress={() => setActivePost(post)}>
+              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 <Video
                   style={styles.video}
                   source={{ uri: post.videoUrl }}
@@ -1843,6 +1946,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       likeActiveColor,
       likeBusyByPostId,
       openCommentsForPost,
+      openPostFromFeed,
       playingPostId,
       relationships,
       toggleFollow,
@@ -1876,32 +1980,36 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           {listHeader}
           <View style={styles.reelSlot} onLayout={(e) => setReelSlotHeight(Math.round(e.nativeEvent.layout.height))}>
             {reelSlotHeight > 0 ? (
-              <FlatList
-                data={tabPosts}
-                keyExtractor={(item) => String(item.id)}
-                renderItem={renderFullScreenReel}
-                pagingEnabled
-                showsVerticalScrollIndicator={false}
-                snapToInterval={reelSlotHeight}
-                snapToAlignment="start"
-                decelerationRate="fast"
-                disableIntervalMomentum
-                getItemLayout={(_data, index) => ({
-                  length: reelSlotHeight,
-                  offset: reelSlotHeight * index,
-                  index
-                })}
-                onViewableItemsChanged={onViewableItemsChangedRef.current}
-                viewabilityConfig={reelViewabilityConfig}
-                onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
-                extraData={`${playingPostId}-${reelSlotHeight}`}
-                ListEmptyComponent={
-                  <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
-                    <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
-                    <Text style={styles.emptyTabSubDark}>{emptyTabSubtitle}</Text>
-                  </View>
-                }
-              />
+              reelViewerOpen ? (
+                <View style={{ flex: 1, backgroundColor: "#000" }} />
+              ) : (
+                <FlatList
+                  data={tabPosts}
+                  keyExtractor={(item) => String(item.id)}
+                  renderItem={renderFullScreenReel}
+                  pagingEnabled
+                  showsVerticalScrollIndicator={false}
+                  snapToInterval={reelSlotHeight}
+                  snapToAlignment="start"
+                  decelerationRate="fast"
+                  disableIntervalMomentum
+                  getItemLayout={(_data, index) => ({
+                    length: reelSlotHeight,
+                    offset: reelSlotHeight * index,
+                    index
+                  })}
+                  onViewableItemsChanged={onViewableItemsChangedRef.current}
+                  viewabilityConfig={reelViewabilityConfig}
+                  onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
+                  extraData={`${playingPostId}-${reelSlotHeight}`}
+                  ListEmptyComponent={
+                    <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
+                      <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
+                      <Text style={styles.emptyTabSubDark}>{emptyTabSubtitle}</Text>
+                    </View>
+                  }
+                />
+              )
             ) : null}
           </View>
         </View>
@@ -2046,6 +2154,63 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Text style={styles.postViewerFallbackText}>No video available for this post</Text>
             </View>
           )}
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!reelViewerOpen}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setReelViewerOpen(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <View
+            style={[styles.reelViewerTopChrome, { paddingTop: Math.max(insets.top, 8) }]}
+            pointerEvents="box-none"
+          >
+            <Pressable
+              onPress={() => setReelViewerOpen(null)}
+              hitSlop={14}
+              style={styles.reelViewerBackBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="arrow-back-outline" size={28} color="#fff" />
+            </Pressable>
+          </View>
+          {reelViewerOpen && reelViewerOpen.posts.length > 0 ? (
+            <FlatList
+              ref={(r) => {
+                reelViewerListRef.current = r;
+              }}
+              data={reelViewerOpen.posts}
+              keyExtractor={(item) => `reel-viewer-${item.id}`}
+              renderItem={renderFullScreenReel}
+              pagingEnabled
+              showsVerticalScrollIndicator={false}
+              snapToInterval={windowHeight}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              disableIntervalMomentum
+              initialScrollIndex={
+                reelViewerOpen.initialIndex > 0 && reelViewerOpen.initialIndex < reelViewerOpen.posts.length
+                  ? reelViewerOpen.initialIndex
+                  : undefined
+              }
+              getItemLayout={(_data, idx) => ({
+                length: windowHeight,
+                offset: windowHeight * idx,
+                index: idx
+              })}
+              onViewableItemsChanged={onViewableItemsChangedRef.current}
+              viewabilityConfig={reelViewabilityConfig}
+              onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
+              extraData={`${playingPostId}-${windowHeight}-${reelViewerOpen.posts.length}`}
+              initialNumToRender={Math.min(7, reelViewerOpen.posts.length || 1)}
+              removeClippedSubviews={false}
+            />
+          ) : null}
         </View>
       </Modal>
 
@@ -2361,13 +2526,34 @@ const styles = StyleSheet.create({
   },
   reelSlot: { flex: 1, minHeight: 0, backgroundColor: "#000" },
   reelPage: { backgroundColor: "#000", overflow: "hidden" },
+  reelViewerTopChrome: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingLeft: 4,
+    paddingRight: 12,
+    paddingBottom: 6
+  },
+  reelViewerBackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.35)"
+  },
   reelVideoFull: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   reelGradient: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    height: 220,
+    height: 280,
     zIndex: 1
   },
   reelOverlayWrap: {
@@ -2379,47 +2565,103 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
-    paddingLeft: 12,
-    paddingRight: 8,
-    paddingTop: 24
+    paddingLeft: 14,
+    paddingRight: 10,
+    paddingTop: 28
   },
-  reelLeftMeta: { flex: 1, marginRight: 8, maxWidth: "72%" },
-  reelUserFollowRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
+  reelUserFollowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "nowrap",
+    minWidth: 0
+  },
   reelAvatarSq: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#2d2d2d",
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#2a2a2a",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)"
+    borderColor: "rgba(255,255,255,0.14)"
   },
-  reelAvatarSqText: { color: "#fff", fontWeight: "800", fontSize: 16 },
-  reelUserName: { color: "#d8ff37", fontWeight: "800", fontSize: 15, maxWidth: 140 },
-  reelFollowOutline: {
-    borderWidth: 1,
-    borderColor: "#d8ff37",
-    borderRadius: 6,
+  reelAvatarSqText: { color: "#fff", fontWeight: "800", fontSize: 17 },
+  reelUserName: {
+    flex: 1,
+    minWidth: 0,
+    color: "#C9FF35",
+    fontWeight: "800",
+    fontSize: 16,
+    letterSpacing: 0.2,
+    textShadowColor: "rgba(0,0,0,0.75)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3
+  },
+  reelFollowBtn: {
+    flexShrink: 0,
+    alignSelf: "center",
+    borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 5,
-    backgroundColor: "transparent"
+    paddingVertical: 6,
+    borderWidth: 1
   },
-  reelFollowOutlineText: { color: "#d8ff37", fontWeight: "800", fontSize: 12 },
-  reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10 },
-  reelMusicText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: "600", flex: 1 },
-  reelCaptionDark: { color: "#fff", fontSize: 13, fontWeight: "600", marginTop: 8, lineHeight: 18 },
-  reelActionsCol: { alignItems: "center", gap: 16, paddingBottom: 4 },
-  reelActionItem: { alignItems: "center", gap: 4 },
-  reelActionCount: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  reelFollowFollowing: {
+    backgroundColor: "transparent",
+    borderColor: "#C9FF35"
+  },
+  reelFollowRequested: {
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderColor: "rgba(255,255,255,0.35)"
+  },
+  reelFollowDefault: {
+    backgroundColor: "transparent",
+    borderColor: "rgba(255,255,255,0.55)"
+  },
+  reelFollowBtnText: { fontWeight: "800", fontSize: 12 },
+  reelFollowBtnTextLime: { color: "#C9FF35" },
+  reelFollowBtnTextMuted: { color: "rgba(255,255,255,0.92)" },
+  reelFollowBtnTextOnDark: { color: "#ffffff" },
+  reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
+  reelMusicText: {
+    color: "rgba(255,255,255,0.95)",
+    fontSize: 13,
+    fontWeight: "600",
+    flex: 1,
+    textShadowColor: "rgba(0,0,0,0.65)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2
+  },
+  reelCaptionDark: {
+    color: "rgba(255,255,255,0.96)",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 10,
+    lineHeight: 20,
+    textShadowColor: "rgba(0,0,0,0.75)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3
+  },
+  reelActionsCol: { alignItems: "center", gap: 18, paddingBottom: 2, width: 52 },
+  reelActionItem: { alignItems: "center", gap: 5 },
+  reelActionCount: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.55)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2
+  },
+  reelActionCountLiked: { color: REEL_HEART_LIKED_COLOR },
   reelDiscThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
+    width: 46,
+    height: 46,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#fff",
-    marginTop: 4,
-    backgroundColor: "#333"
+    borderColor: "rgba(255,255,255,0.95)",
+    marginTop: 6,
+    backgroundColor: "#2a2a2a"
   },
   reelDiscThumbPlaceholder: { alignItems: "center", justifyContent: "center" },
   reelSeekWrap: {
@@ -2433,24 +2675,14 @@ const styles = StyleSheet.create({
   },
   reelSeekTrack: {
     width: "100%",
-    height: 6,
+    height: 5,
     borderRadius: 0,
-    backgroundColor: "rgba(255,255,255,0.42)",
+    backgroundColor: "rgba(0,0,0,0.42)",
     overflow: "hidden"
   },
   reelSeekFill: {
     height: "100%",
     backgroundColor: "#C9FF35"
-  },
-  reelSeekThumb: {
-    position: "absolute",
-    top: -3,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#C9FF35",
-    borderWidth: 1,
-    borderColor: "#1a1a1a"
   },
   storyRowWrapDark: {
     backgroundColor: "#000000"
@@ -2505,6 +2737,16 @@ const styles = StyleSheet.create({
   },
   storyRingNew: { backgroundColor: "#d8ff37" },
   storyRingViewed: { backgroundColor: "#d8ff37" },
+  storyRingEmptyDark: {
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.28)"
+  },
+  storyRingEmptyLight: {
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "rgba(0,0,0,0.14)"
+  },
   storyInner: {
     width: 60,
     height: 60,

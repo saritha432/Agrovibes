@@ -250,6 +250,10 @@ export interface HomePost {
   /** Present when the post is a multi-image carousel (2+ photos). */
   imageUrls?: string[];
   thumbnailUrl?: string;
+  /** Reel: display label for the attached audio track. */
+  musicLabel?: string | null;
+  /** Reel: URL of the background track (played alongside muted video when set). */
+  musicAudioUrl?: string | null;
   /** User ids tagged in this post (Instagram-style). */
   taggedUserIds?: number[];
   createdAt: string;
@@ -549,6 +553,8 @@ export async function createHomePost(payload: {
   imageUrls?: string[];
   thumbnailUrl?: string;
   taggedUserIds?: number[];
+  musicLabel?: string;
+  musicAudioUrl?: string;
 }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
     method: "POST",
