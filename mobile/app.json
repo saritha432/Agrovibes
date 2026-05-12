@@ -4,14 +4,14 @@
     "slug": "agrovibes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/Cropvibe1.png",
+    "icon": "./assets/logo.png",
     "platforms": [
       "android",
       "ios",
       "web"
     ],
     "splash": {
-      "image": "./assets/Cropvibe1.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#1f1f1f"
     },
@@ -22,7 +22,7 @@
     "android": {
       "package": "com.agrovibes.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/Cropvibe1.png",
+        "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#1f1f1f"
       },
       "permissions": [
