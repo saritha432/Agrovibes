@@ -20,7 +20,7 @@ import {
   type ViewStyle,
   type ViewToken
 } from "react-native";
-import { ResizeMode, Video } from "expo-av";
+import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTopBar } from "../components/AppTopBar";
@@ -351,9 +351,14 @@ type ContainedExpoVideoProps = {
   isLooping?: boolean;
   isMuted?: boolean;
   useNativeControls?: boolean;
+  onStatusUpdate?: (status: AVPlaybackStatus) => void;
 };
 
-function ContainedExpoVideo({
+type ContainedExpoVideoHandle = {
+  seekToRatio: (ratio: number) => Promise<void>;
+};
+
+const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo({
   uri,
   shouldPlay,
   containerWidth,
@@ -361,12 +366,14 @@ function ContainedExpoVideo({
   fit = "contain",
   isLooping = true,
   isMuted = false,
-  useNativeControls = false
-}: ContainedExpoVideoProps) {
+  useNativeControls = false,
+  onStatusUpdate
+}: ContainedExpoVideoProps, ref) {
   const isWeb = Platform.OS === "web";
   const isCover = fit === "cover";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const videoRef = useRef<Video | null>(null);
+  const durationRef = useRef(0);
 
   useEffect(() => {
     setNatural(null);
@@ -402,6 +409,19 @@ function ContainedExpoVideo({
     }
   }, [shouldPlay, uri]);
 
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      seekToRatio: async (ratio: number) => {
+        const target = Math.max(0, Math.min(1, ratio));
+        const dur = durationRef.current;
+        if (!dur || !Number.isFinite(dur)) return;
+        await videoRef.current?.setPositionAsync(Math.round(dur * target));
+      }
+    }),
+    []
+  );
+
   return (
     <View
       style={{
@@ -423,6 +443,12 @@ function ContainedExpoVideo({
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
+        onPlaybackStatusUpdate={(status) => {
+          onStatusUpdate?.(status);
+          if (status.isLoaded) {
+            durationRef.current = Number(status.durationMillis || 0);
+          }
+        }}
         onReadyForDisplay={
           isWeb || isCover
             ? undefined
@@ -432,6 +458,35 @@ function ContainedExpoVideo({
               }
         }
       />
+    </View>
+  );
+});
+
+type ReelSeekBarProps = {
+  progressRatio: number;
+  onSeek: (ratio: number) => void;
+};
+
+function ReelSeekBar({ progressRatio, onSeek }: ReelSeekBarProps) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  const seekAtX = (x: number) => {
+    if (trackWidth <= 0) return;
+    onSeek(clamp(x / trackWidth));
+  };
+  const safeRatio = clamp(progressRatio);
+  return (
+    <View
+      style={styles.reelSeekTrack}
+      onLayout={(e) => setTrackWidth(Math.max(1, Math.round(e.nativeEvent.layout.width)))}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={(e) => seekAtX(e.nativeEvent.locationX)}
+      onResponderMove={(e) => seekAtX(e.nativeEvent.locationX)}
+      onResponderRelease={(e) => seekAtX(e.nativeEvent.locationX)}
+    >
+      <View style={[styles.reelSeekFill, { width: `${safeRatio * 100}%` }]} />
+      <View style={[styles.reelSeekThumb, { left: `${safeRatio * 100}%`, marginLeft: -6 }]} />
     </View>
   );
 }
@@ -470,10 +525,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
+  const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
   const [storyViewport, setStoryViewport] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const progress = useRef(new Animated.Value(0)).current;
   const commentsFetchSeqRef = useRef(0);
+  const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
+  const lastActiveReelIdRef = useRef<number | null>(null);
 
   const viewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 35, minimumViewTime: 0 }),
@@ -898,6 +956,45 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     },
     [reelSlotHeight, tabPosts]
   );
+
+  const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
+    if (!status.isLoaded) return;
+    const position = Number(status.positionMillis || 0);
+    const duration = Math.max(1, Number(status.durationMillis || 0));
+    setReelProgressByPostId((prev) => {
+      const cur = prev[postId];
+      if (cur && Math.abs(cur.position - position) < 120 && cur.duration === duration) return prev;
+      return { ...prev, [postId]: { position, duration } };
+    });
+  }, []);
+
+  const seekReelToRatio = useCallback(
+    (postId: number, ratio: number) => {
+      const clamped = Math.max(0, Math.min(1, ratio));
+      const cur = reelProgressByPostId[postId];
+      if (cur?.duration) {
+        const nextPos = Math.round(cur.duration * clamped);
+        setReelProgressByPostId((prev) => ({ ...prev, [postId]: { position: nextPos, duration: cur.duration } }));
+      }
+      void reelVideoHandlesRef.current[postId]?.seekToRatio(clamped);
+    },
+    [reelProgressByPostId]
+  );
+
+  useEffect(() => {
+    const prev = lastActiveReelIdRef.current;
+    const next = playingPostId;
+    if (prev != null && prev !== next) {
+      setReelProgressByPostId((state) => {
+        const cur = state[prev];
+        if (!cur) return state;
+        if (cur.position === 0) return state;
+        return { ...state, [prev]: { ...cur, position: 0 } };
+      });
+      void reelVideoHandlesRef.current[prev]?.seekToRatio(0);
+    }
+    lastActiveReelIdRef.current = next ?? null;
+  }, [playingPostId]);
 
   const buildShareLink = useCallback((post: HomePost) => {
     return `https://agrovibes.app/reel/${encodeURIComponent(String(post.id))}`;
@@ -1467,12 +1564,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const reelPoster = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || nextPost?.imageUrl || nextPost?.thumbnailUrl;
       const musicLabel =
         post.caption?.replace(/^\[REEL\]\s*/i, "").trim().slice(0, 36) || "Original audio";
+      const reelProgress = reelProgressByPostId[post.id];
+      const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: windowWidth }]}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => (post.videoUrl ? setActivePost(post) : null)}>
             {post.videoUrl ? (
               <ContainedExpoVideo
+                ref={(r) => {
+                  reelVideoHandlesRef.current[post.id] = r;
+                }}
                 uri={post.videoUrl}
                 shouldPlay={isActive}
                 containerWidth={windowWidth}
@@ -1481,6 +1583,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 isLooping
                 isMuted={Platform.OS === "web"}
                 useNativeControls={false}
+                onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
             ) : reelPoster ? (
               <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
@@ -1549,6 +1652,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               )}
             </View>
           </View>
+          {post.videoUrl ? (
+            <View style={styles.reelSeekWrap} pointerEvents="box-none">
+              <ReelSeekBar progressRatio={progressRatio} onSeek={(ratio) => seekReelToRatio(post.id, ratio)} />
+            </View>
+          ) : null}
         </View>
       );
     },
@@ -1567,11 +1675,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       onShareToWhatsApp,
       playingPostId,
       reelSlotHeight,
+      reelProgressByPostId,
       relationships,
       saveBusyByPostId,
       tabPosts,
       toggleFollow,
       togglePostLike,
+      seekReelToRatio,
+      onReelStatusUpdate,
       togglePostSave,
       user?.fullName,
       user?.id,
@@ -2311,6 +2422,36 @@ const styles = StyleSheet.create({
     backgroundColor: "#333"
   },
   reelDiscThumbPlaceholder: { alignItems: "center", justifyContent: "center" },
+  reelSeekWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 0,
+    alignItems: "stretch",
+    zIndex: 12
+  },
+  reelSeekTrack: {
+    width: "100%",
+    height: 6,
+    borderRadius: 0,
+    backgroundColor: "rgba(255,255,255,0.42)",
+    overflow: "hidden"
+  },
+  reelSeekFill: {
+    height: "100%",
+    backgroundColor: "#C9FF35"
+  },
+  reelSeekThumb: {
+    position: "absolute",
+    top: -3,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#C9FF35",
+    borderWidth: 1,
+    borderColor: "#1a1a1a"
+  },
   storyRowWrapDark: {
     backgroundColor: "#000000"
   },
