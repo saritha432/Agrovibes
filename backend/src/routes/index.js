@@ -811,6 +811,7 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ALTER COLUMN video_url DROP NOT NULL`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS image_urls TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS user_id INT REFERENCES learn_users(id) ON DELETE SET NULL`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS tagged_user_ids JSONB NOT NULL DEFAULT '[]'::jsonb`);
   homePostsTableReady = true;
 }
 
@@ -835,6 +836,23 @@ function normalizeHomePostRow(row) {
   } else if (list && list.length === 1) {
     base.imageUrl = base.imageUrl || list[0];
   }
+  // Coerce tagged_user_ids -> taggedUserIds as a clean number[]
+  const rawTagged = base.taggedUserIds ?? base.tagged_user_ids;
+  delete base.tagged_user_ids;
+  let taggedIds = [];
+  if (Array.isArray(rawTagged)) {
+    taggedIds = rawTagged.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0);
+  } else if (typeof rawTagged === "string" && rawTagged.trim()) {
+    try {
+      const parsed = JSON.parse(rawTagged);
+      if (Array.isArray(parsed)) {
+        taggedIds = parsed.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0);
+      }
+    } catch (_e) {
+      taggedIds = [];
+    }
+  }
+  base.taggedUserIds = taggedIds;
   return base;
 }
 
@@ -2496,6 +2514,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
         p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
         CASE
           WHEN $1::integer IS NULL THEN false
           ELSE EXISTS (
@@ -2538,7 +2557,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
 router.post("/v1/home/posts", async (req, res) => {
   try {
     await ensureHomePostsTable();
-    const { userId, userName, location, caption, videoUrl, imageUrl, imageUrls, thumbnailUrl } = req.body || {};
+    const { userId, userName, location, caption, videoUrl, imageUrl, imageUrls, thumbnailUrl, taggedUserIds } = req.body || {};
 
     const urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
     const primaryImage = urlList[0] || (typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null);
@@ -2555,10 +2574,15 @@ router.post("/v1/home/posts", async (req, res) => {
       return;
     }
 
+    const cleanTagged = Array.isArray(taggedUserIds)
+      ? [...new Set(taggedUserIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))]
+      : [];
+    const taggedJson = JSON.stringify(cleanTagged);
+
     const result = await query(
       `
-      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
       RETURNING
         id,
         user_id AS "userId",
@@ -2571,14 +2595,71 @@ router.post("/v1/home/posts", async (req, res) => {
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
+        tagged_user_ids AS "tagged_user_ids",
         created_at AS "createdAt"
       `,
-      [userId || null, userName, location, caption, videoUrl || null, primaryImage, imageUrlsJson, thumbnailUrl || null]
+      [
+        userId || null,
+        userName,
+        location,
+        caption,
+        videoUrl || null,
+        primaryImage,
+        imageUrlsJson,
+        thumbnailUrl || null,
+        taggedJson
+      ]
     );
 
     res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const viewerId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      WHERE p.tagged_user_ids @> to_jsonb($1::integer)
+      ORDER BY p.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId]
+    );
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load tagged posts", error: error.message });
   }
 });
 
@@ -2602,6 +2683,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
         p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1

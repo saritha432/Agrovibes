@@ -32,6 +32,7 @@ import {
   fetchHomePosts,
   fetchHomeStories,
   fetchRelationships,
+  fetchSocialNetwork,
   HomePost,
   HomeStory,
   likeHomePost,
@@ -462,6 +463,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
   const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
+  const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -506,10 +508,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const tabPosts = useMemo(() => {
     if (activeHomeTab === "Feed") return posts;
-    if (activeHomeTab === "Friends") return posts.filter((p) => !!p.videoUrl && p.likesCount > 0);
-    if (activeHomeTab === "live") return posts.filter((p) => !!p.videoUrl);
+    if (activeHomeTab === "Friends") {
+      return posts.filter((p) => {
+        if (!p.videoUrl) return false;
+        const uid = Number(p.userId);
+        return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
+      });
+    }
+    if (activeHomeTab === "live") return [];
     return posts;
-  }, [activeHomeTab, posts]);
+  }, [activeHomeTab, posts, followingUserIds]);
+  /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
   const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
   useEffect(() => {
@@ -716,6 +725,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       mounted = false;
     };
   }, [posts, token, user?.id]);
+
+  /** Populates the set of user ids the current user follows — used by the Friends tab to show reels from those users. */
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!token || !user?.id) {
+        if (mounted) setFollowingUserIds(new Set());
+        return;
+      }
+      try {
+        const network = await fetchSocialNetwork(token, Number(user.id));
+        if (!mounted) return;
+        const ids = new Set<number>();
+        for (const person of network.following || []) {
+          const raw = String(person.key || "").trim();
+          if (/^\d+$/.test(raw)) ids.add(Number(raw));
+        }
+        setFollowingUserIds(ids);
+      } catch {
+        if (!mounted) return;
+        setFollowingUserIds(new Set());
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [token, user?.id, refreshToken]);
 
   useEffect(() => {
     let mounted = true;
@@ -1707,12 +1743,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const emptyTabTitle =
     activeHomeTab === "Friends"
-      ? "No friend-liked videos yet"
+      ? "No reels from people you follow"
       : activeHomeTab === "live"
-        ? "No live reels yet"
+        ? "Live streaming is coming soon"
         : activeHomeTab === "Feed"
           ? "No feed posts yet"
           : "Nothing here yet";
+  const emptyTabSubtitle =
+    activeHomeTab === "Friends"
+      ? "Follow more creators to see their reels here."
+      : activeHomeTab === "live"
+        ? "We're building live broadcasts. Stay tuned!"
+        : "Create a reel to start filling this section.";
 
   const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
@@ -1745,7 +1787,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 ListEmptyComponent={
                   <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
                     <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
-                    <Text style={styles.emptyTabSubDark}>Create a reel to start filling this section.</Text>
+                    <Text style={styles.emptyTabSubDark}>{emptyTabSubtitle}</Text>
                   </View>
                 }
               />
@@ -1761,7 +1803,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
               <Text style={isReelSurfaceTab ? styles.emptyTabTitleDark : styles.emptyTabTitle}>{emptyTabTitle}</Text>
-              <Text style={isReelSurfaceTab ? styles.emptyTabSubDark : styles.emptyTabSub}>Create a reel to start filling this section.</Text>
+              <Text style={isReelSurfaceTab ? styles.emptyTabSubDark : styles.emptyTabSub}>{emptyTabSubtitle}</Text>
           </View>
         }
           contentContainerStyle={[styles.feedBottom, isReelSurfaceTab ? styles.feedBottomDark : null]}
