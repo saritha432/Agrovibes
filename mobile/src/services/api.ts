@@ -250,6 +250,8 @@ export interface HomePost {
   /** Present when the post is a multi-image carousel (2+ photos). */
   imageUrls?: string[];
   thumbnailUrl?: string;
+  /** User ids tagged in this post (Instagram-style). */
+  taggedUserIds?: number[];
   createdAt: string;
   /** Present when posts are loaded with an auth token (server-tracked like). */
   viewerHasLiked?: boolean;
@@ -422,6 +424,19 @@ export async function fetchSavedHomePosts(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
 }
 
+/**
+ * Posts where the current user appears in `taggedUserIds`.
+ * Returns an empty list when the server does not expose this route yet (e.g. 404 before redeploy).
+ */
+export async function fetchTaggedHomePosts(token: string) {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts/tagged`, { headers });
+  if (response.status === 404) {
+    return { posts: [] as HomePost[] };
+  }
+  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+}
+
 export async function saveHomePost(token: string, postId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/save`, token, {
     method: "POST"
@@ -533,6 +548,7 @@ export async function createHomePost(payload: {
   imageUrl?: string;
   imageUrls?: string[];
   thumbnailUrl?: string;
+  taggedUserIds?: number[];
 }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
     method: "POST",
