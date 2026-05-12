@@ -22,8 +22,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { captureRef } from "react-native-view-shot";
-import { createHomePost, createHomeStory, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
+import { createHomePost, createHomeStory, fetchSocialNetwork, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
+
+type TaggedPerson = { id: number; name: string };
 
 interface CreateModalProps {
   visible: boolean;
@@ -292,6 +294,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [recentGridAssets, setRecentGridAssets] = useState<RecentGridAsset[]>([]);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   const [entryMultiSelect, setEntryMultiSelect] = useState(false);
+  const [postLocation, setPostLocation] = useState("");
+  const [showLocationPanel, setShowLocationPanel] = useState(false);
+  const [locationDraft, setLocationDraft] = useState("");
+  const [taggedPeople, setTaggedPeople] = useState<TaggedPerson[]>([]);
+  const [showTagPeoplePanel, setShowTagPeoplePanel] = useState(false);
+  const [followableUsers, setFollowableUsers] = useState<TaggedPerson[]>([]);
+  const [followableLoading, setFollowableLoading] = useState(false);
+  const [tagSearchQuery, setTagSearchQuery] = useState("");
   /** Snapshot of preview with text+filter for single-image post/reel (captured when leaving preview). */
   const [composedImageUri, setComposedImageUri] = useState<string | null>(null);
   const previewCaptureRef = useRef<View>(null);
@@ -398,6 +408,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setComposedImageUri(null);
     setEntrySelectedIds([]);
     setEntryMultiSelect(false);
+    setPostLocation("");
+    setLocationDraft("");
+    setShowLocationPanel(false);
+    setTaggedPeople([]);
+    setShowTagPeoplePanel(false);
+    setTagSearchQuery("");
   }, [visible, initialType, stopAudioPreview]);
 
   React.useEffect(() => {
@@ -455,6 +471,41 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     if (!visible || createType) return;
     void loadRecentGridAssets();
   }, [createType, visible]);
+
+  React.useEffect(() => {
+    if (!showTagPeoplePanel) return;
+    if (!token || !user?.id) {
+      setFollowableUsers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        setFollowableLoading(true);
+        const network = await fetchSocialNetwork(token, Number(user.id));
+        const merged: TaggedPerson[] = [];
+        const seen = new Set<number>();
+        for (const list of [network.following || [], network.followers || []]) {
+          for (const person of list) {
+            const raw = String(person.key || "").trim();
+            if (!/^\d+$/.test(raw)) continue;
+            const id = Number(raw);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            merged.push({ id, name: person.name });
+          }
+        }
+        if (!cancelled) setFollowableUsers(merged);
+      } catch {
+        if (!cancelled) setFollowableUsers([]);
+      } finally {
+        if (!cancelled) setFollowableLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showTagPeoplePanel, token, user?.id]);
 
   React.useEffect(() => {
     if (!visible || createType || entryType !== "post") return;
@@ -752,6 +803,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
+        const resolvedLocation =
+          postLocation.trim() || user?.locationLabel?.trim() || "Unknown";
+        const taggedIds = taggedPeople.map((p) => p.id);
         if (videos.length === 1) {
           const v = videos[0];
           await validateVideoSize(v.uri, 80);
@@ -759,10 +813,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           await createHomePost({
             userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
-            location: user?.locationLabel?.trim() || "Unknown",
+            location: resolvedLocation,
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             videoUrl: mediaUrl,
-            thumbnailUrl: thumbnailUrl.trim() || undefined
+            thumbnailUrl: thumbnailUrl.trim() || undefined,
+            ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
           });
         } else {
           const urls: string[] = [];
@@ -781,10 +836,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           await createHomePost({
             userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
-            location: user?.locationLabel?.trim() || "Unknown",
+            location: resolvedLocation,
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             imageUrl: urls[0],
-            ...(urls.length > 1 ? { imageUrls: urls } : {})
+            ...(urls.length > 1 ? { imageUrls: urls } : {}),
+            ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
           });
         }
       }
@@ -797,6 +853,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setPickedStoryAsset(null);
       setPickedPostAssets([]);
       setComposedImageUri(null);
+      setPostLocation("");
+      setTaggedPeople([]);
       onVideoPosted?.();
       onClose();
     } catch (error) {
@@ -821,6 +879,61 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const selectedAudioTrack =
     [...audioSearchResults, ...AUDIO_TRACKS].find((t) => t.id === selectedAudioTrackId) ?? null;
   const selectedAudioLabel = selectedAudioTrack ? `${selectedAudioTrack.title} - ${selectedAudioTrack.artist}` : "";
+
+  const taggedSummary =
+    taggedPeople.length === 0
+      ? "Tag people"
+      : taggedPeople.length === 1
+      ? `Tagged: ${taggedPeople[0].name}`
+      : `Tagged: ${taggedPeople[0].name} + ${taggedPeople.length - 1} more`;
+  const locationSummary = postLocation.trim() ? `Location: ${postLocation.trim()}` : "Add location";
+
+  const composeOptions: Array<{
+    icon: keyof typeof Ionicons.glyphMap;
+    label: string;
+    displayText: string;
+    onPress: () => void;
+  }> = [
+    {
+      icon: "musical-notes-outline",
+      label: "Add audio",
+      displayText: selectedAudioTrack ? `Audio: ${selectedAudioTrack.title}` : "Add audio",
+      onPress: () => setShowAudioPanel(true)
+    },
+    {
+      icon: "person-add-outline",
+      label: "Tag people",
+      displayText: taggedSummary,
+      onPress: () => {
+        setTagSearchQuery("");
+        setShowTagPeoplePanel(true);
+      }
+    },
+    {
+      icon: "location-outline",
+      label: "Add location",
+      displayText: locationSummary,
+      onPress: () => {
+        setLocationDraft(postLocation);
+        setShowLocationPanel(true);
+      }
+    },
+    {
+      icon: "people-outline",
+      label: "Audience",
+      displayText: "Audience",
+      onPress: () => Alert.alert("Audience", "Audience controls coming soon.")
+    }
+  ];
+
+  const filteredFollowable = followableUsers.filter((p) =>
+    tagSearchQuery.trim()
+      ? p.name.toLowerCase().includes(tagSearchQuery.trim().toLowerCase())
+      : true
+  );
+  const isTagged = (id: number) => taggedPeople.some((p) => p.id === id);
+  const toggleTagPerson = (p: TaggedPerson) =>
+    setTaggedPeople((prev) => (prev.some((x) => x.id === p.id) ? prev.filter((x) => x.id !== p.id) : [...prev, p]));
 
   return (
     <>
@@ -1266,21 +1379,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 />
                 {createType === "post" || createType === "reel" ? (
                   <View style={styles.igComposeOptions}>
-                    {[
-                      ["musical-notes-outline", "Add audio"],
-                      ["person-add-outline", "Tag people"],
-                      ["location-outline", "Add location"],
-                      ["people-outline", "Audience"]
-                    ].map(([icon, label]) => (
-                      <Pressable
-                        key={label}
-                        style={styles.igComposeOptionRow}
-                        onPress={() => (label === "Add audio" ? setShowAudioPanel(true) : Alert.alert(label, `${label} coming soon.`))}
-                      >
+                    {composeOptions.map(({ icon, label, onPress, displayText }) => (
+                      <Pressable key={label} style={styles.igComposeOptionRow} onPress={onPress}>
                         <View style={styles.igComposeOptionLeft}>
                           <Ionicons name={icon as any} size={18} color="#d8ff37" />
-                          <Text style={styles.igComposeOptionText}>
-                            {label === "Add audio" && selectedAudioTrack ? `Audio: ${selectedAudioTrack.title}` : label}
+                          <Text style={styles.igComposeOptionText} numberOfLines={1}>
+                            {displayText}
                           </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={17} color="#97a0a8" />
@@ -1310,21 +1414,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </View>
                 {createType === "post" || createType === "reel" ? (
                   <View style={styles.igComposeOptionsInline}>
-                    {[
-                      ["musical-notes-outline", "Add audio"],
-                      ["person-add-outline", "Tag people"],
-                      ["location-outline", "Add location"],
-                      ["people-outline", "Audience"]
-                    ].map(([icon, label]) => (
-                      <Pressable
-                        key={label}
-                        style={styles.igComposeOptionRow}
-                        onPress={() => (label === "Add audio" ? setShowAudioPanel(true) : Alert.alert(label, `${label} coming soon.`))}
-                      >
+                    {composeOptions.map(({ icon, label, onPress, displayText }) => (
+                      <Pressable key={label} style={styles.igComposeOptionRow} onPress={onPress}>
                         <View style={styles.igComposeOptionLeft}>
                           <Ionicons name={icon as any} size={18} color="#d8ff37" />
-                          <Text style={styles.igComposeOptionText}>
-                            {label === "Add audio" && selectedAudioTrack ? `Audio: ${selectedAudioTrack.title}` : label}
+                          <Text style={styles.igComposeOptionText} numberOfLines={1}>
+                            {displayText}
                           </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={17} color="#97a0a8" />
@@ -1635,6 +1730,109 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 void stopAudioPreview();
               }}
             >
+              <Text style={styles.primaryBtnText}>Done</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={showLocationPanel} transparent animationType="fade" onRequestClose={() => setShowLocationPanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowLocationPanel(false)}>
+        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <Text style={styles.creativePanelTitle}>Add location</Text>
+          <Text style={styles.creativePanelHint}>Where was this taken?</Text>
+          <TextInput
+            value={locationDraft}
+            onChangeText={setLocationDraft}
+            placeholder="e.g. Krishna, Andhra Pradesh"
+            placeholderTextColor="#8b9793"
+            style={styles.creativePanelInput}
+            autoFocus
+            maxLength={120}
+          />
+          <View style={styles.audioActionsRow}>
+            <Pressable
+              style={styles.secondaryBtn}
+              onPress={() => {
+                setLocationDraft("");
+                setPostLocation("");
+                setShowLocationPanel(false);
+              }}
+            >
+              <Text style={styles.secondaryBtnText}>Remove</Text>
+            </Pressable>
+            <Pressable
+              style={styles.audioDoneBtn}
+              onPress={() => {
+                setPostLocation(locationDraft.trim());
+                setShowLocationPanel(false);
+              }}
+            >
+              <Text style={styles.primaryBtnText}>Save</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={showTagPeoplePanel} transparent animationType="fade" onRequestClose={() => setShowTagPeoplePanel(false)}>
+      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowTagPeoplePanel(false)}>
+        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
+          <Text style={styles.creativePanelTitle}>Tag people</Text>
+          <Text style={styles.creativePanelHint}>Select friends to tag in this post.</Text>
+          <TextInput
+            value={tagSearchQuery}
+            onChangeText={setTagSearchQuery}
+            placeholder="Search by name…"
+            placeholderTextColor="#8b9793"
+            style={styles.audioSearchInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {followableLoading ? (
+            <View style={styles.audioSearchStateRow}>
+              <ActivityIndicator size="small" color="#0a9f46" />
+              <Text style={styles.audioSearchStateText}>Loading people…</Text>
+            </View>
+          ) : null}
+          {!followableLoading && filteredFollowable.length === 0 ? (
+            <Text style={styles.audioSearchStateText}>
+              {followableUsers.length === 0
+                ? "Follow some users first to tag them in posts."
+                : "No people match your search."}
+            </Text>
+          ) : null}
+          <ScrollView style={styles.tagPeopleList} contentContainerStyle={{ gap: 8 }}>
+            {filteredFollowable.map((person) => {
+              const selected = isTagged(person.id);
+              return (
+                <Pressable
+                  key={person.id}
+                  style={[styles.audioTrackRow, selected ? styles.audioTrackRowSelected : null]}
+                  onPress={() => toggleTagPerson(person)}
+                >
+                  <View style={styles.audioTrackMeta}>
+                    <Text style={styles.audioTrackTitle}>{person.name}</Text>
+                    <Text style={styles.audioTrackArtist}>Tap to {selected ? "untag" : "tag"}</Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.audioTrackPlayBtn,
+                      { backgroundColor: selected ? "#0a9f46" : "#d8ff37" }
+                    ]}
+                  >
+                    <Ionicons name={selected ? "checkmark" : "add"} size={16} color={selected ? "#fff" : "#111"} />
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.audioActionsRow}>
+            <Pressable style={styles.secondaryBtn} onPress={() => setTaggedPeople([])}>
+              <Text style={styles.secondaryBtnText}>Clear</Text>
+            </Pressable>
+            <Pressable style={styles.audioDoneBtn} onPress={() => setShowTagPeoplePanel(false)}>
               <Text style={styles.primaryBtnText}>Done</Text>
             </Pressable>
           </View>
@@ -2176,6 +2374,7 @@ const styles = StyleSheet.create({
   audioSearchStateText: { marginTop: 10, color: "#62706c", fontSize: 12, fontWeight: "600" },
   audioSearchErrorText: { marginTop: 8, color: "#b91c1c", fontSize: 12, fontWeight: "700" },
   audioTrackList: { marginTop: 8, gap: 10 },
+  tagPeopleList: { marginTop: 10, maxHeight: 260 },
   audioTrackRow: {
     minHeight: 54,
     borderRadius: 12,

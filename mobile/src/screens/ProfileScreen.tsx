@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,7 +12,8 @@ import {
   View,
   useWindowDimensions
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { ResizeMode, Video } from "expo-av";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -19,6 +21,7 @@ import {
   fetchHomePosts,
   fetchProfileStats,
   fetchSocialNetwork,
+  fetchTaggedHomePosts,
   HomePost,
   removeFollower,
   sendFollowRequest,
@@ -52,14 +55,24 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
+/** Prefer a still image in the profile reel grid — many tiny playing videos cause GPU decode noise ("dots") especially on web. */
+function reelGridStillUri(post: HomePost): string | null {
+  const th = post.thumbnailUrl?.trim();
+  if (th) return th;
+  const img = post.imageUrl?.trim();
+  if (img) return img;
+  return null;
+}
+
 type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  const { width } = useWindowDimensions();
+  const { width, height: windowHeight } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
+  const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [followersList, setFollowersList] = useState<Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>(
@@ -68,12 +81,17 @@ export function ProfileScreen() {
   const [followingList, setFollowingList] = useState<Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>>([]);
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
-  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Posts");
+  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Reels");
+  const [activeReel, setActiveReel] = useState<HomePost | null>(null);
+  const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
   const [isFollowing, setFollowing] = useState(false);
   const isMountedRef = useRef(true);
 
   const gridGap = 6;
   const gridTileSize = (width - 24 - gridGap * 2) / 3;
+  const reelTileHeight = Math.round(gridTileSize * (16 / 9));
+  const isReelTab =
+    activeGalleryTab === "Reels" || activeGalleryTab === "Saved" || activeGalleryTab === "Tagged";
 
   const normalizeName = (v: string) =>
     String(v || "")
@@ -89,28 +107,34 @@ export function ProfileScreen() {
     return /^\d+$/.test(raw) ? Number(raw) : null;
   };
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const [homeData, savedData] = await Promise.all([
-          fetchHomePosts(token || null),
-          token ? fetchSavedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] })
-        ]);
-        if (!mounted) return;
-        setAllPosts(homeData.posts);
-        setSavedPosts(savedData.posts);
-      } catch {
-        if (!mounted) return;
-        setAllPosts([]);
-        setSavedPosts([]);
-      }
-    };
-    void load();
-    return () => {
-      mounted = false;
-    };
+  const loadPosts = useCallback(async () => {
+    try {
+      const [homeData, savedData, taggedData] = await Promise.all([
+        fetchHomePosts(token || null),
+        token ? fetchSavedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] }),
+        token ? fetchTaggedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] })
+      ]);
+      if (!isMountedRef.current) return;
+      setAllPosts(homeData.posts);
+      setSavedPosts(savedData.posts);
+      setTaggedPosts(taggedData.posts);
+    } catch {
+      if (!isMountedRef.current) return;
+      setAllPosts([]);
+      setSavedPosts([]);
+      setTaggedPosts([]);
+    }
   }, [token]);
+
+  useEffect(() => {
+    void loadPosts();
+  }, [loadPosts]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadPosts();
+    }, [loadPosts])
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -181,20 +205,33 @@ export function ProfileScreen() {
 
   const userPosts = useMemo(() => {
     if (!user) return [];
+    const myId = Number(user.id);
     const nameA = normalizeName(user.fullName || "");
     const nameB = normalizeName(String(user.email || "").split("@")[0] || "");
+    const nameC = normalizeName(user.username || "");
     return allPosts.filter((p) => {
+      if (Number.isFinite(myId) && myId > 0 && Number(p.userId) === myId) return true;
       const postName = normalizeName(p.userName || "");
-      return postName === nameA || postName === nameB;
+      return postName === nameA || postName === nameB || postName === nameC;
     });
   }, [allPosts, user]);
 
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
     if (activeGalleryTab === "Saved") return savedPosts.filter((p) => !!p.videoUrl);
-    if (activeGalleryTab === "Tagged") return [];
+    if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => !!p.videoUrl);
     return userPosts.filter((p) => !p.videoUrl);
-  }, [activeGalleryTab, savedPosts, userPosts]);
+  }, [activeGalleryTab, savedPosts, taggedPosts, userPosts]);
+
+  /** At most one live decode in the reel grid when a post has no still — avoids parallel tiny decoders (speckled "dots"). */
+  const singleGridVideoPreviewId = useMemo(() => {
+    if (activeGalleryTab !== "Reels" && activeGalleryTab !== "Saved" && activeGalleryTab !== "Tagged") return null;
+    for (const p of visiblePosts) {
+      if (!p.videoUrl || reelGridStillUri(p)) continue;
+      return p.id;
+    }
+    return null;
+  }, [activeGalleryTab, visiblePosts]);
 
   const profileModel = useMemo(() => {
     if (!user) return null;
@@ -444,30 +481,80 @@ export function ProfileScreen() {
               </View>
 
               <View style={[styles.grid, { gap: gridGap }]}>
-                {activeGalleryTab === "Tagged" ? (
-                  <View style={styles.emptyWrap}>
-                    <Ionicons name="pricetag-outline" size={22} color={MUTED} />
-                    <Text style={styles.emptyText}>No tagged posts yet.</Text>
-                  </View>
-                ) : visiblePosts.length ? (
-                  visiblePosts.map((post) => (
-                    <View key={post.id} style={[styles.gridTile, { width: gridTileSize, height: gridTileSize }]}>
-                      {post.imageUrl ? (
-                        <Image source={{ uri: post.imageUrl }} style={styles.gridImage} resizeMode="cover" />
-                      ) : post.videoUrl ? (
-                        <View style={[styles.gridPlaceholder, styles.gridVideoBg]}>
-                          <Ionicons name="play-circle" size={28} color={LIME} />
-                        </View>
-                      ) : (
-                        <View style={[styles.gridPlaceholder, styles.gridPastelA]}>
-                          <Ionicons name="leaf-outline" size={28} color={LIME} />
-                        </View>
-                      )}
-                    </View>
-                  ))
+                {visiblePosts.length ? (
+                  visiblePosts.map((post) => {
+                    const tileHeight = isReelTab ? reelTileHeight : gridTileSize;
+                    const tileStyle = [styles.gridTile, { width: gridTileSize, height: tileHeight }];
+                    if (post.videoUrl) {
+                      const stillUri = reelGridStillUri(post);
+                      if (stillUri) {
+                        return (
+                          <Pressable key={post.id} style={tileStyle} onPress={() => setActiveReel(post)}>
+                            <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
+                            <View style={styles.gridPlayBadge} pointerEvents="none">
+                              <Ionicons name="play" size={12} color="#111" />
+                            </View>
+                          </Pressable>
+                        );
+                      }
+                      const shouldPlayTile = !activeReel && post.id === singleGridVideoPreviewId;
+                      return (
+                        <Pressable
+                          key={post.id}
+                          style={tileStyle}
+                          onPress={() => setActiveReel(post)}
+                        >
+                          <Video
+                            style={styles.gridImage}
+                            source={{ uri: post.videoUrl }}
+                            resizeMode={ResizeMode.COVER}
+                            shouldPlay={shouldPlayTile}
+                            isLooping
+                            isMuted
+                            useNativeControls={false}
+                            progressUpdateIntervalMillis={2000}
+                            {...(Platform.OS === "web"
+                              ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any)
+                              : {})}
+                          />
+                          <View style={styles.gridPlayBadge} pointerEvents="none">
+                            <Ionicons name="play" size={12} color="#111" />
+                          </View>
+                        </Pressable>
+                      );
+                    }
+                    const galleryFirst = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls[0] : null;
+                    const cover = post.imageUrl || galleryFirst || null;
+                    const canOpen = !!cover;
+                    return (
+                      <Pressable
+                        key={post.id}
+                        style={tileStyle}
+                        onPress={() => (canOpen ? setActiveImagePost(post) : undefined)}
+                      >
+                        {cover ? (
+                          <Image source={{ uri: cover }} style={styles.gridImage} resizeMode="cover" />
+                        ) : (
+                          <View style={[styles.gridPlaceholder, styles.gridPastelA]}>
+                            <Ionicons name="leaf-outline" size={28} color={LIME} />
+                          </View>
+                        )}
+                        {post.imageUrls && post.imageUrls.length > 1 ? (
+                          <View style={styles.gridGalleryBadge} pointerEvents="none">
+                            <Ionicons name="copy" size={12} color="#fff" />
+                          </View>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })
                 ) : (
                   <View style={styles.placeholderGridRow}>
-                    {activeGalleryTab === "Saved" ? (
+                    {activeGalleryTab === "Tagged" ? (
+                      <View style={styles.emptyWrap}>
+                        <Ionicons name="pricetag-outline" size={22} color={MUTED} />
+                        <Text style={styles.emptyText}>No tagged posts yet.</Text>
+                      </View>
+                    ) : activeGalleryTab === "Saved" ? (
                       <View style={styles.emptyWrap}>
                         <Ionicons name="bookmark-outline" size={22} color={MUTED} />
                         <Text style={styles.emptyText}>Saved reels will appear here.</Text>
@@ -492,6 +579,105 @@ export function ProfileScreen() {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={!!activeImagePost}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveImagePost(null)}
+        statusBarTranslucent
+      >
+        <View style={[styles.imageViewerRoot, { width, height: windowHeight }]}>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            style={{ width, height: windowHeight }}
+          >
+            {(() => {
+              const post = activeImagePost;
+              if (!post) return null;
+              const list: string[] = post.imageUrls && post.imageUrls.length > 0
+                ? post.imageUrls
+                : post.imageUrl
+                ? [post.imageUrl]
+                : [];
+              return list.map((uri, idx) => (
+                <View key={`${post.id}-${idx}`} style={{ width, height: windowHeight, alignItems: "center", justifyContent: "center" }}>
+                  <Image
+                    source={{ uri }}
+                    style={{ width, height: windowHeight }}
+                    resizeMode="contain"
+                  />
+                </View>
+              ));
+            })()}
+          </ScrollView>
+          <Pressable
+            style={styles.reelCloseBtn}
+            hitSlop={12}
+            onPress={() => setActiveImagePost(null)}
+            accessibilityLabel="Close image"
+          >
+            <Ionicons name="close" size={26} color="#fff" />
+          </Pressable>
+          {activeImagePost ? (
+            <View style={styles.reelCaptionWrap} pointerEvents="none">
+              <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
+                {activeImagePost.userName}
+              </Text>
+              {activeImagePost.caption ? (
+                <Text style={styles.reelCaptionText} numberOfLines={3}>
+                  {activeImagePost.caption}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!activeReel}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveReel(null)}
+        statusBarTranslucent
+      >
+        <View style={[styles.reelPlayerRoot, { width, height: windowHeight }]}>
+          {activeReel?.videoUrl ? (
+            <Video
+              style={{ width, height: windowHeight, backgroundColor: "#000" }}
+              source={{ uri: activeReel.videoUrl }}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay
+              isLooping
+              isMuted={false}
+              useNativeControls
+              {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
+            />
+          ) : null}
+          <Pressable
+            style={styles.reelCloseBtn}
+            hitSlop={12}
+            onPress={() => setActiveReel(null)}
+            accessibilityLabel="Close reel"
+          >
+            <Ionicons name="close" size={26} color="#fff" />
+          </Pressable>
+          {activeReel ? (
+            <View style={styles.reelCaptionWrap} pointerEvents="none">
+              <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
+                {activeReel.userName}
+              </Text>
+              {activeReel.caption ? (
+                <Text style={styles.reelCaptionText} numberOfLines={2}>
+                  {activeReel.caption}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </Modal>
 
       <Modal
         visible={!!activeListType}
@@ -753,8 +939,23 @@ const styles = StyleSheet.create({
   iconTabSpacer: { marginTop: 6, height: 2, width: 28 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
-  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#1d2126", borderWidth: 1, borderColor: "#303842" },
+  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#1d2126", borderWidth: 1, borderColor: "#303842", position: "relative" },
   gridImage: { width: "100%", height: "100%" },
+  gridPlayBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: LIME,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 }
+  },
   gridPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   gridVideoBg: { backgroundColor: "#1d2126" },
   gridPastelA: { backgroundColor: "#1d2126" },
@@ -769,6 +970,45 @@ const styles = StyleSheet.create({
     gap: 8
   },
   emptyText: { color: MUTED, fontWeight: "700", textAlign: "center" },
+
+  reelPlayerRoot: { flex: 1, backgroundColor: "#000" },
+  imageViewerRoot: { flex: 1, backgroundColor: "#000" },
+  gridGalleryBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  reelCloseBtn: {
+    position: "absolute",
+    top: 44,
+    right: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    zIndex: 10
+  },
+  reelCaptionWrap: {
+    position: "absolute",
+    left: 16,
+    right: 64,
+    bottom: 28,
+    gap: 4
+  },
+  reelCaptionAuthor: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  reelCaptionText: { color: "#e5e7eb", fontWeight: "600", fontSize: 13 },
 
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheet: {
