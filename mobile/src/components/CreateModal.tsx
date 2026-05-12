@@ -21,8 +21,16 @@ import { Audio, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
+import * as VideoThumbnails from "expo-video-thumbnails";
 import { captureRef } from "react-native-view-shot";
-import { createHomePost, createHomeStory, fetchSocialNetwork, shouldUseImageUpload, uploadPickedMedia } from "../services/api";
+import {
+  createHomePost,
+  createHomeStory,
+  fetchSocialNetwork,
+  shouldUseImageUpload,
+  uploadImageFile,
+  uploadPickedMedia
+} from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 
 type TaggedPerson = { id: number; name: string };
@@ -809,6 +817,19 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         if (videos.length === 1) {
           const v = videos[0];
           await validateVideoSize(v.uri, 80);
+          let derivedThumb: string | undefined;
+          if (!thumbnailUrl.trim()) {
+            try {
+              const thumb = await VideoThumbnails.getThumbnailAsync(v.uri, {
+                time: 400,
+                quality: 0.72
+              });
+              const { url } = await uploadImageFile(thumb.uri);
+              derivedThumb = url;
+            } catch {
+              /* grid can fall back to muted video preview on device */
+            }
+          }
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           await createHomePost({
             userId: user?.id,
@@ -816,7 +837,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             location: resolvedLocation,
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             videoUrl: mediaUrl,
-            thumbnailUrl: thumbnailUrl.trim() || undefined,
+            thumbnailUrl: thumbnailUrl.trim() || derivedThumb || undefined,
             ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
           });
         } else {
