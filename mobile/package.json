@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "expo start --port 8082",
+    "start:tunnel": "expo start --tunnel --port 8082",
+    "start:lan": "expo start --lan --port 8082",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web --port 8082",
@@ -16,7 +18,11 @@
     "vercel-build": "node ./node_modules/expo/bin/cli export --platform web",
     "build:android:preview": "eas build --platform android --profile preview",
     "build:android:prod": "eas build --platform android --profile production",
-    "build:ios:prod": "eas build --platform ios --profile production"
+    "build:ios:preview": "eas build --platform ios --profile preview",
+    "build:ios:prod": "eas build --platform ios --profile production",
+    "build:all:preview": "eas build --platform all --profile preview",
+    "build:all:prod": "eas build --platform all --profile production",
+    "doctor": "npx expo-doctor"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
