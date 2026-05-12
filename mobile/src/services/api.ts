@@ -1,5 +1,8 @@
 import { Platform } from "react-native";
 
+/** Production API URL used whenever the build/runtime can't determine a local backend. */
+const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
+
 function resolveApiBaseUrl() {
   const envUrl = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_API_BASE_URL;
   if (envUrl && envUrl.trim().length > 0) {
@@ -9,15 +12,20 @@ function resolveApiBaseUrl() {
   const webLocation = (globalThis as { location?: { hostname?: string } }).location;
   if (Platform.OS === "web" && webLocation?.hostname) {
     const host = webLocation.hostname;
-    if (host !== "localhost" && host !== "127.0.0.1") {
-      return "https://agrovibes.onrender.com/api";
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://localhost:5000/api";
     }
+    return PRODUCTION_API_BASE_URL;
   }
 
-  if (Platform.OS === "android") {
-    return "http://10.0.2.2:5000/api";
+  // Native binaries (APK / IPA) — when no env var is baked in, always hit production.
+  // We used to fall back to http://10.0.2.2:5000 here, but that's emulator-only and
+  // causes "Network Error" on real devices, so production is the safe default.
+  if (__DEV__) {
+    if (Platform.OS === "android") return "http://10.0.2.2:5000/api";
+    return "http://localhost:5000/api";
   }
-  return "http://localhost:5000/api";
+  return PRODUCTION_API_BASE_URL;
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();

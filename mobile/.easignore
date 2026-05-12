@@ -1,0 +1,48 @@
+# Files NOT uploaded to EAS Build.
+# EAS reinstalls dependencies on the cloud, so we never need to upload them.
+
+# Dependencies / lockfiles handled remotely
+node_modules/
+**/node_modules/
+
+# Local caches & build artifacts
+.expo/
+.expo-shared/
+dist/
+web-build/
+build/
+coverage/
+.cache/
+.turbo/
+.parcel-cache/
+.next/
+
+# Native scaffolds re-created by EAS prebuild
+android/
+ios/
+
+# Backend & non-mobile siblings (in case git workflow climbs up)
+../backend/
+../db/
+../.git/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+*.tgz
+*.zip
+*.7z
+
+# Source maps and bundles you do not need on the build machine
+*.map
+
+# Local secrets (envs uploaded via EAS environment variables instead)
+.env
+.env.local
+.env.*.local
+
+# Generated assets caches
+.expo/web/cache/
