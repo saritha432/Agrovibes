@@ -710,19 +710,35 @@ export function ProfileScreen() {
             onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
             viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
             onScrollToIndexFailed={() => {}}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => {
+              const activeIx = activeReelIndex ?? 0;
+              const isActive = playingReelId != null ? String(playingReelId) === String(item.id) : false;
+              const isNearActive = Math.abs(index - activeIx) <= 1;
+              return (
               <View style={{ width, height: windowHeight }}>
-                {item.videoUrl ? (
+                {item.videoUrl && (isActive || isNearActive) ? (
                   <Video
                     style={{ width, height: windowHeight, backgroundColor: "#000" }}
                     source={{ uri: item.videoUrl }}
                     resizeMode={ResizeMode.COVER}
-                    shouldPlay={playingReelId != null ? String(playingReelId) === String(item.id) : false}
+                    shouldPlay={isActive}
                     isLooping
-                    isMuted={false}
+                    isMuted={!isActive}
                     useNativeControls={false}
+                    usePoster={!!(item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0])}
+                    posterSource={
+                      item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0]
+                        ? { uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] }
+                        : undefined
+                    }
                     progressUpdateIntervalMillis={1000}
                     {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
+                  />
+                ) : item.videoUrl ? (
+                  <Image
+                    style={{ width, height: windowHeight, backgroundColor: "#000" }}
+                    source={{ uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] || "" }}
+                    resizeMode="cover"
                   />
                 ) : null}
                 <View style={styles.reelCaptionWrap} pointerEvents="none">
@@ -736,7 +752,8 @@ export function ProfileScreen() {
                   ) : null}
                 </View>
               </View>
-            )}
+            );
+            }}
           />
           <Pressable
             style={styles.reelCloseBtn}

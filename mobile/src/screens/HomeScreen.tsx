@@ -348,12 +348,14 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
 type ContainedExpoVideoProps = {
   uri: string;
   shouldPlay: boolean;
+  preloadOnly?: boolean;
   containerWidth: number;
   containerHeight: number;
   /** `cover` = full bleed (no side bars; may crop). `contain` = full frame visible (letterboxing). */
   fit?: "contain" | "cover";
   isLooping?: boolean;
   isMuted?: boolean;
+  posterUri?: string;
   useNativeControls?: boolean;
   onStatusUpdate?: (status: AVPlaybackStatus) => void;
 };
@@ -365,11 +367,13 @@ type ContainedExpoVideoHandle = {
 const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo({
   uri,
   shouldPlay,
+  preloadOnly = false,
   containerWidth,
   containerHeight,
   fit = "contain",
   isLooping = true,
   isMuted = false,
+  posterUri,
   useNativeControls = false,
   onStatusUpdate
 }: ContainedExpoVideoProps, ref) {
@@ -442,8 +446,10 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         source={{ uri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
-        isMuted={isMuted}
+        isMuted={isMuted || preloadOnly}
         useNativeControls={useNativeControls}
+        usePoster={!!posterUri}
+        posterSource={posterUri ? { uri: posterUri } : undefined}
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
@@ -1598,6 +1604,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
+      const activeIndex = reelRowPosts.findIndex((p) => p.id === playingPostId);
+      const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const nextPost = reelRowPosts[index + 1];
       const thumbUri = post.thumbnailUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
       const reelPoster = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || nextPost?.imageUrl || nextPost?.thumbnailUrl;
@@ -1618,18 +1626,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               openPostFromFeed(post);
             }}
           >
-            {post.videoUrl ? (
+            {post.videoUrl && (isActive || isNearActive) ? (
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
                 shouldPlay={isActive}
+                preloadOnly={!isActive}
                 containerWidth={windowWidth}
                 containerHeight={pageH}
                 fit="cover"
                 isLooping
                 isMuted={hasAttachedReelMusic || Platform.OS === "web"}
+                posterUri={reelPoster || undefined}
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
