@@ -1000,42 +1000,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   useEffect(() => {
     if (Platform.OS === "web") return;
-    let cancelled = false;
-    const run = async () => {
-      const existing = reelBackgroundMusicRef.current;
-      if (existing) {
-        try {
-          await existing.sound.unloadAsync();
-        } catch {
-          //
-        }
-        reelBackgroundMusicRef.current = null;
-      }
-      if (playingPostId == null) return;
-      const post =
-        postsRef.current.find((p) => p.id === playingPostId) ?? reelViewerOpen?.posts.find((p) => p.id === playingPostId);
-      const url = post?.musicAudioUrl?.trim();
-      if (!url) return;
-      try {
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, isLooping: true, volume: 1 });
-        if (cancelled) {
-          await sound.unloadAsync();
-          return;
-        }
-        reelBackgroundMusicRef.current = { postId: playingPostId, sound };
-      } catch {
-        //
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-      const cur = reelBackgroundMusicRef.current;
-      if (cur) {
-        void cur.sound.unloadAsync();
-        reelBackgroundMusicRef.current = null;
-      }
-    };
+    // Keep only the reel's video audio on native devices.
+    // A second network audio stream (musicAudioUrl) can cause stutter on real phones.
+    const cur = reelBackgroundMusicRef.current;
+    if (cur) {
+      void cur.sound.unloadAsync();
+      reelBackgroundMusicRef.current = null;
+    }
   }, [playingPostId, reelViewerOpen]);
 
   useEffect(() => {
@@ -1857,15 +1828,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
-                <Video
-                  style={styles.video}
-                  source={{ uri: post.videoUrl }}
-                  resizeMode={ResizeMode.COVER}
-                  shouldPlay={isActive}
-                  isLooping
-                  isMuted
-                  useNativeControls={false}
-                />
+                {isActive ? (
+                  <Video
+                    style={styles.video}
+                    source={{ uri: post.videoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay
+                    isLooping
+                    isMuted
+                    useNativeControls={false}
+                  />
+                ) : (
+                  <>
+                    <Image
+                      style={styles.video}
+                      source={{ uri: post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || "" }}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
+                      <Ionicons name="play" size={20} color="#fff" />
+                    </View>
+                  </>
+                )}
               </Pressable>
             ) : isCarousel ? (
               <FlatList
@@ -1985,6 +1969,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   data={tabPosts}
                   keyExtractor={(item) => String(item.id)}
                   renderItem={renderFullScreenReel}
+                  removeClippedSubviews
+                  initialNumToRender={2}
+                  maxToRenderPerBatch={2}
+                  windowSize={3}
                   pagingEnabled
                   showsVerticalScrollIndicator={false}
                   snapToInterval={reelSlotHeight}
@@ -2016,6 +2004,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         data={tabPosts}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderPost}
+        removeClippedSubviews
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={5}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
@@ -2850,6 +2842,17 @@ const styles = StyleSheet.create({
   videoTapArea: {
     width: "100%",
     height: "100%"
+  },
+  videoPreviewPlayBadge: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
   },
   postActionsRow: {
     marginTop: 10,

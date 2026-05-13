@@ -113,7 +113,7 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 6 },
   logoTab: {
-    width: 42,
+    width: 54,
     height: 32,
     borderRadius: 2,
     backgroundColor: "#2a2b2c",
@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 4
   },
-  logoImage: { width: 36, height: 14 },
+  logoImage: { width: 48, height: 16 },
   tabItem: {
     flex: 1,
     alignItems: "center",

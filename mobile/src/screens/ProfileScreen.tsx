@@ -14,7 +14,7 @@ import {
   ViewToken,
   useWindowDimensions
 } from "react-native";
-import { ResizeMode, Video } from "expo-av";
+import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
@@ -238,6 +238,26 @@ export function ProfileScreen() {
     return null;
   }, [activeGalleryTab, visiblePosts]);
   const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    void Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false
+    });
+  }, []);
+
+  useEffect(() => {
+    if (activeReelIndex == null) return;
+    const current = visiblePosts[activeReelIndex];
+    if (current?.id != null) setPlayingReelId(Number(current.id));
+    const t = setTimeout(() => {
+      reelViewerListRef.current?.scrollToIndex({ index: Math.max(0, activeReelIndex), animated: false });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [activeReelIndex, visiblePosts]);
 
   const onReelViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const ordered = viewableItems
@@ -514,7 +534,7 @@ export function ProfileScreen() {
                             onPress={() => {
                               const ix = visiblePosts.findIndex((p) => p.id === post.id);
                               setActiveReelIndex(ix >= 0 ? ix : 0);
-                              setPlayingReelId(post.id);
+                              setPlayingReelId(Number(post.id));
                             }}
                           >
                             <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
@@ -533,7 +553,7 @@ export function ProfileScreen() {
                           onPress={() => {
                             const ix = visiblePosts.findIndex((p) => p.id === post.id);
                             setActiveReelIndex(ix >= 0 ? ix : 0);
-                            setPlayingReelId(post.id);
+                            setPlayingReelId(Number(post.id));
                           }}
                         >
                           <Video
@@ -689,6 +709,7 @@ export function ProfileScreen() {
             getItemLayout={(_, index) => ({ length: windowHeight, offset: windowHeight * index, index })}
             onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
             viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
+            onScrollToIndexFailed={() => {}}
             renderItem={({ item }) => (
               <View style={{ width, height: windowHeight }}>
                 {item.videoUrl ? (
@@ -696,7 +717,7 @@ export function ProfileScreen() {
                     style={{ width, height: windowHeight, backgroundColor: "#000" }}
                     source={{ uri: item.videoUrl }}
                     resizeMode={ResizeMode.COVER}
-                    shouldPlay={playingReelId === item.id}
+                    shouldPlay={playingReelId != null ? String(playingReelId) === String(item.id) : false}
                     isLooping
                     isMuted={false}
                     useNativeControls={false}
