@@ -46,7 +46,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/crop vibe.png"
+      "favicon": "./assets/logo.png"
     },
     "extra": {
       "eas": {
