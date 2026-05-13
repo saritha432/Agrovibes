@@ -61,15 +61,17 @@ function toCloudinaryHlsUrl(rawUrl) {
   if (/\.m3u8($|\?)/i.test(input)) return input;
 
   let out = input;
-  // Strip extension from path for HLS delivery.
-  out = out.replace(/\.(mp4|mov|m4v|webm)(\?|$)/i, "$2");
+  // Strip video extension before appending .m3u8 (keep query string).
+  out = out.replace(/\.(mp4|mov|m4v|webm)(?=\?|$)/i, "");
   // Insert adaptive streaming transformation if missing.
   if (!/\/video\/upload\/sp_auto,f_m3u8\//i.test(out)) {
     out = out.replace(/\/video\/upload\//i, "/video/upload/sp_auto,f_m3u8/");
   }
-  // Ensure .m3u8 extension exists.
+  // Ensure .m3u8 extension exists (before query string if any).
   if (!/\.m3u8($|\?)/i.test(out)) {
-    out = out.replace(/(\?.*)?$/, ".m3u8$1");
+    const q = out.indexOf("?");
+    if (q === -1) out = `${out}.m3u8`;
+    else out = `${out.slice(0, q)}.m3u8${out.slice(q)}`;
   }
   return out;
 }
@@ -3025,7 +3027,7 @@ router.post("/v1/media/cloudinary-sign", (req, res) => {
   // 2) Optimized MP4 fallback for clients that cannot use HLS
   const eager =
     resourceType === "video"
-      ? "sp_auto,f_m3u8|c_limit,w_720,h_1280,vc_h264,ac_aac,br_1800k,q_auto:good,f_mp4,so_0"
+      ? "sp_auto,f_m3u8|c_limit,w_720,h_1280,vc_h264,ac_aac,br_1200k,q_auto:good,f_mp4,so_0"
       : "";
 
   const signatureParts = [`folder=${folder}`];

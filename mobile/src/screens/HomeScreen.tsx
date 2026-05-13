@@ -467,6 +467,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
                 if (dim) setNatural(dim);
               }
         }
+        progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
       />
     </View>
   );

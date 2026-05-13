@@ -22,7 +22,8 @@
     "build:ios:prod": "node scripts/eas.js build --platform ios --profile production",
     "build:all:preview": "node scripts/eas.js build --platform all --profile preview",
     "build:all:prod": "node scripts/eas.js build --platform all --profile production",
-    "doctor": "npx expo-doctor"
+    "doctor": "npx expo-doctor",
+    "generate:adaptive-icon": "node scripts/generate-adaptive-icon.cjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
@@ -54,6 +55,7 @@
   },
   "devDependencies": {
     "@types/react": "~18.2.79",
+    "sharp": "^0.33.5",
     "typescript": "~5.3.3"
   }
 }
