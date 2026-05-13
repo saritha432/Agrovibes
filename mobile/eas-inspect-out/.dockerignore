@@ -1,0 +1,12 @@
+node_modules
+backend/node_modules
+mobile/node_modules
+.git
+.github
+.cursor
+agent-transcripts
+terminals
+npm-debug.log
+yarn-error.log
+*.local
+mobile

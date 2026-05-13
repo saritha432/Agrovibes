@@ -384,12 +384,14 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
 type ContainedExpoVideoProps = {
   uri: string;
   shouldPlay: boolean;
+  preloadOnly?: boolean;
   containerWidth: number;
   containerHeight: number;
   /** `cover` = full bleed (no side bars; may crop). `contain` = full frame visible (letterboxing). */
   fit?: "contain" | "cover";
   isLooping?: boolean;
   isMuted?: boolean;
+  posterUri?: string;
   useNativeControls?: boolean;
   onStatusUpdate?: (status: AVPlaybackStatus) => void;
 };
@@ -401,11 +403,13 @@ type ContainedExpoVideoHandle = {
 const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo({
   uri,
   shouldPlay,
+  preloadOnly = false,
   containerWidth,
   containerHeight,
   fit = "contain",
   isLooping = true,
   isMuted = false,
+  posterUri,
   useNativeControls = false,
   onStatusUpdate
 }: ContainedExpoVideoProps, ref) {
@@ -478,8 +482,10 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         source={{ uri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
-        isMuted={isMuted}
+        isMuted={isMuted || preloadOnly}
         useNativeControls={useNativeControls}
+        usePoster={!!posterUri}
+        posterSource={posterUri ? { uri: posterUri } : undefined}
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
@@ -1847,6 +1853,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
+      const activeIndex = reelRowPosts.findIndex((p) => p.id === playingPostId);
+      const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const nextPost = reelRowPosts[index + 1];
       const thumbUri = post.thumbnailUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
       const reelPoster = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || nextPost?.imageUrl || nextPost?.thumbnailUrl;
@@ -1867,13 +1875,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             style={StyleSheet.absoluteFillObject}
             onPress={() => onReelSurfaceTap(post)}
           >
-            {post.videoUrl ? (
+            {post.videoUrl && (isActive || isNearActive) ? (
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
                 shouldPlay={isActive}
+                preloadOnly={!isActive}
                 containerWidth={windowWidth}
                 containerHeight={pageH}
                 fit="contain"
@@ -2107,15 +2116,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
-                <Video
-                  style={styles.video}
-                  source={{ uri: post.videoUrl }}
-                  resizeMode={ResizeMode.COVER}
-                  shouldPlay={isActive}
-                  isLooping
-                  isMuted
-                  useNativeControls={false}
-                />
+                {isActive ? (
+                  <Video
+                    style={styles.video}
+                    source={{ uri: post.videoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay
+                    isLooping
+                    isMuted
+                    useNativeControls={false}
+                  />
+                ) : (
+                  <>
+                    <Image
+                      style={styles.video}
+                      source={{ uri: post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || "" }}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
+                      <Ionicons name="play" size={20} color="#fff" />
+                    </View>
+                  </>
+                )}
               </Pressable>
             ) : isCarousel ? (
               <FlatList
@@ -2235,6 +2257,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   data={tabPosts}
                   keyExtractor={(item) => String(item.id)}
                   renderItem={renderFullScreenReel}
+                  removeClippedSubviews
+                  initialNumToRender={2}
+                  maxToRenderPerBatch={2}
+                  windowSize={3}
                   pagingEnabled
                   showsVerticalScrollIndicator={false}
                   snapToInterval={reelSlotHeight}
@@ -2266,6 +2292,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         data={tabPosts}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderPost}
+        removeClippedSubviews
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={5}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
@@ -3173,6 +3203,17 @@ const styles = StyleSheet.create({
   videoTapArea: {
     width: "100%",
     height: "100%"
+  },
+  videoPreviewPlayBadge: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center"
   },
   postActionsRow: {
     marginTop: 10,

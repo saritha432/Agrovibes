@@ -720,11 +720,11 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
   })) as { message: DirectMessageItem };
 }
 
-async function signCloudinaryUpload(folder = "agrovibes") {
+async function signCloudinaryUpload(folder = "agrovibes", resourceType: "image" | "video" = "image") {
   const signRes = await fetch(`${API_BASE_URL}/v1/media/cloudinary-sign`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder })
+    body: JSON.stringify({ folder, resourceType })
   });
   if (!signRes.ok) throw new Error("Failed to sign upload");
   return (await signRes.json()) as {
@@ -733,6 +733,8 @@ async function signCloudinaryUpload(folder = "agrovibes") {
     timestamp: number;
     folder: string;
     signature: string;
+    eager?: string;
+    eagerAsync?: boolean;
   };
 }
 
@@ -834,7 +836,7 @@ async function uploadToCloudinary(
   nativeMimeFallback: string,
   resource: "image" | "video"
 ) {
-  const sign = await signCloudinaryUpload();
+  const sign = await signCloudinaryUpload("agrovibes", resource);
   const form = new FormData();
   const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
 
@@ -858,6 +860,8 @@ async function uploadToCloudinary(
   form.append("timestamp", String(sign.timestamp));
   form.append("folder", sign.folder);
   form.append("signature", sign.signature);
+  if (sign.eager) form.append("eager", sign.eager);
+  if (typeof sign.eagerAsync === "boolean") form.append("eager_async", String(sign.eagerAsync));
 
   const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/${resource}/upload`, {
     method: "POST",
@@ -865,10 +869,21 @@ async function uploadToCloudinary(
   });
 
   if (!uploadRes.ok) await throwCloudinaryError(uploadRes, "Cloudinary upload failed");
-  const uploaded = (await uploadRes.json()) as { secure_url?: string; url?: string };
-  const url = uploaded.secure_url ?? uploaded.url;
+  const uploaded = (await uploadRes.json()) as {
+    secure_url?: string;
+    url?: string;
+    eager?: Array<{ secure_url?: string; url?: string }>;
+  };
+  const eagerUrls = Array.isArray(uploaded.eager)
+    ? uploaded.eager
+        .map((e) => e?.secure_url || e?.url || "")
+        .filter((u): u is string => Boolean(u))
+    : [];
+  const hlsUrl = eagerUrls.find((u) => u.toLowerCase().includes(".m3u8"));
+  const mp4Url = eagerUrls.find((u) => u.toLowerCase().includes(".mp4"));
+  const url = hlsUrl ?? mp4Url ?? uploaded.secure_url ?? uploaded.url;
   if (!url) throw new Error("Cloud upload missing URL");
-  return { url };
+  return { url, hlsUrl, mp4Url };
 }
 
 export async function uploadVideoFile(fileUri: string) {

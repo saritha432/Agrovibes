@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingTop: 10
   },
-  logoImage: { width: 86, height: 20 },
+  logoImage: { width: 100, height: 24 },
   rightSide: { flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" },
   iconBadge: {
     width: 24,
