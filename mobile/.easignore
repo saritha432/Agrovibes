@@ -26,6 +26,9 @@ ios/
 ../db/
 ../.git/
 
+# Local inspect/export trees (backend uploads, videos) — not used by the app build
+eas-inspect-out/
+
 # OS / editor junk
 .DS_Store
 Thumbs.db

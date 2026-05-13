@@ -1,0 +1,41 @@
+# Dependencies installed by package managers
+node_modules/
+**/node_modules/
+
+# Build outputs / caches
+dist/
+build/
+web-build/
+.expo/
+.expo-shared/
+.next/
+.cache/
+.turbo/
+.parcel-cache/
+coverage/
+
+# Native scaffolds (Expo regenerates them on build)
+android/
+ios/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.*.local
+backend/.env
+mobile/.env
+
+# Source maps and archives
+*.map
+*.tgz
+*.zip
+
+# Mobile platform leftovers
+mobile/.expo/web/cache/
