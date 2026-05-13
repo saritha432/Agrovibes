@@ -262,6 +262,14 @@ export interface HomePost {
   musicLabel?: string | null;
   /** Reel: URL of the background track (played alongside muted video when set). */
   musicAudioUrl?: string | null;
+  /** Reel editor metadata (filter/text styling) to render on playback. */
+  creativeMeta?: {
+    filter?: string;
+    overlayText?: string;
+    textColor?: string;
+    textBackground?: boolean;
+    font?: string;
+  };
   /** User ids tagged in this post (Instagram-style). */
   taggedUserIds?: number[];
   createdAt: string;
@@ -563,6 +571,13 @@ export async function createHomePost(payload: {
   taggedUserIds?: number[];
   musicLabel?: string;
   musicAudioUrl?: string;
+  creativeMeta?: {
+    filter?: string;
+    overlayText?: string;
+    textColor?: string;
+    textBackground?: boolean;
+    font?: string;
+  };
 }) {
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
     method: "POST",

@@ -836,6 +836,7 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS tagged_user_ids JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_label TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_audio_url TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS creative_meta JSONB NOT NULL DEFAULT '{}'::jsonb`);
   homePostsTableReady = true;
 }
 
@@ -877,6 +878,35 @@ function normalizeHomePostRow(row) {
     }
   }
   base.taggedUserIds = taggedIds;
+  const rawCreative = base.creativeMeta ?? base.creative_meta;
+  delete base.creative_meta;
+  let creativeMeta = {};
+  let creativeObj = null;
+  if (rawCreative && typeof rawCreative === "object" && !Array.isArray(rawCreative)) {
+    creativeObj = rawCreative;
+  } else if (typeof rawCreative === "string" && rawCreative.trim()) {
+    try {
+      const parsed = JSON.parse(rawCreative);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) creativeObj = parsed;
+    } catch (_e) {
+      creativeObj = null;
+    }
+  }
+  if (creativeObj) {
+    const filter = String(creativeObj.filter || "").trim();
+    const overlayText = String(creativeObj.overlayText || "").trim();
+    const textColor = String(creativeObj.textColor || "").trim();
+    const textBackground = !!creativeObj.textBackground;
+    const font = String(creativeObj.font || "").trim();
+    creativeMeta = {
+      ...(filter ? { filter } : {}),
+      ...(overlayText ? { overlayText } : {}),
+      ...(textColor ? { textColor } : {}),
+      ...(textBackground ? { textBackground } : {}),
+      ...(font ? { font } : {})
+    };
+  }
+  base.creativeMeta = creativeMeta;
   return base;
 }
 
@@ -2541,6 +2571,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         p.tagged_user_ids AS "tagged_user_ids",
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
         CASE
           WHEN $1::integer IS NULL THEN false
           ELSE EXISTS (
@@ -2594,7 +2625,8 @@ router.post("/v1/home/posts", async (req, res) => {
       thumbnailUrl,
       taggedUserIds,
       musicLabel,
-      musicAudioUrl
+      musicAudioUrl,
+      creativeMeta
     } = req.body || {};
 
     const urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
@@ -2620,11 +2652,29 @@ router.post("/v1/home/posts", async (req, res) => {
       typeof musicLabel === "string" && musicLabel.trim() ? musicLabel.trim().slice(0, 240) : null;
     const cleanMusicAudioUrl =
       typeof musicAudioUrl === "string" && musicAudioUrl.trim() ? musicAudioUrl.trim().slice(0, 2000) : null;
+    const cleanCreativeMeta =
+      creativeMeta && typeof creativeMeta === "object" && !Array.isArray(creativeMeta)
+        ? {
+            ...(typeof creativeMeta.filter === "string" && creativeMeta.filter.trim()
+              ? { filter: creativeMeta.filter.trim().slice(0, 32) }
+              : {}),
+            ...(typeof creativeMeta.overlayText === "string" && creativeMeta.overlayText.trim()
+              ? { overlayText: creativeMeta.overlayText.trim().slice(0, 240) }
+              : {}),
+            ...(typeof creativeMeta.textColor === "string" && creativeMeta.textColor.trim()
+              ? { textColor: creativeMeta.textColor.trim().slice(0, 32) }
+              : {}),
+            ...(typeof creativeMeta.font === "string" && creativeMeta.font.trim()
+              ? { font: creativeMeta.font.trim().slice(0, 32) }
+              : {}),
+            ...(typeof creativeMeta.textBackground === "boolean" ? { textBackground: creativeMeta.textBackground } : {})
+          }
+        : {};
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url, creative_meta)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12::jsonb)
       RETURNING
         id,
         user_id AS "userId",
@@ -2640,6 +2690,7 @@ router.post("/v1/home/posts", async (req, res) => {
         tagged_user_ids AS "tagged_user_ids",
         music_label AS "musicLabel",
         music_audio_url AS "musicAudioUrl",
+        creative_meta AS "creativeMeta",
         created_at AS "createdAt"
       `,
       [
@@ -2653,7 +2704,8 @@ router.post("/v1/home/posts", async (req, res) => {
         thumbnailUrl || null,
         taggedJson,
         cleanMusicLabel,
-        cleanMusicAudioUrl
+        cleanMusicAudioUrl,
+        JSON.stringify(cleanCreativeMeta)
       ]
     );
 
@@ -2689,6 +2741,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         p.tagged_user_ids AS "tagged_user_ids",
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1
@@ -2734,6 +2787,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.tagged_user_ids AS "tagged_user_ids",
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1

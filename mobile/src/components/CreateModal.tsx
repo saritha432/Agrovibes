@@ -838,6 +838,19 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   musicAudioUrl: selectedAudioTrack.previewUrl
                 }
               : {};
+          const reelCreative =
+            createType === "reel" &&
+            (creativeFilter !== "none" || creativeText.trim() || creativeTextBackground || creativeTextColor !== "white" || creativeFont !== "classic")
+              ? {
+                  creativeMeta: {
+                    filter: creativeFilter,
+                    overlayText: creativeText.trim(),
+                    textColor: creativeTextColor,
+                    textBackground: creativeTextBackground,
+                    font: creativeFont
+                  }
+                }
+              : {};
           await createHomePost({
             userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
@@ -846,7 +859,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             videoUrl: mediaUrl,
             thumbnailUrl: thumbnailUrl.trim() || derivedThumb || undefined,
             ...(taggedIds.length ? { taggedUserIds: taggedIds } : {}),
-            ...reelAudio
+            ...reelAudio,
+            ...reelCreative
           });
         } else {
           const urls: string[] = [];
