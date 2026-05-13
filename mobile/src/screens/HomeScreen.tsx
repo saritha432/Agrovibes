@@ -12,6 +12,7 @@ import {
   Pressable,
   Share,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -65,6 +66,42 @@ const REEL_LIKE_COLOR = "#ffffff";
 
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
+}
+
+function reelCreativeFilterTint(filter?: string): string | null {
+  switch (String(filter || "").toLowerCase()) {
+    case "warm":
+      return "rgba(255, 190, 100, 0.22)";
+    case "cool":
+      return "rgba(100, 180, 255, 0.2)";
+    case "mono":
+      return "rgba(80, 80, 80, 0.3)";
+    case "vivid":
+      return "rgba(255, 60, 160, 0.12)";
+    case "sunset":
+      return "rgba(255, 120, 60, 0.24)";
+    case "noir":
+      return "rgba(0, 0, 0, 0.34)";
+    default:
+      return null;
+  }
+}
+
+function reelCreativeTextColor(textColor?: string): string {
+  switch (String(textColor || "").toLowerCase()) {
+    case "black":
+      return "#111111";
+    case "yellow":
+      return "#FFE066";
+    case "pink":
+      return "#FF66C4";
+    case "blue":
+      return "#66D2FF";
+    case "green":
+      return "#86EFAC";
+    default:
+      return "#FFFFFF";
+  }
 }
 
 function normalizeIdentity(value: string) {
@@ -488,9 +525,100 @@ function ReelSeekBar({ progressRatio }: ReelSeekBarProps) {
   );
 }
 
+type ReelLikeBurstProps = {
+  trigger: number;
+};
+
+function ReelLikeBurst({ trigger }: ReelLikeBurstProps) {
+  const [hearts, setHearts] = useState<
+    Array<{
+      id: string;
+      progress: Animated.Value;
+      leftPct: number;
+      topPct: number;
+      xFrom: number;
+      xTo: number;
+      yLift: number;
+      size: number;
+      delay: number;
+    }>
+  >([]);
+
+  useEffect(() => {
+    if (!trigger) return;
+    const created = Array.from({ length: 10 }, (_, idx) => ({
+      id: `${trigger}-${idx}`,
+      progress: new Animated.Value(0),
+      leftPct: 8 + Math.random() * 84,
+      topPct: 16 + Math.random() * 66,
+      xFrom: Math.round((Math.random() - 0.5) * 18),
+      xTo: Math.round((Math.random() - 0.5) * 72),
+      yLift: 65 + Math.round(Math.random() * 70),
+      size: 18 + Math.round(Math.random() * 20),
+      delay: idx * 40
+    }));
+    setHearts(created);
+    created.forEach((h) => {
+      Animated.sequence([
+        Animated.delay(h.delay),
+        Animated.timing(h.progress, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true
+        })
+      ]).start();
+    });
+    const clearT = setTimeout(() => setHearts([]), 1050);
+    return () => clearTimeout(clearT);
+  }, [trigger]);
+
+  if (!hearts.length) return null;
+  return (
+    <View style={styles.reelLikeBurstLayer} pointerEvents="none">
+      {hearts.map((h) => {
+        const translateY = h.progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [14, -h.yLift]
+        });
+        const translateX = h.progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [h.xFrom, h.xTo]
+        });
+        const scale = h.progress.interpolate({
+          inputRange: [0, 0.22, 1],
+          outputRange: [0.55, 1.2, 0.9]
+        });
+        const opacity = h.progress.interpolate({
+          inputRange: [0, 0.2, 0.75, 1],
+          outputRange: [0, 1, 0.95, 0]
+        });
+        return (
+          <Animated.View
+            key={h.id}
+            style={{
+              position: "absolute",
+              left: `${h.leftPct}%`,
+              top: `${h.topPct}%`,
+              transform: [{ translateX }, { translateY }, { scale }],
+              opacity
+            }}
+          >
+            <Ionicons name="heart" size={h.size} color="#C9FF35" />
+          </Animated.View>
+        );
+      })}
+    </View>
+  );
+}
+
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
   const { token, user } = useAuth();
   const insets = useSafeAreaInsets();
+  /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
+  const reelTopInset = useMemo(() => {
+    const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
+    return Math.max(insets.top, sbh);
+  }, [insets.top]);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
@@ -526,6 +654,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
+  const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
+  const [activeReelMusicPostId, setActiveReelMusicPostId] = useState<number | null>(null);
+  const [isReelMuted, setIsReelMuted] = useState(true);
+  /** Ephemeral center icon in full-screen reel viewer after tap mute/unmute (Instagram-style). */
+  const [reelMuteFeedback, setReelMuteFeedback] = useState<"muted" | "unmuted" | null>(null);
   const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
@@ -534,6 +667,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const commentsFetchSeqRef = useRef(0);
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
   const lastActiveReelIdRef = useRef<number | null>(null);
+  const reelTapTsRef = useRef<Record<number, number>>({});
+  const reelTapTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
+  const reelViewerOpenRef = useRef<typeof reelViewerOpen>(null);
+  reelViewerOpenRef.current = reelViewerOpen;
+  const reelMuteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -603,6 +741,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     }
     if (post.videoUrl || postImageGallery(post).length) setActivePost(post);
   }, [tabPosts]);
+
+  const triggerReelLikeBurst = useCallback((postId: number) => {
+    setReelLikeBurstByPostId((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
+  }, []);
+
 
   useEffect(() => {
     if (tabPosts.length === 0) {
@@ -1006,15 +1149,56 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   }, []);
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
-    // Keep only the reel's video audio on native devices.
-    // A second network audio stream (musicAudioUrl) can cause stutter on real phones.
+    let cancelled = false;
+    const run = async () => {
+      const existing = reelBackgroundMusicRef.current;
+      if (existing) {
+        try {
+          await existing.sound.unloadAsync();
+        } catch {
+          //
+        }
+        reelBackgroundMusicRef.current = null;
+        setActiveReelMusicPostId((cur) => (cur === existing.postId ? null : cur));
+      }
+      if (playingPostId == null) return;
+      const post =
+        postsRef.current.find((p) => p.id === playingPostId) ?? reelViewerOpen?.posts.find((p) => p.id === playingPostId);
+      const url = post?.musicAudioUrl?.trim();
+      if (!url) return;
+      try {
+        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: !isReelMuted, isLooping: true, volume: 1 });
+        if (cancelled) {
+          await sound.unloadAsync();
+          return;
+        }
+        reelBackgroundMusicRef.current = { postId: playingPostId, sound };
+        setActiveReelMusicPostId(playingPostId);
+      } catch {
+        setActiveReelMusicPostId((cur) => (cur === playingPostId ? null : cur));
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+      const cur = reelBackgroundMusicRef.current;
+      if (cur) {
+        void cur.sound.unloadAsync();
+        reelBackgroundMusicRef.current = null;
+      }
+      setActiveReelMusicPostId(null);
+    };
+  }, [isReelMuted, playingPostId, reelViewerOpen]);
+
+  useEffect(() => {
     const cur = reelBackgroundMusicRef.current;
-    if (cur) {
-      void cur.sound.unloadAsync();
-      reelBackgroundMusicRef.current = null;
+    if (!cur) return;
+    if (isReelMuted) {
+      void cur.sound.pauseAsync().catch(() => {});
+    } else {
+      void cur.sound.playAsync().catch(() => {});
     }
-  }, [playingPostId, reelViewerOpen]);
+  }, [isReelMuted]);
 
   useEffect(() => {
     const prev = lastActiveReelIdRef.current;
@@ -1292,6 +1476,77 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     },
     [token, user?.email, user?.fullName, user?.id]
   );
+
+  const likeReelFromDoubleTap = useCallback(
+    (post: HomePost) => {
+      triggerReelLikeBurst(post.id);
+      if (!post.viewerHasLiked) {
+        void togglePostLike(post);
+      }
+    },
+    [togglePostLike, triggerReelLikeBurst]
+  );
+
+  const onReelSurfaceTap = useCallback(
+    (post: HomePost) => {
+      if (!post.videoUrl) return;
+      const now = Date.now();
+      const lastTap = reelTapTsRef.current[post.id] || 0;
+      if (now - lastTap <= 280) {
+        const pending = reelTapTimeoutRef.current[post.id];
+        if (pending) clearTimeout(pending);
+        reelTapTimeoutRef.current[post.id] = null;
+        reelTapTsRef.current[post.id] = 0;
+        likeReelFromDoubleTap(post);
+        return;
+      }
+      reelTapTsRef.current[post.id] = now;
+      const pending = reelTapTimeoutRef.current[post.id];
+      if (pending) clearTimeout(pending);
+      const delay = reelViewerOpenRef.current ? 200 : 280;
+      reelTapTimeoutRef.current[post.id] = setTimeout(() => {
+        reelTapTimeoutRef.current[post.id] = null;
+        if (reelViewerOpenRef.current) {
+          setIsReelMuted((prev) => {
+            const next = !prev;
+            setReelMuteFeedback(next ? "muted" : "unmuted");
+            if (reelMuteFeedbackTimerRef.current) clearTimeout(reelMuteFeedbackTimerRef.current);
+            reelMuteFeedbackTimerRef.current = setTimeout(() => {
+              setReelMuteFeedback(null);
+              reelMuteFeedbackTimerRef.current = null;
+            }, 900);
+            return next;
+          });
+        } else {
+          openPostFromFeed(post);
+        }
+      }, delay);
+    },
+    [likeReelFromDoubleTap, openPostFromFeed]
+  );
+
+  useEffect(() => {
+    return () => {
+      const pending = Object.values(reelTapTimeoutRef.current);
+      pending.forEach((t) => {
+        if (t) clearTimeout(t);
+      });
+      if (reelMuteFeedbackTimerRef.current) clearTimeout(reelMuteFeedbackTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reelViewerOpen) {
+      setIsReelMuted(false);
+    } else {
+      setIsReelMuted(true);
+    }
+    setReelMuteFeedback(null);
+    if (reelMuteFeedbackTimerRef.current) {
+      clearTimeout(reelMuteFeedbackTimerRef.current);
+      reelMuteFeedbackTimerRef.current = null;
+    }
+  }, [reelViewerOpen]);
 
   const togglePostSave = useCallback(
     async (post: HomePost) => {
@@ -1616,16 +1871,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         "Original audio";
       const reelProgress = reelProgressByPostId[post.id];
       const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
-      const hasAttachedReelMusic = !!post.musicAudioUrl?.trim();
+      const creativeMeta = post.creativeMeta || {};
+      const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
+      const creativeOverlayText = String(creativeMeta.overlayText || "").trim();
+      const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: windowWidth }]}>
           <Pressable
             style={StyleSheet.absoluteFillObject}
-            onPress={() => {
-              if (!post.videoUrl || reelViewerOpen) return;
-              openPostFromFeed(post);
-            }}
+            onPress={() => onReelSurfaceTap(post)}
           >
             {post.videoUrl && (isActive || isNearActive) ? (
               <ContainedExpoVideo
@@ -1637,10 +1892,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 preloadOnly={!isActive}
                 containerWidth={windowWidth}
                 containerHeight={pageH}
-                fit="cover"
+                fit="contain"
                 isLooping
-                isMuted={hasAttachedReelMusic || Platform.OS === "web"}
-                posterUri={reelPoster || undefined}
+                isMuted={isReelMuted || activeReelMusicPostId === post.id}
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
@@ -1650,16 +1904,42 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
             )}
           </Pressable>
+          {!reelViewerOpen ? (
+            <Pressable
+              style={[styles.reelMuteToggle, { top: reelTopInset + 28 }]}
+              onPress={() => setIsReelMuted((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={isReelMuted ? "Unmute reel" : "Mute reel"}
+            >
+              <Ionicons name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"} size={22} color="#fff" />
+            </Pressable>
+          ) : null}
+          {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
+          {creativeOverlayText ? (
+            <View style={styles.reelCreativeTextWrap} pointerEvents="none">
+              <Text
+                style={[
+                  styles.reelCreativeText,
+                  { color: creativeTextColor },
+                  creativeMeta.textBackground ? styles.reelCreativeTextBg : null
+                ]}
+                numberOfLines={2}
+              >
+                {creativeOverlayText}
+              </Text>
+            </View>
+          ) : null}
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.45)", "rgba(0,0,0,0.92)"]}
             locations={[0.25, 0.55, 1]}
             style={styles.reelGradient}
             pointerEvents="none"
           />
+          <ReelLikeBurst trigger={reelLikeBurstByPostId[post.id] || 0} />
           <View
-            style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]}
-            pointerEvents="box-none"
-          >
+              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]}
+              pointerEvents="box-none"
+            >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
                 <View style={styles.reelAvatarSq}>
@@ -1733,7 +2013,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <View style={[styles.reelDiscThumb, styles.reelDiscThumbPlaceholder]} />
               )}
             </View>
-          </View>
+            </View>
           {post.videoUrl ? (
             <View style={styles.reelSeekWrap} pointerEvents="box-none">
               <ReelSeekBar progressRatio={progressRatio} />
@@ -1746,6 +2026,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
+      reelTopInset,
+      isReelMuted,
       legacyFollowStateByName,
       legacyRelationshipByName,
       likeBusyByPostId,
@@ -1756,8 +2038,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       onShareToSystem,
       onShareToWhatsApp,
       playingPostId,
+      activeReelMusicPostId,
       reelSlotHeight,
       reelProgressByPostId,
+      reelLikeBurstByPostId,
       relationships,
       saveBusyByPostId,
       tabPosts,
@@ -1770,7 +2054,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       windowHeight,
       windowWidth,
       reelViewerOpen,
-      openPostFromFeed
+      onReelSurfaceTap
     ]
   );
 
@@ -2128,7 +2412,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               shouldPlay
               containerWidth={windowWidth}
               containerHeight={windowHeight}
-              fit="cover"
+              fit="contain"
               isLooping
               isMuted={false}
               useNativeControls
@@ -2167,7 +2451,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       >
         <View style={{ flex: 1, backgroundColor: "#000" }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: Math.max(insets.top, 8) }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 12 }]}
             pointerEvents="box-none"
           >
             <Pressable
@@ -2180,6 +2464,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
           </View>
+          {reelMuteFeedback ? (
+            <View style={styles.reelMuteFeedbackLayer} pointerEvents="none">
+              <View style={styles.reelMuteFeedbackBubble}>
+                <Ionicons
+                  name={reelMuteFeedback === "muted" ? "volume-mute" : "volume-high"}
+                  size={44}
+                  color="#fff"
+                />
+              </View>
+            </View>
+          ) : null}
           {reelViewerOpen && reelViewerOpen.posts.length > 0 ? (
             <FlatList
               ref={(r) => {
@@ -2563,6 +2858,68 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: 280,
     zIndex: 1
+  },
+  reelLikeBurstLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+    overflow: "hidden"
+  },
+  reelCreativeFilterLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1.5
+  },
+  reelCreativeTextWrap: {
+    position: "absolute",
+    top: "17%",
+    left: 14,
+    right: 14,
+    zIndex: 1.7,
+    alignItems: "center"
+  },
+  reelCreativeText: {
+    maxWidth: "90%",
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.7)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3
+  },
+  reelCreativeTextBg: {
+    backgroundColor: "rgba(0,0,0,0.58)",
+    borderRadius: 8,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  reelMuteToggle: {
+    position: "absolute",
+    right: 10,
+    zIndex: 4,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)"
+  },
+  reelMuteFeedbackLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 14
+  },
+  reelMuteFeedbackBubble: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "rgba(0,0,0,0.58)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)"
   },
   reelOverlayWrap: {
     position: "absolute",
