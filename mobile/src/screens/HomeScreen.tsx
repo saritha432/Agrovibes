@@ -62,8 +62,6 @@ const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 const homeTopTabs = ["Feed", "Friends", "live"] as const;
 const likeActiveColor = "#C9FF35";
 const REEL_LIKE_COLOR = "#ffffff";
-/** Filled heart + count when viewer has liked (short-form style). */
-const REEL_HEART_LIKED_COLOR = "#FF4B8C";
 
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
@@ -1731,7 +1729,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Ionicons
                   name={post.viewerHasLiked ? "heart" : "heart-outline"}
                   size={32}
-                  color={post.viewerHasLiked ? REEL_HEART_LIKED_COLOR : REEL_LIKE_COLOR}
+                  color={post.viewerHasLiked ? likeActiveColor : REEL_LIKE_COLOR}
                 />
                 <Text style={[styles.reelActionCount, post.viewerHasLiked ? styles.reelActionCountLiked : null]}>
                   {post.likesCount}
@@ -2216,36 +2214,38 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
       <Modal
         visible={!!activeCommentsPost}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        statusBarTranslucent
+        transparent
+        animationType="fade"
         onRequestClose={() => setActiveCommentsPost(null)}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.commentsKeyboardWrap}
-        >
-          <View style={[styles.commentsFullScreen, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            <View style={[styles.commentsFullHeader, { paddingTop: Math.max(insets.top, 12) }]}>
-              <Pressable
-                onPress={() => setActiveCommentsPost(null)}
-                hitSlop={12}
-                style={styles.commentsCloseHit}
-                accessibilityRole="button"
-                accessibilityLabel="Close comments"
-              >
-                <Ionicons name="close" size={26} color="#b7ff37" />
-              </Pressable>
-              <Text style={styles.commentsTitle}>Comments</Text>
-              <View style={styles.commentsHeaderSpacer} />
-            </View>
+        <View style={styles.commentsSheetRoot}>
+          <Pressable style={styles.commentsSheetBackdrop} onPress={() => setActiveCommentsPost(null)} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={[styles.commentsSheetContainer, { height: Math.round(windowHeight * 0.5) }]}
+          >
+            <View style={[styles.commentsSheetPanel, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+              <View style={styles.commentsSheetHandle} />
+              <View style={styles.commentsSheetHeader}>
+                <Pressable
+                  onPress={() => setActiveCommentsPost(null)}
+                  hitSlop={12}
+                  style={styles.commentsCloseHit}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close comments"
+                >
+                  <Ionicons name="chevron-down" size={28} color="#C9FF35" />
+                </Pressable>
+                <Text style={styles.commentsTitle}>Comments</Text>
+                <View style={styles.commentsHeaderSpacer} />
+              </View>
 
-            <ScrollView
-              style={styles.commentsList}
-              contentContainerStyle={styles.commentsListInner}
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
-            >
+              <ScrollView
+                style={styles.commentsListScroll}
+                contentContainerStyle={styles.commentsListInner}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
                 {(() => {
                   if (!activeCommentsPost) {
                     return <Text style={styles.noCommentsText}>No Comments</Text>;
@@ -2291,9 +2291,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                               <Ionicons
                                 name={inter.liked ? "heart" : "heart-outline"}
                                 size={18}
-                                color={inter.liked ? "#ec4899" : "#9ca3af"}
+                                color={inter.liked ? "#C9FF35" : "#9ca3af"}
                               />
-                              <Text style={styles.commentActionCount}>{likeCount}</Text>
+                              <Text
+                                style={[styles.commentActionCount, inter.liked ? styles.commentLikeCountActive : null]}
+                              >
+                                {likeCount}
+                              </Text>
                             </Pressable>
                             <Pressable hitSlop={8} onPress={() => toggleCommentSheetDislike(pid, c.id)} style={styles.commentActionHit}>
                               <Ionicons
@@ -2375,8 +2379,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   <Ionicons name="send" size={14} color="#111827" />
                 </Pressable>
               </View>
-          </View>
+            </View>
           </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       <Modal visible={!!activeReelOptionsPost} transparent animationType="slide" onRequestClose={() => setActiveReelOptionsPost(null)}>
@@ -2653,7 +2658,7 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2
   },
-  reelActionCountLiked: { color: REEL_HEART_LIKED_COLOR },
+  reelActionCountLiked: { color: "#C9FF35" },
   reelDiscThumb: {
     width: 46,
     height: 46,
@@ -2925,17 +2930,38 @@ const styles = StyleSheet.create({
   emptyTabTitle: { fontWeight: "900", color: "#22312d", fontSize: 15 },
   emptyTabSub: { marginTop: 6, color: "#5b6965", fontWeight: "600" }
   ,
-  commentsKeyboardWrap: {
-    flex: 1,
-    width: "100%",
-    backgroundColor: "#1a1b1c"
+  commentsSheetRoot: {
+    flex: 1
   },
-  commentsFullScreen: {
+  commentsSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent"
+  },
+  commentsSheetContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%"
+  },
+  commentsSheetPanel: {
     flex: 1,
     backgroundColor: "#1a1b1c",
-    paddingHorizontal: 14
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    overflow: "hidden"
   },
-  commentsFullHeader: {
+  commentsSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#52525b",
+    alignSelf: "center",
+    marginBottom: 10
+  },
+  commentsSheetHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -2955,15 +2981,15 @@ const styles = StyleSheet.create({
     height: 40
   },
   commentsTitle: {
-    color: "#b7ff37",
+    color: "#C9FF35",
     fontSize: 16,
     fontWeight: "800",
     textAlign: "center",
     flex: 1
   },
-  commentsList: { flex: 1 },
+  commentsListScroll: { flex: 1, minHeight: 0 },
   commentsListInner: { paddingBottom: 12, gap: 14 },
-  noCommentsText: { color: "#b7ff37", textAlign: "center", marginTop: 40, fontWeight: "700" },
+  noCommentsText: { color: "#C9FF35", textAlign: "center", marginTop: 16, fontWeight: "700" },
   commentBlock: { marginBottom: 2 },
   commentRowInsta: { flexDirection: "row", alignItems: "flex-start" },
   commentAvatarSq: {
@@ -2993,6 +3019,7 @@ const styles = StyleSheet.create({
   },
   commentActionHit: { flexDirection: "row", alignItems: "center", gap: 4, minWidth: 24 },
   commentActionCount: { color: "#9ca3af", fontSize: 11, fontWeight: "700" },
+  commentLikeCountActive: { color: "#C9FF35" },
   viewMoreCommentsWrap: {
     flexDirection: "row",
     alignItems: "center",
