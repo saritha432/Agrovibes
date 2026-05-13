@@ -228,7 +228,7 @@ export function ProfileScreen() {
     return userPosts.filter((p) => !p.videoUrl);
   }, [activeGalleryTab, savedPosts, taggedPosts, userPosts]);
 
-  /** At most one live decode in the reel grid when a post has no still — avoids parallel tiny decoders (speckled "dots"). */
+  /** Web only: at most one live grid preview when a reel has no still image. */
   const singleGridVideoPreviewId = useMemo(() => {
     if (activeGalleryTab !== "Reels" && activeGalleryTab !== "Saved" && activeGalleryTab !== "Tagged") return null;
     for (const p of visiblePosts) {
@@ -544,8 +544,36 @@ export function ProfileScreen() {
                           </Pressable>
                         );
                       }
-                      /** On native, paused grid decoders often show black; web keeps a single live tile to reduce GPU speckle. */
-                      const shouldPlayTile = activeReelIndex == null && post.id === singleGridVideoPreviewId;
+                      /** Web only: one muted preview decode (tiny tiles + parallel decoders tank real phones). */
+                      if (Platform.OS === "web") {
+                        const shouldPlayTile = activeReelIndex == null && post.id === singleGridVideoPreviewId;
+                        return (
+                          <Pressable
+                            key={post.id}
+                            style={tileStyle}
+                            onPress={() => {
+                              const ix = visiblePosts.findIndex((p) => p.id === post.id);
+                              setActiveReelIndex(ix >= 0 ? ix : 0);
+                              setPlayingReelId(Number(post.id));
+                            }}
+                          >
+                            <Video
+                              style={styles.gridImage}
+                              source={{ uri: post.videoUrl }}
+                              resizeMode={ResizeMode.COVER}
+                              shouldPlay={shouldPlayTile}
+                              isLooping
+                              isMuted
+                              useNativeControls={false}
+                              progressUpdateIntervalMillis={2000}
+                              {...({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any)}
+                            />
+                            <View style={styles.gridPlayBadge} pointerEvents="none">
+                              <Ionicons name="play" size={12} color="#111" />
+                            </View>
+                          </Pressable>
+                        );
+                      }
                       return (
                         <Pressable
                           key={post.id}
@@ -556,19 +584,9 @@ export function ProfileScreen() {
                             setPlayingReelId(Number(post.id));
                           }}
                         >
-                          <Video
-                            style={styles.gridImage}
-                            source={{ uri: post.videoUrl }}
-                            resizeMode={ResizeMode.COVER}
-                            shouldPlay={shouldPlayTile}
-                            isLooping
-                            isMuted
-                            useNativeControls={false}
-                            progressUpdateIntervalMillis={2000}
-                            {...(Platform.OS === "web"
-                              ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any)
-                              : {})}
-                          />
+                          <View style={[styles.gridImage, styles.gridVideoBg, styles.gridVideoPlaceholder]}>
+                            <Ionicons name="play-circle" size={30} color={LIME} />
+                          </View>
                           <View style={styles.gridPlayBadge} pointerEvents="none">
                             <Ionicons name="play" size={12} color="#111" />
                           </View>
@@ -710,20 +728,22 @@ export function ProfileScreen() {
             onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
             viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
             onScrollToIndexFailed={() => {}}
+            removeClippedSubviews
+            initialNumToRender={2}
+            maxToRenderPerBatch={2}
+            windowSize={3}
             renderItem={({ item, index }) => {
-              const activeIx = activeReelIndex ?? 0;
               const isActive = playingReelId != null ? String(playingReelId) === String(item.id) : false;
-              const isNearActive = Math.abs(index - activeIx) <= 1;
               return (
               <View style={{ width, height: windowHeight }}>
-                {item.videoUrl && (isActive || isNearActive) ? (
+                {item.videoUrl && isActive ? (
                   <Video
                     style={{ width, height: windowHeight, backgroundColor: "#000" }}
                     source={{ uri: item.videoUrl }}
                     resizeMode={ResizeMode.COVER}
-                    shouldPlay={isActive}
+                    shouldPlay
                     isLooping
-                    isMuted={!isActive}
+                    isMuted={false}
                     useNativeControls={false}
                     usePoster={!!(item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0])}
                     posterSource={
@@ -731,15 +751,19 @@ export function ProfileScreen() {
                         ? { uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] }
                         : undefined
                     }
-                    progressUpdateIntervalMillis={1000}
+                    progressUpdateIntervalMillis={750}
                     {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
                   />
                 ) : item.videoUrl ? (
+                  item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] ? (
                   <Image
                     style={{ width, height: windowHeight, backgroundColor: "#000" }}
                     source={{ uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] || "" }}
                     resizeMode="cover"
                   />
+                  ) : (
+                    <View style={{ width, height: windowHeight, backgroundColor: "#000" }} />
+                  )
                 ) : null}
                 <View style={styles.reelCaptionWrap} pointerEvents="none">
                   <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
@@ -1048,6 +1072,7 @@ const styles = StyleSheet.create({
   },
   gridPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 12 },
   gridVideoBg: { backgroundColor: "#1d2126" },
+  gridVideoPlaceholder: { alignItems: "center", justifyContent: "center" },
   gridPastelA: { backgroundColor: "#1d2126" },
   gridPastelB: { backgroundColor: "#111418" },
   gridPastelC: { backgroundColor: "#1d2126" },
