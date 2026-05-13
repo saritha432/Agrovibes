@@ -12,6 +12,7 @@ import {
   Pressable,
   Share,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -503,6 +504,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
                 if (dim) setNatural(dim);
               }
         }
+        progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
       />
     </View>
   );
@@ -612,6 +614,11 @@ function ReelLikeBurst({ trigger }: ReelLikeBurstProps) {
 export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
   const { token, user } = useAuth();
   const insets = useSafeAreaInsets();
+  /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
+  const reelTopInset = useMemo(() => {
+    const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
+    return Math.max(insets.top, sbh);
+  }, [insets.top]);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
@@ -1899,7 +1906,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           </Pressable>
           {!reelViewerOpen ? (
             <Pressable
-              style={[styles.reelMuteToggle, { top: Math.max(insets.top + 10, 56) }]}
+              style={[styles.reelMuteToggle, { top: reelTopInset + 28 }]}
               onPress={() => setIsReelMuted((v) => !v)}
               accessibilityRole="button"
               accessibilityLabel={isReelMuted ? "Unmute reel" : "Mute reel"}
@@ -2019,7 +2026,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
-      insets.top,
+      reelTopInset,
       isReelMuted,
       legacyFollowStateByName,
       legacyRelationshipByName,
@@ -2444,7 +2451,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       >
         <View style={{ flex: 1, backgroundColor: "#000" }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: Math.max(insets.top, 8) }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 12 }]}
             pointerEvents="box-none"
           >
             <Pressable

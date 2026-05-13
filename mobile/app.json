@@ -22,7 +22,7 @@
     "android": {
       "package": "com.agrovibes.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo.png",
+        "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#1f1f1f"
       },
       "permissions": [
@@ -46,7 +46,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/Cropvibe1.png"
+      "favicon": "./assets/crop vibe.png"
     },
     "extra": {
       "eas": {
