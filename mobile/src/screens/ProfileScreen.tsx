@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  FlatList,
   Image,
   Modal,
   Platform,
@@ -10,6 +11,7 @@ import {
   StyleSheet,
   Text,
   View,
+  ViewToken,
   useWindowDimensions
 } from "react-native";
 import { ResizeMode, Video } from "expo-av";
@@ -84,7 +86,8 @@ export function ProfileScreen() {
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Reels");
-  const [activeReel, setActiveReel] = useState<HomePost | null>(null);
+  const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
+  const [playingReelId, setPlayingReelId] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
   const [isFollowing, setFollowing] = useState(false);
   const isMountedRef = useRef(true);
@@ -234,6 +237,20 @@ export function ProfileScreen() {
     }
     return null;
   }, [activeGalleryTab, visiblePosts]);
+  const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
+
+  const onReelViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const ordered = viewableItems
+      .filter((v) => v.isViewable && v.item != null)
+      .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
+      .sort((a, b) => a.index - b.index);
+    const focus = ordered[0];
+    setPlayingReelId(focus?.post?.id ?? null);
+    if (focus) setActiveReelIndex(focus.index);
+  }, []);
+
+  const onReelViewableItemsChangedRef = useRef(onReelViewableItemsChanged);
+  onReelViewableItemsChangedRef.current = onReelViewableItemsChanged;
 
   const profileModel = useMemo(() => {
     if (!user) return null;
@@ -491,7 +508,15 @@ export function ProfileScreen() {
                       const stillUri = reelGridStillUri(post);
                       if (stillUri) {
                         return (
-                          <Pressable key={post.id} style={tileStyle} onPress={() => setActiveReel(post)}>
+                          <Pressable
+                            key={post.id}
+                            style={tileStyle}
+                            onPress={() => {
+                              const ix = visiblePosts.findIndex((p) => p.id === post.id);
+                              setActiveReelIndex(ix >= 0 ? ix : 0);
+                              setPlayingReelId(post.id);
+                            }}
+                          >
                             <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
                             <View style={styles.gridPlayBadge} pointerEvents="none">
                               <Ionicons name="play" size={12} color="#111" />
@@ -500,14 +525,16 @@ export function ProfileScreen() {
                         );
                       }
                       /** On native, paused grid decoders often show black; web keeps a single live tile to reduce GPU speckle. */
-                      const shouldPlayTile =
-                        !activeReel &&
-                        (Platform.OS === "web" ? post.id === singleGridVideoPreviewId : true);
+                      const shouldPlayTile = activeReelIndex == null && post.id === singleGridVideoPreviewId;
                       return (
                         <Pressable
                           key={post.id}
                           style={tileStyle}
-                          onPress={() => setActiveReel(post)}
+                          onPress={() => {
+                            const ix = visiblePosts.findIndex((p) => p.id === post.id);
+                            setActiveReelIndex(ix >= 0 ? ix : 0);
+                            setPlayingReelId(post.id);
+                          }}
                         >
                           <Video
                             style={styles.gridImage}
@@ -642,45 +669,65 @@ export function ProfileScreen() {
       </Modal>
 
       <Modal
-        visible={!!activeReel}
+        visible={activeReelIndex != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setActiveReel(null)}
+        onRequestClose={() => {
+          setActiveReelIndex(null);
+          setPlayingReelId(null);
+        }}
         statusBarTranslucent
       >
         <View style={[styles.reelPlayerRoot, { width, height: windowHeight }]}>
-          {activeReel?.videoUrl ? (
-            <Video
-              style={{ width, height: windowHeight, backgroundColor: "#000" }}
-              source={{ uri: activeReel.videoUrl }}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay
-              isLooping
-              isMuted={false}
-              useNativeControls
-              {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
-            />
-          ) : null}
+          <FlatList
+            ref={reelViewerListRef}
+            data={visiblePosts}
+            keyExtractor={(item) => String(item.id)}
+            pagingEnabled
+            showsVerticalScrollIndicator={false}
+            initialScrollIndex={Math.max(0, activeReelIndex ?? 0)}
+            getItemLayout={(_, index) => ({ length: windowHeight, offset: windowHeight * index, index })}
+            onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
+            viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
+            renderItem={({ item }) => (
+              <View style={{ width, height: windowHeight }}>
+                {item.videoUrl ? (
+                  <Video
+                    style={{ width, height: windowHeight, backgroundColor: "#000" }}
+                    source={{ uri: item.videoUrl }}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay={playingReelId === item.id}
+                    isLooping
+                    isMuted={false}
+                    useNativeControls={false}
+                    progressUpdateIntervalMillis={1000}
+                    {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
+                  />
+                ) : null}
+                <View style={styles.reelCaptionWrap} pointerEvents="none">
+                  <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
+                    {item.userName}
+                  </Text>
+                  {item.caption ? (
+                    <Text style={styles.reelCaptionText} numberOfLines={2}>
+                      {item.caption}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            )}
+          />
           <Pressable
             style={styles.reelCloseBtn}
             hitSlop={12}
-            onPress={() => setActiveReel(null)}
+            onPress={() => {
+              setActiveReelIndex(null);
+              setPlayingReelId(null);
+            }}
             accessibilityLabel="Close reel"
           >
             <Ionicons name="close" size={26} color="#fff" />
           </Pressable>
-          {activeReel ? (
-            <View style={styles.reelCaptionWrap} pointerEvents="none">
-              <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
-                {activeReel.userName}
-              </Text>
-              {activeReel.caption ? (
-                <Text style={styles.reelCaptionText} numberOfLines={2}>
-                  {activeReel.caption}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
         </View>
       </Modal>
 
