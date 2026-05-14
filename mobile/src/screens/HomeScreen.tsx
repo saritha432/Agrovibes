@@ -83,44 +83,37 @@ function postCreatedMs(post: HomePost): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Full-screen reel pager item: tagged reel plus video. */
-function isFullScreenReelItem(post: HomePost): boolean {
-  return !!(post.videoUrl && isReelPost(post));
+/** Deterministic PRNG for stable useMemo shuffles (new seed each network refresh). */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return function random() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function seededShuffle<T>(items: T[], seed: number): T[] {
+  const arr = items.slice();
+  const rand = mulberry32(seed >>> 0);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+  return arr;
 }
 
 /**
- * Interleave reel items and other feed cards (newest-first within each group) so the feed
- * alternates rhythm instead of long runs of only reels or only posts.
+ * Shuffle the entire home feed (reels, photo posts, carousels, etc.) on each refresh.
+ * One Fisher–Yates pass so every item moves in the same random order, not reels-only.
  */
-function interleaveFeedPostsInstagramStyle(posts: HomePost[]): HomePost[] {
+function shuffleHomeFeedDiscoverStyle(posts: HomePost[], mixSeed: number): HomePost[] {
   if (posts.length <= 1) return posts;
-  const byTime = (a: HomePost, b: HomePost) => {
-    const d = postCreatedMs(b) - postCreatedMs(a);
-    if (d !== 0) return d;
-    return b.id - a.id;
-  };
-  const reels = posts.filter(isFullScreenReelItem).sort(byTime);
-  const others = posts.filter((p) => !isFullScreenReelItem(p)).sort(byTime);
-  if (reels.length === 0 || others.length === 0) {
-    return [...posts].sort(byTime);
-  }
-  let nextReel =
-    postCreatedMs(reels[0]) > postCreatedMs(others[0]) ||
-    (postCreatedMs(reels[0]) === postCreatedMs(others[0]) && reels[0].id >= others[0].id);
-  const out: HomePost[] = [];
-  let ir = 0;
-  let io = 0;
-  while (ir < reels.length || io < others.length) {
-    if (nextReel) {
-      if (ir < reels.length) out.push(reels[ir++]);
-      else out.push(others[io++]);
-    } else {
-      if (io < others.length) out.push(others[io++]);
-      else out.push(reels[ir++]);
-    }
-    nextReel = !nextReel;
-  }
-  return out;
+  return seededShuffle(posts, mixSeed >>> 0);
 }
 
 const REPORT_REASONS = [
@@ -752,6 +745,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  /** New value on each home-posts fetch so Feed interleave shuffles (Instagram-style variety on refresh). */
+  const [feedShuffleSeed, setFeedShuffleSeed] = useState(0);
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
   const [reportModalPost, setReportModalPost] = useState<HomePost | null>(null);
@@ -835,9 +830,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         .filter((v) => v.isViewable && v.item != null)
         .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
         .sort((a, b) => a.index - b.index);
-      // Prefer the last visible video while scrolling down so the next reel starts promptly.
-      const withVideo = [...ordered].reverse().find((c) => !!c.post.videoUrl) ?? ordered.find((c) => !!c.post.videoUrl);
-      setPlayingPostId(withVideo ? withVideo.post.id : null);
+      if (ordered.length === 0) {
+        setPlayingPostId(null);
+        return;
+      }
+      // Follow the pager slot itself (reel or photo). Do not prefer "any visible video" — that kept the
+      // previous reel playing when a photo slot was centered, so playback never switched every swipe.
+      const primary = ordered[ordered.length - 1];
+      setPlayingPostId(primary.post.id);
     },
     []
   );
@@ -854,7 +854,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const tabPosts = useMemo(() => {
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return interleaveFeedPostsInstagramStyle(strip(posts));
+    if (activeHomeTab === "Feed") return shuffleHomeFeedDiscoverStyle(strip(posts), feedShuffleSeed);
     if (activeHomeTab === "Friends") {
       return strip(
         posts.filter((p) => {
@@ -866,7 +866,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     }
     if (activeHomeTab === "live") return [];
     return strip(posts);
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds]);
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -929,7 +929,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     }
     setPlayingPostId((current) => {
       if (current != null && tabPosts.some((p) => p.id === current)) return current;
-      return tabPosts.find((p) => p.videoUrl)?.id ?? null;
+      return tabPosts[0]?.id ?? null;
     });
   }, [tabPosts]);
 
@@ -1091,13 +1091,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           data.posts.map((p) => p.id)
         );
         if (!mounted) return;
+        const rows = dedupeHomePosts(data.posts);
         setPosts(
-          dedupeHomePosts(data.posts).map((p) => ({
+          rows.map((p) => ({
             ...p,
             viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
             likesCount: Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
           }))
         );
+        setFeedShuffleSeed((Date.now() >>> 0) ^ (rows.length * 0x9e3779b1));
       } catch {
         if (!mounted) return;
         setPosts([]);
@@ -1302,7 +1304,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       if (reelSlotHeight <= 0 || tabPosts.length === 0) return;
       const index = Math.max(0, Math.min(tabPosts.length - 1, Math.round(offsetY / reelSlotHeight)));
       const post = tabPosts[index];
-      if (post?.videoUrl) setPlayingPostId(post.id);
+      setPlayingPostId(post?.id ?? null);
     },
     [reelSlotHeight, tabPosts]
   );
@@ -1314,7 +1316,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       if (!viewerPosts.length) return;
       const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / windowHeight)));
       const post = viewerPosts[index];
-      if (post?.videoUrl) setPlayingPostId(post.id);
+      setPlayingPostId(post?.id ?? null);
     },
     [reelViewerOpen, windowHeight]
   );
