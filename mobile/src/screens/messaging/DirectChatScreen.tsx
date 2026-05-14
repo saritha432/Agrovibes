@@ -33,9 +33,18 @@ function formatMsgTime(ts: number) {
 }
 
 function parseSharedReel(body: string) {
-  if (!body.startsWith("[AgroVibe Reel]")) return null;
+  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]"];
+  let jsonText = "";
+  let matched = false;
+  for (const p of prefixes) {
+    if (body.startsWith(p)) {
+      jsonText = body.slice(p.length).trim();
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) return null;
   const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
-  const jsonText = body.replace("[AgroVibe Reel]", "").trim();
   if (jsonText.startsWith("{")) {
     try {
       const parsed = JSON.parse(jsonText) as {
@@ -47,7 +56,7 @@ function parseSharedReel(body: string) {
         link?: string;
       };
       return {
-        author: parsed.author || "AgroVibe",
+        author: parsed.author || "Cropvibe",
         caption: parsed.caption || "",
         videoUrl: parsed.videoUrl || "",
         imageUrl: parsed.imageUrl || parsed.thumbnailUrl || "",
@@ -59,7 +68,7 @@ function parseSharedReel(body: string) {
   }
   const link = lines.find((line) => line.includes("/reel/")) || "";
   return {
-    author: lines[1] || "AgroVibe",
+    author: lines[1] || "Cropvibe",
     caption: lines.slice(2).filter((line) => line !== link).join("\n"),
     videoUrl: "",
     imageUrl: "",

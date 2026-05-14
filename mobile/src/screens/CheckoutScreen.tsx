@@ -41,7 +41,7 @@ function buildRazorpayHtml(keyId: string, orderId: string, amountPaise: number) 
     amount: ${amountPaise},
     currency: "INR",
     order_id: ${oid},
-    name: "Agrovibes",
+    name: "Cropvibe",
     description: "Agri market order",
     theme: { color: "${CTA_GREEN}" },
     handler: function (response) {
@@ -156,7 +156,7 @@ export function CheckoutScreen() {
         amount: amountPaise,
         currency: "INR",
         order_id: orderId,
-        name: "Agrovibes",
+        name: "Cropvibe",
         description: "Agri market order",
         theme: { color: CTA_GREEN },
         handler(response: any) {

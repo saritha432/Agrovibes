@@ -33,7 +33,7 @@ export function RoleSelectionScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>How will you use Agrovibes?</Text>
+      <Text style={styles.title}>How will you use Cropvibe?</Text>
       <Text style={styles.sub}>Pick one — you can explore other areas anytime.</Text>
       <View style={styles.list}>
         {ROLES.map((r) => (
