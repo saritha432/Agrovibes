@@ -28,6 +28,7 @@ import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTopBar } from "../components/AppTopBar";
+import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
@@ -148,6 +149,43 @@ function viewerOwnsPost(post: HomePost, viewer: { id: number; fullName?: string 
   );
 }
 
+function postAuthorAvatarUri(
+  post: HomePost,
+  viewer: { id?: number; fullName?: string; avatarUrl?: string } | null | undefined
+): string | undefined {
+  const fromPost = post.authorAvatarUrl;
+  if (typeof fromPost === "string" && fromPost.trim()) return fromPost.trim();
+  if (viewer != null && Number.isFinite(Number(viewer.id)) && Number(viewer.id) > 0) {
+    if (viewerOwnsPost(post, { id: Number(viewer.id), fullName: viewer.fullName })) {
+      const u = viewer.avatarUrl;
+      if (typeof u === "string" && u.trim()) return u.trim();
+    }
+  }
+  return undefined;
+}
+
+/** When story API omits avatarUrl, reuse a recent home post author's photo (same user id or display name). */
+function avatarFromHomePostsForStory(head: HomeStory, postsList: HomePost[]): string | undefined {
+  const uid = Number(head.userId);
+  if (Number.isFinite(uid) && uid > 0) {
+    for (const p of postsList) {
+      if (Number(p.userId) === uid) {
+        const a = p.authorAvatarUrl;
+        if (typeof a === "string" && a.trim()) return a.trim();
+      }
+    }
+  }
+  const n = normalizeIdentity(head.userName);
+  if (!n) return undefined;
+  for (const p of postsList) {
+    if (normalizeIdentity(p.userName) === n) {
+      const a = p.authorAvatarUrl;
+      if (typeof a === "string" && a.trim()) return a.trim();
+    }
+  }
+  return undefined;
+}
+
 /** Stable key for grouping stories by author (prefer server user id). */
 function storyAuthorKey(s: HomeStory): string {
   const sid = Number(s.userId);
@@ -185,6 +223,7 @@ type HomeCommentRow = {
   likes: number;
   createdAt?: string;
   parentCommentId?: string;
+  avatarUrl?: string;
 };
 
 type OtherStoryGroup = {
@@ -192,6 +231,7 @@ type OtherStoryGroup = {
   userId: number | null;
   userName: string;
   avatarLabel: string;
+  avatarUrl?: string | null;
   stories: HomeStory[];
 };
 
@@ -246,13 +286,16 @@ function normalizeCommentRow(c: Partial<HomeCommentRow> & Record<string, unknown
     pidRaw != null && String(pidRaw).trim() !== "" && String(pidRaw) !== "null"
       ? String(pidRaw).trim()
       : undefined;
+  const avRaw = c.avatarUrl ?? c["avatar_url"] ?? c["avatarUrl"];
+  const avatarUrl = typeof avRaw === "string" && avRaw.trim() ? avRaw.trim() : undefined;
   return {
     id: String(c.id ?? ""),
     user: String(c.user ?? ""),
     text: String(c.text ?? ""),
     likes: Number.isFinite(Number(c.likes)) ? Number(c.likes) : 0,
     createdAt: typeof c.createdAt === "string" ? c.createdAt : c.createdAt != null ? String(c.createdAt) : undefined,
-    parentCommentId
+    parentCommentId,
+    ...(avatarUrl ? { avatarUrl } : {})
   };
 }
 
@@ -295,16 +338,19 @@ function inferParentFromMention(rows: HomeCommentRow[]): HomeCommentRow[] {
 }
 
 function normalizeStoryRow(raw: Partial<HomeStory> & Record<string, unknown>): HomeStory {
-  const userName = String(raw.userName ?? raw["user_name"] ?? "You");
+  const userName = String(raw.userName ?? raw["user_name"] ?? "You").trim();
   const avatarLabelRaw = String(raw.avatarLabel ?? raw["avatar_label"] ?? userName.charAt(0) ?? "U").trim();
   const video = (raw.videoUrl as string | null | undefined) ?? (raw["video_url"] as string | null | undefined) ?? null;
   const image = (raw.imageUrl as string | null | undefined) ?? (raw["image_url"] as string | null | undefined) ?? null;
+  const avRaw = raw.avatarUrl ?? raw["avatar_url"];
+  const avatarUrl = typeof avRaw === "string" && avRaw.trim() ? avRaw.trim() : undefined;
   return {
     id: Number(raw.id ?? Date.now()),
     userId: raw.userId != null ? Number(raw.userId) : raw["user_id"] != null ? Number(raw["user_id"]) : undefined,
     userName,
     district: String(raw.district ?? "My Farm"),
     avatarLabel: (avatarLabelRaw || "U").charAt(0).toUpperCase(),
+    ...(avatarUrl ? { avatarUrl } : {}),
     hasNew: raw.hasNew != null ? !!raw.hasNew : raw["has_new"] != null ? !!raw["has_new"] : true,
     viewed: !!raw.viewed,
     videoUrl: video || undefined,
@@ -895,17 +941,24 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const sorted = sortStoriesForPlayback(list);
       const head = sorted[0];
       const uid = Number(head.userId);
+      const fromStoryRow =
+        sorted.map((s) => s.avatarUrl).find((u) => typeof u === "string" && u.trim()) ?? head.avatarUrl;
+      const fromApi =
+        fromStoryRow != null && String(fromStoryRow).trim().length > 0 ? String(fromStoryRow).trim() : undefined;
+      const fromPosts = avatarFromHomePostsForStory(head, posts);
+      const av = fromApi || fromPosts;
       groups.push({
         key,
         userId: Number.isFinite(uid) && uid > 0 ? uid : null,
         userName: head.userName,
         avatarLabel: head.avatarLabel,
+        ...(av ? { avatarUrl: av } : {}),
         stories: sorted
       });
     }
     groups.sort((a, b) => storyTimeMs(b.stories[b.stories.length - 1]) - storyTimeMs(a.stories[a.stories.length - 1]));
     return groups;
-  }, [otherStories]);
+  }, [otherStories, posts]);
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
 
@@ -1332,26 +1385,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     const viewerName = normalizeIdentity(user?.fullName || "");
     const viewerId = Number(user?.id);
     const seen = new Set<string>();
-    return posts
-      .map((p) => {
-        const name = String(p.userName || "").trim();
-        const userId = Number(p.userId || 0);
-        const key = userId > 0 ? `id:${userId}` : `name:${normalizeIdentity(name)}`;
-        if (!name || !key || seen.has(key)) return null;
-        if ((userId > 0 && userId === viewerId) || normalizeIdentity(name) === viewerName) return null;
-        seen.add(key);
-        return { id: userId > 0 ? userId : null, name };
-      })
-      .filter((item): item is { id: number | null; name: string } => !!item)
-      .filter((item) => {
-        const q = normalizeIdentity(shareSearch);
-        return !q || normalizeIdentity(item.name).includes(q);
-      })
-      .slice(0, 24);
+    type ShareRecipient = { id: number | null; name: string; avatarUrl?: string | null };
+    const out: ShareRecipient[] = [];
+    for (const p of posts) {
+      const name = String(p.userName || "").trim();
+      const userId = Number(p.userId || 0);
+      const key = userId > 0 ? `id:${userId}` : `name:${normalizeIdentity(name)}`;
+      if (!name || !key || seen.has(key)) continue;
+      if ((userId > 0 && userId === viewerId) || normalizeIdentity(name) === viewerName) continue;
+      seen.add(key);
+      const av = p.authorAvatarUrl;
+      out.push({
+        id: userId > 0 ? userId : null,
+        name,
+        ...(typeof av === "string" && av.trim() ? { avatarUrl: av.trim() } : {})
+      });
+    }
+    const q = normalizeIdentity(shareSearch);
+    return (q ? out.filter((item) => normalizeIdentity(item.name).includes(q)) : out).slice(0, 24);
   }, [posts, shareSearch, user?.fullName, user?.id]);
 
   const onSendReelToChat = useCallback(
-    async (post: HomePost, recipient: { id: number | null; name: string }) => {
+    async (post: HomePost, recipient: { id: number | null; name: string; avatarUrl?: string | null }) => {
       if (!token) {
         Alert.alert("Login required", "Please log in to send reels in chat.");
         return;
@@ -1439,6 +1494,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         userName: user?.fullName || "You",
         district: post.location || "My Farm",
         avatarLabel: (user?.fullName || "U").charAt(0).toUpperCase(),
+        avatarUrl: user?.avatarUrl,
         hasNew: true,
         viewed: false,
         ...media,
@@ -1471,7 +1527,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         onOpenCreate?.("story");
       }
     },
-    [applyViewedStories, onOpenCreate, token, user?.fullName, user?.id]
+    [applyViewedStories, onOpenCreate, token, user?.avatarUrl, user?.fullName, user?.id]
   );
 
   const togglePostLike = useCallback(
@@ -1792,7 +1848,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           text: res.comment.text || text,
           likes: res.comment.likes ?? 0,
           createdAt: createdIso,
-          parentCommentId: res.comment.parentCommentId ?? parentIdStr
+          parentCommentId: res.comment.parentCommentId ?? parentIdStr,
+          ...(res.comment.avatarUrl && String(res.comment.avatarUrl).trim()
+            ? { avatarUrl: String(res.comment.avatarUrl).trim() }
+            : user?.avatarUrl && String(user.avatarUrl).trim()
+              ? { avatarUrl: String(user.avatarUrl).trim() }
+              : {})
         };
     setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
@@ -1821,7 +1882,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             text,
             likes: 0,
             createdAt: nowIso,
-            parentCommentId: parentIdStr
+            parentCommentId: parentIdStr,
+            ...(user?.avatarUrl && String(user.avatarUrl).trim() ? { avatarUrl: String(user.avatarUrl).trim() } : {})
           }
         ]
       };
@@ -1860,7 +1922,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         commentExcerpt: excerpt
       });
     }
-  }, [activeCommentsPost, commentDraft, replyingTo, token, user?.email, user?.fullName, user?.id]);
+  }, [activeCommentsPost, commentDraft, replyingTo, token, user?.avatarUrl, user?.email, user?.fullName, user?.id]);
 
   const toggleCommentSheetLike = useCallback((postId: number, commentId: string) => {
     setCommentInteractions((prev) => {
@@ -1896,6 +1958,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
           style={[isReelSurfaceTab ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
           contentContainerStyle={styles.storyRow}
         >
@@ -1906,7 +1970,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 onOpenCreate?.("story");
                 return;
               }
-              setStoryPlaybackQueue(ownPlayableStories);
+              setReelViewerOpen(null);
+              setStoryPlaybackQueue(
+                ownPlayableStories.map((s) =>
+                  user?.avatarUrl?.trim() && !s.avatarUrl?.trim() ? { ...s, avatarUrl: user.avatarUrl.trim() } : s
+                )
+              );
               setActiveStoryIndex(0);
               setStoryOpen(true);
             }}
@@ -1924,13 +1993,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               ]}
             >
                 <View style={styles.storyInner}>
-                <View style={styles.storyAvatarFill}>
-                  {user?.avatarUrl && String(user.avatarUrl).trim().length > 0 ? (
-                    <Image source={{ uri: String(user.avatarUrl).trim() }} style={styles.storyAvatarImage} resizeMode="cover" />
-                  ) : (
-                    <Text style={styles.storyInitial}>{(user?.fullName || "Y").charAt(0).toUpperCase()}</Text>
-                  )}
-                </View>
+                <UserAvatar
+                  uri={user?.avatarUrl}
+                  name={user?.fullName || "You"}
+                  size={56}
+                  borderRadius={28}
+                  style={styles.storyAvatarFill}
+                  fallbackBackgroundColor="#d4dce0"
+                  initialsColor="#1f2c29"
+                />
                 <Pressable
                   style={styles.yourStoryPlusBadge}
                   onPress={(e) => {
@@ -1953,8 +2024,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               key={group.key}
               style={styles.storyItem}
               onPress={() => {
-                const first = group.stories[0];
-                if (!first || (!first.videoUrl && !first.imageUrl)) return;
+                const first = group.stories.find((s) => !!(s.videoUrl || s.imageUrl)) ?? group.stories[0];
+                if (!first || (!first.videoUrl && !first.imageUrl)) {
+                  return;
+                }
+                setReelViewerOpen(null);
                 setViewedStoryIds((prev) => {
                   if (prev.has(first.id)) return prev;
                   const next = new Set(prev);
@@ -1962,7 +2036,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   return next;
                 });
                 setStories((prev) => prev.map((s) => (s.id === first.id ? { ...s, viewed: true } : s)));
-                setStoryPlaybackQueue(group.stories);
+                const enriched = group.stories.map((s) => {
+                  const g = group.avatarUrl;
+                  if (typeof g === "string" && g.trim() && !s.avatarUrl?.trim()) {
+                    return { ...s, avatarUrl: g.trim() };
+                  }
+                  return s;
+                });
+                setStoryPlaybackQueue(enriched);
                 setActiveStoryIndex(0);
                 setStoryOpen(true);
               }}
@@ -1974,9 +2055,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 ]}
               >
                 <View style={styles.storyInner}>
-                  <View style={styles.storyAvatarFill}>
-                    <Text style={styles.storyInitial}>{group.avatarLabel}</Text>
-                  </View>
+                  <UserAvatar
+                    uri={group.avatarUrl}
+                    name={group.userName}
+                    size={56}
+                    borderRadius={28}
+                    style={styles.storyAvatarFill}
+                    fallbackBackgroundColor="#d4dce0"
+                    initialsColor="#1f2c29"
+                  />
                 </View>
               </View>
               <Text style={styles.storyNameDark} numberOfLines={1}>
@@ -2134,9 +2221,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
-                <View style={styles.reelAvatarSq}>
-                  <Text style={styles.reelAvatarSqText}>{post.userName[0]?.toUpperCase() || "?"}</Text>
-                </View>
+                <UserAvatar
+                  uri={postAuthorAvatarUri(post, user)}
+                  name={post.userName}
+                  size={44}
+                  borderRadius={12}
+                  style={styles.reelAvatarSq}
+                  fallbackBackgroundColor="#2a2a2a"
+                  initialsColor="#fff"
+                />
                 <Text style={styles.reelUserName} numberOfLines={1}>
                   {post.userName}
                 </Text>
@@ -2243,6 +2336,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       togglePostSave,
       user?.fullName,
       user?.id,
+      user?.avatarUrl,
       windowHeight,
       windowWidth,
       reelViewerOpen,
@@ -2289,9 +2383,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         <View style={styles.postCard}>
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
-              <View style={styles.userAvatar}>
-                <Text style={styles.userAvatarText}>{post.userName[0]}</Text>
-              </View>
+              <UserAvatar
+                uri={postAuthorAvatarUri(post, user)}
+                name={post.userName}
+                size={34}
+                style={styles.userAvatar}
+                fallbackBackgroundColor="#22c55e"
+                initialsColor="#fff"
+              />
               <View>
                 <Text style={styles.userName}>
                   {post.userName} <Text style={styles.timeText}>• 13h</Text>
@@ -2422,6 +2521,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       relationships,
       toggleFollow,
       togglePostLike,
+      user?.avatarUrl,
       user?.fullName,
       user?.id
     ]
@@ -2494,6 +2594,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         keyExtractor={(item) => String(item.id)}
         renderItem={renderPost}
         removeClippedSubviews
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={5}
@@ -2543,9 +2645,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
           <View style={styles.storyViewerTopRow}>
             <View style={styles.storyViewerUser}>
-              <View style={styles.storyViewerAvatar}>
-                <Text style={styles.storyViewerAvatarText}>{activeStory?.avatarLabel ?? "U"}</Text>
-              </View>
+              <UserAvatar
+                uri={activeStory?.avatarUrl}
+                name={activeStory?.userName || "U"}
+                size={34}
+                style={styles.storyViewerAvatar}
+                fallbackBackgroundColor="#22c55e"
+                initialsColor="#fff"
+              />
               <View>
                 <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
               </View>
@@ -2759,9 +2866,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                     return (
                       <View style={[styles.commentBlock, { marginLeft: indent }]}>
                         <View style={styles.commentRowInsta}>
-                          <View style={styles.commentAvatarSq}>
-                            <Text style={styles.commentAvatarSqText}>{(c.user[0] || "?").toUpperCase()}</Text>
-                      </View>
+                          <UserAvatar
+                            uri={c.avatarUrl}
+                            name={c.user}
+                            size={36}
+                            borderRadius={10}
+                            style={styles.commentAvatarSq}
+                            fallbackBackgroundColor="#3f3f46"
+                            initialsColor="#fafafa"
+                          />
                           <View style={styles.commentMainCol}>
                             <View style={styles.commentHeaderRow}>
                               <Text style={styles.commentUserName} numberOfLines={1}>
@@ -2857,9 +2970,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </View>
 
               <View style={styles.commentInputRow}>
-                <View style={styles.commentInputAvatar}>
-                  <Ionicons name="person" size={12} color="#0f172a" />
-                </View>
+                <UserAvatar
+                  uri={user?.avatarUrl}
+                  name={user?.fullName || "You"}
+                  size={20}
+                  borderRadius={10}
+                  style={styles.commentInputAvatar}
+                  fallbackBackgroundColor="#d1d5db"
+                  initialsColor="#0f172a"
+                />
                 <TextInput
                   value={commentDraft}
                   onChangeText={setCommentDraft}
@@ -3053,7 +3172,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                       {shareBusyUserId === recipient.id ? (
                         <Ionicons name="checkmark" size={18} color="#d8ff37" />
                       ) : (
-                        <Text style={styles.sharePersonAvatarText}>{(recipient.name[0] || "?").toUpperCase()}</Text>
+                        <UserAvatar
+                          uri={recipient.avatarUrl}
+                          name={recipient.name}
+                          size={52}
+                          borderRadius={26}
+                          fallbackBackgroundColor="#343b43"
+                          initialsColor="#d8ff37"
+                        />
                       )}
                     </View>
                     <Text style={styles.sharePersonName} numberOfLines={1}>

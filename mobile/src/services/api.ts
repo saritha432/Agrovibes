@@ -260,6 +260,8 @@ export interface HomeStory {
   userName: string;
   district: string;
   avatarLabel: string;
+  /** Resolved from learn_users when available */
+  avatarUrl?: string | null;
   hasNew: boolean;
   viewed: boolean;
   videoUrl?: string | null;
@@ -301,6 +303,8 @@ export interface HomePost {
   /** Present when posts are loaded with an auth token (server-tracked save). */
   viewerHasSaved?: boolean;
   savedAt?: string;
+  /** Author profile image when joined from learn_users */
+  authorAvatarUrl?: string | null;
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -315,6 +319,7 @@ export interface MessageThread {
   peerUserId: number;
   peerName: string;
   peerEmail?: string;
+  peerAvatarUrl?: string | null;
   lastSenderId?: number;
   lastReceiverId?: number;
   lastMessage: string;
@@ -522,7 +527,15 @@ export async function fetchHomePostComments(postId: number, token?: string | nul
     throw new Error("Failed to load comments");
   }
   return (await response.json()) as {
-    comments: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string }[];
+    comments: {
+      id: string;
+      user: string;
+      text: string;
+      likes: number;
+      avatarUrl?: string | null;
+      createdAt?: string;
+      parentCommentId?: string;
+    }[];
   };
 }
 
@@ -541,7 +554,15 @@ export async function createHomePostComment(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   })) as {
-    comment: { id: string; user: string; text: string; likes: number; createdAt?: string; parentCommentId?: string };
+    comment: {
+      id: string;
+      user: string;
+      text: string;
+      likes: number;
+      createdAt?: string;
+      avatarUrl?: string | null;
+      parentCommentId?: string;
+    };
     commentsCount: number;
   };
 }
@@ -724,8 +745,20 @@ export async function syncLocalFollowEdgesToServer(
 
 export async function fetchSocialNetwork(token: string, userId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/network/${encodeURIComponent(String(userId))}`, token)) as {
-    followers: Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>;
-    following: Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>;
+    followers: Array<{
+      name: string;
+      key?: string;
+      avatarUrl?: string | null;
+      viewerStatus: "none" | "pending" | "accepted";
+      canFollowBack: boolean;
+    }>;
+    following: Array<{
+      name: string;
+      key?: string;
+      avatarUrl?: string | null;
+      viewerStatus: "accepted";
+      canFollowBack: false;
+    }>;
   };
 }
 
@@ -762,7 +795,7 @@ export async function fetchMessageThreads(token: string) {
 
 export async function fetchMessageThread(token: string, peerUserId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
-    peer: { id: number; fullName: string; email?: string; phone?: string };
+    peer: { id: number; fullName: string; email?: string; phone?: string; avatarUrl?: string | null };
     messages: DirectMessageItem[];
   };
 }

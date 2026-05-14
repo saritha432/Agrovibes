@@ -63,7 +63,7 @@ export type RootStackParamList = {
   UserSearch: undefined;
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
   DirectInbox: undefined;
-  DirectChat: { peerUserId: number; peerName: string; peerKey?: string };
+  DirectChat: { peerUserId: number; peerName: string; peerKey?: string; peerAvatarUrl?: string | null };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

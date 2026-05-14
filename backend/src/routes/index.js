@@ -1885,7 +1885,7 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
 
     const followersRes = await query(
       `
-      SELECT u.id AS "userId", u.full_name AS "fullName"
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
       FROM social_follows f
       JOIN learn_users u ON u.id = f.follower_id
       WHERE f.following_id = $1 AND f.status = 'accepted'
@@ -1895,7 +1895,7 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
     );
     const followingRes = await query(
       `
-      SELECT u.id AS "userId", u.full_name AS "fullName"
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
       FROM social_follows f
       JOIN learn_users u ON u.id = f.following_id
       WHERE f.follower_id = $1 AND f.status = 'accepted'
@@ -1905,7 +1905,7 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
     );
     const pendingOutRes = await query(
       `
-      SELECT u.id AS "userId", u.full_name AS "fullName"
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
       FROM social_follows f
       JOIN learn_users u ON u.id = f.following_id
       WHERE f.follower_id = $1 AND f.status = 'pending'
@@ -1925,6 +1925,7 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
       return {
         name: row.fullName,
         key: String(row.userId),
+        avatarUrl: row.avatarUrl || undefined,
         viewerStatus,
         canFollowBack: viewerStatus === "none"
       };
@@ -1933,6 +1934,7 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
     const following = followingRes.rows.map((row) => ({
       name: row.fullName,
       key: String(row.userId),
+      avatarUrl: row.avatarUrl || undefined,
       viewerStatus: "accepted",
       canFollowBack: false
     }));
@@ -2357,6 +2359,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         t.peer_id AS "peerUserId",
         u.full_name AS "peerName",
         u.email AS "peerEmail",
+        NULLIF(TRIM(u.avatar_url), '') AS "peerAvatarUrl",
         t.sender_id AS "lastSenderId",
         t.receiver_id AS "lastReceiverId",
         t.body AS "lastMessage",
@@ -2392,7 +2395,10 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
       return;
     }
 
-    const peerRes = await query(`SELECT id, full_name AS "fullName", email, phone FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    const peerRes = await query(
+      `SELECT id, full_name AS "fullName", email, phone, NULLIF(TRIM(avatar_url), '') AS "avatarUrl" FROM learn_users WHERE id = $1 LIMIT 1`,
+      [peerUserId]
+    );
     if (!peerRes.rows[0]) {
       res.status(404).json({ message: "Peer user not found" });
       return;
@@ -2418,7 +2424,13 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     );
 
     res.json({
-      peer: { id: peerRes.rows[0].id, fullName: peerRes.rows[0].fullName, email: peerRes.rows[0].email, phone: peerRes.rows[0].phone },
+      peer: {
+        id: peerRes.rows[0].id,
+        fullName: peerRes.rows[0].fullName,
+        email: peerRes.rows[0].email,
+        phone: peerRes.rows[0].phone,
+        avatarUrl: peerRes.rows[0].avatarUrl || undefined
+      },
       messages: rows.rows
     });
   } catch (error) {
@@ -2548,7 +2560,7 @@ const STORY_TTL_SQL = "24 hours";
 router.get("/v1/home/stories", async (_req, res) => {
   try {
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:${gen}`;
+    const cacheKey = `v1:home:stories:v2:${gen}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
@@ -2560,19 +2572,42 @@ router.get("/v1/home/stories", async (_req, res) => {
     const result = await query(
       `
       SELECT
-        id,
-        user_id AS "userId",
-        user_name AS "userName",
-        district,
-        avatar_label AS "avatarLabel",
-        has_new AS "hasNew",
-        viewed,
-        video_url AS "videoUrl",
-        image_url AS "imageUrl",
-        created_at AS "createdAt"
-      FROM home_stories
-      WHERE created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
-      ORDER BY created_at DESC
+        s.id,
+        s.user_id AS "userId",
+        s.user_name AS "userName",
+        s.district,
+        s.avatar_label AS "avatarLabel",
+        s.has_new AS "hasNew",
+        s.viewed,
+        s.video_url AS "videoUrl",
+        s.image_url AS "imageUrl",
+        s.created_at AS "createdAt",
+        COALESCE(
+          NULLIF(TRIM(lu.avatar_url), ''),
+          NULLIF(TRIM(nm.avatar_url), '')
+        ) AS "avatarUrl"
+      FROM home_stories s
+      LEFT JOIN learn_users lu ON lu.id = s.user_id
+      LEFT JOIN LATERAL (
+        SELECT u2.avatar_url
+        FROM learn_users u2
+        WHERE
+          LOWER(TRIM(u2.full_name)) = LOWER(TRIM(s.user_name))
+          OR LOWER(TRIM(SPLIT_PART(u2.full_name, ' ', 1))) = LOWER(TRIM(s.user_name))
+          OR LOWER(TRIM(u2.full_name)) LIKE LOWER(TRIM(s.user_name)) || ' %'
+          OR LOWER(TRIM(REGEXP_REPLACE(COALESCE(u2.username, ''), '^@+', '', 'g'))) = LOWER(TRIM(s.user_name))
+        ORDER BY
+          CASE
+            WHEN LOWER(TRIM(u2.full_name)) = LOWER(TRIM(s.user_name)) THEN 0
+            WHEN LOWER(TRIM(SPLIT_PART(u2.full_name, ' ', 1))) = LOWER(TRIM(s.user_name)) THEN 1
+            WHEN LOWER(TRIM(u2.full_name)) LIKE LOWER(TRIM(s.user_name)) || ' %' THEN 2
+            ELSE 3
+          END,
+          u2.id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE s.created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
+      ORDER BY s.created_at DESC
       LIMIT 40
       `
     );
@@ -2624,8 +2659,28 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
       [actorUserId, userName, district, avatarLabel, videoUrl || null, imageUrl || null]
     );
 
+    let storyAvatarUrl = null;
+    if (actorUserId) {
+      const av = await query(`SELECT NULLIF(TRIM(avatar_url), '') AS "avatarUrl" FROM learn_users WHERE id = $1 LIMIT 1`, [
+        actorUserId
+      ]);
+      storyAvatarUrl = av.rows[0]?.avatarUrl || null;
+    } else {
+      const av = await query(
+        `
+        SELECT NULLIF(TRIM(avatar_url), '') AS "avatarUrl"
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        ORDER BY id ASC
+        LIMIT 1
+        `,
+        [userName]
+      );
+      storyAvatarUrl = av.rows[0]?.avatarUrl || null;
+    }
+
     await cacheIncr("home:stories:gen");
-    res.status(201).json({ story: result.rows[0] });
+    res.status(201).json({ story: { ...result.rows[0], avatarUrl: storyAvatarUrl } });
   } catch (error) {
     res.status(500).json({ message: "Failed to create story", error: error.message });
   }
@@ -2669,6 +2724,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
         p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
         CASE
           WHEN $1::integer IS NULL THEN false
           ELSE EXISTS (
@@ -2686,7 +2742,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
-        SELECT id
+        SELECT id, avatar_url
         FROM learn_users
         WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
         ORDER BY id ASC
@@ -2919,6 +2975,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
         p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1
@@ -2929,6 +2986,13 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         ) AS "viewerHasSaved"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
       WHERE p.tagged_user_ids @> to_jsonb($1::integer)
       ORDER BY p.created_at DESC
       LIMIT 100
@@ -2965,6 +3029,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
         p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
           WHERE hpl.post_id = p.id AND hpl.user_id = $1
@@ -2974,6 +3039,13 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
       FROM home_post_saves hps
       JOIN home_posts p ON p.id = hps.post_id
       LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
       WHERE hps.user_id = $1
       ORDER BY hps.created_at DESC
       LIMIT 100
@@ -3126,6 +3198,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
         c.id::text AS id,
         c.body AS text,
         u.full_name AS "user",
+        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
         c.created_at AS "createdAt",
         c.parent_comment_id AS "parentCommentId"
       FROM home_post_comments c
@@ -3141,6 +3214,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
         user: row.user,
         text: row.text,
         likes: 0,
+        avatarUrl: row.avatarUrl || undefined,
         createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
         parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
       }))
@@ -3223,7 +3297,10 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
       }
     }
 
-    const actor = await query(`SELECT full_name AS "fullName" FROM learn_users WHERE id = $1`, [actorUserId]);
+    const actor = await query(
+      `SELECT full_name AS "fullName", NULLIF(TRIM(avatar_url), '') AS "avatarUrl" FROM learn_users WHERE id = $1`,
+      [actorUserId]
+    );
     const row = ins.rows[0];
     const cc = await query(`SELECT comments_count AS "commentsCount" FROM home_posts WHERE id = $1`, [postId]);
     res.status(201).json({
@@ -3233,6 +3310,7 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
         text: row.body,
         likes: 0,
         createdAt: row.createdAt,
+        avatarUrl: actor.rows[0]?.avatarUrl || undefined,
         parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
       },
       commentsCount: Number(cc.rows[0]?.commentsCount ?? 0)
