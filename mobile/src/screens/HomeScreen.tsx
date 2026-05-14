@@ -21,7 +21,7 @@ import {
   type ViewStyle,
   type ViewToken
 } from "react-native";
-import { Audio, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTopBar } from "../components/AppTopBar";
@@ -656,7 +656,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
   const [activeReelMusicPostId, setActiveReelMusicPostId] = useState<number | null>(null);
-  const [isReelMuted, setIsReelMuted] = useState(true);
+  /** Web: start muted (browser autoplay). Native: start with sound so reel / track audio is audible. */
+  const [isReelMuted, setIsReelMuted] = useState(Platform.OS === "web");
   /** Ephemeral center icon in full-screen reel viewer after tap mute/unmute (Instagram-style). */
   const [reelMuteFeedback, setReelMuteFeedback] = useState<"muted" | "unmuted" | null>(null);
   const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
@@ -676,9 +677,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   useEffect(() => {
     if (Platform.OS === "web") return;
     void Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
       staysActiveInBackground: false,
+      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
       shouldDuckAndroid: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
       playThroughEarpieceAndroid: false
     });
   }, []);
@@ -1164,10 +1168,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       if (playingPostId == null) return;
       const post =
         postsRef.current.find((p) => p.id === playingPostId) ?? reelViewerOpen?.posts.find((p) => p.id === playingPostId);
-      const url = post?.musicAudioUrl?.trim();
-      if (!url) return;
+      const musicUrl = post?.musicAudioUrl?.trim();
+      if (!musicUrl) return;
       try {
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: !isReelMuted, isLooping: true, volume: 1 });
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: musicUrl },
+          { shouldPlay: !isReelMuted, isLooping: true, volume: 1, isMuted: false }
+        );
         if (cancelled) {
           await sound.unloadAsync();
           return;
@@ -1223,7 +1230,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     (post: HomePost) => {
       const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
       const link = buildShareLink(post);
-      return `${post.userName} shared a reel on AgroVibe${caption ? `\n${caption}` : ""}\n${link}`;
+      return `${post.userName} shared a reel on Cropvibe${caption ? `\n${caption}` : ""}\n${link}`;
     },
     [buildShareLink]
   );
@@ -1231,7 +1238,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const reelChatMessage = useCallback(
     (post: HomePost) => {
       const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
-      return `[AgroVibe Reel]\n${JSON.stringify({
+      return `[Cropvibe Reel]\n${JSON.stringify({
         id: post.id,
         author: post.userName,
         caption,
@@ -1875,6 +1882,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayText = String(creativeMeta.overlayText || "").trim();
       const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
+      const hasMusicTrack = !!post.musicAudioUrl?.trim();
+      const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: windowWidth }]}>
@@ -1894,7 +1903,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 containerHeight={pageH}
                 fit="contain"
                 isLooping
-                isMuted={isReelMuted || activeReelMusicPostId === post.id}
+                isMuted={isReelMuted || separateMusicPlaying}
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
@@ -1904,8 +1913,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
             )}
           </Pressable>
-          {!reelViewerOpen ? (
-            <Pressable
+          <Pressable
               style={[styles.reelMuteToggle, { top: reelTopInset + 28 }]}
               onPress={() => setIsReelMuted((v) => !v)}
               accessibilityRole="button"
@@ -1913,7 +1921,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             >
               <Ionicons name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"} size={22} color="#fff" />
             </Pressable>
-          ) : null}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
           {creativeOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">

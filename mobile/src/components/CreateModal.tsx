@@ -70,19 +70,19 @@ const AUDIO_TRACKS: CreativeAudioTrack[] = [
   {
     id: "sunrise",
     title: "Sunrise Fields",
-    artist: "AgroVibes",
+    artist: "Cropvibe",
     previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
   },
   {
     id: "tractor-beat",
     title: "Tractor Beat",
-    artist: "AgroVibes",
+    artist: "Cropvibe",
     previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
   },
   {
     id: "rainfall",
     title: "Rainfall Mood",
-    artist: "AgroVibes",
+    artist: "Cropvibe",
     previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
   }
 ];

@@ -35,7 +35,7 @@ function formatTime(ts: number) {
 }
 
 function previewMessage(body: string) {
-  if (String(body || "").startsWith("[AgroVibe Reel]")) return "Shared a reel";
+  if (String(body || "").startsWith("[Cropvibe Reel]") || String(body || "").startsWith("[AgroVibe Reel]")) return "Shared a reel";
   return body;
 }
 

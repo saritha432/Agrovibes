@@ -1,0 +1,17 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# New → Blueprint → paste this file, or connect the repo and set Root Directory = backend.
+# Do not set PORT here — Render sets process.env.PORT automatically.
+# Add secrets in the dashboard: Environment → Environment Variables (see backend/.env.example).
+services:
+  - type: web
+    name: cropvibe-api
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production

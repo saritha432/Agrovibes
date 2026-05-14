@@ -1,5 +1,14 @@
 const express = require("express");
 const { query } = require("../db");
+const {
+  isRedisConfigured,
+  cachePing,
+  cacheGetJson,
+  cacheSetJson,
+  cacheDel,
+  cacheIncr,
+  cacheGenString
+} = require("../cache");
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
@@ -1060,7 +1069,8 @@ async function relationshipForUsers(viewerUserId, targetUserId) {
 router.get("/health", async (_req, res) => {
   try {
     await query("SELECT 1");
-    res.json({ status: "ok", db: "connected" });
+    const redis = isRedisConfigured() ? await cachePing() : { ok: false, skipped: true };
+    res.json({ status: "ok", db: "connected", redis });
   } catch (error) {
     res.status(500).json({ status: "error", db: "disconnected", message: error.message });
   }
@@ -1068,7 +1078,7 @@ router.get("/health", async (_req, res) => {
 
 router.get("/v1/bootstrap", (_req, res) => {
   res.json({
-    app: "Agrovibes",
+    app: "Cropvibe",
     modules: ["home", "marketplace", "create", "services", "community", "profile", "wallet", "escrow"]
   });
 });
@@ -2408,6 +2418,12 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
 
 router.get("/v1/marketplace/listings", async (_req, res) => {
   try {
+    const cacheKey = "v1:marketplace:listings";
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.listings)) {
+      res.json(cached);
+      return;
+    }
     const result = await query(
       `
       SELECT
@@ -2424,7 +2440,9 @@ router.get("/v1/marketplace/listings", async (_req, res) => {
       `
     );
 
-    res.json({ listings: result.rows });
+    const body = { listings: result.rows };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 90);
   } catch (error) {
     res.json({
       listings: [],
@@ -2436,6 +2454,12 @@ router.get("/v1/marketplace/listings", async (_req, res) => {
 
 router.get("/v1/community/questions", async (_req, res) => {
   try {
+    const cacheKey = "v1:community:questions";
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.questions)) {
+      res.json(cached);
+      return;
+    }
     const result = await query(
       `
       SELECT
@@ -2457,7 +2481,9 @@ router.get("/v1/community/questions", async (_req, res) => {
       `
     );
 
-    res.json({ questions: result.rows });
+    const body = { questions: result.rows };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 90);
   } catch (error) {
     res.json({
       questions: [],
@@ -2471,6 +2497,13 @@ const STORY_TTL_SQL = "24 hours";
 
 router.get("/v1/home/stories", async (_req, res) => {
   try {
+    const gen = await cacheGenString("home:stories:gen");
+    const cacheKey = `v1:home:stories:${gen}`;
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.stories)) {
+      res.json(cached);
+      return;
+    }
     await ensureHomeStoriesTable();
     // Stories expire after 24 hours (Instagram-style). Remove expired rows so they no longer appear.
     await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
@@ -2494,7 +2527,9 @@ router.get("/v1/home/stories", async (_req, res) => {
       `
     );
 
-    res.json({ stories: result.rows });
+    const body = { stories: result.rows };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 45);
   } catch (error) {
     res.json({
       stories: [],
@@ -2539,6 +2574,7 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
       [actorUserId, userName, district, avatarLabel, videoUrl || null, imageUrl || null]
     );
 
+    await cacheIncr("home:stories:gen");
     res.status(201).json({ story: result.rows[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to create story", error: error.message });
@@ -2547,13 +2583,22 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
 
 router.get("/v1/home/posts", authOptional, async (req, res) => {
   try {
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
+    const viewerKey = viewerId != null ? String(viewerId) : "anon";
+    const gen = await cacheGenString("home:posts:gen");
+    const cacheKey = `v1:home:posts:${gen}:${viewerKey}`;
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.posts)) {
+      res.json(cached);
+      return;
+    }
+
     await backfillHomePostUserIds();
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
-    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
-    const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
     const result = await query(
       `
       SELECT
@@ -2603,7 +2648,9 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       [viewerId]
     );
 
-    res.json({ posts: dedupeHomePostRows(result.rows) });
+    const body = { posts: dedupeHomePostRows(result.rows) };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 30);
   } catch (error) {
     res.json({
       posts: [],
@@ -2711,6 +2758,7 @@ router.post("/v1/home/posts", async (req, res) => {
       ]
     );
 
+    await cacheIncr("home:posts:gen");
     res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
@@ -2833,6 +2881,7 @@ router.post("/v1/home/posts/:postId/save", authRequired, async (req, res) => {
       `,
       [postId, userId]
     );
+    await cacheIncr("home:posts:gen");
     res.json({ saved: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to save post", error: error.message });
@@ -2849,6 +2898,7 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
       return;
     }
     await query(`DELETE FROM home_post_saves WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
+    await cacheIncr("home:posts:gen");
     res.json({ saved: false });
   } catch (error) {
     res.status(500).json({ message: "Failed to unsave post", error: error.message });
@@ -2899,6 +2949,7 @@ router.post("/v1/home/posts/:postId/like", authRequired, async (req, res) => {
         [authorUserId, actorUserId, postId]
       );
     }
+    await cacheIncr("home:posts:gen");
     res.json({ liked: true, likesCount: Number(updated.rows[0]?.likesCount || 0) });
   } catch (error) {
     res.status(500).json({ message: "Failed to like post", error: error.message });
@@ -2922,6 +2973,7 @@ router.post("/v1/home/posts/:postId/unlike", authRequired, async (req, res) => {
       await query(`UPDATE home_posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = $1`, [postId]);
     }
     const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1`, [postId]);
+    await cacheIncr("home:posts:gen");
     res.json({ liked: false, likesCount: Number(cur.rows[0]?.likesCount || 0) });
   } catch (error) {
     res.status(500).json({ message: "Failed to unlike post", error: error.message });
@@ -3179,6 +3231,12 @@ router.post("/v1/media/migrate-video-urls-to-hls", authRequired, requireRole(["a
 
 router.get("/v1/learn/courses", async (_req, res) => {
   try {
+    const cacheKey = "v1:learn:courses";
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.courses)) {
+      res.json(cached);
+      return;
+    }
     await seedLearnCoursesIfEmpty();
     const result = await query(
       `
@@ -3202,7 +3260,9 @@ router.get("/v1/learn/courses", async (_req, res) => {
       ORDER BY updated_at DESC
       `
     );
-    res.json({ courses: result.rows, source: "db" });
+    const body = { courses: result.rows, source: "db" };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 120);
   } catch (error) {
     res.json({ courses: learnFallbackCourses(), source: "fallback", message: error.message });
   }
@@ -3276,6 +3336,7 @@ router.post("/v1/learn/courses", authRequired, requireRole(["instructor", "admin
       ]
     );
 
+    await cacheDel("v1:learn:courses");
     res.status(201).json({ courseId: result.rows[0].id });
   } catch (error) {
     const msg = String(error.message || "");
@@ -3399,6 +3460,7 @@ router.put("/v1/learn/courses/:id", authRequired, requireRole(["instructor", "ad
       ]
     );
 
+    await cacheDel("v1:learn:courses");
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to update course", error: error.message });

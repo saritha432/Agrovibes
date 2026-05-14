@@ -22,7 +22,7 @@ export function PersonalInfoScreen() {
   const submit = async () => {
     await updateUser({
       fullName: fullName.trim() || user?.fullName || "Member",
-      email: email.trim() || user?.email || "user@agrovibes.app",
+      email: email.trim() || user?.email || "user@cropvibe.app",
       dateOfBirth: dob.trim() || undefined,
       preferredLanguage: quickPrefs ? language.trim() || undefined : undefined,
       locationLabel: quickPrefs ? location.trim() || undefined : undefined
@@ -34,7 +34,7 @@ export function PersonalInfoScreen() {
   return (
     <OnboardingLayout
       title="About you"
-      subtitle="We use this to personalize Agrovibes. You can edit it anytime in profile."
+      subtitle="We use this to personalize Cropvibe. You can edit it anytime in profile."
       primaryLabel="Create account"
       onPrimary={submit}
       primaryDisabled={!(fullName.trim() || (user?.fullName ?? "").trim())}

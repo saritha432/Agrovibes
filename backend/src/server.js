@@ -14,7 +14,9 @@ const allowedOrigins = rawCorsOrigins
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const compression = require('compression');
 
+app.use(compression());
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -64,5 +66,5 @@ app.use("/api", apiRoutes);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
-  console.log(`Agrovibes backend running on port ${PORT}`);
+  console.log(`Cropvibe backend running on port ${PORT}`);
 });

@@ -1,0 +1,8 @@
+# Railway: create a service from the `backend` folder (or set Root Directory to `backend`).
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "npm start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
