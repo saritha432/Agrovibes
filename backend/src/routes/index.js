@@ -2895,7 +2895,25 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
       return;
     }
     const postRes = await query(
-      `SELECT id, user_id AS "userId", user_name AS "userName" FROM home_posts WHERE id = $1 LIMIT 1`,
+      `
+      SELECT
+        p.id,
+        p.user_id AS "userId",
+        p.user_name AS "userName",
+        COALESCE(
+          p.user_id,
+          (
+            SELECT u.id
+            FROM learn_users u
+            WHERE LOWER(TRIM(u.full_name)) = LOWER(TRIM(p.user_name))
+            ORDER BY u.id ASC
+            LIMIT 1
+          )
+        ) AS "effectiveUserId"
+      FROM home_posts p
+      WHERE p.id = $1
+      LIMIT 1
+      `,
       [postId]
     );
     const row = postRes.rows[0];
@@ -2903,14 +2921,16 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
       res.status(404).json({ message: "Post not found" });
       return;
     }
-    const ownerId = row.userId != null ? Number(row.userId) : NaN;
+    const effectiveOwnerId = row.effectiveUserId != null ? Number(row.effectiveUserId) : NaN;
     const meRow = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [me]);
     const myName = normalizeUserLabelForHomePostAuth(meRow.rows[0]?.full_name || req.user?.fullName || "");
     const authorName = normalizeUserLabelForHomePostAuth(row.userName || "");
 
     const isOwner =
-      (Number.isFinite(ownerId) && ownerId > 0 && ownerId === me) ||
-      ((!Number.isFinite(ownerId) || ownerId <= 0) && authorName.length > 0 && authorName === myName);
+      (Number.isFinite(effectiveOwnerId) && effectiveOwnerId > 0 && effectiveOwnerId === me) ||
+      ((!Number.isFinite(effectiveOwnerId) || effectiveOwnerId <= 0) &&
+        authorName.length > 0 &&
+        authorName === myName);
 
     if (!isOwner) {
       res.status(403).json({ message: "You can only delete your own posts" });
