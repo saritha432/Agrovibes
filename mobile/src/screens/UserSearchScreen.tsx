@@ -3,7 +3,9 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Image,
+  Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -18,6 +20,7 @@ import {
   getLocalFollowNetworkByIdentity,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
+import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
 
 type SearchUser = {
   id?: number;
@@ -27,12 +30,6 @@ type SearchUser = {
   avatarUrl?: string | null;
   isFollowing: boolean;
 };
-
-const BG = "#ffffff";
-const TEXT = "#101010";
-const MUTED = "#8a8a8a";
-const BORDER = "#e6e6e6";
-const TEAL = "#0f9b8e";
 
 function normalizeName(value: string) {
   return String(value || "")
@@ -47,6 +44,21 @@ export function UserSearchScreen() {
   const [query, setQuery] = useState("");
   const [users, setUsers] = useState<SearchUser[]>([]);
   const [busyName, setBusyName] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      StatusBar.setBarStyle("light-content");
+      if (Platform.OS === "android") {
+        StatusBar.setBackgroundColor(T.navBg);
+      }
+      return () => {
+        StatusBar.setBarStyle("dark-content");
+        if (Platform.OS === "android") {
+          StatusBar.setBackgroundColor("#ffffff");
+        }
+      };
+    }, [])
+  );
 
   const load = useCallback(async (searchText = "") => {
     const list: SearchUser[] = [];
@@ -131,12 +143,12 @@ export function UserSearchScreen() {
   return (
     <View style={styles.root}>
       <View style={styles.searchWrap}>
-        <Ionicons name="search" size={18} color={MUTED} />
+        <Ionicons name="search" size={18} color={T.muted} />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Search users"
-          placeholderTextColor={MUTED}
+          placeholderTextColor={T.muted}
           style={styles.input}
           autoCapitalize="none"
         />
@@ -184,43 +196,45 @@ export function UserSearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
+  root: { flex: 1, backgroundColor: T.bg },
   searchWrap: {
     marginHorizontal: 14,
     marginTop: 10,
     marginBottom: 8,
-    backgroundColor: "#f2f2f2",
+    backgroundColor: T.searchBarBg,
     borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: T.border,
     paddingHorizontal: 12,
     height: 40,
     alignItems: "center",
     flexDirection: "row",
     gap: 8
   },
-  input: { flex: 1, color: TEXT, fontSize: 15, paddingVertical: 0 },
+  input: { flex: 1, color: T.text, fontSize: 15, paddingVertical: 0 },
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: BORDER,
+    borderBottomColor: T.rowDivider,
     gap: 10
   },
   avatar: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#e6f2ef",
+    backgroundColor: T.avatarRing,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden"
   },
   avatarImage: { width: "100%", height: "100%" },
-  avatarText: { color: TEAL, fontWeight: "800", fontSize: 17 },
-  name: { flex: 1, color: TEXT, fontWeight: "700", fontSize: 15 },
-  followBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  followBtnText: { color: "#fff", fontSize: 13, fontWeight: "800" },
-  followingText: { color: MUTED, fontWeight: "700", fontSize: 13 },
-  empty: { padding: 20, textAlign: "center", color: MUTED, fontSize: 14 }
+  avatarText: { color: T.accent, fontWeight: "800", fontSize: 17 },
+  name: { flex: 1, color: T.text, fontWeight: "700", fontSize: 15 },
+  followBtn: { backgroundColor: T.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  followBtnText: { color: T.accentText, fontSize: 13, fontWeight: "800" },
+  followingText: { color: T.muted, fontWeight: "700", fontSize: 13 },
+  empty: { padding: 20, textAlign: "center", color: T.muted, fontSize: 14 }
 });

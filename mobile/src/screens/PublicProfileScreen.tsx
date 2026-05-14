@@ -1,26 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
   useWindowDimensions
 } from "react-native";
-import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
+import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { fetchHomePosts, fetchProfileStats, sendFollowRequest, type HomePost } from "../services/api";
 import { sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
-
-const BG = "#ffffff";
-const TEXT = "#111111";
-const MUTED = "#7f7f7f";
-const BORDER = "#ececec";
+import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
 
 function normalizeName(value: string) {
   return String(value || "")
@@ -40,8 +40,26 @@ export function PublicProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null | undefined>(avatarFromRoute);
-  const { width } = useWindowDimensions();
+  const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const tile = (width - 4) / 3;
+  const avatarPreviewSize = Math.min(320, Math.max(200, Math.min(width, height) * 0.68));
+
+  useFocusEffect(
+    useCallback(() => {
+      StatusBar.setBarStyle("light-content");
+      if (Platform.OS === "android") {
+        StatusBar.setBackgroundColor(T.navBg);
+      }
+      return () => {
+        StatusBar.setBarStyle("dark-content");
+        if (Platform.OS === "android") {
+          StatusBar.setBackgroundColor("#ffffff");
+        }
+      };
+    }, [])
+  );
 
   useEffect(() => {
     navigation.setOptions({ title: userName });
@@ -126,15 +144,24 @@ export function PublicProfileScreen() {
   };
 
   return (
+    <>
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <View style={styles.avatar}>
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
-          ) : (
-            <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
-          )}
-        </View>
+        <Pressable
+          onPress={() => avatarUrl && setAvatarPreviewOpen(true)}
+          disabled={!avatarUrl}
+          style={({ pressed }) => [styles.avatarPressable, pressed && avatarUrl ? { opacity: 0.85 } : null]}
+          accessibilityRole="button"
+          accessibilityLabel="View profile photo"
+        >
+          <View style={styles.avatar}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+            ) : (
+              <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
+            )}
+          </View>
+        </Pressable>
         <View style={styles.statsRow}>
           <View style={styles.stat}>
             <Text style={styles.statValue}>{visible.length}</Text>
@@ -180,63 +207,117 @@ export function PublicProfileScreen() {
                 </View>
               ) : (
                 <View style={[styles.placeholder, styles.emptyBg]}>
-                  <Ionicons name="leaf-outline" size={24} color="#85783e" />
+                  <Ionicons name="leaf-outline" size={24} color={T.emptyIcon} />
                 </View>
               )}
             </Pressable>
           ))
         ) : (
           <View style={styles.emptyWrap}>
-            <Ionicons name="images-outline" size={30} color={MUTED} />
+            <Ionicons name="images-outline" size={30} color={T.muted} />
             <Text style={styles.emptyText}>No public posts yet.</Text>
           </View>
         )}
       </View>
     </ScrollView>
+
+    <Modal
+      visible={avatarPreviewOpen}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setAvatarPreviewOpen(false)}
+    >
+      <View style={styles.avatarPreviewRoot}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => setAvatarPreviewOpen(false)} accessibilityLabel="Close preview" />
+        <View style={styles.avatarPreviewLayer} pointerEvents="box-none">
+          <View
+            style={[
+              styles.avatarPreviewCircle,
+              {
+                width: avatarPreviewSize,
+                height: avatarPreviewSize,
+                borderRadius: avatarPreviewSize / 2
+              }
+            ]}
+          >
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={{ width: avatarPreviewSize, height: avatarPreviewSize }}
+                resizeMode="cover"
+              />
+            ) : null}
+          </View>
+          <Pressable
+            onPress={() => setAvatarPreviewOpen(false)}
+            style={[styles.avatarPreviewClose, { top: insets.top + 8 }]}
+            hitSlop={12}
+          >
+            <Ionicons name="close-circle" size={44} color="rgba(255,255,255,0.92)" />
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: BG },
+  root: { flex: 1, backgroundColor: T.bg },
   content: { paddingBottom: 20 },
   header: { flexDirection: "row", alignItems: "center", gap: 22, paddingHorizontal: 16, paddingTop: 14 },
   avatar: {
     width: 78,
     height: 78,
     borderRadius: 39,
-    backgroundColor: "#edf3f2",
+    backgroundColor: T.avatarRing,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden"
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: T.border
   },
   avatarImage: { width: "100%", height: "100%" },
-  avatarText: { fontSize: 30, fontWeight: "800", color: "#0f9b8e" },
+  avatarText: { fontSize: 30, fontWeight: "800", color: T.accent },
   statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingRight: 6 },
   stat: { alignItems: "center" },
-  statValue: { fontSize: 20, fontWeight: "900", color: TEXT },
-  statLabel: { marginTop: 2, fontSize: 12, color: MUTED, fontWeight: "700" },
-  name: { marginTop: 14, paddingHorizontal: 16, fontSize: 16, color: TEXT, fontWeight: "800" },
-  sub: { marginTop: 4, paddingHorizontal: 16, fontSize: 13, color: MUTED, fontWeight: "600" },
+  statValue: { fontSize: 20, fontWeight: "900", color: T.text },
+  statLabel: { marginTop: 2, fontSize: 12, color: T.statLabel, fontWeight: "700" },
+  name: { marginTop: 14, paddingHorizontal: 16, fontSize: 16, color: T.text, fontWeight: "800" },
+  sub: { marginTop: 4, paddingHorizontal: 16, fontSize: 13, color: T.muted, fontWeight: "600" },
   actionsRow: { marginTop: 12, paddingHorizontal: 16, flexDirection: "row", gap: 8 },
   actionBtn: { flex: 1, borderRadius: 8, height: 34, alignItems: "center", justifyContent: "center" },
-  actionBtnPrimary: { backgroundColor: "#3797ef" },
-  actionBtnMuted: { backgroundColor: "#efefef", borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER },
+  actionBtnPrimary: { backgroundColor: T.accent },
+  actionBtnMuted: { backgroundColor: T.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: T.border },
   actionText: { fontSize: 13, fontWeight: "800" },
-  actionTextPrimary: { color: "#fff" },
-  actionTextMuted: { color: TEXT },
+  actionTextPrimary: { color: T.accentText },
+  actionTextMuted: { color: T.text },
   grid: {
     marginTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BORDER,
+    borderTopColor: T.border,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 2
   },
-  tile: { backgroundColor: "#f0f0f0" },
+  tile: { backgroundColor: T.gridTile },
   media: { width: "100%", height: "100%" },
   placeholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
-  videoBg: { backgroundColor: "#3e4a53" },
-  emptyBg: { backgroundColor: "#f0eadf" },
+  videoBg: { backgroundColor: T.videoPlaceholder },
+  emptyBg: { backgroundColor: T.surface },
   emptyWrap: { width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 8 },
-  emptyText: { color: MUTED, fontSize: 14, fontWeight: "600" }
+  emptyText: { color: T.muted, fontSize: 14, fontWeight: "600" },
+  avatarPressable: { borderRadius: 41 },
+  avatarPreviewRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)" },
+  avatarPreviewLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  avatarPreviewCircle: {
+    overflow: "hidden",
+    borderWidth: 3,
+    borderColor: T.accent
+  },
+  avatarPreviewClose: { position: "absolute", right: 14, zIndex: 4 }
 });
