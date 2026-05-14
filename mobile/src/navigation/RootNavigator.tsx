@@ -28,6 +28,7 @@ import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
 import type { LearnStackParamList } from "./LearnStackNavigator";
+import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 
 export type MainTabParamList = {
   Home: undefined;
@@ -60,7 +61,7 @@ export type RootStackParamList = {
   InstructorStudio: undefined;
   EditProfile: undefined;
   UserSearch: undefined;
-  PublicProfile: { userId?: number; userName: string; userKey?: string };
+  PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
   DirectInbox: undefined;
   DirectChat: { peerUserId: number; peerName: string; peerKey?: string };
 };
@@ -91,8 +92,32 @@ export function RootNavigator() {
       <Stack.Screen name="Main" component={AppNavigator} />
       <Stack.Screen name="InstructorStudio" component={InstructorStudioScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: "Edit Profile" }} />
-      <Stack.Screen name="UserSearch" component={UserSearchScreen} options={{ headerShown: true, title: "Search" }} />
-      <Stack.Screen name="PublicProfile" component={PublicProfileScreen} options={{ headerShown: true, title: "Profile" }} />
+      <Stack.Screen
+        name="UserSearch"
+        component={UserSearchScreen}
+        options={{
+          headerShown: true,
+          title: "Search",
+          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
+          headerTintColor: socialDiscoveryTheme.navTint,
+          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="PublicProfile"
+        component={PublicProfileScreen}
+        options={{
+          headerShown: true,
+          title: "Profile",
+          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
+          headerTintColor: socialDiscoveryTheme.navTint,
+          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
       <Stack.Screen name="DirectInbox" component={DirectInboxScreen} options={{ headerShown: true, title: "Messages" }} />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
     </Stack.Navigator>

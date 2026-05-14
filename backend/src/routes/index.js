@@ -29,6 +29,7 @@ let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
 let homePostSavesTableReady = false;
+let postReportsTableReady = false;
 let directMessagesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
@@ -849,6 +850,22 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_audio_url TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS creative_meta JSONB NOT NULL DEFAULT '{}'::jsonb`);
   homePostsTableReady = true;
+}
+
+async function ensurePostReportsTable() {
+  if (postReportsTableReady) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS post_reports (
+      id SERIAL PRIMARY KEY,
+      post_id INT NOT NULL REFERENCES home_posts(id) ON DELETE CASCADE,
+      reporter_user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS post_reports_post_idx ON post_reports (post_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS post_reports_created_idx ON post_reports (created_at DESC)`);
+  postReportsTableReady = true;
 }
 
 function normalizeHomePostRow(row) {
@@ -1807,17 +1824,50 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
 router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) => {
   try {
     await ensureSocialNotificationsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostsTable();
     const targetUserId = Number(req.params.userId);
     if (!Number.isFinite(targetUserId)) {
       res.status(400).json({ message: "Valid userId is required" });
       return;
     }
+    const userRes = await query(
+      `
+      SELECT
+        u.id,
+        u.full_name AS "fullName",
+        u.username,
+        u.avatar_url AS "avatarUrl",
+        u.bio,
+        u.website,
+        u.location_label AS "locationLabel",
+        u.created_at AS "createdAt",
+        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
+        COALESCE(posts.reels_count, 0)::INT AS "reelsCount"
+      FROM learn_users u
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS posts_count,
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+        FROM home_posts p
+        WHERE p.user_id = u.id
+      ) posts ON TRUE
+      WHERE u.id = $1
+      LIMIT 1
+      `,
+      [targetUserId]
+    );
+    if (!userRes.rows[0]) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    const profile = userRes.rows[0];
     const counts = await socialCountsForUser(targetUserId);
     const relation =
       Number(req.user.userId) === targetUserId
         ? { viewerStatus: "self", reverseStatus: "self", canFollowBack: false }
         : await relationshipForUsers(req.user.userId, targetUserId);
-    res.json({ ...counts, ...relation });
+    res.json({ ...profile, ...counts, ...relation });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile stats", error: error.message });
   }
@@ -2762,6 +2812,83 @@ router.post("/v1/home/posts", async (req, res) => {
     res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
+  }
+});
+
+router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const me = Number(req.user.userId);
+    const postRes = await query(
+      `SELECT id, user_id AS "userId", user_name AS "userName" FROM home_posts WHERE id = $1 LIMIT 1`,
+      [postId]
+    );
+    const row = postRes.rows[0];
+    if (!row) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const ownerId = row.userId != null ? Number(row.userId) : null;
+    const meRow = await query(`SELECT LOWER(TRIM(full_name)) AS n FROM learn_users WHERE id = $1 LIMIT 1`, [me]);
+    const myName = String(meRow.rows[0]?.n || "").trim();
+    const authorName = String(row.userName || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const isOwner =
+      (Number.isFinite(ownerId) && ownerId > 0 && ownerId === me) ||
+      ((!Number.isFinite(ownerId) || ownerId <= 0) && authorName && authorName === myName);
+
+    if (!isOwner) {
+      res.status(403).json({ message: "You can only delete your own posts" });
+      return;
+    }
+
+    await query(`DELETE FROM home_posts WHERE id = $1`, [postId]);
+    await cacheIncr("home:posts:gen");
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete post", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensurePostReportsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(me) || me <= 0) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const existsRes = await query(`SELECT 1 FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!existsRes.rows.length) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const rawReason = req.body && typeof req.body.reason === "string" ? req.body.reason.trim() : "";
+    const reason = rawReason ? rawReason.slice(0, 500) : null;
+    await query(
+      `INSERT INTO post_reports (post_id, reporter_user_id, reason) VALUES ($1, $2, $3)`,
+      [postId, me, reason]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to submit report", error: error.message });
   }
 });
 

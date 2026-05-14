@@ -30,6 +30,29 @@ function resolveApiBaseUrl() {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
+/**
+ * Public web app origin for share / deep links (no trailing slash).
+ * Set `EXPO_PUBLIC_WEB_BASE_URL` for native builds (EAS env). On web, the current
+ * `window.location.origin` is used when env is unset so a new Vercel URL works without a rebuild.
+ */
+export function getWebAppOrigin(): string {
+  const raw = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_WEB_BASE_URL;
+  const fromEnv = typeof raw === "string" ? raw.trim().replace(/\/$/, "") : "";
+  if (fromEnv) return fromEnv;
+
+  const loc = (globalThis as { location?: { protocol?: string; hostname?: string; port?: string } }).location;
+  if (typeof loc?.hostname === "string" && loc.hostname.length > 0) {
+    const host = loc.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      const port = loc.port ? `:${loc.port}` : "";
+      const protocol = loc.protocol && loc.protocol.length > 0 ? loc.protocol : "https:";
+      return `${protocol}//${host}${port}`;
+    }
+  }
+
+  return "https://agrovibes.app";
+}
+
 export interface AuthResponse {
   token: string;
   user: {
@@ -469,6 +492,28 @@ export async function unsaveHomePost(token: string, postId: number) {
   })) as { saved: boolean };
 }
 
+export async function deleteHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean };
+}
+
+export async function reportHomePost(token: string, postId: number, reason?: string) {
+  const body: { reason?: string } = {};
+  if (reason != null && String(reason).trim()) {
+    body.reason = String(reason).trim().slice(0, 500);
+  }
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/report`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  )) as { ok: boolean };
+}
+
 export async function fetchHomePostComments(postId: number, token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -640,6 +685,16 @@ export async function respondToFollowRequest(token: string, followId: number, ac
 
 export async function fetchProfileStats(token: string, userId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/profile-stats/${encodeURIComponent(String(userId))}`, token)) as {
+    id: number;
+    fullName: string;
+    username?: string | null;
+    avatarUrl?: string | null;
+    bio?: string | null;
+    website?: string | null;
+    locationLabel?: string | null;
+    createdAt?: string;
+    postsCount: number;
+    reelsCount: number;
     followersCount: number;
     followingCount: number;
     viewerStatus: FollowStatus;
