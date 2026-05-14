@@ -1807,17 +1807,50 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
 router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) => {
   try {
     await ensureSocialNotificationsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostsTable();
     const targetUserId = Number(req.params.userId);
     if (!Number.isFinite(targetUserId)) {
       res.status(400).json({ message: "Valid userId is required" });
       return;
     }
+    const userRes = await query(
+      `
+      SELECT
+        u.id,
+        u.full_name AS "fullName",
+        u.username,
+        u.avatar_url AS "avatarUrl",
+        u.bio,
+        u.website,
+        u.location_label AS "locationLabel",
+        u.created_at AS "createdAt",
+        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
+        COALESCE(posts.reels_count, 0)::INT AS "reelsCount"
+      FROM learn_users u
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::INT AS posts_count,
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+        FROM home_posts p
+        WHERE p.user_id = u.id
+      ) posts ON TRUE
+      WHERE u.id = $1
+      LIMIT 1
+      `,
+      [targetUserId]
+    );
+    if (!userRes.rows[0]) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    const profile = userRes.rows[0];
     const counts = await socialCountsForUser(targetUserId);
     const relation =
       Number(req.user.userId) === targetUserId
         ? { viewerStatus: "self", reverseStatus: "self", canFollowBack: false }
         : await relationshipForUsers(req.user.userId, targetUserId);
-    res.json({ ...counts, ...relation });
+    res.json({ ...profile, ...counts, ...relation });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile stats", error: error.message });
   }

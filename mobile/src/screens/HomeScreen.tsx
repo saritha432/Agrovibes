@@ -34,6 +34,7 @@ import {
   fetchHomeStories,
   fetchRelationships,
   fetchSocialNetwork,
+  getWebAppOrigin,
   HomePost,
   HomeStory,
   likeHomePost,
@@ -1223,7 +1224,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   }, [playingPostId]);
 
   const buildShareLink = useCallback((post: HomePost) => {
-    return `https://agrovibes.app/reel/${encodeURIComponent(String(post.id))}`;
+    return `${getWebAppOrigin()}/reel/${encodeURIComponent(String(post.id))}`;
   }, []);
 
   const shareMessage = useCallback(

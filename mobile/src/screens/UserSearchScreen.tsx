@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -153,12 +154,17 @@ export function UserSearchScreen() {
               navigation.navigate("PublicProfile", {
                 userId: item.id,
                 userName: item.name,
-                userKey: item.key
+                userKey: item.key,
+                avatarUrl: item.avatarUrl
               })
             }
           >
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+              {item.avatarUrl ? (
+                <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+              ) : (
+                <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+              )}
             </View>
             <Text style={styles.name} numberOfLines={1}>
               {item.name}
@@ -207,8 +213,10 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     backgroundColor: "#e6f2ef",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "hidden"
   },
+  avatarImage: { width: "100%", height: "100%" },
   avatarText: { color: TEAL, fontWeight: "800", fontSize: 17 },
   name: { flex: 1, color: TEXT, fontWeight: "700", fontSize: 15 },
   followBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },

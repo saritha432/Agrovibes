@@ -60,7 +60,7 @@ export type RootStackParamList = {
   InstructorStudio: undefined;
   EditProfile: undefined;
   UserSearch: undefined;
-  PublicProfile: { userId?: number; userName: string; userKey?: string };
+  PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
   DirectInbox: undefined;
   DirectChat: { peerUserId: number; peerName: string; peerKey?: string };
 };

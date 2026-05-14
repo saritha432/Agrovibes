@@ -33,12 +33,13 @@ export function PublicProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { token, user } = useAuth();
   const route = useRoute<RouteProp<RootStackParamList, "PublicProfile">>();
-  const { userId, userName, userKey } = route.params;
+  const { userId, userName, userKey, avatarUrl: avatarFromRoute } = route.params;
   const [posts, setPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null | undefined>(avatarFromRoute);
   const { width } = useWindowDimensions();
   const tile = (width - 4) / 3;
 
@@ -71,6 +72,10 @@ export function PublicProfileScreen() {
         setFollowersCount(Number(stats.followersCount || 0));
         setFollowingCount(Number(stats.followingCount || 0));
         setIsFollowing(stats.viewerStatus === "accepted" || stats.viewerStatus === "pending");
+        const fromApi =
+          stats.avatarUrl != null && String(stats.avatarUrl).trim().length > 0 ? String(stats.avatarUrl).trim() : null;
+        const fromRoute = avatarFromRoute != null && String(avatarFromRoute).trim().length > 0 ? String(avatarFromRoute).trim() : null;
+        setAvatarUrl(fromApi ?? fromRoute);
       })
       .catch(() => {
         if (!mounted) return;
@@ -80,7 +85,7 @@ export function PublicProfileScreen() {
     return () => {
       mounted = false;
     };
-  }, [token, userId]);
+  }, [token, userId, avatarFromRoute]);
 
   const visible = useMemo(() => {
     const byName = normalizeName(userName);
@@ -124,7 +129,11 @@ export function PublicProfileScreen() {
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+          ) : (
+            <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
+          )}
         </View>
         <View style={styles.statsRow}>
           <View style={styles.stat}>
@@ -197,8 +206,10 @@ const styles = StyleSheet.create({
     borderRadius: 39,
     backgroundColor: "#edf3f2",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "hidden"
   },
+  avatarImage: { width: "100%", height: "100%" },
   avatarText: { fontSize: 30, fontWeight: "800", color: "#0f9b8e" },
   statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingRight: 6 },
   stat: { alignItems: "center" },
