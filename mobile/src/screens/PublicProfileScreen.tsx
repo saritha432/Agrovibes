@@ -139,7 +139,8 @@ export function PublicProfileScreen() {
     navigation.navigate("DirectChat", {
       peerUserId: userId,
       peerName: userName,
-      peerKey: userKey || (userId ? String(userId) : undefined)
+      peerKey: userKey || (userId ? String(userId) : undefined),
+      peerAvatarUrl: avatarUrl
     });
   };
 

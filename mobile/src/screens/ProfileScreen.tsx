@@ -18,6 +18,7 @@ import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
+import { UserAvatar } from "../components/UserAvatar";
 import {
   fetchSavedHomePosts,
   fetchHomePosts,
@@ -79,10 +80,12 @@ export function ProfileScreen() {
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
-  const [followersList, setFollowersList] = useState<Array<{ name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>(
-    []
-  );
-  const [followingList, setFollowingList] = useState<Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>>([]);
+  const [followersList, setFollowersList] = useState<
+    Array<{ name: string; key?: string; avatarUrl?: string | null; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>
+  >([]);
+  const [followingList, setFollowingList] = useState<
+    Array<{ name: string; key?: string; avatarUrl?: string | null; viewerStatus: "accepted"; canFollowBack: false }>
+  >([]);
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Reels");
@@ -171,8 +174,14 @@ export function ProfileScreen() {
         if (!isMountedRef.current) return;
         const mergedFollowers = [...(network.followers || []), ...(localNetwork.followers || [])];
         const mergedFollowing = [...(network.following || []), ...(localNetwork.following || [])];
-        const followersDedup = new Map<string, { name: string; key?: string; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>();
-        const followingDedup = new Map<string, { name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>();
+        const followersDedup = new Map<
+          string,
+          { name: string; key?: string; avatarUrl?: string | null; viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }
+        >();
+        const followingDedup = new Map<
+          string,
+          { name: string; key?: string; avatarUrl?: string | null; viewerStatus: "accepted"; canFollowBack: false }
+        >();
         for (const person of mergedFollowers) {
           const id = personUniqueId(person);
           if (!followersDedup.has(id)) followersDedup.set(id, person);
@@ -366,13 +375,18 @@ export function ProfileScreen() {
     await refreshMergedFollowStats();
   };
 
-  const openPersonChat = (person: { name: string; key?: string }) => {
+  const openPersonChat = (person: { name: string; key?: string; avatarUrl?: string | null }) => {
     const peerUserId = parsePersonUserId(person);
     if (!peerUserId) {
       Alert.alert("Unavailable", "Chat is available only for synced users.");
       return;
     }
-    navigation.navigate("DirectChat", { peerUserId, peerName: person.name, peerKey: person.key || String(peerUserId) });
+    navigation.navigate("DirectChat", {
+      peerUserId,
+      peerName: person.name,
+      peerKey: person.key || String(peerUserId),
+      peerAvatarUrl: person.avatarUrl
+    });
     setActiveListType(null);
   };
 
@@ -830,7 +844,18 @@ export function ProfileScreen() {
                   const isFollowingMenuOpen = activeListType === "following" && followingActionMenuFor === rowId;
                   return (
                     <View key={`${person.key || person.name}-${idx}`} style={[styles.personRow, isFollowingMenuOpen ? styles.personRowMenuOpen : null]}>
-                      <Text style={styles.personName}>{person.name}</Text>
+                      <UserAvatar
+                        uri={person.avatarUrl}
+                        name={person.name}
+                        size={40}
+                        borderRadius={20}
+                        style={styles.personListAvatar}
+                        fallbackBackgroundColor="#29303a"
+                        initialsColor={LIME}
+                      />
+                      <Text style={styles.personName} numberOfLines={1}>
+                        {person.name}
+                      </Text>
                       {activeListType === "followers" ? (
                         <View style={styles.personActionsRow}>
                           <Pressable style={styles.messageBtn} onPress={() => openPersonChat(person)}>
@@ -1153,7 +1178,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#1d2126"
   },
   personRowMenuOpen: { zIndex: 40 },
-  personName: { color: TEXT, fontWeight: "800", flex: 1, marginRight: 10 },
+  personListAvatar: { marginRight: 10 },
+  personName: { color: TEXT, fontWeight: "800", flex: 1, marginRight: 10, minWidth: 0 },
   personActionsRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0, position: "relative" },
   messageBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   messageBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },

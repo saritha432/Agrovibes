@@ -12,7 +12,8 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { fetchMessageThreads } from "../../services/api";
+import { UserAvatar } from "../../components/UserAvatar";
+import { fetchMessageThreads, type MessageThread } from "../../services/api";
 
 const BG = "#000000";
 const TEXT = "#f8fafc";
@@ -43,9 +44,7 @@ export function DirectInboxScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, token } = useAuth();
   const [query, setQuery] = useState("");
-  const [threads, setThreads] = useState<
-    Array<{ peerUserId: number; peerName: string; peerEmail?: string; lastMessage: string; lastAt: string }>
-  >([]);
+  const [threads, setThreads] = useState<MessageThread[]>([]);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -74,11 +73,12 @@ export function DirectInboxScreen() {
     ? threads.filter((t) => t.peerName.toLowerCase().includes(query.trim().toLowerCase()))
     : threads;
 
-  const openThread = (t: { peerUserId: number; peerName: string; peerEmail?: string }) => {
+  const openThread = (t: MessageThread) => {
     navigation.navigate("DirectChat", {
       peerUserId: t.peerUserId,
       peerName: t.peerName,
-      peerKey: t.peerEmail
+      peerKey: t.peerEmail,
+      peerAvatarUrl: t.peerAvatarUrl
     });
   };
 
@@ -110,9 +110,15 @@ export function DirectInboxScreen() {
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <Pressable style={styles.row} onPress={() => openThread(item)}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{item.peerName.trim().charAt(0).toUpperCase() || "?"}</Text>
-              </View>
+              <UserAvatar
+                uri={item.peerAvatarUrl}
+                name={item.peerName}
+                size={56}
+                borderRadius={28}
+                style={styles.avatar}
+                fallbackBackgroundColor={CARD}
+                initialsColor={YELLOW}
+              />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
                   <Text style={styles.peerName} numberOfLines={1}>

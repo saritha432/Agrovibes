@@ -18,6 +18,7 @@ import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { UserAvatar } from "../../components/UserAvatar";
 import { fetchMessageThread, sendDirectMessage, type DirectMessageItem } from "../../services/api";
 
 const BG = "#000000";
@@ -80,9 +81,12 @@ export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName } = route.params;
+  const { peerUserId, peerName, peerAvatarUrl } = route.params;
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
+  const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
+    peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
+  );
   const [draft, setDraft] = useState("");
   const [activeCall, setActiveCall] = useState<"voice" | "video" | null>(null);
   const [isMuted, setMuted] = useState(false);
@@ -96,6 +100,8 @@ export function DirectChatScreen() {
     }
     const list = await fetchMessageThread(token, peerUserId);
     setMessages(list.messages || []);
+    const next = list.peer?.avatarUrl != null && String(list.peer.avatarUrl).trim() ? String(list.peer.avatarUrl).trim() : null;
+    if (next) setPeerAvatar(next);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
   }, [token, peerUserId]);
 
@@ -143,9 +149,15 @@ export function DirectChatScreen() {
           <Ionicons name="chevron-back" size={28} color={YELLOW} />
         </Pressable>
         <View style={styles.headerCenter}>
-          <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>{peerName.trim().charAt(0).toUpperCase() || "?"}</Text>
-          </View>
+          <UserAvatar
+            uri={peerAvatar}
+            name={peerName}
+            size={32}
+            borderRadius={16}
+            style={styles.headerAvatar}
+            fallbackBackgroundColor="#111418"
+            initialsColor={YELLOW}
+          />
           <Text style={styles.headerTitle} numberOfLines={1}>
             {peerName}
           </Text>
@@ -256,7 +268,14 @@ export function DirectChatScreen() {
                 </View>
               ) : (
                 <View style={styles.videoAvatarLarge}>
-                  <Text style={styles.callAvatarText}>{peerName.trim().charAt(0).toUpperCase() || "?"}</Text>
+                  <UserAvatar
+                    uri={peerAvatar}
+                    name={peerName}
+                    size={120}
+                    borderRadius={60}
+                    fallbackBackgroundColor="#1d2126"
+                    initialsColor="#fff"
+                  />
                 </View>
               )}
             </View>
@@ -267,9 +286,15 @@ export function DirectChatScreen() {
             </Pressable>
           </View>
           <View style={styles.callIdentity}>
-            <View style={[styles.callAvatar, activeCall === "video" ? styles.callAvatarVideo : null]}>
-              <Text style={styles.callAvatarText}>{peerName.trim().charAt(0).toUpperCase() || "?"}</Text>
-            </View>
+            <UserAvatar
+              uri={peerAvatar}
+              name={peerName}
+              size={activeCall === "video" ? 82 : 118}
+              borderRadius={activeCall === "video" ? 41 : 59}
+              style={[styles.callAvatar, activeCall === "video" ? styles.callAvatarVideo : null]}
+              fallbackBackgroundColor="#d8ff37"
+              initialsColor="#111"
+            />
             <Text style={styles.callName}>{peerName}</Text>
             <Text style={styles.callStatus}>{activeCall === "video" ? "Video calling..." : "Calling..."}</Text>
           </View>
