@@ -75,6 +75,54 @@ function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
 }
 
+function postCreatedMs(post: HomePost): number {
+  const raw = post.createdAt as string | number | Date | undefined;
+  if (raw == null) return 0;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  const t = Date.parse(String(raw));
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Full-screen reel pager item: tagged reel plus video. */
+function isFullScreenReelItem(post: HomePost): boolean {
+  return !!(post.videoUrl && isReelPost(post));
+}
+
+/**
+ * Interleave reel items and other feed cards (newest-first within each group) so the feed
+ * alternates rhythm instead of long runs of only reels or only posts.
+ */
+function interleaveFeedPostsInstagramStyle(posts: HomePost[]): HomePost[] {
+  if (posts.length <= 1) return posts;
+  const byTime = (a: HomePost, b: HomePost) => {
+    const d = postCreatedMs(b) - postCreatedMs(a);
+    if (d !== 0) return d;
+    return b.id - a.id;
+  };
+  const reels = posts.filter(isFullScreenReelItem).sort(byTime);
+  const others = posts.filter((p) => !isFullScreenReelItem(p)).sort(byTime);
+  if (reels.length === 0 || others.length === 0) {
+    return [...posts].sort(byTime);
+  }
+  let nextReel =
+    postCreatedMs(reels[0]) > postCreatedMs(others[0]) ||
+    (postCreatedMs(reels[0]) === postCreatedMs(others[0]) && reels[0].id >= others[0].id);
+  const out: HomePost[] = [];
+  let ir = 0;
+  let io = 0;
+  while (ir < reels.length || io < others.length) {
+    if (nextReel) {
+      if (ir < reels.length) out.push(reels[ir++]);
+      else out.push(others[io++]);
+    } else {
+      if (io < others.length) out.push(others[io++]);
+      else out.push(reels[ir++]);
+    }
+    nextReel = !nextReel;
+  }
+  return out;
+}
+
 const REPORT_REASONS = [
   { key: "spam", label: "Spam or misleading" },
   { key: "harassment", label: "Harassment or bullying" },
@@ -806,7 +854,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const tabPosts = useMemo(() => {
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return strip(posts);
+    if (activeHomeTab === "Feed") return interleaveFeedPostsInstagramStyle(strip(posts));
     if (activeHomeTab === "Friends") {
       return strip(
         posts.filter((p) => {
@@ -1779,37 +1827,58 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const confirmDeleteOwnPost = useCallback(
     (post: HomePost) => {
       if (!token) {
-        Alert.alert("Login required", "Please log in to delete posts.");
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("Please log in to delete posts.");
+        } else {
+          Alert.alert("Login required", "Please log in to delete posts.");
+        }
         return;
       }
       if (!viewerOwnsPost(post, user)) {
-        Alert.alert("Not allowed", "You can only delete your own posts.");
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("You can only delete your own posts.");
+        } else {
+          Alert.alert("Not allowed", "You can only delete your own posts.");
+        }
         return;
       }
-      Alert.alert("Delete this post?", "This cannot be undone.", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteHomePost(token, post.id);
-              setPosts((prev) => prev.filter((p) => p.id !== post.id));
-              setActiveReelOptionsPost(null);
-              setReelViewerOpen((v) => {
-                if (!v) return null;
-                const nextPosts = v.posts.filter((p) => p.id !== post.id);
-                if (nextPosts.length === 0) return null;
-                const nextIndex = Math.min(v.initialIndex, nextPosts.length - 1);
-                return { posts: nextPosts, initialIndex: nextIndex };
-              });
-              setPlayingPostId((cur) => (cur === post.id ? null : cur));
-            } catch (e: unknown) {
-              const msg = e instanceof Error ? e.message : "Could not delete this post.";
-              Alert.alert("Delete failed", msg);
-            }
+
+      const runDelete = async () => {
+        try {
+          await deleteHomePost(token, post.id);
+          setPosts((prev) => prev.filter((p) => p.id !== post.id));
+          setActiveReelOptionsPost(null);
+          setReelViewerOpen((v) => {
+            if (!v) return null;
+            const nextPosts = v.posts.filter((p) => p.id !== post.id);
+            if (nextPosts.length === 0) return null;
+            const nextIndex = Math.min(v.initialIndex, nextPosts.length - 1);
+            return { posts: nextPosts, initialIndex: nextIndex };
+          });
+          setPlayingPostId((cur) => (cur === post.id ? null : cur));
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Could not delete this post.";
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert(msg);
+          } else {
+            Alert.alert("Delete failed", msg);
           }
         }
+      };
+
+      // React Native Web: Alert.alert with buttons is unreliable; nothing runs → no DELETE request.
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        setActiveReelOptionsPost(null);
+        setTimeout(() => {
+          if (!window.confirm("Delete this post? This cannot be undone.")) return;
+          void runDelete();
+        }, 0);
+        return;
+      }
+
+      Alert.alert("Delete this post?", "This cannot be undone.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void runDelete() }
       ]);
     },
     [token, user]
@@ -2996,11 +3065,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       </Modal>
 
       <Modal visible={!!activeReelOptionsPost} transparent animationType="slide" onRequestClose={() => setActiveReelOptionsPost(null)}>
-        <Pressable style={styles.shareBackdrop} onPress={() => setActiveReelOptionsPost(null)}>
+        <View style={styles.reelOptionsModalRoot}>
           <Pressable
-            style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22) }]}
-            onPress={(e) => e.stopPropagation?.()}
-          >
+            accessibilityLabel="Dismiss menu"
+            style={[StyleSheet.absoluteFillObject, styles.reelOptionsDimTap]}
+            onPress={() => setActiveReelOptionsPost(null)}
+          />
+          <View style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22) }]}>
             <View style={styles.shareHandle} />
             <Text style={styles.reelOptionsTitle}>
               {activeReelOptionsPost?.videoUrl && isReelPost(activeReelOptionsPost) ? "Reel options" : "Post options"}
@@ -3086,8 +3157,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 </View>
               </Pressable>
             ) : null}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       <Modal
@@ -3903,6 +3974,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "flex-end"
+  },
+  /** Bottom sheet host: dim tap layer + sheet as siblings so row Pressables receive presses on web. */
+  reelOptionsModalRoot: {
+    flex: 1,
+    justifyContent: "flex-end"
+  },
+  reelOptionsDimTap: {
+    backgroundColor: "rgba(0,0,0,0.5)"
   },
   shareSheet: {
     borderTopLeftRadius: 18,
