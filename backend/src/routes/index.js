@@ -868,6 +868,16 @@ async function ensurePostReportsTable() {
   postReportsTableReady = true;
 }
 
+/** Same rules as mobile `normalizeIdentity` — compare post.user_name to learn_users.full_name reliably. */
+function normalizeUserLabelForHomePostAuth(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeHomePostRow(row) {
   const base = { ...row };
   let list = null;
@@ -2880,6 +2890,10 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
       return;
     }
     const me = Number(req.user.userId);
+    if (!Number.isFinite(me) || me <= 0) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
     const postRes = await query(
       `SELECT id, user_id AS "userId", user_name AS "userName" FROM home_posts WHERE id = $1 LIMIT 1`,
       [postId]
@@ -2889,19 +2903,14 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
       res.status(404).json({ message: "Post not found" });
       return;
     }
-    const ownerId = row.userId != null ? Number(row.userId) : null;
-    const meRow = await query(`SELECT LOWER(TRIM(full_name)) AS n FROM learn_users WHERE id = $1 LIMIT 1`, [me]);
-    const myName = String(meRow.rows[0]?.n || "").trim();
-    const authorName = String(row.userName || "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const ownerId = row.userId != null ? Number(row.userId) : NaN;
+    const meRow = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [me]);
+    const myName = normalizeUserLabelForHomePostAuth(meRow.rows[0]?.full_name || req.user?.fullName || "");
+    const authorName = normalizeUserLabelForHomePostAuth(row.userName || "");
 
     const isOwner =
       (Number.isFinite(ownerId) && ownerId > 0 && ownerId === me) ||
-      ((!Number.isFinite(ownerId) || ownerId <= 0) && authorName && authorName === myName);
+      ((!Number.isFinite(ownerId) || ownerId <= 0) && authorName.length > 0 && authorName === myName);
 
     if (!isOwner) {
       res.status(403).json({ message: "You can only delete your own posts" });
