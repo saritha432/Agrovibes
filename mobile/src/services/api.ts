@@ -492,6 +492,28 @@ export async function unsaveHomePost(token: string, postId: number) {
   })) as { saved: boolean };
 }
 
+export async function deleteHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean };
+}
+
+export async function reportHomePost(token: string, postId: number, reason?: string) {
+  const body: { reason?: string } = {};
+  if (reason != null && String(reason).trim()) {
+    body.reason = String(reason).trim().slice(0, 500);
+  }
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/report`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  )) as { ok: boolean };
+}
+
 export async function fetchHomePostComments(postId: number, token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

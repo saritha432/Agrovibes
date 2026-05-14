@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   FlatList,
@@ -22,6 +24,7 @@ import {
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppTopBar } from "../components/AppTopBar";
@@ -29,6 +32,8 @@ import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
   createHomePostComment,
+  deleteHomePost,
+  reportHomePost,
   fetchHomePostComments,
   fetchHomePosts,
   fetchHomeStories,
@@ -67,6 +72,24 @@ const REEL_LIKE_COLOR = "#ffffff";
 
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
+}
+
+const REPORT_REASONS = [
+  { key: "spam", label: "Spam or misleading" },
+  { key: "harassment", label: "Harassment or bullying" },
+  { key: "hate", label: "Hate speech or symbols" },
+  { key: "nudity", label: "Nudity or sexual content" },
+  { key: "violence", label: "Violence or dangerous acts" },
+  { key: "scam", label: "Scam or fraud" },
+  { key: "ip", label: "Intellectual property violation" },
+  { key: "other", label: "Something else" }
+] as const;
+
+function dismissedPostsStorageKey(userId: string | number | undefined) {
+  if (userId != null && String(userId) !== "" && Number(userId) > 0) {
+    return `agrovibes.feed.dismissedPosts.v1.${userId}`;
+  }
+  return "agrovibes.feed.dismissedPosts.v1.anon";
 }
 
 function reelCreativeFilterTint(filter?: string): string | null {
@@ -112,6 +135,17 @@ function normalizeIdentity(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function viewerOwnsPost(post: HomePost, viewer: { id: number; fullName?: string } | null) {
+  if (!viewer) return false;
+  const postUserId = Number(post.userId);
+  const normalizedPostName = normalizeIdentity(post.userName);
+  const normalizedCurrentUserName = normalizeIdentity(viewer.fullName || "");
+  return (
+    (postUserId > 0 && postUserId === Number(viewer.id)) ||
+    (!postUserId && normalizedPostName.length > 0 && normalizedPostName === normalizedCurrentUserName)
+  );
 }
 
 /** Stable key for grouping stories by author (prefer server user id). */
@@ -624,6 +658,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
+  const [dismissedHydrated, setDismissedHydrated] = useState(false);
+  const [reportModalPost, setReportModalPost] = useState<HomePost | null>(null);
+  const [reportSubmitBusy, setReportSubmitBusy] = useState(false);
   const postsRef = useRef<HomePost[]>([]);
   postsRef.current = posts;
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
@@ -720,17 +758,55 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   );
 
   const tabPosts = useMemo(() => {
-    if (activeHomeTab === "Feed") return posts;
+    const dismissed = new Set(dismissedPostIds);
+    const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
+    if (activeHomeTab === "Feed") return strip(posts);
     if (activeHomeTab === "Friends") {
-      return posts.filter((p) => {
-        if (!p.videoUrl) return false;
-        const uid = Number(p.userId);
-        return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
-      });
+      return strip(
+        posts.filter((p) => {
+          if (!p.videoUrl) return false;
+          const uid = Number(p.userId);
+          return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
+        })
+      );
     }
     if (activeHomeTab === "live") return [];
-    return posts;
-  }, [activeHomeTab, posts, followingUserIds]);
+    return strip(posts);
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDismissedHydrated(false);
+    setDismissedPostIds([]);
+    const key = dismissedPostsStorageKey(user?.id);
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (cancelled) return;
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown;
+          if (Array.isArray(parsed)) {
+            const ids = parsed.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0);
+            setDismissedPostIds(Array.from(new Set(ids)).slice(-400));
+          }
+        }
+      } catch {
+        if (!cancelled) setDismissedPostIds([]);
+      } finally {
+        if (!cancelled) setDismissedHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!dismissedHydrated) return;
+    const key = dismissedPostsStorageKey(user?.id);
+    void AsyncStorage.setItem(key, JSON.stringify(Array.from(new Set(dismissedPostIds)).slice(-400)));
+  }, [user?.id, dismissedPostIds, dismissedHydrated]);
+
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
   const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
@@ -1579,6 +1655,110 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [token]
   );
 
+  const onCopyPostLink = useCallback(
+    async (post: HomePost) => {
+      try {
+        await Clipboard.setStringAsync(buildShareLink(post));
+        setActiveReelOptionsPost(null);
+        Alert.alert("Copied", "Post link copied to clipboard.");
+      } catch {
+        Alert.alert("Copy failed", "Could not copy the link.");
+      }
+    },
+    [buildShareLink]
+  );
+
+  const onNotInterestedInPost = useCallback((post: HomePost) => {
+    setDismissedPostIds((prev) => (prev.includes(post.id) ? prev : [...prev, post.id]));
+    setReelViewerOpen((v) => {
+      if (!v || !v.posts.some((p) => p.id === post.id)) return v;
+      const nextPosts = v.posts.filter((p) => p.id !== post.id);
+      if (nextPosts.length === 0) return null;
+      const removedIndex = v.posts.findIndex((p) => p.id === post.id);
+      let nextInitial = v.initialIndex;
+      if (removedIndex !== -1 && removedIndex < nextInitial) {
+        nextInitial = Math.max(0, nextInitial - 1);
+      }
+      if (removedIndex !== -1 && removedIndex === nextInitial && nextInitial >= nextPosts.length) {
+        nextInitial = Math.max(0, nextPosts.length - 1);
+      }
+      if (nextInitial >= nextPosts.length) nextInitial = Math.max(0, nextPosts.length - 1);
+      return { posts: nextPosts, initialIndex: nextInitial };
+    });
+    setPlayingPostId((cur) => (cur === post.id ? null : cur));
+    setActiveReelOptionsPost(null);
+    Alert.alert("Got it", "We will hide this post and tune what we show you on this device.");
+  }, []);
+
+  const submitReportWithReason = useCallback(
+    async (reasonKey: string) => {
+      if (!reportModalPost || !token) return;
+      setReportSubmitBusy(true);
+      try {
+        await reportHomePost(token, reportModalPost.id, reasonKey);
+        setReportModalPost(null);
+        Alert.alert("Thanks", "We received your report and will review it.");
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Could not send report.";
+        Alert.alert("Report failed", msg);
+      } finally {
+        setReportSubmitBusy(false);
+      }
+    },
+    [reportModalPost, token]
+  );
+
+  const onReportPost = useCallback(
+    (post: HomePost) => {
+      setActiveReelOptionsPost(null);
+      if (!token) {
+        Alert.alert("Login required", "Please log in to report posts.");
+        return;
+      }
+      setReportModalPost(post);
+    },
+    [token]
+  );
+
+  const confirmDeleteOwnPost = useCallback(
+    (post: HomePost) => {
+      if (!token) {
+        Alert.alert("Login required", "Please log in to delete posts.");
+        return;
+      }
+      if (!viewerOwnsPost(post, user)) {
+        Alert.alert("Not allowed", "You can only delete your own posts.");
+        return;
+      }
+      Alert.alert("Delete this post?", "This cannot be undone.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteHomePost(token, post.id);
+              setPosts((prev) => prev.filter((p) => p.id !== post.id));
+              setActiveReelOptionsPost(null);
+              setReelViewerOpen((v) => {
+                if (!v) return null;
+                const nextPosts = v.posts.filter((p) => p.id !== post.id);
+                if (nextPosts.length === 0) return null;
+                const nextIndex = Math.min(v.initialIndex, nextPosts.length - 1);
+                return { posts: nextPosts, initialIndex: nextIndex };
+              });
+              setPlayingPostId((cur) => (cur === post.id ? null : cur));
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : "Could not delete this post.";
+              Alert.alert("Delete failed", msg);
+            }
+          }
+        }
+      ]);
+    },
+    [token, user]
+  );
+
   const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
     if (!text || !activeCommentsPost) return;
@@ -1743,9 +1923,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                     : styles.storyRingEmptyLight
               ]}
             >
-              <View style={styles.storyInner}>
+                <View style={styles.storyInner}>
                 <View style={styles.storyAvatarFill}>
-                  <Text style={styles.storyInitial}>{(user?.fullName || "Y").charAt(0).toUpperCase()}</Text>
+                  {user?.avatarUrl && String(user.avatarUrl).trim().length > 0 ? (
+                    <Image source={{ uri: String(user.avatarUrl).trim() }} style={styles.storyAvatarImage} resizeMode="cover" />
+                  ) : (
+                    <Text style={styles.storyInitial}>{(user?.fullName || "Y").charAt(0).toUpperCase()}</Text>
+                  )}
                 </View>
                 <Pressable
                   style={styles.yourStoryPlusBadge}
@@ -1824,7 +2008,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.fullName]
+    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.avatarUrl, user?.fullName]
   );
 
   const renderFullScreenReel = useCallback(
@@ -2124,7 +2308,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   <Text style={styles.followChipText}>{followLabel}</Text>
                 </Pressable>
               ) : null}
-            <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+            <Pressable hitSlop={10} onPress={() => setActiveReelOptionsPost(post)} accessibilityLabel="Post options">
+              <Ionicons name="ellipsis-horizontal" size={18} color="#5f6f6a" />
+            </Pressable>
             </View>
           </View>
 
@@ -2697,7 +2883,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             onPress={(e) => e.stopPropagation?.()}
           >
             <View style={styles.shareHandle} />
-            <Text style={styles.reelOptionsTitle}>Reel options</Text>
+            <Text style={styles.reelOptionsTitle}>
+              {activeReelOptionsPost?.videoUrl && isReelPost(activeReelOptionsPost) ? "Reel options" : "Post options"}
+            </Text>
             <Pressable
               style={styles.reelOptionRow}
               disabled={!activeReelOptionsPost || !!saveBusyByPostId[activeReelOptionsPost.id]}
@@ -2718,31 +2906,117 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 <Text style={styles.reelOptionTitle}>
                   {activeReelOptionsPost?.viewerHasSaved ? "Remove from saved" : "Save"}
                 </Text>
-                <Text style={styles.reelOptionSub}>Saved reels appear in your profile.</Text>
+                <Text style={styles.reelOptionSub}>Saved posts appear in your profile.</Text>
               </View>
             </Pressable>
             <Pressable
               style={styles.reelOptionRow}
               onPress={() => {
-                if (activeReelOptionsPost) setSharePost(activeReelOptionsPost);
-                setActiveReelOptionsPost(null);
+                if (activeReelOptionsPost) void onCopyPostLink(activeReelOptionsPost);
               }}
             >
               <View style={styles.reelOptionIcon}>
-                <Ionicons name="paper-plane-outline" size={22} color="#d8ff37" />
+                <Ionicons name="link-outline" size={22} color="#d8ff37" />
               </View>
               <View style={styles.reelOptionTextCol}>
-                <Text style={styles.reelOptionTitle}>Share</Text>
-                <Text style={styles.reelOptionSub}>Send this reel to chat or other apps.</Text>
+                <Text style={styles.reelOptionTitle}>Copy link</Text>
+                <Text style={styles.reelOptionSub}>Copy the post URL to your clipboard.</Text>
               </View>
             </Pressable>
-            <Pressable style={styles.reelOptionRow} onPress={() => setActiveReelOptionsPost(null)}>
+            <Pressable
+              style={styles.reelOptionRow}
+              onPress={() => {
+                if (activeReelOptionsPost) onNotInterestedInPost(activeReelOptionsPost);
+              }}
+            >
               <View style={styles.reelOptionIcon}>
-                <Ionicons name="close-outline" size={23} color="#d8ff37" />
+                <Ionicons name="eye-off-outline" size={22} color="#d8ff37" />
               </View>
               <View style={styles.reelOptionTextCol}>
-                <Text style={styles.reelOptionTitle}>Cancel</Text>
+                <Text style={styles.reelOptionTitle}>Not interested</Text>
+                <Text style={styles.reelOptionSub}>Hide this post from your feed on this device.</Text>
               </View>
+            </Pressable>
+            <Pressable
+              style={styles.reelOptionRow}
+              onPress={() => {
+                if (activeReelOptionsPost) onReportPost(activeReelOptionsPost);
+              }}
+            >
+              <View style={styles.reelOptionIcon}>
+                <Ionicons name="flag-outline" size={22} color="#d8ff37" />
+              </View>
+              <View style={styles.reelOptionTextCol}>
+                <Text style={styles.reelOptionTitle}>Report</Text>
+                <Text style={styles.reelOptionSub}>Flag this content for review.</Text>
+              </View>
+            </Pressable>
+            {activeReelOptionsPost && viewerOwnsPost(activeReelOptionsPost, user) ? (
+              <Pressable
+                style={styles.reelOptionRow}
+                onPress={() => {
+                  if (activeReelOptionsPost) confirmDeleteOwnPost(activeReelOptionsPost);
+                }}
+              >
+                <View style={styles.reelOptionIcon}>
+                  <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
+                </View>
+                <View style={styles.reelOptionTextCol}>
+                  <Text style={[styles.reelOptionTitle, styles.reelOptionTitleDanger]}>Delete</Text>
+                  <Text style={styles.reelOptionSub}>Remove this post permanently. Only you can do this.</Text>
+                </View>
+              </Pressable>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={!!reportModalPost}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!reportSubmitBusy) setReportModalPost(null);
+        }}
+      >
+        <Pressable style={styles.shareBackdrop} onPress={() => !reportSubmitBusy && setReportModalPost(null)}>
+          <Pressable
+            style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22), maxHeight: windowHeight * 0.72 }]}
+            onPress={(e) => e.stopPropagation?.()}
+          >
+            <View style={styles.shareHandle} />
+            <Text style={styles.reelOptionsTitle}>Report post</Text>
+            <Text style={[styles.reelOptionSub, { marginBottom: 6 }]}>
+              {reportModalPost ? `Why are you reporting ${reportModalPost.userName}?` : ""}
+            </Text>
+            {reportSubmitBusy ? (
+              <View style={{ paddingVertical: 24, alignItems: "center" }}>
+                <ActivityIndicator color="#d8ff37" />
+              </View>
+            ) : (
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                {REPORT_REASONS.map((r) => (
+                  <Pressable
+                    key={r.key}
+                    style={styles.reelOptionRow}
+                    onPress={() => void submitReportWithReason(r.key)}
+                  >
+                    <View style={styles.reelOptionIcon}>
+                      <Ionicons name="alert-circle-outline" size={22} color="#d8ff37" />
+                    </View>
+                    <View style={styles.reelOptionTextCol}>
+                      <Text style={styles.reelOptionTitle}>{r.label}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+            <Pressable
+              style={[styles.reelOptionRow, { borderBottomWidth: 0 }]}
+              disabled={reportSubmitBusy}
+              onPress={() => setReportModalPost(null)}
+            >
+              <Text style={[styles.reelOptionTitle, { flex: 1, textAlign: "center" }]}>Cancel</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -3135,8 +3409,10 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     backgroundColor: "#d4dce0",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "hidden"
   },
+  storyAvatarImage: { width: 56, height: 56, borderRadius: 28 },
   storyInitial: { fontSize: 18, fontWeight: "700", color: "#1f2c29" },
   yourStoryPlusBadge: {
     position: "absolute",
@@ -3495,6 +3771,7 @@ const styles = StyleSheet.create({
   },
   reelOptionTextCol: { flex: 1, minWidth: 0 },
   reelOptionTitle: { color: "#f8fafc", fontSize: 14, fontWeight: "900" },
+  reelOptionTitleDanger: { color: "#ff8f8f" },
   reelOptionSub: { color: "#97a0a8", fontSize: 11, fontWeight: "700", marginTop: 3 },
   shareBackdrop: {
     flex: 1,
