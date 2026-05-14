@@ -6,6 +6,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  InteractionManager,
   Modal,
   Platform,
   Pressable,
@@ -31,6 +32,7 @@ import {
   uploadImageFile,
   uploadPickedMedia
 } from "../services/api";
+import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
 
 type TaggedPerson = { id: number; name: string };
@@ -698,15 +700,35 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setCreateType("live");
       return;
     }
+    if (Platform.OS === "web") {
+      try {
+        const result = await launchWebCameraAsyncWithFacing({
+          mediaTypes: mediaTypeForEntry(),
+          cameraType: entryCameraFacing
+        });
+        if (!result.canceled && result.assets?.[0]) {
+          applyPickedMediaToFlow([result.assets[0]]);
+        }
+      } catch (e) {
+        setErrorText(e instanceof Error ? e.message : "Camera failed.");
+      }
+      return;
+    }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
       setErrorText("Camera permission is required.");
       return;
     }
+    await new Promise<void>((resolve) => {
+      InteractionManager.runAfterInteractions(() => resolve());
+    });
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: mediaTypeForEntry(),
       quality: 0.9,
-      cameraType: entryCameraFacing
+      cameraType: entryCameraFacing,
+      ...(Platform.OS === "ios"
+        ? { presentationStyle: ImagePicker.UIImagePickerPresentationStyle.OVER_FULL_SCREEN }
+        : {})
     });
     if (!result.canceled && result.assets[0]) {
       applyPickedMediaToFlow([result.assets[0]]);
