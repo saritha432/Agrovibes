@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
   ViewToken,
   useWindowDimensions
@@ -18,6 +19,7 @@ import { Audio, ResizeMode, Video } from "expo-av";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
+import { useNotificationPanel } from "../context/NotificationPanelContext";
 import {
   fetchSavedHomePosts,
   fetchHomePosts,
@@ -74,6 +76,7 @@ export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width, height: windowHeight } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
+  const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
@@ -85,6 +88,8 @@ export function ProfileScreen() {
   const [followingList, setFollowingList] = useState<Array<{ name: string; key?: string; viewerStatus: "accepted"; canFollowBack: false }>>([]);
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
+  const [followerRemoveConfirm, setFollowerRemoveConfirm] = useState<{ name: string; key?: string } | null>(null);
+  const [removeFollowerBusy, setRemoveFollowerBusy] = useState(false);
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Reels");
   const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
   const [playingReelId, setPlayingReelId] = useState<number | null>(null);
@@ -366,6 +371,26 @@ export function ProfileScreen() {
     await refreshMergedFollowStats();
   };
 
+  const confirmRemoveFollower = (person: { name: string; key?: string }) => {
+    setFollowerRemoveConfirm({ name: person.name, key: person.key });
+  };
+
+  const dismissRemoveFollowerConfirm = () => {
+    if (removeFollowerBusy) return;
+    setFollowerRemoveConfirm(null);
+  };
+
+  const executeRemoveFollower = async () => {
+    if (!followerRemoveConfirm || removeFollowerBusy) return;
+    setRemoveFollowerBusy(true);
+    try {
+      await removeFollowerFromList(followerRemoveConfirm);
+      setFollowerRemoveConfirm(null);
+    } finally {
+      setRemoveFollowerBusy(false);
+    }
+  };
+
   const openPersonChat = (person: { name: string; key?: string }) => {
     const peerUserId = parsePersonUserId(person);
     if (!peerUserId) {
@@ -389,8 +414,15 @@ export function ProfileScreen() {
             <Pressable hitSlop={8} onPress={navigateToUserSearch}>
               <Ionicons name="search-outline" size={18} color={LIME} />
             </Pressable>
-            <Pressable hitSlop={8} onPress={() => Alert.alert("Notifications", "Notifications are available from the home top bar.")}>
-              <Ionicons name="notifications-outline" size={18} color={LIME} />
+            <Pressable hitSlop={8} onPress={openNotificationSheet}>
+              <View style={styles.iconBadgeWrap}>
+                <Ionicons name="notifications-outline" size={18} color={LIME} />
+                {notificationUnreadCount > 0 ? (
+                  <View style={styles.notificationBadge}>
+                    <Text style={styles.notificationBadgeText}>{Math.min(99, notificationUnreadCount)}</Text>
+                  </View>
+                ) : null}
+              </View>
             </Pressable>
           </View>
         </View>
@@ -802,14 +834,15 @@ export function ProfileScreen() {
           setActiveListType(null);
         }}
       >
-        <Pressable
-          style={styles.overlay}
-          onPress={() => {
-            setFollowingActionMenuFor(null);
-            setActiveListType(null);
-          }}
-        >
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
+        <View style={styles.overlay}>
+          <Pressable
+            style={styles.overlayTapAboveSheet}
+            onPress={() => {
+              setFollowingActionMenuFor(null);
+              setActiveListType(null);
+            }}
+          />
+          <View style={styles.sheet} collapsable={false}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{activeListType === "followers" ? "Followers" : "Following"}</Text>
               <Pressable
@@ -821,7 +854,13 @@ export function ProfileScreen() {
                 <Ionicons name="close" size={22} color={TEAL} />
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.sheetBody}>
+            <ScrollView
+              style={[styles.sheetScroll, { maxHeight: Math.min(440, Math.round(windowHeight * 0.52)) }]}
+              contentContainerStyle={styles.sheetBody}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              bounces={false}
+            >
               {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
                 <Text style={styles.sheetEmpty}>No users found.</Text>
               ) : (
@@ -830,15 +869,24 @@ export function ProfileScreen() {
                   const isFollowingMenuOpen = activeListType === "following" && followingActionMenuFor === rowId;
                   return (
                     <View key={`${person.key || person.name}-${idx}`} style={[styles.personRow, isFollowingMenuOpen ? styles.personRowMenuOpen : null]}>
-                      <Text style={styles.personName}>{person.name}</Text>
+                      <Text style={styles.personName} numberOfLines={2}>
+                        {person.name}
+                      </Text>
                       {activeListType === "followers" ? (
-                        <View style={styles.personActionsRow}>
+                        <View style={styles.personActionsRow} collapsable={false}>
                           <Pressable style={styles.messageBtn} onPress={() => openPersonChat(person)}>
                             <Text style={styles.messageBtnText}>Message</Text>
                           </Pressable>
-                          <Pressable style={styles.iconDangerBtn} onPress={() => void removeFollowerFromList(person)}>
+                          <TouchableOpacity
+                            activeOpacity={0.75}
+                            style={styles.iconDangerBtn}
+                            hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                            onPress={() => confirmRemoveFollower(person)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${person.name} from followers`}
+                          >
                             <Ionicons name="close" size={16} color="#fff" />
-                          </Pressable>
+                          </TouchableOpacity>
                         </View>
                       ) : (
                         <View style={styles.personActionsRow}>
@@ -868,8 +916,43 @@ export function ProfileScreen() {
                 })
               )}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!followerRemoveConfirm}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={dismissRemoveFollowerConfirm}
+      >
+        <View style={styles.confirmOverlayRoot}>
+          <Pressable style={styles.confirmBackdrop} onPress={dismissRemoveFollowerConfirm} accessibilityLabel="Dismiss" />
+          <View style={styles.confirmCard} accessibilityViewIsModal>
+            <Text style={styles.confirmTitle}>Remove follower?</Text>
+            <Text style={styles.confirmBody}>
+              <Text style={styles.confirmName}>{followerRemoveConfirm?.name}</Text>
+              <Text style={styles.confirmBodyMuted}> will be removed from your followers.</Text>
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable
+                style={[styles.confirmBtnSecondary, removeFollowerBusy && styles.confirmBtnDisabled]}
+                onPress={dismissRemoveFollowerConfirm}
+                disabled={removeFollowerBusy}
+              >
+                <Text style={styles.confirmBtnSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.confirmBtnDanger, removeFollowerBusy && styles.confirmBtnDisabled]}
+                onPress={() => void executeRemoveFollower()}
+                disabled={removeFollowerBusy}
+              >
+                <Text style={styles.confirmBtnDangerText}>{removeFollowerBusy ? "…" : "Remove"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </Modal>
     </>
   );
@@ -890,6 +973,26 @@ const styles = StyleSheet.create({
     gap: 6
   },
   topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
+  iconBadgeWrap: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative"
+  },
+  notificationBadge: {
+    position: "absolute",
+    right: -6,
+    top: -4,
+    backgroundColor: LIME,
+    borderRadius: 8,
+    minWidth: 14,
+    height: 14,
+    paddingHorizontal: 3,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  notificationBadgeText: { color: "#1f2b28", fontSize: 8, fontWeight: "800" },
 
   card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#303842", padding: 16 },
   cardTitle: { fontSize: 20, fontWeight: "900", color: TEXT },
@@ -1125,17 +1228,30 @@ const styles = StyleSheet.create({
   reelCaptionAuthor: { color: "#fff", fontWeight: "900", fontSize: 15 },
   reelCaptionText: { color: "#e5e7eb", fontWeight: "600", fontSize: 13 },
 
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)"
+  },
+  /** Only the dimmed area above the sheet — does not stack under the sheet, so row buttons receive touches. */
+  overlayTapAboveSheet: {
+    flex: 1,
+    width: "100%"
+  },
   sheet: {
     backgroundColor: CARD,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     maxHeight: "72%",
+    width: "100%",
     paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 16,
     borderTopWidth: 1,
-    borderColor: "#303842"
+    borderColor: "#303842",
+    elevation: 12
+  },
+  sheetScroll: {
+    flexGrow: 0
   },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sheetTitle: { color: TEXT, fontWeight: "900", fontSize: 17 },
@@ -1153,19 +1269,34 @@ const styles = StyleSheet.create({
     backgroundColor: "#1d2126"
   },
   personRowMenuOpen: { zIndex: 40 },
-  personName: { color: TEXT, fontWeight: "800", flex: 1, marginRight: 10 },
-  personActionsRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0, position: "relative" },
+  personName: {
+    color: TEXT,
+    fontWeight: "800",
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 10
+  },
+  personActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 0,
+    position: "relative",
+    zIndex: 4
+  },
   messageBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   messageBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
   iconDangerBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#6b1f1f",
     borderWidth: 1,
     borderColor: "#a93838",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    zIndex: 6
   },
   iconMoreBtn: {
     width: 34,
@@ -1206,5 +1337,68 @@ const styles = StyleSheet.create({
   followingPill: { backgroundColor: "rgba(216,255,55,0.18)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   followingPillText: { color: LIME, fontWeight: "800", fontSize: 12 },
   unfollowBtn: { backgroundColor: "#111827", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 }
+  unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+
+  confirmOverlayRoot: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28
+  },
+  confirmBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.62)"
+  },
+  confirmCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: CARD,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#303842",
+    padding: 22,
+    zIndex: 2,
+    elevation: 16
+  },
+  confirmTitle: {
+    color: TEXT,
+    fontSize: 19,
+    fontWeight: "900",
+    textAlign: "center",
+    marginBottom: 12
+  },
+  confirmBody: {
+    color: MUTED,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+    textAlign: "center",
+    marginBottom: 22
+  },
+  confirmName: { color: LIME, fontWeight: "800" },
+  confirmBodyMuted: { color: MUTED, fontWeight: "600" },
+  confirmActions: { flexDirection: "row", gap: 12, justifyContent: "center" },
+  confirmBtnSecondary: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: LIME,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent"
+  },
+  confirmBtnSecondaryText: { color: LIME, fontWeight: "900", fontSize: 15 },
+  confirmBtnDanger: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#7f1d1d",
+    borderWidth: 1,
+    borderColor: "#b91c1c"
+  },
+  confirmBtnDangerText: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  confirmBtnDisabled: { opacity: 0.55 }
 });

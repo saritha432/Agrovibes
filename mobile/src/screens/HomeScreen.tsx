@@ -649,6 +649,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
   const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
   const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
+  /** Accepted following (name + id) for share sheet — not only users who appear as post authors. */
+  const [followingSharePeers, setFollowingSharePeers] = useState<Array<{ id: number; name: string }>>([]);
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -957,21 +959,32 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     let mounted = true;
     (async () => {
       if (!token || !user?.id) {
-        if (mounted) setFollowingUserIds(new Set());
+        if (mounted) {
+          setFollowingUserIds(new Set());
+          setFollowingSharePeers([]);
+        }
         return;
       }
       try {
         const network = await fetchSocialNetwork(token, Number(user.id));
         if (!mounted) return;
         const ids = new Set<number>();
+        const peers: Array<{ id: number; name: string }> = [];
         for (const person of network.following || []) {
           const raw = String(person.key || "").trim();
-          if (/^\d+$/.test(raw)) ids.add(Number(raw));
+          const uid = /^\d+$/.test(raw) ? Number(raw) : NaN;
+          if (Number.isFinite(uid) && uid > 0) {
+            ids.add(uid);
+            const name = String(person.name || "").trim();
+            if (name) peers.push({ id: uid, name });
+          }
         }
         setFollowingUserIds(ids);
+        setFollowingSharePeers(peers);
       } catch {
         if (!mounted) return;
         setFollowingUserIds(new Set());
+        setFollowingSharePeers([]);
       }
     })();
     return () => {
@@ -1248,23 +1261,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     const viewerName = normalizeIdentity(user?.fullName || "");
     const viewerId = Number(user?.id);
     const seen = new Set<string>();
-    return posts
-      .map((p) => {
-        const name = String(p.userName || "").trim();
-        const userId = Number(p.userId || 0);
-        const key = userId > 0 ? `id:${userId}` : `name:${normalizeIdentity(name)}`;
-        if (!name || !key || seen.has(key)) return null;
-        if ((userId > 0 && userId === viewerId) || normalizeIdentity(name) === viewerName) return null;
-        seen.add(key);
-        return { id: userId > 0 ? userId : null, name };
-      })
-      .filter((item): item is { id: number | null; name: string } => !!item)
-      .filter((item) => {
-        const q = normalizeIdentity(shareSearch);
-        return !q || normalizeIdentity(item.name).includes(q);
-      })
-      .slice(0, 24);
-  }, [posts, shareSearch, user?.fullName, user?.id]);
+    const rows: { id: number | null; name: string }[] = [];
+
+    const add = (name: string, userId: number | null) => {
+      const n = String(name || "").trim();
+      if (!n) return;
+      const uid = userId != null && Number.isFinite(userId) && userId > 0 ? userId : null;
+      const key = uid != null ? `id:${uid}` : `name:${normalizeIdentity(n)}`;
+      if (seen.has(key)) return;
+      if ((uid != null && uid === viewerId) || normalizeIdentity(n) === viewerName) return;
+      seen.add(key);
+      rows.push({ id: uid, name: n });
+    };
+
+    for (const peer of followingSharePeers) {
+      add(peer.name, peer.id);
+    }
+    for (const p of posts) {
+      const uid = Number(p.userId);
+      add(p.userName, Number.isFinite(uid) && uid > 0 ? uid : null);
+    }
+
+    const q = normalizeIdentity(shareSearch);
+    return rows
+      .filter((item) => !q || normalizeIdentity(item.name).includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+      .slice(0, 48);
+  }, [followingSharePeers, posts, shareSearch, user?.fullName, user?.id]);
 
   const onSendReelToChat = useCallback(
     async (post: HomePost, recipient: { id: number | null; name: string }) => {
@@ -1987,7 +2010,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </Text>
             </View>
             <View style={styles.reelActionsCol} pointerEvents="auto">
-              <Pressable style={styles.reelActionItem} onPress={() => togglePostLike(post)} disabled={!!likeBusyByPostId[post.id]}>
+              <Pressable
+                style={styles.reelActionItem}
+                onPress={() => {
+                  if (!post.viewerHasLiked) triggerReelLikeBurst(post.id);
+                  void togglePostLike(post);
+                }}
+                disabled={!!likeBusyByPostId[post.id]}
+              >
                 <Ionicons
                   name={post.viewerHasLiked ? "heart" : "heart-outline"}
                   size={32}
@@ -2047,6 +2077,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       tabPosts,
       toggleFollow,
       togglePostLike,
+      triggerReelLikeBurst,
       onReelStatusUpdate,
       togglePostSave,
       user?.fullName,

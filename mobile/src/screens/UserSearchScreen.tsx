@@ -12,11 +12,13 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { fetchUsers, sendFollowRequest } from "../services/api";
+import { fetchSocialNetwork, fetchUsers, sendFollowRequest } from "../services/api";
 import {
   getLocalFollowNetworkByIdentity,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
+
+type SearchUserFollowRow = "following" | "requested" | "follow_back" | "follow";
 
 type SearchUser = {
   id?: number;
@@ -24,7 +26,8 @@ type SearchUser = {
   name: string;
   username?: string | null;
   avatarUrl?: string | null;
-  isFollowing: boolean;
+  /** Matches profile Following sheet: accepted, or merged local+server following — not outgoing pending alone. */
+  followRow: SearchUserFollowRow;
 };
 
 const BG = "#ffffff";
@@ -33,11 +36,23 @@ const MUTED = "#8a8a8a";
 const BORDER = "#e6e6e6";
 const TEAL = "#0f9b8e";
 
+/** Same normalization as ProfileScreen follow lists (stable name matching). */
 function normalizeName(value: string) {
   return String(value || "")
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, " ");
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeKey(value?: string) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function parsePersonUserId(person: { key?: string }) {
+  const raw = String(person.key || "").trim();
+  return /^\d+$/.test(raw) ? Number(raw) : null;
 }
 
 export function UserSearchScreen() {
@@ -53,20 +68,48 @@ export function UserSearchScreen() {
     const selfName = normalizeName(user?.fullName || "");
     const identity = { name: user?.fullName || "", key: user?.email || String(user?.id || "") };
 
-    if (token) {
+    if (token && user?.id) {
       try {
-        const { users: remoteUsers } = await fetchUsers(token, { search: searchText, limit: 100 });
+        const uid = Number(user.id);
+        const [{ users: remoteUsers }, network, localNet] = await Promise.all([
+          fetchUsers(token, { search: searchText, limit: 100 }),
+          fetchSocialNetwork(token, uid),
+          getLocalFollowNetworkByIdentity(identity)
+        ]);
+
+        const mergedFollowing = [...(network.following || []), ...(localNet.following || [])];
+        const followingIds = new Set<number>();
+        const followingNames = new Set<string>();
+        for (const p of mergedFollowing) {
+          const pid = parsePersonUserId(p);
+          if (pid != null && pid > 0) followingIds.add(pid);
+          const nn = normalizeName(p.name);
+          if (nn) followingNames.add(nn);
+        }
+
         for (const remoteUser of remoteUsers) {
           const n = normalizeName(remoteUser.fullName);
-          if (!n || n === selfName || seen.has(n)) continue;
-          seen.add(n);
+          if (!n || n === selfName || seen.has(`id:${remoteUser.id}`)) continue;
+          seen.add(`id:${remoteUser.id}`);
+
+          const inMergedFollowing = followingIds.has(remoteUser.id) || followingNames.has(n);
+          const serverAccepted = remoteUser.viewerStatus === "accepted";
+          const outgoingPending = remoteUser.viewerStatus === "pending";
+          const isFollowing = serverAccepted || inMergedFollowing;
+
+          let followRow: SearchUserFollowRow;
+          if (isFollowing) followRow = "following";
+          else if (outgoingPending) followRow = "requested";
+          else if (remoteUser.canFollowBack) followRow = "follow_back";
+          else followRow = "follow";
+
           list.push({
             id: remoteUser.id,
             key: String(remoteUser.id),
             name: remoteUser.fullName,
             username: remoteUser.username,
             avatarUrl: remoteUser.avatarUrl,
-            isFollowing: remoteUser.viewerStatus === "accepted" || remoteUser.viewerStatus === "pending"
+            followRow
           });
         }
         setUsers(list.sort((a, b) => a.name.localeCompare(b.name)));
@@ -80,9 +123,14 @@ export function UserSearchScreen() {
       const { followers, following } = await getLocalFollowNetworkByIdentity(identity);
       for (const n of [...following, ...followers]) {
         const key = normalizeName(n.name);
-        if (!key || key === selfName || seen.has(key)) continue;
-        seen.add(key);
-        list.push({ name: n.name, key: n.key, isFollowing: following.some((f) => normalizeName(f.name) === key) });
+        if (!key || key === selfName || seen.has(`name:${normalizeKey(n.key)}::${key}`)) continue;
+        seen.add(`name:${normalizeKey(n.key)}::${key}`);
+        const isFollowing = following.some((f) => normalizeName(f.name) === key);
+        list.push({
+          name: n.name,
+          key: n.key,
+          followRow: isFollowing ? "following" : "follow"
+        });
       }
       setUsers(list.sort((a, b) => a.name.localeCompare(b.name)));
     } catch {
@@ -121,7 +169,7 @@ export function UserSearchScreen() {
           { name: person.name, key: person.key }
         );
       }
-      setUsers((prev) => prev.map((p) => (normalizeName(p.name) === normalizeName(person.name) ? { ...p, isFollowing: true } : p)));
+      await load(query);
     } finally {
       setBusyName(null);
     }
@@ -147,30 +195,38 @@ export function UserSearchScreen() {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={<Text style={styles.empty}>No users found.</Text>}
         renderItem={({ item }) => (
-          <Pressable
-            style={styles.row}
-            onPress={() =>
-              navigation.navigate("PublicProfile", {
-                userId: item.id,
-                userName: item.name,
-                userKey: item.key
-              })
-            }
-          >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
-            </View>
-            <Text style={styles.name} numberOfLines={1}>
-              {item.name}
-            </Text>
-            {item.isFollowing ? (
+          <View style={styles.row}>
+            <Pressable
+              style={styles.rowMain}
+              onPress={() =>
+                navigation.navigate("PublicProfile", {
+                  userId: item.id,
+                  userName: item.name,
+                  userKey: item.key
+                })
+              }
+            >
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
+              </View>
+              <Text style={styles.name} numberOfLines={1}>
+                {item.name}
+              </Text>
+            </Pressable>
+            {item.followRow === "following" ? (
               <Text style={styles.followingText}>Following</Text>
+            ) : item.followRow === "requested" ? (
+              <Text style={styles.requestedText}>Requested</Text>
+            ) : item.followRow === "follow_back" ? (
+              <Pressable style={styles.followBtn} onPress={() => onFollow(item)} disabled={busyName === item.name}>
+                <Text style={styles.followBtnText}>{busyName === item.name ? "..." : "Follow back"}</Text>
+              </Pressable>
             ) : (
               <Pressable style={styles.followBtn} onPress={() => onFollow(item)} disabled={busyName === item.name}>
                 <Text style={styles.followBtnText}>{busyName === item.name ? "..." : "Follow"}</Text>
               </Pressable>
             )}
-          </Pressable>
+          </View>
         )}
       />
     </View>
@@ -201,6 +257,7 @@ const styles = StyleSheet.create({
     borderBottomColor: BORDER,
     gap: 10
   },
+  rowMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 },
   avatar: {
     width: 42,
     height: 42,
@@ -210,9 +267,10 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   avatarText: { color: TEAL, fontWeight: "800", fontSize: 17 },
-  name: { flex: 1, color: TEXT, fontWeight: "700", fontSize: 15 },
+  name: { flex: 1, color: TEXT, fontWeight: "700", fontSize: 15, minWidth: 0 },
   followBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
   followBtnText: { color: "#fff", fontSize: 13, fontWeight: "800" },
   followingText: { color: MUTED, fontWeight: "700", fontSize: 13 },
+  requestedText: { color: MUTED, fontWeight: "700", fontSize: 13, fontStyle: "italic" },
   empty: { padding: 20, textAlign: "center", color: MUTED, fontSize: 14 }
 });
