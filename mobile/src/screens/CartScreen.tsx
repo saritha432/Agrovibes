@@ -14,6 +14,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { CheckoutBill, MarketStackParamList } from "../navigation/MarketStackNavigator";
 import { useCart } from "../cart/CartContext";
+import { useNotificationPanel } from "../context/NotificationPanelContext";
 
 const TEAL = "#0d9488";
 const TEAL_STEPPER = "#0f766e";
@@ -22,6 +23,7 @@ const MUSTARD = "#ffb703";
 const MUSTARD_SOFT = "#fff8e6";
 const BG = "#fdf7f2";
 const BORDER = "#e8e2d9";
+const NOTIF_RED = "#ef4444";
 
 const AGRO_WALLET_BALANCE = 2450;
 
@@ -82,6 +84,7 @@ export function CartScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { items, itemCount, setQuantity, removeLine } = useCart();
+  const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
 
   const [couponInput, setCouponInput] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<{ discount: number; label: string } | null>(null);
@@ -132,9 +135,13 @@ export function CartScreen() {
           <Pressable style={styles.iconBtn}>
             <Ionicons name="search-outline" size={18} color="#1f2c29" />
           </Pressable>
-          <Pressable style={styles.iconBtn}>
+          <Pressable style={styles.iconBtn} onPress={openNotificationSheet}>
             <Ionicons name="notifications-outline" size={18} color="#1f2c29" />
-            <View style={styles.notifDot} />
+            {notificationUnreadCount > 0 ? (
+              <View style={styles.notifCountBadge}>
+                <Text style={styles.notifCountBadgeText}>{Math.min(99, notificationUnreadCount)}</Text>
+              </View>
+            ) : null}
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={() => navigation.navigate("MarketplaceHome")}>
             <Ionicons name="cart-outline" size={18} color="#1f2c29" />
@@ -338,15 +345,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  notifDot: {
+  notifCountBadge: {
     position: "absolute",
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#ef4444"
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: NOTIF_RED,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4
   },
+  notifCountBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
   cartBadge: {
     position: "absolute",
     top: 4,

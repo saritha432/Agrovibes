@@ -60,8 +60,6 @@
     "updates": {
       "url": "https://u.expo.dev/03e098eb-cfad-496b-8385-dab904b3d946"
     },
-    "plugins": [
-      "expo-video"
-    ]
+    "plugins": []
   }
 }
