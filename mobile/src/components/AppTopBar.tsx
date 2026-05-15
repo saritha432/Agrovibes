@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { navigateToDirectInbox, navigateToUserSearch } from "../navigation/navigationRef";
+import { APP_DARK_BG } from "../theme/appColors";
 
 export function AppTopBar() {
   const { openNotificationSheet, notificationUnreadCount, messageUnreadCount } = useNotificationPanel();
@@ -40,7 +41,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
-    backgroundColor: "#262626",
+    backgroundColor: APP_DARK_BG,
     paddingHorizontal: 10,
     paddingVertical: 7,
     paddingTop: 10

@@ -44,7 +44,7 @@ import {
 import { navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
 
 const TEAL = "#d8ff37";
-const CREAM = "#000000";
+const CREAM = "#262626";
 const CARD = "#111418";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
@@ -784,7 +784,7 @@ export function ProfileScreen() {
               <View style={{ width, height: windowHeight }}>
                 {item.videoUrl && isActive ? (
                   <Video
-                    style={{ width, height: windowHeight, backgroundColor: "#000" }}
+                    style={{ width, height: windowHeight, backgroundColor: "#262626" }}
                     source={{ uri: item.videoUrl }}
                     resizeMode={ResizeMode.COVER}
                     shouldPlay
@@ -803,12 +803,12 @@ export function ProfileScreen() {
                 ) : item.videoUrl ? (
                   item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] ? (
                   <Image
-                    style={{ width, height: windowHeight, backgroundColor: "#000" }}
+                    style={{ width, height: windowHeight, backgroundColor: "#262626" }}
                     source={{ uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] || "" }}
                     resizeMode="cover"
                   />
                   ) : (
-                    <View style={{ width, height: windowHeight, backgroundColor: "#000" }} />
+                    <View style={{ width, height: windowHeight, backgroundColor: "#262626" }} />
                   )
                 ) : null}
                 <View style={styles.reelCaptionWrap} pointerEvents="none">
@@ -989,7 +989,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    backgroundColor: "#000000",
+    backgroundColor: "#262626",
     paddingHorizontal: 10,
     paddingVertical: 8,
     paddingTop: 10,
@@ -1212,8 +1212,8 @@ const styles = StyleSheet.create({
   },
   emptyText: { color: MUTED, fontWeight: "700", textAlign: "center" },
 
-  reelPlayerRoot: { flex: 1, backgroundColor: "#000" },
-  imageViewerRoot: { flex: 1, backgroundColor: "#000" },
+  reelPlayerRoot: { flex: 1, backgroundColor: "#262626" },
+  imageViewerRoot: { flex: 1, backgroundColor: "#262626" },
   gridGalleryBadge: {
     position: "absolute",
     top: 6,
