@@ -15,6 +15,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { fetchMarketplaceListings, MarketplaceListing } from "../services/api";
 import { useCart } from "../cart/CartContext";
+import { useNotificationPanel } from "../context/NotificationPanelContext";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
 
 type MarketCategory = "All" |"Vegetables" | "Fruits" | "Dairy" | "InputsSupplies" | "Seeds" | "Fertilizers" | "Tools";
@@ -135,6 +136,7 @@ export function MarketplaceScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { addFromListing, itemCount } = useCart();
+  const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
 
   const [listings, setListings] = useState<MarketplaceListing[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
@@ -184,9 +186,13 @@ export function MarketplaceScreen() {
           <Pressable style={styles.iconBtn}>
             <Ionicons name="search-outline" size={18} color="#1f2c29" />
           </Pressable>
-          <Pressable style={styles.iconBtn}>
+          <Pressable style={styles.iconBtn} onPress={openNotificationSheet}>
             <Ionicons name="notifications-outline" size={18} color="#1f2c29" />
-            <View style={styles.notifDot} />
+            {notificationUnreadCount > 0 ? (
+              <View style={styles.notifCountBadge}>
+                <Text style={styles.notifCountBadgeText}>{Math.min(99, notificationUnreadCount)}</Text>
+              </View>
+            ) : null}
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={() => navigation.navigate("Cart")}>
             <Ionicons name="cart-outline" size={18} color="#1f2c29" />
@@ -467,15 +473,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  notifDot: {
+  notifCountBadge: {
     position: "absolute",
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: RED
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: RED,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4
   },
+  notifCountBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
   cartBadge: {
     position: "absolute",
     top: 4,

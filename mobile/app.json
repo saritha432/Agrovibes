@@ -4,7 +4,7 @@
     "slug": "agrovibes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/logo.png",
+    "icon": "./assets/cropvibe.png",
     "platforms": [
       "android",
       "ios",
@@ -21,8 +21,9 @@
     "scheme": "agrovibes",
     "android": {
       "package": "com.agrovibes.app",
+      "label": "Cropvibe",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo-adaptive-foreground.png",
+        "foregroundImage": "./assets/cropvibe.png",
         "backgroundColor": "#1f1f1f"
       },
       "permissions": [
@@ -60,8 +61,6 @@
     "updates": {
       "url": "https://u.expo.dev/03e098eb-cfad-496b-8385-dab904b3d946"
     },
-    "plugins": [
-      "expo-video"
-    ]
+    "plugins": []
   }
 }

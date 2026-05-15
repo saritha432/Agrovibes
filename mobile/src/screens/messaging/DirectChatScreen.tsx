@@ -21,7 +21,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchMessageThread, sendDirectMessage, type DirectMessageItem } from "../../services/api";
 
-const BG = "#000000";
+const BG = "#262626";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";

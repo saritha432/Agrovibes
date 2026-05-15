@@ -9,6 +9,7 @@ import { ServicesScreen } from "../screens/ServicesScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
 import { LearnStackNavigator } from "./LearnStackNavigator";
+import { NotificationPanelProvider } from "../context/NotificationPanelContext";
 
 const Tab = createBottomTabNavigator();
 
@@ -18,6 +19,7 @@ export function AppNavigator() {
   const [createPresetType, setCreatePresetType] = useState<CreateType | null>(null);
 
   return (
+    <NotificationPanelProvider>
     <View style={styles.root}>
       <Tab.Navigator
         screenOptions={{ headerShown: false, tabBarShowLabel: false }}
@@ -58,6 +60,7 @@ export function AppNavigator() {
         onVideoPosted={() => setHomeRefreshToken((v) => v + 1)}
       />
     </View>
+    </NotificationPanelProvider>
   );
 }
 

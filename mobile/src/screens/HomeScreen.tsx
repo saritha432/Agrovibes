@@ -60,6 +60,7 @@ import {
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
+import { APP_DARK_BG } from "../theme/appColors";
 
 interface HomeScreenProps {
   refreshToken?: number;
@@ -67,12 +68,19 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
-const homeTopTabs = ["Feed", "Friends", "live"] as const;
+const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
+type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
 const likeActiveColor = "#C9FF35";
 const REEL_LIKE_COLOR = "#ffffff";
+const REEL_ACTION_ICON = 22;
+const REEL_ACTION_ICON_LIKE = 24;
 
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
+}
+
+function isFullScreenReelItem(post: HomePost) {
+  return !!(post.videoUrl && isReelPost(post));
 }
 
 function postCreatedMs(post: HomePost): number {
@@ -594,7 +602,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       style={{
         width: containerWidth,
         height: containerHeight,
-        backgroundColor: "#000",
+        backgroundColor: APP_DARK_BG,
         ...(!isCover ? { justifyContent: "center", alignItems: "center" } : {})
       }}
     >
@@ -775,8 +783,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
-  const [activeHomeTab, setActiveHomeTab] = useState<(typeof homeTopTabs)[number]>("Feed");
+  const [activeHomeTab, setActiveHomeTab] = useState<HomeTopTab>("Feed");
   const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
+  const [followerUserIds, setFollowerUserIds] = useState<Set<number>>(new Set());
+  const [socialNetworkHydrated, setSocialNetworkHydrated] = useState(false);
+  /** Accepted following (name + id) for share sheet — not only users who appear as post authors. */
+  const [followingSharePeers, setFollowingSharePeers] = useState<Array<{ id: number; name: string }>>([]);
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -791,6 +803,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
+  const [reelFrameWidth, setReelFrameWidth] = useState(0);
   const [storyViewport, setStoryViewport] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const progress = useRef(new Animated.Value(0)).current;
   const commentsFetchSeqRef = useRef(0);
@@ -855,6 +868,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
     if (activeHomeTab === "Feed") return shuffleHomeFeedDiscoverStyle(strip(posts), feedShuffleSeed);
+    if (activeHomeTab === "Reels") {
+      const reels = strip(posts).filter((p) => isFullScreenReelItem(p));
+      return shuffleHomeFeedDiscoverStyle(reels, feedShuffleSeed);
+    }
     if (activeHomeTab === "Friends") {
       return strip(
         posts.filter((p) => {
@@ -901,8 +918,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     void AsyncStorage.setItem(key, JSON.stringify(Array.from(new Set(dismissedPostIds)).slice(-400)));
   }, [user?.id, dismissedPostIds, dismissedHydrated]);
 
+  const showFriendsTab =
+    socialNetworkHydrated && (followingUserIds.size > 0 || followerUserIds.size > 0);
+
+  const visibleHomeTopTabs = useMemo(
+    () => (showFriendsTab ? [...HOME_TOP_TABS_ALL] : HOME_TOP_TABS_ALL.filter((t) => t !== "Friends")),
+    [showFriendsTab]
+  );
+
+  useEffect(() => {
+    if (activeHomeTab === "Friends" && !showFriendsTab) {
+      setActiveHomeTab("Feed");
+    }
+  }, [activeHomeTab, showFriendsTab]);
+
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
-  const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
+  const isReelSurfaceTab =
+    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
   const openPostFromFeed = useCallback((post: HomePost) => {
     if (post.videoUrl && isReelPost(post)) {
@@ -1141,21 +1173,44 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     let mounted = true;
     (async () => {
       if (!token || !user?.id) {
-        if (mounted) setFollowingUserIds(new Set());
+        if (mounted) {
+          setFollowingUserIds(new Set());
+          setFollowerUserIds(new Set());
+          setFollowingSharePeers([]);
+          setSocialNetworkHydrated(true);
+        }
         return;
       }
       try {
         const network = await fetchSocialNetwork(token, Number(user.id));
         if (!mounted) return;
-        const ids = new Set<number>();
+        const followingIds = new Set<number>();
+        const followerIds = new Set<number>();
+        const peers: Array<{ id: number; name: string }> = [];
         for (const person of network.following || []) {
           const raw = String(person.key || "").trim();
-          if (/^\d+$/.test(raw)) ids.add(Number(raw));
+          const uid = /^\d+$/.test(raw) ? Number(raw) : NaN;
+          if (Number.isFinite(uid) && uid > 0) {
+            followingIds.add(uid);
+            const name = String(person.name || "").trim();
+            if (name) peers.push({ id: uid, name });
+          }
         }
-        setFollowingUserIds(ids);
+        for (const person of network.followers || []) {
+          const raw = String(person.key || "").trim();
+          const uid = /^\d+$/.test(raw) ? Number(raw) : NaN;
+          if (Number.isFinite(uid) && uid > 0) followerIds.add(uid);
+        }
+        setFollowingUserIds(followingIds);
+        setFollowerUserIds(followerIds);
+        setFollowingSharePeers(peers);
+        setSocialNetworkHydrated(true);
       } catch {
         if (!mounted) return;
         setFollowingUserIds(new Set());
+        setFollowerUserIds(new Set());
+        setFollowingSharePeers([]);
+        setSocialNetworkHydrated(true);
       }
     })();
     return () => {
@@ -1436,24 +1491,36 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     const viewerId = Number(user?.id);
     const seen = new Set<string>();
     type ShareRecipient = { id: number | null; name: string; avatarUrl?: string | null };
-    const out: ShareRecipient[] = [];
-    for (const p of posts) {
-      const name = String(p.userName || "").trim();
-      const userId = Number(p.userId || 0);
-      const key = userId > 0 ? `id:${userId}` : `name:${normalizeIdentity(name)}`;
-      if (!name || !key || seen.has(key)) continue;
-      if ((userId > 0 && userId === viewerId) || normalizeIdentity(name) === viewerName) continue;
+    const rows: ShareRecipient[] = [];
+
+    const add = (name: string, userId: number | null, avatarUrl?: string | null) => {
+      const n = String(name || "").trim();
+      if (!n) return;
+      const uid = userId != null && Number.isFinite(userId) && userId > 0 ? userId : null;
+      const key = uid != null ? `id:${uid}` : `name:${normalizeIdentity(n)}`;
+      if (seen.has(key)) return;
+      if ((uid != null && uid === viewerId) || normalizeIdentity(n) === viewerName) return;
       seen.add(key);
-      const av = p.authorAvatarUrl;
-      out.push({
-        id: userId > 0 ? userId : null,
-        name,
-        ...(typeof av === "string" && av.trim() ? { avatarUrl: av.trim() } : {})
-      });
+      const entry: ShareRecipient = { id: uid, name: n };
+      if (typeof avatarUrl === "string" && avatarUrl.trim()) entry.avatarUrl = avatarUrl.trim();
+      rows.push(entry);
+    };
+
+    for (const peer of followingSharePeers) {
+      add(peer.name, peer.id);
     }
+    for (const p of posts) {
+      const uid = Number(p.userId);
+      const av = p.authorAvatarUrl;
+      add(p.userName, Number.isFinite(uid) && uid > 0 ? uid : null, typeof av === "string" ? av : null);
+    }
+
     const q = normalizeIdentity(shareSearch);
-    return (q ? out.filter((item) => normalizeIdentity(item.name).includes(q)) : out).slice(0, 24);
-  }, [posts, shareSearch, user?.fullName, user?.id]);
+    return rows
+      .filter((item) => !q || normalizeIdentity(item.name).includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+      .slice(0, 48);
+  }, [followingSharePeers, posts, shareSearch, user?.fullName, user?.id]);
 
   const onSendReelToChat = useCallback(
     async (post: HomePost, recipient: { id: number | null; name: string; avatarUrl?: string | null }) => {
@@ -2143,34 +2210,38 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </Pressable>
           ))}
         </ScrollView>
-        <View style={isReelSurfaceTab ? styles.homeTopTabsRowDark : styles.homeTopTabsRow}>
-          {homeTopTabs.map((tab) => (
-            <Pressable key={tab} onPress={() => setActiveHomeTab(tab)} style={styles.homeTopTabPressable}>
-              <View
-                style={[
-                  isReelSurfaceTab ? styles.homeTopTabPillDark : styles.homeTopTabPill,
-                  activeHomeTab === tab ? (isReelSurfaceTab ? styles.homeTopTabPillActiveDark : styles.homeTopTabPillActive) : null
-                ]}
-              >
-                <Text
-                  style={[
-                    isReelSurfaceTab ? styles.homeTopTabTextDark : styles.homeTopTabText,
-                    activeHomeTab === tab ? (isReelSurfaceTab ? styles.homeTopTabTextActiveDark : styles.homeTopTabTextActive) : null
+        <View style={styles.homeTopTabsBarDark}>
+          <View style={styles.homeTopTabsRowDark}>
+            {visibleHomeTopTabs.map((tab) => {
+              const isActive = activeHomeTab === tab;
+              return (
+                <Pressable
+                  key={tab}
+                  onPress={() => setActiveHomeTab(tab)}
+                  style={({ pressed }) => [
+                    styles.homeTopTabPressable,
+                    pressed ? styles.homeTopTabPressablePressed : null
                   ]}
                 >
-                  {tab}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
+                  <View style={[styles.homeTopTabPillDark, isActive ? styles.homeTopTabPillActiveDark : null]}>
+                    <Text style={[styles.homeTopTabTextDark, isActive ? styles.homeTopTabTextActivePillDark : null]}>
+                      {tab}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.homeTopTabsSeparator} />
         </View>
       </View>
     ),
-    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.avatarUrl, user?.fullName]
+    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.avatarUrl, user?.fullName, visibleHomeTopTabs]
   );
 
   const renderFullScreenReel = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
+      const reelContentWidth = reelViewerOpen ? windowWidth : reelFrameWidth > 0 ? reelFrameWidth : windowWidth - 20;
       const pageH = reelViewerOpen
         ? windowHeight
         : reelSlotHeight > 0
@@ -2229,7 +2300,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
       return (
-        <View style={[styles.reelPage, { height: pageH, width: windowWidth }]}>
+        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth }]}>
           <Pressable
             style={StyleSheet.absoluteFillObject}
             onPress={() => onReelSurfaceTap(post)}
@@ -2242,7 +2313,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 uri={post.videoUrl}
                 shouldPlay={isActive}
                 preloadOnly={!isActive}
-                containerWidth={windowWidth}
+                containerWidth={reelContentWidth}
                 containerHeight={pageH}
                 fit="contain"
                 isLooping
@@ -2256,14 +2327,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
             )}
           </Pressable>
-          <Pressable
-              style={[styles.reelMuteToggle, { top: reelTopInset + 28 }]}
-              onPress={() => setIsReelMuted((v) => !v)}
-              accessibilityRole="button"
-              accessibilityLabel={isReelMuted ? "Unmute reel" : "Mute reel"}
-            >
-              <Ionicons name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"} size={22} color="#fff" />
-            </Pressable>
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
           {creativeOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">
@@ -2343,10 +2406,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </Text>
             </View>
             <View style={styles.reelActionsCol} pointerEvents="auto">
-              <Pressable style={styles.reelActionItem} onPress={() => togglePostLike(post)} disabled={!!likeBusyByPostId[post.id]}>
+              <Pressable
+                style={styles.reelActionItem}
+                onPress={() => {
+                  if (!post.viewerHasLiked) triggerReelLikeBurst(post.id);
+                  void togglePostLike(post);
+                }}
+                disabled={!!likeBusyByPostId[post.id]}
+              >
                 <Ionicons
                   name={post.viewerHasLiked ? "heart" : "heart-outline"}
-                  size={32}
+                  size={REEL_ACTION_ICON_LIKE}
                   color={post.viewerHasLiked ? likeActiveColor : REEL_LIKE_COLOR}
                 />
                 <Text style={[styles.reelActionCount, post.viewerHasLiked ? styles.reelActionCountLiked : null]}>
@@ -2354,14 +2424,26 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 </Text>
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => openCommentsForPost(post)}>
-                <Ionicons name="chatbubble-outline" size={28} color="#fff" />
+                <Ionicons name="chatbubble-outline" size={REEL_ACTION_ICON} color="#fff" />
                 <Text style={styles.reelActionCount}>{shownCommentsCount}</Text>
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setSharePost(post)}>
-                <Ionicons name="paper-plane-outline" size={28} color="#fff" />
+                <Ionicons name="paper-plane-outline" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
-                <Ionicons name="ellipsis-horizontal" size={26} color="#fff" />
+                <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
+              </Pressable>
+              <Pressable
+                style={styles.reelActionItem}
+                onPress={() => setIsReelMuted((v) => !v)}
+                accessibilityRole="button"
+                accessibilityLabel={isReelMuted ? "Unmute reel" : "Mute reel"}
+              >
+                <Ionicons
+                  name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"}
+                  size={REEL_ACTION_ICON}
+                  color="#fff"
+                />
               </Pressable>
               {thumbUri ? (
                 <Image source={{ uri: thumbUri }} style={styles.reelDiscThumb} />
@@ -2382,7 +2464,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
-      reelTopInset,
       isReelMuted,
       legacyFollowStateByName,
       legacyRelationshipByName,
@@ -2395,6 +2476,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       onShareToWhatsApp,
       playingPostId,
       activeReelMusicPostId,
+      reelFrameWidth,
       reelSlotHeight,
       reelProgressByPostId,
       reelLikeBurstByPostId,
@@ -2403,6 +2485,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       tabPosts,
       toggleFollow,
       togglePostLike,
+      triggerReelLikeBurst,
       onReelStatusUpdate,
       togglePostSave,
       user?.fullName,
@@ -2601,31 +2684,45 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const emptyTabTitle =
     activeHomeTab === "Friends"
       ? "No reels from people you follow"
-      : activeHomeTab === "live"
-        ? "Live streaming is coming soon"
-        : activeHomeTab === "Feed"
-          ? "No feed posts yet"
-          : "Nothing here yet";
+      : activeHomeTab === "Reels"
+        ? "No reels yet"
+        : activeHomeTab === "live"
+          ? "Live streaming is coming soon"
+          : activeHomeTab === "Feed"
+            ? "No feed posts yet"
+            : "Nothing here yet";
   const emptyTabSubtitle =
     activeHomeTab === "Friends"
       ? "Follow more creators to see their reels here."
-      : activeHomeTab === "live"
-        ? "We're building live broadcasts. Stay tuned!"
-        : "Create a reel to start filling this section.";
+      : activeHomeTab === "Reels"
+        ? "Create a reel to get started."
+        : activeHomeTab === "live"
+          ? "We're building live broadcasts. Stay tuned!"
+          : "Create a reel to start filling this section.";
 
-  const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends" || activeHomeTab === "live";
+  const useFullScreenReelLayout =
+    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
   return (
     <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
       {useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
-          <View style={styles.reelSlot} onLayout={(e) => setReelSlotHeight(Math.round(e.nativeEvent.layout.height))}>
+          <View style={[styles.reelSlot, isReelSurfaceTab ? styles.reelSlotCardGap : null]}>
+            <View
+              style={[styles.reelFrame, isReelSurfaceTab ? styles.reelFrameCard : null]}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                setReelFrameWidth(Math.round(width));
+                setReelSlotHeight(Math.round(height));
+              }}
+            >
             {reelSlotHeight > 0 ? (
               reelViewerOpen ? (
-                <View style={{ flex: 1, backgroundColor: "#000" }} />
+                <View style={styles.reelFramePlaceholder} />
               ) : (
                 <FlatList
+                  style={styles.reelFrameList}
                   data={tabPosts}
                   keyExtractor={(item) => String(item.id)}
                   renderItem={renderFullScreenReel}
@@ -2647,7 +2744,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   onViewableItemsChanged={onViewableItemsChangedRef.current}
                   viewabilityConfig={reelViewabilityConfig}
                   onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
-                  extraData={`${playingPostId}-${reelSlotHeight}`}
+                  extraData={`${playingPostId}-${reelSlotHeight}-${reelFrameWidth}`}
                   ListEmptyComponent={
                     <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
                       <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
@@ -2657,6 +2754,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 />
               )
             ) : null}
+            </View>
           </View>
         </View>
       ) : (
@@ -2821,7 +2919,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         statusBarTranslucent
         onRequestClose={() => setReelViewerOpen(null)}
       >
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
+        <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
             style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 12 }]}
             pointerEvents="box-none"
@@ -3300,7 +3398,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f2f3f5" },
-  screenDark: { backgroundColor: "#000000" },
+  screenDark: { backgroundColor: APP_DARK_BG },
   reelsColumn: { flex: 1, minHeight: 0, flexDirection: "column" },
   homeTopChrome: { flexGrow: 0, flexShrink: 0 },
   storyRowScrollCompact: {
@@ -3308,8 +3406,32 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     maxHeight: 140
   },
-  reelSlot: { flex: 1, minHeight: 0, backgroundColor: "#000" },
-  reelPage: { backgroundColor: "#000", overflow: "hidden" },
+  reelSlot: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: 10,
+    paddingBottom: 12
+  },
+  reelSlotCardGap: {
+    paddingTop: 12
+  },
+  reelFrame: {
+    flex: 1,
+    borderRadius: 22,
+    overflow: "hidden",
+    backgroundColor: APP_DARK_BG
+  },
+  reelFrameCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.12)"
+  },
+  reelFramePlaceholder: { flex: 1, backgroundColor: APP_DARK_BG },
+  reelFrameList: { flex: 1 },
+  reelPage: {
+    backgroundColor: APP_DARK_BG,
+    overflow: "hidden",
+    borderRadius: 22
+  },
   reelViewerTopChrome: {
     position: "absolute",
     left: 0,
@@ -3372,19 +3494,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingHorizontal: 8,
     paddingVertical: 4
-  },
-  reelMuteToggle: {
-    position: "absolute",
-    right: 10,
-    zIndex: 4,
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.35)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)"
   },
   reelMuteFeedbackLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -3489,11 +3598,11 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3
   },
-  reelActionsCol: { alignItems: "center", gap: 18, paddingBottom: 2, width: 52 },
-  reelActionItem: { alignItems: "center", gap: 5 },
+  reelActionsCol: { alignItems: "center", gap: 14, paddingBottom: 2, width: 44 },
+  reelActionItem: { alignItems: "center", gap: 4 },
   reelActionCount: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
     textShadowColor: "rgba(0,0,0,0.55)",
     textShadowOffset: { width: 0, height: 1 },
@@ -3501,12 +3610,12 @@ const styles = StyleSheet.create({
   },
   reelActionCountLiked: { color: "#C9FF35" },
   reelDiscThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: "rgba(255,255,255,0.95)",
-    marginTop: 6,
+    marginTop: 4,
     backgroundColor: "#2a2a2a"
   },
   reelDiscThumbPlaceholder: { alignItems: "center", justifyContent: "center" },
@@ -3531,25 +3640,56 @@ const styles = StyleSheet.create({
     backgroundColor: "#C9FF35"
   },
   storyRowWrapDark: {
-    backgroundColor: "#000000"
+    backgroundColor: APP_DARK_BG
   },
   storyNameDark: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: 5, fontWeight: "600", textAlign: "center", width: "100%" },
+  homeTopTabsBarDark: {
+    backgroundColor: APP_DARK_BG
+  },
+  homeTopTabsSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255,255,255,0.22)"
+  },
+  homeTopTabsBarLight: {
+    backgroundColor: "#f2f3f5",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0,0,0,0.12)"
+  },
   homeTopTabsRowDark: {
     flexDirection: "row",
-    backgroundColor: "#000000",
-    paddingHorizontal: 6,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
+    minHeight: 42,
+    alignItems: "center",
     justifyContent: "space-between"
   },
+  homeTopTabPressablePressed: { opacity: 0.85 },
   homeTopTabPillDark: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 10
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center"
   },
-  homeTopTabPillActiveDark: { backgroundColor: "#2a2a2a" },
-  homeTopTabTextDark: { fontSize: 13, color: "#ffffff", fontWeight: "600" },
-  homeTopTabTextActiveDark: { color: "#d8ff37", fontWeight: "800" },
-  feedBottomDark: { backgroundColor: "#000000", paddingTop: 4 },
+  homeTopTabPillActiveDark: {
+    minWidth: 89,
+    height: 32,
+    paddingTop: 8,
+    paddingBottom: 8,
+    paddingLeft: 24,
+    paddingRight: 24,
+    borderRadius: 9,
+    backgroundColor: "#303132",
+    overflow: "hidden"
+  },
+  homeTopTabTextDark: {
+    fontSize: 14,
+    color: "#ffffff",
+    fontWeight: "600",
+    lineHeight: 16,
+    textAlign: "center"
+  },
+  homeTopTabTextActivePillDark: { color: "#C9FF35", fontWeight: "700", lineHeight: 16, textAlign: "center" },
+  feedBottomDark: { backgroundColor: APP_DARK_BG, paddingTop: 4 },
   emptyTabWrapDark: {
     marginHorizontal: 12,
     marginTop: 18,
@@ -3629,12 +3769,13 @@ const styles = StyleSheet.create({
   storyName: { fontSize: 8, color: "#7f868a", marginTop: 5, fontWeight: "500", textAlign: "center", width: "100%" },
   homeTopTabsRow: {
     flexDirection: "row",
-    backgroundColor: "#f2f3f5",
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    justifyContent: "space-between"
+    paddingHorizontal: 4,
+    paddingTop: 8,
+    paddingBottom: 10,
+    justifyContent: "space-between",
+    alignItems: "center"
   },
-  homeTopTabPressable: { flex: 1, alignItems: "center" },
+  homeTopTabPressable: { flex: 1, alignItems: "center", justifyContent: "center" },
   homeTopTabPill: {
     paddingVertical: 4,
     paddingHorizontal: 12,
@@ -3729,7 +3870,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "rgba(255,255,255,0.85)"
   },
-  storyViewerRoot: { flex: 1, backgroundColor: "#000" },
+  storyViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
   storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
@@ -3746,7 +3887,7 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#000"
+    backgroundColor: APP_DARK_BG
   },
   storyVideo: {
     width: "100%",
@@ -3755,7 +3896,7 @@ const styles = StyleSheet.create({
   },
   storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
   storyTapZone: { flex: 1 },
-  postViewerRoot: { flex: 1, backgroundColor: "#000" },
+  postViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
   postViewerTop: {
     position: "absolute",
     top: 44,
