@@ -68,7 +68,7 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
-const HOME_TOP_TABS_ALL = ["Feed", "Reels", "Friends", "live"] as const;
+const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
 type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
 const likeActiveColor = "#C9FF35";
 const REEL_LIKE_COLOR = "#ffffff";
