@@ -21,6 +21,7 @@
     "scheme": "agrovibes",
     "android": {
       "package": "com.agrovibes.app",
+      "label": "Cropvibe",
       "adaptiveIcon": {
         "foregroundImage": "./assets/cropvibe.png",
         "backgroundColor": "#1f1f1f"
