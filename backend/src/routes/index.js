@@ -3395,15 +3395,23 @@ router.post("/v1/media/cloudinary-sign", (req, res) => {
   // Video uploads are signed with eager transformations:
   // 1) HLS stream (.m3u8) for adaptive playback on mobile
   // 2) Optimized MP4 fallback for clients that cannot use HLS
+  // sp_auto must be the only directive in its eager component; MP4 is a separate eager pass.
   const eager =
     resourceType === "video"
-      ? "sp_auto,f_m3u8|c_limit,w_720,h_1280,vc_h264,ac_aac,br_1200k,q_auto:good,f_mp4,so_0"
+      ? "sp_auto|c_limit,w_720,h_1280,vc_h264,ac_aac,br_1200k,q_auto:good,f_mp4"
       : "";
 
-  const signatureParts = [`folder=${folder}`];
-  if (eager) signatureParts.push(`eager=${eager}`);
-  signatureParts.push(`timestamp=${timestamp}`);
-  const signaturePayload = `${signatureParts.join("&")}${apiSecret}`;
+  // Cloudinary requires every signed param in the upload body, sorted alphabetically in the signature.
+  const signParams = { folder, timestamp: String(timestamp) };
+  if (eager) {
+    signParams.eager = eager;
+    signParams.eager_async = "false";
+  }
+  const signaturePayload =
+    Object.keys(signParams)
+      .sort()
+      .map((key) => `${key}=${signParams[key]}`)
+      .join("&") + apiSecret;
   const signature = crypto.createHash("sha1").update(signaturePayload).digest("hex");
 
   res.json({
