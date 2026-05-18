@@ -1,6 +1,11 @@
 import { API_BASE_URL, fetchWithAuth, parseJsonOrThrow } from "./client";
 import type { NetworkPerson } from "./profile";
-import type { HomePost, UserSearchRecord } from "./types";
+import type { HomePost, HomeStory, UserSearchRecord } from "./types";
+
+export async function fetchHomeStories() {
+  const response = await fetch(`${API_BASE_URL}/v1/home/stories`);
+  return (await parseJsonOrThrow(response)) as { stories: HomeStory[] };
+}
 
 export async function fetchHomePosts(token?: string | null) {
   const headers: Record<string, string> = {};

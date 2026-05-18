@@ -113,15 +113,18 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 6 },
   logoTab: {
-    width: 54,
-    height: 32,
+    minWidth: 92,
+    maxWidth: 108,
+    height: 36,
+    paddingHorizontal: 6,
     borderRadius: 2,
     backgroundColor: "#2a2b2c",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 4
+    marginRight: 4,
+    overflow: "hidden"
   },
-  logoImage: { width: 48, height: 16 },
+  logoImage: { width: 88, height: 22 },
   tabItem: {
     flex: 1,
     alignItems: "center",
