@@ -1,0 +1,30 @@
+.app-shell {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-shell__main {
+  margin-left: var(--sidebar-width);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+}
+
+.app-shell__main--with-right {
+  justify-content: center;
+  gap: 32px;
+  padding: 0 20px;
+}
+
+.app-shell__content {
+  width: 100%;
+  max-width: var(--feed-width);
+  flex-shrink: 0;
+  padding: 24px 0 48px;
+}
+
+.app-shell__main:not(.app-shell__main--with-right) .app-shell__content {
+  max-width: var(--content-max);
+  padding: 24px 20px 48px;
+}
