@@ -21,7 +21,7 @@
   width: 100%;
   max-width: var(--feed-width);
   flex-shrink: 0;
-  padding: 24px 0 48px;
+  padding: 16px 0 48px;
 }
 
 .app-shell__main:not(.app-shell__main--with-right) .app-shell__content {

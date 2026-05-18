@@ -55,6 +55,43 @@
   font-weight: 400;
 }
 
+.login-form__password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.login-form__password-wrap input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.login-form__password-toggle {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.login-form__password-toggle:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.login-form__password-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .login-form button[type="submit"] {
   margin-top: 8px;
   padding: 12px;

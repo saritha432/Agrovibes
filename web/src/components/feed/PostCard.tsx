@@ -2,10 +2,11 @@ import { useState } from "react";
 import { likeHomePost, unlikeHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import "./PostCard.css";
 
 function isReel(post: HomePost) {
-  return /^\[REEL\]/i.test(String(post.caption || "").trim());
+  return !!post.videoUrl && /^\[REEL\]/i.test(String(post.caption || "").trim());
 }
 
 function mediaUrl(post: HomePost) {
@@ -39,10 +40,12 @@ export function PostCard({ post }: { post: HomePost }) {
   };
 
   const img = mediaUrl(post);
+  const videoSrc = resolveWebVideoUrl(post.videoUrl);
+  const reel = isReel(post);
   const caption = post.caption?.replace(/^\[REEL\]\s*/i, "") || "";
 
   return (
-    <article className="post-card">
+    <article className={`post-card${reel ? " post-card--reel" : ""}`}>
       <header className="post-card__head">
         <span className="post-card__avatar">
           {post.authorAvatarUrl ? (
@@ -58,12 +61,12 @@ export function PostCard({ post }: { post: HomePost }) {
       </header>
 
       <div className="post-card__media">
-        {post.videoUrl ? (
-          <video src={post.videoUrl} controls playsInline className="post-card__video" />
+        {videoSrc ? (
+          <video src={videoSrc} controls playsInline className="post-card__video" />
         ) : img ? (
           <img src={img} alt="" className="post-card__img" />
         ) : (
-          <div className="post-card__placeholder">{isReel(post) ? "Reel" : "Post"}</div>
+          <div className="post-card__placeholder">{reel ? "Reel" : "Post"}</div>
         )}
       </div>
 

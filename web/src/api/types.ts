@@ -19,6 +19,20 @@ export interface AuthResponse {
   isNewUser?: boolean;
 }
 
+export interface HomeStory {
+  id: number;
+  userId?: number | null;
+  userName: string;
+  district: string;
+  avatarLabel: string;
+  avatarUrl?: string | null;
+  hasNew: boolean;
+  viewed: boolean;
+  videoUrl?: string | null;
+  imageUrl?: string | null;
+  createdAt?: string;
+}
+
 export interface HomePost {
   id: number;
   userId?: number | null;
