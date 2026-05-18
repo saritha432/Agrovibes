@@ -1,0 +1,51 @@
+.home-page {
+  width: 100%;
+}
+
+.home-tabs {
+  margin-bottom: 20px;
+}
+
+.home-tabs__row {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 8px 0 10px;
+}
+
+.home-tabs__btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 24px;
+  border-radius: 9px;
+}
+
+.home-tabs__btn--active {
+  color: var(--accent);
+  background: #303132;
+}
+
+.home-tabs__line {
+  height: 1px;
+  background: var(--border);
+}
+
+.home-page__status,
+.home-page__error,
+.home-page__empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+}
+
+.home-page__error {
+  color: #ff6b6b;
+}
+
+.home-feed {
+  width: 100%;
+}

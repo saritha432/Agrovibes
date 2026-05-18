@@ -404,6 +404,27 @@ async function resolveHomePostAuthorUserId(postRow) {
   return null;
 }
 
+/** Surface pg / connection errors (ECONNREFUSED often has an empty `.message`). */
+function authRouteErrorInfo(error) {
+  const code = String(error?.code || "");
+  const msg = String(error?.message || error?.detail || "").trim();
+  if (code === "ECONNREFUSED" || msg.includes("ECONNREFUSED")) {
+    return {
+      status: 503,
+      message:
+        "Database is not running. Start PostgreSQL (from repo root: docker compose up -d) and check DATABASE_URL in backend/.env."
+    };
+  }
+  if (code === "23505" || /duplicate key|already exists|unique/i.test(msg)) {
+    return { status: 409, message: "Email, phone, or username already registered" };
+  }
+  return {
+    status: 500,
+    message: msg || code || "Request failed",
+    error: msg || code || ""
+  };
+}
+
 function normalizeIndiaPhone(rawPhone) {
   const digits = String(rawPhone || "").replace(/\D/g, "");
   if (digits.length === 10) return `+91${digits}`;
@@ -1144,12 +1165,16 @@ router.post("/v1/auth/register", async (req, res) => {
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.status(201).json({ token, user });
   } catch (error) {
-    const msg = String(error.message || "");
-    if (msg.includes("duplicate key") || msg.includes("already exists") || msg.includes("unique")) {
-      res.status(409).json({ message: "Email, phone, or username already registered" });
+    const info = authRouteErrorInfo(error);
+    if (info.status === 409) {
+      res.status(409).json({ message: info.message });
       return;
     }
-    res.status(500).json({ message: "Failed to register", error: error.message });
+    if (info.status === 503) {
+      res.status(503).json({ message: info.message });
+      return;
+    }
+    res.status(500).json({ message: "Failed to register", error: info.error });
   }
 });
 
@@ -1206,7 +1231,12 @@ router.post("/v1/auth/login", async (req, res) => {
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.json({ token, user });
   } catch (error) {
-    res.status(500).json({ message: "Failed to login", error: error.message });
+    const info = authRouteErrorInfo(error);
+    if (info.status === 503) {
+      res.status(503).json({ message: info.message });
+      return;
+    }
+    res.status(500).json({ message: "Failed to login", error: info.error });
   }
 });
 
