@@ -34,8 +34,8 @@ import {
 } from "../services/api";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
-import { CameraType } from "expo-camera";
-import { InAppCameraCapture, type InAppCameraCaptureMode } from "./InAppCameraCapture";
+import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
+import { WebCameraCapture } from "./WebCameraCapture";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -670,8 +670,27 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     return "any";
   };
 
-  const pickerFacingToCamera = (f: ImagePicker.CameraType) =>
-    f === ImagePicker.CameraType.front ? CameraType.front : CameraType.back;
+  const openNativeCameraPicker = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setErrorText("Camera permission is required.");
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      InteractionManager.runAfterInteractions(() => resolve());
+    });
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: mediaTypeForEntry(),
+      quality: 0.9,
+      cameraType: entryCameraFacing,
+      ...(Platform.OS === "ios"
+        ? { presentationStyle: ImagePicker.UIImagePickerPresentationStyle.OVER_FULL_SCREEN }
+        : {})
+    });
+    if (!result.canceled && result.assets[0]) {
+      applyPickedMediaToFlow([result.assets[0]]);
+    }
+  };
 
   const openEntryCameraWeb = async () => {
     try {
@@ -694,7 +713,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       return;
     }
     if (Platform.OS === "web") {
-      void openEntryCameraWeb();
+      setFullScreenCameraOpen(true);
+      return;
+    }
+    if (!isInAppCameraSupported()) {
+      void openNativeCameraPicker();
       return;
     }
     setFullScreenCameraOpen(true);
@@ -1010,7 +1033,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     <>
     <Modal
       visible={visible}
-      transparent={!createType || createType === "live"}
+      transparent={Platform.OS === "web" ? false : !createType || createType === "live"}
       animationType={createType && createType !== "live" ? "fade" : "slide"}
       onRequestClose={handleClose}
     >
@@ -1100,7 +1123,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             </View>
           </View>
         ) : (
-        <View style={[styles.igCameraEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <View
+          style={[
+            styles.igCameraEntryRoot,
+            { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) },
+            Platform.OS === "web" ? styles.igCameraEntryRootWeb : null
+          ]}
+        >
           <View style={styles.igCamTopRow}>
             <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
               <Ionicons name="chevron-back" size={24} color="#fff" />
@@ -1910,16 +1939,33 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
     </Modal>
 
-    <InAppCameraCapture
-      visible={fullScreenCameraOpen}
-      onClose={() => setFullScreenCameraOpen(false)}
-      onCapture={(asset) => {
-        setFullScreenCameraOpen(false);
-        applyPickedMediaToFlow([asset]);
-      }}
-      initialFacing={pickerFacingToCamera(entryCameraFacing)}
-      mode={cameraCaptureMode()}
-    />
+    {Platform.OS === "web" ? (
+      <WebCameraCapture
+        visible={fullScreenCameraOpen}
+        onClose={() => setFullScreenCameraOpen(false)}
+        onCapture={(asset) => {
+          setFullScreenCameraOpen(false);
+          applyPickedMediaToFlow([asset]);
+        }}
+        initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
+        allowVideo={entryType !== "post"}
+      />
+    ) : (
+      <InAppCameraCapture
+        visible={fullScreenCameraOpen}
+        onClose={() => setFullScreenCameraOpen(false)}
+        onUnavailable={() => {
+          setFullScreenCameraOpen(false);
+          void openNativeCameraPicker();
+        }}
+        onCapture={(asset) => {
+          setFullScreenCameraOpen(false);
+          applyPickedMediaToFlow([asset]);
+        }}
+        initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
+        mode={cameraCaptureMode()}
+      />
+    )}
     </>
   );
 }
@@ -2034,6 +2080,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#1f1f1f",
     paddingHorizontal: 8
+  },
+  igCameraEntryRootWeb: {
+    minHeight: "100vh",
+    width: "100%"
   },
   igCamTopRow: {
     flexDirection: "row",
