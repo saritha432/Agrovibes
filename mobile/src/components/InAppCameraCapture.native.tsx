@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { CameraType, CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -83,10 +83,6 @@ export function InAppCameraCapture({
     })();
   }, [cameraPermission?.granted, requestCameraPermission, visible]);
 
-  const wantsVideo = mode === "video" || mode === "any";
-  const cameraViewMode = recording && wantsVideo ? "video" : "picture";
-  const cameraFacing = facing === "front" ? CameraType.front : CameraType.back;
-
   const takePhoto = useCallback(async () => {
     if (!cameraRef.current || busy) return;
     setBusy(true);
@@ -164,6 +160,9 @@ export function InAppCameraCapture({
 
   if (!visible) return null;
 
+  const wantsVideo = mode === "video" || mode === "any";
+  const cameraViewMode = recording && wantsVideo ? "video" : "picture";
+
   const permissionLoading = cameraPermission == null;
   const permissionDenied = cameraPermission != null && !cameraPermission.granted;
 
@@ -199,7 +198,7 @@ export function InAppCameraCapture({
             <CameraView
               ref={cameraRef}
               style={StyleSheet.absoluteFill}
-              facing={cameraFacing}
+              facing={facing}
               mode={cameraViewMode}
               active={visible}
               onCameraReady={() => setCameraReady(true)}

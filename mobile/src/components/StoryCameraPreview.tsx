@@ -1,14 +1,16 @@
-import React from "react";
+import React, { forwardRef } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 type Props = {
   facing?: "front" | "back";
+  active?: boolean;
+  mode?: "picture" | "video";
   onPress?: () => void;
 };
 
 /** Web: tap opens full-screen browser camera. */
-export function StoryCameraPreview({ onPress }: Props) {
+export const StoryCameraPreview = forwardRef<unknown, Props>(function StoryCameraPreview({ onPress }, _ref) {
   if (Platform.OS !== "web") return null;
   return (
     <Pressable style={styles.fallback} onPress={onPress}>
@@ -16,7 +18,7 @@ export function StoryCameraPreview({ onPress }: Props) {
       <Text style={styles.hint}>Tap for live camera</Text>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   fallback: {
