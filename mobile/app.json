@@ -61,6 +61,15 @@
     "updates": {
       "url": "https://u.expo.dev/03e098eb-cfad-496b-8385-dab904b3d946"
     },
-    "plugins": []
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cropvibe uses your camera to record reels, stories, and posts.",
+          "microphonePermission": "Cropvibe uses your microphone to record audio for reels and stories.",
+          "recordAudioAndroid": true
+        }
+      ]
+    ]
   }
 }

@@ -34,6 +34,8 @@ import {
 } from "../services/api";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
+import { CameraType } from "expo-camera";
+import { InAppCameraCapture, type InAppCameraCaptureMode } from "./InAppCameraCapture";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -270,7 +272,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const insets = useSafeAreaInsets();
   const { user, token } = useAuth();
   const [createType, setCreateType] = useState<CreateType | null>(null);
-  const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.back);
+  const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.front);
+  const [fullScreenCameraOpen, setFullScreenCameraOpen] = useState(false);
   const [entryFlashOn, setEntryFlashOn] = useState(false);
   const [entryZoomLabel, setEntryZoomLabel] = useState<"1x" | "2x">("1x");
   const [entryTimerOn, setEntryTimerOn] = useState(false);
@@ -382,6 +385,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   React.useEffect(() => {
     if (!visible) {
+      setFullScreenCameraOpen(false);
       setShowCreativeTextPanel(false);
       setShowCreativeFilterPanel(false);
       setShowStickerPanel(false);
@@ -393,6 +397,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setCreateType(initialType === "story" ? null : initialType);
     setCreateStep("preview");
     setEntryType(initialType ?? "story");
+    setEntryCameraFacing(ImagePicker.CameraType.front);
+    setFullScreenCameraOpen(false);
     setErrorText("");
     setPickedStoryVideoUri("");
     setPickedStoryAsset(null);
@@ -525,6 +531,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const handleClose = () => {
     if (isSubmitting) return;
+    setFullScreenCameraOpen(false);
     setCreateType(null);
     setErrorText("");
     setShowCreativeTextPanel(false);
@@ -657,6 +664,42 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     return ImagePicker.MediaTypeOptions.All;
   };
 
+  const cameraCaptureMode = (): InAppCameraCaptureMode => {
+    if (entryType === "reel") return "video";
+    if (entryType === "post") return "photo";
+    return "any";
+  };
+
+  const pickerFacingToCamera = (f: ImagePicker.CameraType) =>
+    f === ImagePicker.CameraType.front ? CameraType.front : CameraType.back;
+
+  const openEntryCameraWeb = async () => {
+    try {
+      const result = await launchWebCameraAsyncWithFacing({
+        mediaTypes: mediaTypeForEntry(),
+        cameraType: entryCameraFacing
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        applyPickedMediaToFlow([result.assets[0]]);
+      }
+    } catch (e) {
+      setErrorText(e instanceof Error ? e.message : "Camera failed.");
+    }
+  };
+
+  const openFullScreenCamera = () => {
+    setErrorText("");
+    if (entryType === "live") {
+      setCreateType("live");
+      return;
+    }
+    if (Platform.OS === "web") {
+      void openEntryCameraWeb();
+      return;
+    }
+    setFullScreenCameraOpen(true);
+  };
+
   const applyPickedMediaToFlow = (assets: ImagePicker.ImagePickerAsset[]) => {
     if (!assets.length) return;
     const first = assets[0];
@@ -694,45 +737,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
   };
 
-  const openEntryCamera = async () => {
-    setErrorText("");
-    if (entryType === "live") {
-      setCreateType("live");
-      return;
-    }
-    if (Platform.OS === "web") {
-      try {
-        const result = await launchWebCameraAsyncWithFacing({
-          mediaTypes: mediaTypeForEntry(),
-          cameraType: entryCameraFacing
-        });
-        if (!result.canceled && result.assets?.[0]) {
-          applyPickedMediaToFlow([result.assets[0]]);
-        }
-      } catch (e) {
-        setErrorText(e instanceof Error ? e.message : "Camera failed.");
-      }
-      return;
-    }
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      setErrorText("Camera permission is required.");
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      InteractionManager.runAfterInteractions(() => resolve());
-    });
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: mediaTypeForEntry(),
-      quality: 0.9,
-      cameraType: entryCameraFacing,
-      ...(Platform.OS === "ios"
-        ? { presentationStyle: ImagePicker.UIImagePickerPresentationStyle.OVER_FULL_SCREEN }
-        : {})
-    });
-    if (!result.canceled && result.assets[0]) {
-      applyPickedMediaToFlow([result.assets[0]]);
-    }
+  const openEntryCamera = () => {
+    openFullScreenCamera();
   };
 
   const openEntryGallery = async () => {
@@ -1099,7 +1105,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
               <Ionicons name="chevron-back" size={24} color="#fff" />
             </Pressable>
-            <Text style={styles.igCamTopTitle}>Story</Text>
+            <Text style={styles.igCamTopTitle}>
+              {entryType === "reel" ? "Reel" : entryType === "post" ? "Post" : entryType === "live" ? "Live" : "Story"}
+            </Text>
             <Pressable
               onPress={() => {
                 if (entryType === "live") {
@@ -1161,14 +1169,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               </Pressable>
             </View>
 
-            <View style={styles.igCamViewfinder}>
-              {recentGridAssets[0] ? (
-                <Image source={{ uri: recentGridAssets[0].uri }} style={styles.igCamViewfinderMedia} resizeMode="cover" />
-              ) : (
-                <View style={styles.igCamViewfinderFallback}>
-                  <Ionicons name="camera-outline" size={42} color="rgba(255,255,255,0.65)" />
-                </View>
-              )}
+            <Pressable style={styles.igCamViewfinder} onPress={openFullScreenCamera} accessibilityLabel="Open camera">
+              <View style={styles.igCamViewfinderFallback}>
+                <Ionicons name="camera-outline" size={42} color="rgba(255,255,255,0.65)" />
+                <Text style={styles.igCamViewfinderHint}>Tap for camera</Text>
+              </View>
               <View style={styles.igCamViewfinderShade} pointerEvents="none" />
               <View style={styles.igCamGuideFrame} pointerEvents="none">
                 <View style={styles.igCamGuideCornerTL} />
@@ -1176,7 +1181,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <View style={styles.igCamGuideCornerBL} />
                 <View style={styles.igCamGuideCornerBR} />
               </View>
-            </View>
+            </Pressable>
           </View>
 
           {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
@@ -1904,6 +1909,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         </Pressable>
       </Pressable>
     </Modal>
+
+    <InAppCameraCapture
+      visible={fullScreenCameraOpen}
+      onClose={() => setFullScreenCameraOpen(false)}
+      onCapture={(asset) => {
+        setFullScreenCameraOpen(false);
+        applyPickedMediaToFlow([asset]);
+      }}
+      initialFacing={pickerFacingToCamera(entryCameraFacing)}
+      mode={cameraCaptureMode()}
+    />
     </>
   );
 }
@@ -2131,7 +2147,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2e2e2e"
+    backgroundColor: "#2e2e2e",
+    gap: 8
+  },
+  igCamViewfinderHint: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 11,
+    fontWeight: "600"
   },
   igCamViewfinderShade: {
     ...StyleSheet.absoluteFillObject,
