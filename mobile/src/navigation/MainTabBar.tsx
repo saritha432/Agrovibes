@@ -9,6 +9,7 @@ type Props = BottomTabBarProps & { onCreatePress: () => void };
 const TAB_BG = "#1e1f1f";
 const ACTIVE = "#ffffff";
 const MUTED = "#b9bec3";
+const BRAND_ACCENT = "#C9FF35";
 
 function tabIcon(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
   switch (routeName) {
@@ -31,6 +32,8 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
   const insets = useSafeAreaInsets();
   // Web doesn't have a real safe-area inset; extra bottom padding makes alignment drift.
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
+  const homeRoute = state.routes.find((r) => r.name === "Home");
+  const isHomeFocused = homeRoute ? state.index === state.routes.indexOf(homeRoute) : false;
 
   const renderTab = (routeName: string) => {
     const route = state.routes.find((r) => r.name === routeName);
@@ -71,7 +74,7 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
       >
         <Ionicons name={tabIcon(route.name, isFocused)} size={15} color={isFocused ? ACTIVE : MUTED} />
         <Text style={[styles.tabLabel, isFocused ? styles.tabLabelActive : null]} numberOfLines={1}>
-          {route.name === "Services" ? "community" : route.name}
+          {route.name === "Services" ? "Community" : route.name}
         </Text>
       </Pressable>
     );
@@ -87,11 +90,16 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
             const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
             if (!event.defaultPrevented) navigation.navigate("Home");
           }}
-          style={styles.logoTab}
+          style={[styles.logoTab, isHomeFocused ? styles.logoTabFocused : null]}
           accessibilityRole="button"
+          accessibilityState={{ selected: isHomeFocused }}
           accessibilityLabel="Home"
         >
-          <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
+          <Image
+            source={require("../../assets/crop vibe.png")}
+            style={[styles.logoImage, !isHomeFocused ? styles.logoImageMuted : null]}
+            resizeMode="contain"
+          />
         </Pressable>
         {renderTab("Market")}
         <Pressable onPress={onCreatePress} style={styles.tabItem} accessibilityRole="button" accessibilityLabel="Create">
@@ -113,18 +121,20 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 6 },
   logoTab: {
-    minWidth: 92,
-    maxWidth: 108,
-    height: 36,
-    paddingHorizontal: 6,
-    borderRadius: 2,
-    backgroundColor: "#2a2b2c",
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 4,
-    overflow: "hidden"
+    minWidth: 0,
+    paddingVertical: 1
   },
-  logoImage: { width: 88, height: 22 },
+  logoTabFocused: {
+    borderTopWidth: 2,
+    borderTopColor: BRAND_ACCENT,
+    marginTop: -2,
+    paddingTop: 1
+  },
+  logoImage: { width: 76, height: 11 },
+  logoImageMuted: { opacity: 0.72 },
   tabItem: {
     flex: 1,
     alignItems: "center",
