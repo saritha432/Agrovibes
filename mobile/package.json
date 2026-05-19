@@ -23,7 +23,8 @@
     "build:all:preview": "node scripts/eas.js build --platform all --profile preview",
     "build:all:prod": "node scripts/eas.js build --platform all --profile production",
     "doctor": "npx expo-doctor",
-    "generate:adaptive-icon": "node scripts/generate-adaptive-icon.cjs"
+    "generate:adaptive-icon": "node scripts/generate-adaptive-icon.cjs",
+    "preview:adaptive-icon": "node scripts/preview-adaptive-icon.cjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
