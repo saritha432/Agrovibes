@@ -966,6 +966,17 @@ function normalizeHomePostRow(row) {
     };
   }
   base.creativeMeta = creativeMeta;
+  const rawLikers = base.recentLikers;
+  if (typeof rawLikers === "string" && rawLikers.trim()) {
+    try {
+      const parsed = JSON.parse(rawLikers);
+      base.recentLikers = Array.isArray(parsed) ? parsed : [];
+    } catch (_e) {
+      base.recentLikers = [];
+    }
+  } else if (!Array.isArray(rawLikers)) {
+    base.recentLikers = [];
+  }
   return base;
 }
 
@@ -2753,7 +2764,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         owner.username AS "username",
         p.location,
         p.caption,
-        p.likes_count AS "likesCount",
+        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
@@ -2778,7 +2789,22 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
             SELECT 1 FROM home_post_saves hps
             WHERE hps.post_id = p.id AND hps.user_id = $1::integer
           )
-        END AS "viewerHasSaved"
+        END AS "viewerHasSaved",
+        (
+          SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
+          FROM (
+            SELECT
+              lu2.id AS "userId",
+              lu2.full_name AS "fullName",
+              lu2.username AS "username",
+              lu2.avatar_url AS "avatarUrl"
+            FROM home_post_likes hpl2
+            JOIN learn_users lu2 ON lu2.id = hpl2.user_id
+            WHERE hpl2.post_id = p.id
+            ORDER BY hpl2.created_at DESC
+            LIMIT 50
+          ) t
+        ) AS "recentLikers"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
@@ -3160,6 +3186,36 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
     res.json({ saved: false });
   } catch (error) {
     res.status(500).json({ message: "Failed to unsave post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/:postId/likes", async (req, res) => {
+  try {
+    await ensureHomePostLikesTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId)) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        lu.id AS "userId",
+        lu.full_name AS "fullName",
+        lu.username,
+        lu.avatar_url AS "avatarUrl",
+        hpl.created_at AS "createdAt"
+      FROM home_post_likes hpl
+      JOIN learn_users lu ON lu.id = hpl.user_id
+      WHERE hpl.post_id = $1
+      ORDER BY hpl.created_at DESC
+      LIMIT 200
+      `,
+      [postId]
+    );
+    res.json({ likers: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load post likes", error: error.message });
   }
 });
 

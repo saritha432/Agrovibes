@@ -52,17 +52,35 @@ type LocalCommentRecord = {
   parentCommentId?: string;
 };
 
-function identityKey(identity: { name: string; key?: string }) {
+function identityKey(identity: { name: string; key?: string; userId?: number }) {
+  const uid = Number(identity.userId);
+  if (Number.isFinite(uid) && uid > 0) return `uid:${uid}`;
   const key = String(identity.key || "").trim().toLowerCase();
   if (key) return `key:${key}`;
   return `name:${normalizeName(identity.name)}`;
+}
+
+const INVALID_ACTOR_MARKERS = new Set(["legacy:migrated"]);
+
+function sanitizeActors(actors: string[]): string[] {
+  return [...new Set(actors.filter((a) => a && !INVALID_ACTOR_MARKERS.has(a)))];
 }
 
 async function readLikeMap(): Promise<LocalPostLikeMap> {
   try {
     const raw = await AsyncStorage.getItem(LIKED_POSTS_KEY);
     const parsed = raw ? (JSON.parse(raw) as LocalPostLikeMap) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
+    const map = parsed && typeof parsed === "object" ? parsed : {};
+    let dirty = false;
+    for (const postKey of Object.keys(map)) {
+      const cleaned = sanitizeActors(Array.isArray(map[postKey]) ? map[postKey] : []);
+      if (cleaned.length !== (map[postKey]?.length ?? 0)) {
+        map[postKey] = cleaned;
+        dirty = true;
+      }
+    }
+    if (dirty) await writeLikeMap(map);
+    return map;
   } catch {
     return {};
   }
@@ -145,27 +163,64 @@ export async function markLocalEngagementRead(id: string) {
   await writeEngagement(records);
 }
 
+export type PostLiker = {
+  userId?: number;
+  userName: string;
+  avatarUrl?: string;
+};
+
+/** Actors from local engagement notifications for a given post (offline / API fallback). */
+export async function getLikersFromLocalEngagementForPost(postId: number): Promise<PostLiker[]> {
+  if (!Number.isFinite(postId) || postId <= 0) return [];
+  const records = await readEngagement();
+  const seen = new Set<string>();
+  const out: PostLiker[] = [];
+  for (const row of records) {
+    if (row.type !== "post_like" || row.postId !== postId) continue;
+    const name = String(row.actorName || "").trim();
+    if (!name) continue;
+    const key = normalizeName(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ userName: name });
+  }
+  return out;
+}
+
+/** Likers stored in the on-device like map (uid keys when available). */
+export async function getLikersFromLocalLikeMap(postId: number): Promise<PostLiker[]> {
+  if (!Number.isFinite(postId) || postId <= 0) return [];
+  const map = await readLikeMap();
+  const actors = sanitizeActors(Array.isArray(map[String(postId)]) ? map[String(postId)] : []);
+  const out: PostLiker[] = [];
+  const seen = new Set<number>();
+  for (const actor of actors) {
+    if (actor.startsWith("uid:")) {
+      const userId = Number(actor.slice(4));
+      if (!Number.isFinite(userId) || userId <= 0 || seen.has(userId)) continue;
+      seen.add(userId);
+      out.push({ userId, userName: `User ${userId}` });
+    }
+  }
+  return out;
+}
+
 export async function getLocalLikeStateForPosts(
-  viewer: { name: string; key?: string },
+  viewer: { name: string; key?: string; userId?: number },
   postIds: number[]
 ): Promise<{ likedPostIds: Set<number>; likesCountByPost: Record<number, number> }> {
   const map = await readLikeMap();
-  // One-time migration from old global like list.
-  if (Object.keys(map).length === 0) {
-    const legacy = await readLegacyLikedPostIds();
-    if (legacy.length) {
-      for (const id of legacy) {
-        map[String(id)] = ["legacy:migrated"];
-      }
-      await writeLikeMap(map);
-    }
+  // Drop obsolete v1 liked-id list (it created phantom "legacy:migrated" actors).
+  const legacy = await readLegacyLikedPostIds();
+  if (legacy.length) {
+    await AsyncStorage.removeItem(LIKED_POSTS_KEY_V1);
   }
   const viewerKey = identityKey(viewer);
   const ids = [...new Set(postIds.filter((id) => Number.isFinite(id) && id > 0))];
   const likedPostIds = new Set<number>();
   const likesCountByPost: Record<number, number> = {};
   for (const id of ids) {
-    const actors = Array.isArray(map[String(id)]) ? map[String(id)] : [];
+    const actors = sanitizeActors(Array.isArray(map[String(id)]) ? map[String(id)] : []);
     likesCountByPost[id] = actors.length;
     if (actors.includes(viewerKey)) likedPostIds.add(id);
   }
@@ -174,14 +229,14 @@ export async function getLocalLikeStateForPosts(
 
 export async function setLocalPostLikedByIdentity(
   postId: number,
-  viewer: { name: string; key?: string },
+  viewer: { name: string; key?: string; userId?: number },
   liked: boolean
 ): Promise<{ liked: boolean; likesCount: number }> {
   if (!Number.isFinite(postId) || postId <= 0) return { liked: false, likesCount: 0 };
   const map = await readLikeMap();
   const key = String(postId);
   const actor = identityKey(viewer);
-  const before = Array.isArray(map[key]) ? map[key] : [];
+  const before = sanitizeActors(Array.isArray(map[key]) ? map[key] : []);
   const unique = [...new Set(before)];
   const has = unique.includes(actor);
   let next = unique;

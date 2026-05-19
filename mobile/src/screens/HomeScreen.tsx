@@ -27,6 +27,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video,
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { navigateToPublicProfile } from "../navigation/navigationRef";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -36,7 +37,10 @@ import {
   deleteHomePost,
   reportHomePost,
   fetchHomePostComments,
+  fetchHomePostLikes,
   fetchHomePosts,
+  fetchSocialNotifications,
+  type HomePostLiker,
   fetchHomeStories,
   fetchRelationships,
   fetchSocialNetwork,
@@ -56,7 +60,10 @@ import {
   appendLocalEngagementNotification,
   getLocalCommentsForPost,
   getLocalLikeStateForPosts,
-  setLocalPostLikedByIdentity
+  getLikersFromLocalEngagementForPost,
+  getLikersFromLocalLikeMap,
+  setLocalPostLikedByIdentity,
+  type PostLiker
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
@@ -81,6 +88,57 @@ function isReelPost(post: HomePost) {
 
 function isFullScreenReelItem(post: HomePost) {
   return !!(post.videoUrl && isReelPost(post));
+}
+
+function postHasViewableMedia(post: HomePost) {
+  return !!(post.videoUrl || postImageGallery(post).length);
+}
+
+function mapApiLikerToPostLiker(row: HomePostLiker): PostLiker | null {
+  const userId = Number(row.userId);
+  if (!Number.isFinite(userId) || userId <= 0) return null;
+  const username = String(row.username || "")
+    .trim()
+    .replace(/^@+/, "");
+  const fullName = String(row.fullName || "").trim();
+  const userName = username || fullName || `User ${userId}`;
+  return {
+    userId,
+    userName,
+    avatarUrl: row.avatarUrl || undefined
+  };
+}
+
+function viewerAsPostLiker(user: {
+  id?: number;
+  fullName?: string;
+  username?: string;
+  avatarUrl?: string;
+}): PostLiker | null {
+  const userId = Number(user.id);
+  if (!Number.isFinite(userId) || userId <= 0) return null;
+  const username = String(user.username || "")
+    .trim()
+    .replace(/^@+/, "");
+  const fullName = String(user.fullName || "").trim();
+  return {
+    userId,
+    userName: username || fullName || "You",
+    avatarUrl: user.avatarUrl || undefined
+  };
+}
+
+function localLikeViewerIdentity(user: {
+  id?: number;
+  fullName?: string;
+  username?: string;
+  email?: string;
+}) {
+  return {
+    name: user.fullName || user.username || "You",
+    key: user.username || user.email || "",
+    userId: user.id
+  };
 }
 
 function postCreatedMs(post: HomePost): number {
@@ -361,8 +419,8 @@ type OtherStoryGroup = {
 };
 
 const COMMENT_REPLY_INDENT = 14;
-/** Show "View more replies" only when a comment has more than this many direct replies (i.e. 3+ → link). */
-const REPLY_PREVIEW_VISIBLE = 2;
+/** Direct replies stay collapsed until the user taps "View N more reply/replies" (even when N is 1). */
+const REPLY_PREVIEW_VISIBLE = 0;
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 
 function sortCommentsByTime(a: HomeCommentRow, b: HomeCommentRow) {
@@ -732,10 +790,13 @@ function ReelSeekBar({ progressRatio }: ReelSeekBarProps) {
 }
 
 type ReelLikeBurstProps = {
+  postId: number;
   trigger: number;
+  /** Persists across list item remounts so returning to a liked reel does not replay the burst. */
+  seenRef: React.MutableRefObject<Record<number, number>>;
 };
 
-function ReelLikeBurst({ trigger }: ReelLikeBurstProps) {
+function ReelLikeBurst({ postId, trigger, seenRef }: ReelLikeBurstProps) {
   const [hearts, setHearts] = useState<
     Array<{
       id: string;
@@ -752,6 +813,9 @@ function ReelLikeBurst({ trigger }: ReelLikeBurstProps) {
 
   useEffect(() => {
     if (!trigger) return;
+    const seen = seenRef.current[postId] || 0;
+    if (trigger <= seen) return;
+    seenRef.current[postId] = trigger;
     const created = Array.from({ length: 10 }, (_, idx) => ({
       id: `${trigger}-${idx}`,
       progress: new Animated.Value(0),
@@ -776,7 +840,7 @@ function ReelLikeBurst({ trigger }: ReelLikeBurstProps) {
     });
     const clearT = setTimeout(() => setHearts([]), 1050);
     return () => clearTimeout(clearT);
-  }, [trigger]);
+  }, [trigger, postId, seenRef]);
 
   if (!hearts.length) return null;
   return (
@@ -849,6 +913,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [shareBusyUserId, setShareBusyUserId] = useState<number | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
+  const [likesSheetPost, setLikesSheetPost] = useState<HomePost | null>(null);
+  const [likesSheetUsers, setLikesSheetUsers] = useState<PostLiker[]>([]);
+  const [likesSheetLoading, setLikesSheetLoading] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
   const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
@@ -872,6 +939,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
+  const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
   const [activeReelMusicPostId, setActiveReelMusicPostId] = useState<number | null>(null);
   /** Web: start muted (browser autoplay). Native: start with sound so reel / track audio is audible. */
   const [isReelMuted, setIsReelMuted] = useState(Platform.OS === "web");
@@ -1014,17 +1082,141 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
   const openPostFromFeed = useCallback((post: HomePost) => {
-    if (post.videoUrl && isReelPost(post)) {
-      const list = tabPosts.filter((p) => p.videoUrl && isReelPost(p));
-      const ordered = list.length ? list : [post];
-      const ix = ordered.findIndex((p) => p.id === post.id);
-      const initialIndex = ix >= 0 ? ix : 0;
-      setPlayingPostId(post.id);
-      setReelViewerOpen({ posts: ordered, initialIndex });
-      return;
-    }
-    if (post.videoUrl || postImageGallery(post).length) setActivePost(post);
+    if (!postHasViewableMedia(post)) return;
+    const list = tabPosts.filter((p) => postHasViewableMedia(p));
+    const ordered = list.length ? list : [post];
+    const ix = ordered.findIndex((p) => p.id === post.id);
+    const initialIndex = ix >= 0 ? ix : 0;
+    setPlayingPostId(post.id);
+    setReelViewerOpen({ posts: ordered, initialIndex });
   }, [tabPosts]);
+
+  const resolveLikerProfile = useCallback(
+    (liker: PostLiker): PostLiker => {
+      let userId = liker.userId;
+      let userName = liker.userName;
+      let avatarUrl = liker.avatarUrl;
+      if (userId && socialAvatarsByUserId.has(userId)) {
+        avatarUrl = avatarUrl || socialAvatarsByUserId.get(userId);
+      }
+      if (!userId) {
+        const norm = normalizeIdentity(userName);
+        const peer = followingSharePeers.find((p) => normalizeIdentity(p.name) === norm);
+        if (peer) {
+          userId = peer.id;
+          userName = peer.name;
+          avatarUrl = avatarUrl || socialAvatarsByUserId.get(peer.id);
+        } else {
+          const fromPost = postsRef.current.find((p) => normalizeIdentity(p.userName) === norm);
+          if (fromPost?.userId) {
+            userId = Number(fromPost.userId);
+            userName = fromPost.userName || userName;
+            avatarUrl = avatarUrl || fromPost.authorAvatarUrl || socialAvatarsByUserId.get(userId);
+          }
+        }
+      }
+      return { userId, userName, avatarUrl };
+    },
+    [followingSharePeers, socialAvatarsByUserId]
+  );
+
+  const openPostLikesSheet = useCallback(
+    async (post: HomePost) => {
+      const livePost = postsRef.current.find((p) => p.id === post.id) ?? post;
+      if (!livePost.likesCount && !livePost.viewerHasLiked) return;
+      setLikesSheetPost(livePost);
+      setLikesSheetLoading(true);
+      setLikesSheetUsers([]);
+      const seenUserIds = new Set<number>();
+      const seenNames = new Set<string>();
+      const merged: PostLiker[] = [];
+      const pushLiker = (raw: PostLiker | null) => {
+        if (!raw) return;
+        const liker = resolveLikerProfile(raw);
+        const nameKey = normalizeIdentity(liker.userName);
+        if (liker.userId) {
+          if (seenUserIds.has(liker.userId)) return;
+          seenUserIds.add(liker.userId);
+          if (nameKey) seenNames.add(nameKey);
+          merged.push(liker);
+          return;
+        }
+        if (!nameKey || seenNames.has(nameKey)) return;
+        seenNames.add(nameKey);
+        merged.push(liker);
+      };
+
+      for (const row of livePost.recentLikers || []) {
+        pushLiker(mapApiLikerToPostLiker(row));
+      }
+
+      const res = await fetchHomePostLikes(livePost.id, token ?? null);
+      for (const row of res.likers || []) {
+        pushLiker(mapApiLikerToPostLiker(row));
+      }
+
+      if (livePost.viewerHasLiked) {
+        pushLiker(viewerAsPostLiker(user || {}));
+      }
+
+      for (const row of await getLikersFromLocalLikeMap(livePost.id)) {
+        pushLiker(row);
+      }
+      for (const row of await getLikersFromLocalEngagementForPost(livePost.id)) {
+        pushLiker(row);
+      }
+
+      if (token && merged.length === 0 && livePost.likesCount > 0) {
+        try {
+          const notif = await fetchSocialNotifications(token);
+          for (const n of notif.postLikes || []) {
+            if (Number(n.postId) !== livePost.id) continue;
+            pushLiker({
+              userId: Number(n.actorId) || undefined,
+              userName: String(n.actorName || "").trim() || "User",
+              avatarUrl: n.actorId ? socialAvatarsByUserId.get(Number(n.actorId)) : undefined
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (merged.length === 0 && livePost.likesCount > 0) {
+        try {
+          const fresh = await fetchHomePosts(token ?? null);
+          const refreshed = fresh.posts.find((p) => p.id === livePost.id);
+          for (const row of refreshed?.recentLikers || []) {
+            pushLiker(mapApiLikerToPostLiker(row));
+          }
+          if (refreshed?.recentLikers?.length) {
+            setPosts((prev) =>
+              prev.map((p) => (p.id === livePost.id ? { ...p, recentLikers: refreshed.recentLikers } : p))
+            );
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const apiLikers: HomePostLiker[] = merged.map((l) => ({
+        userId: l.userId || 0,
+        fullName: l.userName,
+        username: l.userName,
+        avatarUrl: l.avatarUrl
+      }));
+
+      setLikesSheetUsers(merged);
+      setLikesSheetLoading(false);
+
+      if (merged.length > 0) {
+        setPosts((prev) =>
+          prev.map((p) => (p.id === livePost.id ? { ...p, recentLikers: apiLikers } : p))
+        );
+      }
+    },
+    [token, user, resolveLikerProfile, socialAvatarsByUserId]
+  );
 
   const triggerReelLikeBurst = useCallback((postId: number) => {
     setReelLikeBurstByPostId((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
@@ -1197,7 +1389,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         const data = await fetchHomePosts(token ?? null);
         if (!mounted) return;
         const localLikes = await getLocalLikeStateForPosts(
-          { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
+          localLikeViewerIdentity(user || {}),
           data.posts.map((p) => p.id)
         );
         if (!mounted) return;
@@ -1206,7 +1398,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           rows.map((p) => ({
             ...p,
             viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
-            likesCount: Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
+            likesCount: token
+              ? Number(p.likesCount || 0)
+              : Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
           }))
         );
         setFeedShuffleSeed((Date.now() >>> 0) ^ (rows.length * 0x9e3779b1));
@@ -1765,7 +1959,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       applyOptimistic();
       const localResult = await setLocalPostLikedByIdentity(
         post.id,
-        { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
+        localLikeViewerIdentity(user || {}),
         nextLiked
       );
       setPosts((prev) =>
@@ -1788,15 +1982,38 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: true }));
       try {
         const res = nextLiked ? await likeHomePost(token, post.id) : await unlikeHomePost(token, post.id);
+        const me = viewerAsPostLiker(user || {});
         setPosts((prev) =>
-          prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: res.liked, likesCount: res.likesCount } : p))
+          prev.map((p) => {
+            if (p.id !== post.id) return p;
+            let recentLikers = [...(p.recentLikers || [])];
+            if (res.liked && me?.userId) {
+              if (!recentLikers.some((l) => Number(l.userId) === me.userId)) {
+                recentLikers = [
+                  {
+                    userId: me.userId,
+                    fullName: me.userName,
+                    username: user?.username || me.userName,
+                    avatarUrl: me.avatarUrl
+                  },
+                  ...recentLikers
+                ];
+              }
+            } else if (me?.userId) {
+              recentLikers = recentLikers.filter((l) => Number(l.userId) !== me.userId);
+            }
+            return {
+              ...p,
+              viewerHasLiked: res.liked,
+              likesCount: res.likesCount,
+              recentLikers
+            };
+          })
         );
-        await setLocalPostLikedByIdentity(
-          post.id,
-          { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
-          res.liked
-        );
+        await setLocalPostLikedByIdentity(post.id, localLikeViewerIdentity(user || {}), res.liked);
       } catch {
+        revert();
+        await setLocalPostLikedByIdentity(post.id, localLikeViewerIdentity(user || {}), prevSnapshot.liked);
         if (nextLiked && !isOwnPost) {
           await appendLocalEngagementNotification({
             type: "post_like",
@@ -1806,19 +2023,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             isReel: !!post.videoUrl
           });
         }
-        if (!nextLiked) {
-          revert();
-          await setLocalPostLikedByIdentity(
-            post.id,
-            { name: user?.fullName || "You", key: user?.email || String(user?.id || "") },
-            true
-          );
-        }
       } finally {
         setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
       }
     },
-    [token, user?.email, user?.fullName, user?.id]
+    [token, user?.email, user?.fullName, user?.id, user?.username]
   );
 
   const likeReelFromDoubleTap = useCallback(
@@ -1833,7 +2042,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const onReelSurfaceTap = useCallback(
     (post: HomePost) => {
-      if (!post.videoUrl) return;
+      if (!postHasViewableMedia(post)) return;
+      if (!post.videoUrl) {
+        openPostFromFeed(post);
+        return;
+      }
       const now = Date.now();
       const lastTap = reelTapTsRef.current[post.id] || 0;
       if (now - lastTap <= 280) {
@@ -2373,8 +2586,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const activeIndex = reelRowPosts.findIndex((p) => p.id === playingPostId);
       const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const nextPost = reelRowPosts[index + 1];
-      const thumbUri = post.thumbnailUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
-      const reelPoster = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || nextPost?.imageUrl || nextPost?.thumbnailUrl;
+      const gallery = postImageGallery(post);
+      const thumbUri = post.thumbnailUrl || gallery[0] || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
+      const reelPoster =
+        post.thumbnailUrl || gallery[0] || post.imageUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl;
       const musicLabel =
         (post.musicLabel && post.musicLabel.trim()) ||
         post.caption?.replace(/^\[REEL\]\s*/i, "").trim().slice(0, 36) ||
@@ -2437,7 +2652,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             style={styles.reelGradient}
             pointerEvents="none"
           />
-          <ReelLikeBurst trigger={reelLikeBurstByPostId[post.id] || 0} />
+          <ReelLikeBurst
+            postId={post.id}
+            trigger={reelLikeBurstByPostId[post.id] || 0}
+            seenRef={reelLikeBurstSeenRef}
+          />
           <View
               style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]}
               pointerEvents="box-none"
@@ -2495,23 +2714,35 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               </Text>
             </View>
             <View style={styles.reelActionsCol} pointerEvents="auto">
-              <Pressable
-                style={styles.reelActionItem}
-                onPress={() => {
-                  if (!post.viewerHasLiked) triggerReelLikeBurst(post.id);
-                  void togglePostLike(post);
-                }}
-                disabled={!!likeBusyByPostId[post.id]}
-              >
-                <Ionicons
-                  name={post.viewerHasLiked ? "heart" : "heart-outline"}
-                  size={REEL_ACTION_ICON_LIKE}
-                  color={post.viewerHasLiked ? likeActiveColor : REEL_LIKE_COLOR}
-                />
-                <Text style={[styles.reelActionCount, post.viewerHasLiked ? styles.reelActionCountLiked : null]}>
-                  {post.likesCount}
-                </Text>
-              </Pressable>
+              <View style={styles.reelActionItem}>
+                <Pressable
+                  onPress={() => {
+                    if (!post.viewerHasLiked) triggerReelLikeBurst(post.id);
+                    void togglePostLike(post);
+                  }}
+                  disabled={!!likeBusyByPostId[post.id]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={post.viewerHasLiked ? "Unlike" : "Like"}
+                >
+                  <Ionicons
+                    name={post.viewerHasLiked ? "heart" : "heart-outline"}
+                    size={REEL_ACTION_ICON_LIKE}
+                    color={post.viewerHasLiked ? likeActiveColor : REEL_LIKE_COLOR}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => void openPostLikesSheet(post)}
+                  disabled={!post.likesCount}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="View likes"
+                >
+                  <Text style={[styles.reelActionCount, post.viewerHasLiked ? styles.reelActionCountLiked : null]}>
+                    {post.likesCount}
+                  </Text>
+                </Pressable>
+              </View>
               <Pressable style={styles.reelActionItem} onPress={() => openCommentsForPost(post)}>
                 <Ionicons name="chatbubble-outline" size={REEL_ACTION_ICON} color="#fff" />
                 <Text style={styles.reelActionCount}>{shownCommentsCount}</Text>
@@ -2558,6 +2789,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       legacyRelationshipByName,
       likeBusyByPostId,
       openCommentsForPost,
+      openPostLikesSheet,
       onAddReelToStory,
       onShareToMessenger,
       onShareToSnapchat,
@@ -2683,25 +2915,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 )}
               </Pressable>
             ) : isCarousel ? (
-              <FlatList
-                data={gallery}
-                horizontal
-                pagingEnabled
-                nestedScrollEnabled
-                scrollEnabled
-                showsHorizontalScrollIndicator={false}
-                keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
-                style={{ width: feedMediaWidth, height: feedMediaWidth }}
-                renderItem={({ item: uri }) => (
-                  <Image style={{ width: feedMediaWidth, height: feedMediaWidth }} source={{ uri }} resizeMode="cover" />
-                )}
-              />
+              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
+                <FlatList
+                  data={gallery}
+                  horizontal
+                  pagingEnabled
+                  nestedScrollEnabled
+                  scrollEnabled
+                  showsHorizontalScrollIndicator={false}
+                  keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
+                  style={{ width: feedMediaWidth, height: feedMediaWidth }}
+                  renderItem={({ item: uri }) => (
+                    <Image style={{ width: feedMediaWidth, height: feedMediaWidth }} source={{ uri }} resizeMode="cover" />
+                  )}
+                />
+              </Pressable>
             ) : gallery[0] ? (
-              <Pressable style={styles.videoTapArea} onPress={() => setActivePost(post)}>
+              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
               </Pressable>
             ) : (
-              <Pressable style={styles.videoTapArea} onPress={() => setActivePost(post)}>
+              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 <Ionicons name="play-circle-outline" size={48} color="#fff" />
               </Pressable>
             )}
@@ -2739,7 +2973,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </Pressable>
           </View>
 
-          <Text style={styles.likes}>{post.likesCount} likes</Text>
+          <Pressable onPress={() => void openPostLikesSheet(post)} disabled={!post.likesCount}>
+            <Text style={styles.likes}>{post.likesCount} likes</Text>
+          </Pressable>
           <Text style={styles.caption}>
             <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
           </Text>
@@ -2760,6 +2996,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       likeBusyByPostId,
       openCommentsForPost,
       openPostFromFeed,
+      openPostLikesSheet,
       playingPostId,
       relationships,
       toggleFollow,
@@ -3066,6 +3303,69 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               removeClippedSubviews={false}
             />
           ) : null}
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!likesSheetPost}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLikesSheetPost(null)}
+      >
+        <View style={styles.commentsSheetRoot}>
+          <Pressable style={styles.commentsSheetBackdrop} onPress={() => setLikesSheetPost(null)} />
+          <View style={[styles.commentsSheetContainer, { height: Math.round(windowHeight * 0.5) }]}>
+            <View style={[styles.commentsSheetPanel, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+              <View style={styles.commentsSheetHandle} />
+              <View style={styles.commentsSheetHeader}>
+                <Pressable
+                  onPress={() => setLikesSheetPost(null)}
+                  hitSlop={12}
+                  style={styles.commentsCloseHit}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close likes"
+                >
+                  <Ionicons name="chevron-down" size={28} color="#C9FF35" />
+                </Pressable>
+                <Text style={styles.commentsTitle}>Likes</Text>
+                <View style={styles.commentsHeaderSpacer} />
+              </View>
+              {likesSheetLoading ? (
+                <ActivityIndicator color="#C9FF35" style={{ marginTop: 24 }} />
+              ) : likesSheetUsers.length === 0 ? (
+                <Text style={styles.noCommentsText}>No likes yet</Text>
+              ) : (
+                <ScrollView style={styles.commentsListScroll} contentContainerStyle={styles.likesListInner}>
+                  {likesSheetUsers.map((liker, idx) => (
+                    <Pressable
+                      key={`${liker.userId ?? "n"}-${liker.userName}-${idx}`}
+                      style={styles.likesRow}
+                      onPress={() => {
+                        setLikesSheetPost(null);
+                        navigateToPublicProfile({
+                          userId: liker.userId,
+                          userName: liker.userName,
+                          avatarUrl: liker.avatarUrl ?? null
+                        });
+                      }}
+                    >
+                      <UserAvatar
+                        uri={liker.avatarUrl}
+                        name={liker.userName}
+                        size={40}
+                        borderRadius={20}
+                        fallbackBackgroundColor="#3f3f46"
+                        initialsColor="#fafafa"
+                      />
+                      <Text style={styles.likesRowName} numberOfLines={1}>
+                        {liker.userName}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </View>
         </View>
       </Modal>
 
@@ -4073,6 +4373,15 @@ const styles = StyleSheet.create({
   },
   commentsListScroll: { flex: 1, minHeight: 0 },
   commentsListInner: { paddingBottom: 12, gap: 14 },
+  likesListInner: { paddingBottom: 12, gap: 4 },
+  likesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4
+  },
+  likesRowName: { flex: 1, color: "#fafafa", fontSize: 14, fontWeight: "700" },
   noCommentsText: { color: "#C9FF35", textAlign: "center", marginTop: 16, fontWeight: "700" },
   commentBlock: { marginBottom: 2 },
   commentRowInsta: { flexDirection: "row", alignItems: "flex-start" },
