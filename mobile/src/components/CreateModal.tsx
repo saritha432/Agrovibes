@@ -17,6 +17,7 @@ import {
   TextStyle,
   View
 } from "react-native";
+import { CameraView } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { Audio, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -310,6 +311,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
+  const [captureEntryView, setCaptureEntryView] = useState<"camera" | "gallery">("camera");
+  const entryCameraRef = useRef<CameraView>(null);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   const [entryMultiSelect, setEntryMultiSelect] = useState(false);
   const [postLocation, setPostLocation] = useState("");
@@ -429,6 +432,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setComposedImageUri(null);
     setEntrySelectedIds([]);
     setEntryMultiSelect(false);
+    setCaptureEntryView("camera");
     setPostLocation("");
     setLocationDraft("");
     setShowLocationPanel(false);
@@ -512,6 +516,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     if (!visible || createType) return;
     void refreshGallery();
   }, [createType, refreshGallery, visible]);
+
+  React.useEffect(() => {
+    if (entryType === "post" || entryType === "live") return;
+    setCaptureEntryView("camera");
+  }, [entryType]);
 
   React.useEffect(() => {
     if (!showTagPeoplePanel) return;
@@ -767,21 +776,59 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const openEntryCamera = () => {
-    openFullScreenCamera();
+    void captureEntryShutter();
   };
 
-  const openEntryGallery = async () => {
+  const captureEntryShutter = async () => {
     setErrorText("");
     if (entryType === "live") {
       setCreateType("live");
       return;
     }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      setErrorText("Media library permission is required.");
+    if (entryType === "reel") {
+      openFullScreenCamera();
       return;
     }
+    if (Platform.OS === "web") {
+      openFullScreenCamera();
+      return;
+    }
+    try {
+      const photo = await entryCameraRef.current?.takePictureAsync({ quality: 0.9 });
+      if (!photo?.uri) {
+        setErrorText("Could not capture photo.");
+        return;
+      }
+      applyPickedMediaToFlow([
+        {
+          uri: photo.uri,
+          type: "image",
+          width: photo.width ?? 0,
+          height: photo.height ?? 0
+        } as ImagePicker.ImagePickerAsset
+      ]);
+    } catch (e) {
+      setErrorText(e instanceof Error ? e.message : "Photo capture failed.");
+    }
+  };
+
+  const onCaptureGalleryAsset = (asset: GalleryGridAsset) => {
+    if (entryType === "reel" && asset.mediaType !== "video") {
+      setErrorText("Reels support video only.");
+      return;
+    }
+    pickStoryFromGallery(asset);
+  };
+
+  const launchWebOrNativeImageLibrary = async () => {
     const allowMulti = entryType === "post";
+    if (Platform.OS !== "web") {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        setErrorText("Media library permission is required.");
+        return;
+      }
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: mediaTypeForEntry(),
       allowsMultipleSelection: allowMulti,
@@ -792,6 +839,30 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setErrorText("");
       applyPickedMediaToFlow(result.assets);
     }
+  };
+
+  const openEntryGallery = async () => {
+    setErrorText("");
+    if (entryType === "live") {
+      setCreateType("live");
+      return;
+    }
+    // expo-media-library is native-only; web uses the browser file picker.
+    if (Platform.OS === "web") {
+      await launchWebOrNativeImageLibrary();
+      return;
+    }
+    if (entryType === "story" || entryType === "reel") {
+      const perm = await MediaLibrary.requestPermissionsAsync();
+      if (!perm.granted) {
+        setErrorText("Media library permission is required.");
+        return;
+      }
+      setCaptureEntryView("gallery");
+      void refreshGallery();
+      return;
+    }
+    await launchWebOrNativeImageLibrary();
   };
 
   const submitPostVideo = async () => {
@@ -992,6 +1063,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       ? `Tagged: ${taggedPeople[0].name}`
       : `Tagged: ${taggedPeople[0].name} + ${taggedPeople.length - 1} more`;
   const locationSummary = postLocation.trim() ? `Location: ${postLocation.trim()}` : "Add location";
+  const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
+  const entryCameraActive =
+    visible && captureEntryView === "camera" && (entryType === "story" || entryType === "reel");
 
   const composeOptions: Array<{
     icon: keyof typeof Ionicons.glyphMap;
@@ -1048,7 +1122,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       animationType={createType && createType !== "live" ? "fade" : "slide"}
       onRequestClose={handleClose}
     >
-      {!createType ? (
+      {visible && !createType ? (
         entryType === "post" ? (
           <View style={[styles.igPostEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
             <View style={styles.igPostEntryTop}>
@@ -1134,171 +1208,170 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               ))}
             </View>
           </View>
-        ) : (
-        <View
-          style={[
-            styles.igCameraEntryRoot,
-            { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) },
-            Platform.OS === "web" ? styles.igCameraEntryRootWeb : null
-          ]}
-        >
-          <View style={styles.igCamTopRow}>
-            <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
-              <Ionicons name="chevron-back" size={24} color="#fff" />
-            </Pressable>
-            <Text style={styles.igCamTopTitle}>
-              {entryType === "reel" ? "Reel" : entryType === "post" ? "Post" : entryType === "live" ? "Live" : "Story"}
-            </Text>
-            <Pressable
-              onPress={() => {
-                if (entryType === "live") {
-                  setCreateType("live");
-                  return;
+        ) : captureEntryView === "gallery" ? (
+          <View
+            style={[
+              styles.igCaptureGalleryRoot,
+              { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }
+            ]}
+          >
+            <View style={styles.igCaptureGalleryHeader}>
+              <Pressable style={styles.igCamTopGhostBtn} onPress={() => setCaptureEntryView("camera")} hitSlop={10}>
+                <Ionicons name="chevron-back" size={24} color="#fff" />
+              </Pressable>
+              <Pressable style={styles.igPostAlbumPicker} onPress={() => setShowAlbumPicker(true)}>
+                <Text style={styles.igPostEntryRecentsText}>{selectedAlbumTitle}</Text>
+                <Ionicons name="chevron-down" size={16} color="#f8fafc" />
+              </Pressable>
+              <View style={styles.igCaptureHeaderSpacer} />
+            </View>
+
+            <FlatList
+              data={postGridData}
+              keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
+              numColumns={4}
+              contentContainerStyle={styles.igPostEntryGrid}
+              renderItem={({ item }) => {
+                if ("isCamera" in item && item.isCamera) {
+                  return (
+                    <Pressable style={styles.igPostEntryCell} onPress={() => setCaptureEntryView("camera")}>
+                      <View style={styles.igPostEntryCameraCell}>
+                        <Ionicons name="camera" size={28} color="#fff" />
+                      </View>
+                    </Pressable>
+                  );
                 }
-                openEntryGallery();
+                const asset = item as GalleryGridAsset;
+                return (
+                  <Pressable style={styles.igPostEntryCell} onPress={() => onCaptureGalleryAsset(asset)}>
+                    <Image source={{ uri: asset.uri }} style={styles.igPostEntryCellImage} resizeMode="cover" />
+                    {asset.mediaType === "video" ? (
+                      <View style={styles.storyGalleryVideoBadge}>
+                        <Ionicons name="play" size={10} color="#fff" />
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
               }}
-            >
-              <Text style={styles.igCamTopShare}>Share</Text>
-            </Pressable>
-          </View>
+            />
 
-          <View style={styles.igCamTopCenter}>
-              <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
-                <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#b7ff37" />
-              </Pressable>
-              <Pressable
-                style={styles.igCamRoundControl}
-                onPress={() => setEntryZoomLabel((z) => (z === "1x" ? "2x" : "1x"))}
-              >
-                <Text style={styles.igCamZoomText}>{entryZoomLabel}</Text>
-              </Pressable>
-              <Pressable style={styles.igCamRoundControl} onPress={() => setEntryTimerOn((v) => !v)}>
-                <Ionicons name="timer-outline" size={18} color={entryTimerOn ? "#b7ff37" : "#e8e8e8"} />
-              </Pressable>
-            </View>
+            {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
 
-          <Pressable style={styles.igAddAudioPill} onPress={() => setShowAudioPanel(true)}>
-            <Ionicons name="musical-notes" size={16} color="#b7ff37" />
-            <Text style={styles.igAddAudioText}>{selectedAudioTrack ? selectedAudioTrack.title : "Add Audio"}</Text>
-          </Pressable>
-
-          <View style={styles.igCamBody}>
-            <View style={styles.igCamLeftRail} pointerEvents="box-none">
-              <Pressable style={styles.igCamRailRow} onPress={() => setShowAudioPanel(true)}>
-                <View style={styles.igCamRailIcon}>
-                  <Ionicons name="musical-note" size={16} color="#b7ff37" />
-                </View>
-                <Text style={styles.igCamRailLabel}>Audio</Text>
-              </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => openCreativePanel("filter")}>
-                <View style={styles.igCamRailIcon}>
-                  <Ionicons name="sparkles" size={16} color="#b7ff37" />
-                </View>
-                <Text style={styles.igCamRailLabel}>Effects</Text>
-              </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => openCreativePanel("text")}>
-                <View style={styles.igCamRailIcon}>
-                  <Text style={styles.igCamRailAa}>Aa</Text>
-                </View>
-                <Text style={styles.igCamRailLabel}>Text</Text>
-              </Pressable>
-              <Pressable style={styles.igCamRailRow} onPress={() => setEntryTimerOn((v) => !v)}>
-                <View style={styles.igCamRailIcon}>
-                  <Ionicons name="timer-outline" size={16} color={entryTimerOn ? "#d8ff37" : "#b7ff37"} />
-                </View>
-                <Text style={styles.igCamRailLabel}>Timer</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.igCamViewfinder}>
-              <StoryCameraPreview
-                facing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
-                onPress={openFullScreenCamera}
-              />
-            </View>
-          </View>
-
-          {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
-
-          {entryType === "story" ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.storyGalleryStrip}
-              contentContainerStyle={styles.storyGalleryStripContent}
-            >
-              <Pressable style={styles.storyGalleryAllBtn} onPress={openEntryGallery}>
-                <Ionicons name="images-outline" size={22} color="#d8ff37" />
-              </Pressable>
-              {recentGridAssets.map((asset) => (
-                <Pressable key={asset.id} style={styles.storyGalleryThumb} onPress={() => pickStoryFromGallery(asset)}>
-                  <Image source={{ uri: asset.uri }} style={styles.storyGalleryThumbImg} resizeMode="cover" />
-                  {asset.mediaType === "video" ? (
-                    <View style={styles.storyGalleryVideoBadge}>
-                      <Ionicons name="play" size={10} color="#fff" />
-                    </View>
-                  ) : null}
-                </Pressable>
-              ))}
-            </ScrollView>
-          ) : null}
-
-          <View style={styles.igCamCaptureRow}>
-            <Pressable style={styles.igCamGalleryThumb} onPress={openEntryGallery}>
-              {entryType !== "story" && recentGridAssets[0] ? (
-                <Image source={{ uri: recentGridAssets[0].uri }} style={styles.igCamGalleryThumbImg} resizeMode="cover" />
-              ) : (
-                <Ionicons name="images-outline" size={22} color="#b7ff37" />
-              )}
-            </Pressable>
-            <View style={styles.igCamCaptureRowSpacer} />
-            <View style={styles.igCamCaptureCluster}>
-              <Pressable style={styles.igCamCaptureOuter} onPress={openEntryCamera}>
-                <View style={styles.igCamCaptureInner} />
-              </Pressable>
-              <View style={styles.igCamAuxDots}>
-                <View style={styles.igCamAuxDot} />
-                <View style={[styles.igCamAuxDot, styles.igCamAuxDotSm]} />
-              </View>
-            </View>
-            <View style={styles.igCamCaptureRowSpacer} />
-            <Pressable
-              style={styles.igCamFlipBtn}
-              onPress={() =>
-                setEntryCameraFacing((f) =>
-                  f === ImagePicker.CameraType.back ? ImagePicker.CameraType.front : ImagePicker.CameraType.back
-                )
-              }
-              hitSlop={8}
-            >
-              <Ionicons name="camera-reverse-outline" size={28} color="#b7ff37" />
-            </Pressable>
-          </View>
-
-          <View style={styles.igCamBottomModes}>
-            {createModes.map((m) => {
-              const label = m.label;
-              const emphasize = m.key === "story";
-              return (
+            <View style={styles.igCamBottomModes}>
+              {createModes.map((m) => (
                 <Pressable
                   key={m.key}
                   style={[styles.igCamModeItem, entryType === m.key ? styles.igCamModeItemOn : null]}
                   onPress={() => setEntryType(m.key)}
                 >
-                  <Text
-                    style={[
-                      styles.igCamModeItemText,
-                      entryType === m.key ? styles.igCamModeItemTextOn : null,
-                      emphasize && entryType === m.key ? styles.igCamModeItemTextHero : null
-                    ]}
-                  >
-                    {label}
+                  <Text style={[styles.igCamModeItemText, entryType === m.key ? styles.igCamModeItemTextOn : null]}>
+                    {m.label}
                   </Text>
                 </Pressable>
-              );
-            })}
+              ))}
+            </View>
           </View>
-        </View>
+        ) : (
+          <View style={[styles.igCaptureCameraRoot, Platform.OS === "web" ? styles.igCameraEntryRootWeb : null]}>
+            {entryType === "live" ? (
+              <View style={styles.igCaptureLiveFallback}>
+                <Ionicons name="radio-outline" size={48} color="#d8ff37" />
+                <Text style={styles.igCaptureLiveText}>Go live from here</Text>
+              </View>
+            ) : (
+              <StoryCameraPreview
+                ref={entryCameraRef}
+                active={entryCameraActive}
+                facing={entryFacing}
+                mode={entryType === "reel" ? "video" : "picture"}
+                onPress={openFullScreenCamera}
+              />
+            )}
+
+            <View
+              style={[
+                styles.igCaptureOverlay,
+                { paddingTop: insets.top + 6, paddingBottom: Math.max(insets.bottom, 12) }
+              ]}
+              pointerEvents="box-none"
+            >
+              <View style={styles.igCaptureTopRow} pointerEvents="box-none">
+                <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
+                  <Ionicons name="close" size={26} color="#fff" />
+                </Pressable>
+                <View style={styles.igCaptureTopCenterTools} pointerEvents="box-none">
+                  <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
+                    <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#b7ff37" />
+                  </Pressable>
+                  <Pressable
+                    style={styles.igCamRoundControl}
+                    onPress={() => setEntryZoomLabel((z) => (z === "1x" ? "2x" : "1x"))}
+                  >
+                    <Text style={styles.igCamZoomText}>{entryZoomLabel}</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.igCaptureHeaderSpacer} />
+              </View>
+
+              <View style={{ flex: 1 }} pointerEvents="none" />
+
+              {errorText ? (
+                <Text style={[styles.igCamErrorBanner, styles.igCaptureError]} pointerEvents="none">
+                  {errorText}
+                </Text>
+              ) : null}
+
+              <View style={styles.igCamCaptureRow} pointerEvents="box-none">
+                <Pressable style={styles.igCamGalleryThumb} onPress={openEntryGallery}>
+                  {recentGridAssets[0] ? (
+                    <Image
+                      source={{ uri: recentGridAssets[0].uri }}
+                      style={styles.igCamGalleryThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Ionicons name="images-outline" size={22} color="#b7ff37" />
+                  )}
+                </Pressable>
+                <View style={styles.igCamCaptureRowSpacer} />
+                <Pressable style={styles.igCamCaptureOuter} onPress={openEntryCamera}>
+                  <View style={styles.igCamCaptureInner} />
+                </Pressable>
+                <View style={styles.igCamCaptureRowSpacer} />
+                <Pressable
+                  style={styles.igCamFlipBtn}
+                  onPress={() =>
+                    setEntryCameraFacing((f) =>
+                      f === ImagePicker.CameraType.back ? ImagePicker.CameraType.front : ImagePicker.CameraType.back
+                    )
+                  }
+                  hitSlop={8}
+                >
+                  <Ionicons name="camera-reverse-outline" size={28} color="#b7ff37" />
+                </Pressable>
+              </View>
+
+              <View style={styles.igCamBottomModes} pointerEvents="box-none">
+                {createModes.map((m) => (
+                  <Pressable
+                    key={m.key}
+                    style={[styles.igCamModeItem, entryType === m.key ? styles.igCamModeItemOn : null]}
+                    onPress={() => setEntryType(m.key)}
+                  >
+                    <Text
+                      style={[
+                        styles.igCamModeItemText,
+                        entryType === m.key ? styles.igCamModeItemTextOn : null,
+                        m.key === "story" && entryType === m.key ? styles.igCamModeItemTextHero : null
+                      ]}
+                    >
+                      {m.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
         )
       ) : (
       createType !== "live" ? (
@@ -2008,9 +2081,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
         allowVideo={entryType !== "post"}
       />
-    ) : (
+    ) : fullScreenCameraOpen ? (
       <InAppCameraCapture
-        visible={fullScreenCameraOpen}
+        visible
         onClose={() => setFullScreenCameraOpen(false)}
         onUnavailable={() => {
           setFullScreenCameraOpen(false);
@@ -2023,7 +2096,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
         mode={cameraCaptureMode()}
       />
-    )}
+    ) : null}
     </>
   );
 }
@@ -2207,6 +2280,46 @@ const styles = StyleSheet.create({
   igPostEntryModeItem: { paddingHorizontal: 2, paddingVertical: 6 },
   igPostEntryModeText: { color: "rgba(255,255,255,0.55)", fontWeight: "800", fontSize: 11, letterSpacing: 0.8 },
   igPostEntryModeTextOn: { color: "#d8ff37" },
+  igCaptureCameraRoot: {
+    flex: 1,
+    backgroundColor: "#000"
+  },
+  igCaptureOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between"
+  },
+  igCaptureTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12
+  },
+  igCaptureTopCenterTools: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  igCaptureHeaderSpacer: { width: 38 },
+  igCaptureError: { marginHorizontal: 16, marginBottom: 8 },
+  igCaptureLiveFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1a1a1a",
+    gap: 12
+  },
+  igCaptureLiveText: { color: "#e8e8e8", fontSize: 16, fontWeight: "700" },
+  igCaptureGalleryRoot: {
+    flex: 1,
+    backgroundColor: "#0d0f12"
+  },
+  igCaptureGalleryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 10
+  },
   igCameraEntryRoot: {
     flex: 1,
     backgroundColor: "#1f1f1f",

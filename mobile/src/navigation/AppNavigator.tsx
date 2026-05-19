@@ -50,15 +50,17 @@ export function AppNavigator() {
         <Tab.Screen name="Services" component={ServicesScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
-      <CreateModal
-        visible={isCreateOpen}
-        initialType={createPresetType}
-        onClose={() => {
-          setCreatePresetType(null);
-          setCreateOpen(false);
-        }}
-        onVideoPosted={() => setHomeRefreshToken((v) => v + 1)}
-      />
+      {isCreateOpen ? (
+        <CreateModal
+          visible
+          initialType={createPresetType}
+          onClose={() => {
+            setCreatePresetType(null);
+            setCreateOpen(false);
+          }}
+          onVideoPosted={() => setHomeRefreshToken((v) => v + 1)}
+        />
+      ) : null}
     </View>
     </NotificationPanelProvider>
   );
