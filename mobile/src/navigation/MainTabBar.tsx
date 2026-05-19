@@ -32,14 +32,15 @@ type TabSlotProps = {
   onPress: () => void;
   accessibilityLabel: string;
   label?: string;
+  style?: object;
   children: React.ReactNode;
 };
 
-function TabSlot({ focused, onPress, accessibilityLabel, label, children }: TabSlotProps) {
+function TabSlot({ focused, onPress, accessibilityLabel, label, style, children }: TabSlotProps) {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.tabItem, focused ? styles.tabItemFocused : null]}
+      style={[styles.tabItem, style, focused ? styles.tabItemFocused : null]}
       accessibilityRole="button"
       accessibilityState={{ selected: focused }}
       accessibilityLabel={accessibilityLabel}
@@ -97,12 +98,19 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
   return (
     <View style={[styles.wrap, { paddingBottom: bottomPad }]}>
       <View style={styles.row}>
-        <TabSlot focused={homeFocused} onPress={() => pressRoute("Home")} accessibilityLabel="Home">
-          <Image
-            source={require("../../assets/crop vibe.png")}
-            style={[styles.logoImage, homeFocused ? styles.logoImageActive : styles.logoImageMuted]}
-            resizeMode="contain"
-          />
+        <TabSlot
+          focused={homeFocused}
+          onPress={() => pressRoute("Home")}
+          accessibilityLabel="Home"
+          style={styles.tabItemLogo}
+        >
+          <View style={styles.logoWrap}>
+            <Image
+              source={require("../../assets/crop vibe.png")}
+              style={[styles.logoImage, homeFocused ? styles.logoImageActive : styles.logoImageMuted]}
+              resizeMode="contain"
+            />
+          </View>
         </TabSlot>
 
         <TabSlot
@@ -178,7 +186,20 @@ const styles = StyleSheet.create({
     marginTop: -2,
     paddingTop: 1
   },
-  logoImage: { width: 54, height: 9, maxWidth: "100%" },
+  tabItemLogo: {
+    flexShrink: 0,
+    minWidth: 72,
+    overflow: "visible"
+  },
+  logoWrap: {
+    width: 68,
+    height: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "visible",
+    paddingHorizontal: 4
+  },
+  logoImage: { width: 60, height: 13 },
   logoImageActive: { tintColor: BRAND_ACCENT, opacity: 1 },
   logoImageMuted: { tintColor: MUTED, opacity: 0.9 },
   tabLabel: {

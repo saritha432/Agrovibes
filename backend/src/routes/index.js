@@ -916,9 +916,10 @@ function normalizeHomePostRow(row) {
   delete base.image_urls;
   if (list && list.length > 1) {
     base.imageUrls = list;
-    base.imageUrl = base.imageUrl || list[0] || null;
+    base.imageUrl = list[0] || null;
   } else if (list && list.length === 1) {
-    base.imageUrl = base.imageUrl || list[0];
+    base.imageUrl = list[0];
+    delete base.imageUrls;
   }
   // Coerce tagged_user_ids -> taggedUserIds as a clean number[]
   const rawTagged = base.taggedUserIds ?? base.tagged_user_ids;
@@ -2850,8 +2851,11 @@ router.post("/v1/home/posts", async (req, res) => {
       creativeMeta
     } = req.body || {};
 
-    const urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
-    const primaryImage = urlList[0] || (typeof imageUrl === "string" && imageUrl.trim() ? imageUrl.trim() : null);
+    let urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
+    if (!urlList.length && typeof imageUrl === "string" && imageUrl.trim()) {
+      urlList = [imageUrl.trim()];
+    }
+    const primaryImage = urlList[0] || null;
     const imageUrlsJson = urlList.length > 1 ? JSON.stringify(urlList) : null;
     const hasVideo = !!(videoUrl && String(videoUrl).trim());
     const hasImage = !!primaryImage;
