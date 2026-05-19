@@ -4,7 +4,7 @@
     "slug": "agrovibes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/cropvibe.png",
+    "icon": "./assets/logo-adaptive-foreground.png",
     "platforms": [
       "android",
       "ios",
@@ -23,7 +23,7 @@
       "package": "com.agrovibes.app",
       "label": "Cropvibe",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/cropvibe.png",
+        "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#1f1f1f"
       },
       "permissions": [
