@@ -314,7 +314,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [captureEntryView, setCaptureEntryView] = useState<"camera" | "gallery">("camera");
   const entryCameraRef = useRef<CameraView>(null);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
-  const [entryMultiSelect, setEntryMultiSelect] = useState(false);
+  /** Instagram-style: post flow allows multiple photos by default (up to 10). */
+  const [entryMultiSelect, setEntryMultiSelect] = useState(true);
   const [postLocation, setPostLocation] = useState("");
   const [showLocationPanel, setShowLocationPanel] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
@@ -404,7 +405,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
     setCreateType(initialType === "story" ? null : initialType);
     setCreateStep("preview");
-    setEntryType(initialType ?? "story");
+    const entry = initialType ?? "story";
+    setEntryType(entry);
+    setEntryMultiSelect(entry === "post");
     setEntryCameraFacing(ImagePicker.CameraType.front);
     setFullScreenCameraOpen(false);
     setErrorText("");
@@ -557,12 +560,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     };
   }, [showTagPeoplePanel, token, user?.id]);
 
-  React.useEffect(() => {
-    if (!visible || createType || entryType !== "post") return;
-    if (!recentGridAssets.length) return;
-    setEntrySelectedIds((prev) => (prev.length ? prev : [recentGridAssets[0].id]));
-  }, [recentGridAssets, visible, createType, entryType]);
-
   const handleClose = () => {
     if (isSubmitting) return;
     setFullScreenCameraOpen(false);
@@ -578,9 +575,20 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const startPostFromEntry = () => {
-    const selected = recentGridAssets.filter((a) => entrySelectedIds.includes(a.id));
+    if (pickedPostAssets.length) {
+      setCreateType("post");
+      setCreateStep("preview");
+      return;
+    }
+    const selected = entrySelectedIds
+      .map((id) => recentGridAssets.find((a) => a.id === id))
+      .filter((a): a is GalleryGridAsset => !!a);
     if (!selected.length) {
       setErrorText("Please select at least one photo.");
+      return;
+    }
+    if (selected.length > 1 && selected.some((a) => a.mediaType === "video")) {
+      setErrorText("Photo carousels can only include pictures. Pick one video for a video post.");
       return;
     }
     const assets: ImagePicker.ImagePickerAsset[] = selected.map((a) => ({
@@ -770,6 +778,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         }
       }
       setPickedPostAssets(assets);
+      const gridIds = assets
+        .map((a) => recentGridAssets.find((g) => g.uri === a.uri)?.id)
+        .filter((id): id is string => !!id);
+      if (gridIds.length === assets.length) setEntrySelectedIds(gridIds);
+      else setEntrySelectedIds([]);
+      if (!createType) return;
       setCreateType("post");
       setCreateStep("preview");
     }
@@ -911,7 +925,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        const assets = pickedPostAssets;
+        const assets = [...pickedPostAssets];
         if (!assets.length) {
           setErrorText(createType === "reel" ? "Please record or upload a reel video." : "Please add media for your post.");
           setSubmitting(false);
@@ -1010,7 +1024,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             location: resolvedLocation,
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             imageUrl: urls[0],
-            ...(urls.length > 1 ? { imageUrls: urls } : {}),
+            imageUrls: urls,
             ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
           });
         }
@@ -1036,7 +1050,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   };
 
   const previewWidth = Dimensions.get("window").width - 32;
-  const selectedEntryAsset = recentGridAssets.find((a) => a.id === entrySelectedIds[0]) ?? null;
+  const selectedEntryAsset =
+    recentGridAssets.find((a) => a.id === entrySelectedIds[0]) ??
+    (pickedPostAssets[0]?.uri
+      ? {
+          id: "picked-preview",
+          uri: pickedPostAssets[0].uri,
+          mediaType: "image" as const,
+          filename: pickedPostAssets[0].fileName
+        }
+      : null);
+  const canProceedFromPostEntry = entrySelectedIds.length > 0 || pickedPostAssets.length > 0;
 
   const postGridData = React.useMemo(
     () => [{ id: CAMERA_GRID_ID, isCamera: true as const }, ...recentGridAssets],
@@ -1130,12 +1154,17 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <Ionicons name="close" size={24} color="#fff" />
               </Pressable>
               <Text style={styles.igPostEntryTitle}>New Post</Text>
-              <Pressable onPress={startPostFromEntry} disabled={!entrySelectedIds.length}>
-                <Text style={[styles.igPostEntryNext, !entrySelectedIds.length ? styles.igPostEntryNextDisabled : null]}>Next</Text>
+              <Pressable onPress={startPostFromEntry} disabled={!canProceedFromPostEntry}>
+                <Text style={[styles.igPostEntryNext, !canProceedFromPostEntry ? styles.igPostEntryNextDisabled : null]}>Next</Text>
               </Pressable>
             </View>
 
-            <View style={styles.igPostEntryPreview}>
+            <Pressable
+              style={styles.igPostEntryPreview}
+              onPress={() => void openEntryGallery()}
+              accessibilityRole="button"
+              accessibilityLabel="Open photo gallery"
+            >
               {selectedEntryAsset ? (
                 <Image
                   source={{ uri: selectedEntryAsset.uri }}
@@ -1145,6 +1174,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               ) : (
                 <View style={styles.igPostEntryPreviewFallback}>
                   <Ionicons name="images-outline" size={34} color="#fff" />
+                  <Text style={styles.igPostEntryPreviewHint}>Tap to open gallery</Text>
                 </View>
               )}
               <View style={styles.igPostGridOverlay} pointerEvents="none">
@@ -1153,7 +1183,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <View style={styles.igPostGridLineV} />
                 <View style={[styles.igPostGridLineV, { left: "66.666%" }]} />
               </View>
-            </View>
+            </Pressable>
 
             <View style={styles.igPostEntryRecentsRow}>
               <Pressable style={styles.igPostAlbumPicker} onPress={() => setShowAlbumPicker(true)}>
@@ -2124,7 +2154,8 @@ const styles = StyleSheet.create({
     position: "relative"
   },
   igPostEntryPreviewImage: { width: "100%", height: "100%" },
-  igPostEntryPreviewFallback: { flex: 1, alignItems: "center", justifyContent: "center" },
+  igPostEntryPreviewFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
+  igPostEntryPreviewHint: { color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: "600" },
   igPostGridOverlay: { ...StyleSheet.absoluteFillObject },
   igPostGridLineH: {
     position: "absolute",

@@ -149,37 +149,9 @@ function postCreatedMs(post: HomePost): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Deterministic PRNG for stable useMemo shuffles (new seed each network refresh). */
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return function random() {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function seededShuffle<T>(items: T[], seed: number): T[] {
-  const arr = items.slice();
-  const rand = mulberry32(seed >>> 0);
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    const tmp = arr[i]!;
-    arr[i] = arr[j]!;
-    arr[j] = tmp;
-  }
-  return arr;
-}
-
-/**
- * Shuffle the entire home feed (reels, photo posts, carousels, etc.) on each refresh.
- * One Fisher–Yates pass so every item moves in the same random order, not reels-only.
- */
-function shuffleHomeFeedDiscoverStyle(posts: HomePost[], mixSeed: number): HomePost[] {
-  if (posts.length <= 1) return posts;
-  return seededShuffle(posts, mixSeed >>> 0);
+/** Newest posts/reels first (Instagram-style feed order). */
+function sortPostsNewestFirst(list: HomePost[]): HomePost[] {
+  return [...list].sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
 }
 
 const REPORT_REASONS = [
@@ -394,9 +366,19 @@ function sortStoriesForPlayback(rows: HomeStory[]) {
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
   if (!post) return [];
-  if (post.imageUrls?.length) return post.imageUrls;
-  if (post.imageUrl) return [post.imageUrl];
-  return [];
+  const raw = Array.isArray(post.imageUrls) ? post.imageUrls : [];
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const u of raw) {
+    const s = String(u || "").trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    ordered.push(s);
+  }
+  if (ordered.length > 1) return ordered;
+  if (ordered.length === 1) return ordered;
+  const single = String(post.imageUrl || "").trim();
+  return single ? [single] : [];
 }
 
 type HomeCommentRow = {
@@ -893,8 +875,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
-  /** New value on each home-posts fetch so Feed interleave shuffles (Instagram-style variety on refresh). */
-  const [feedShuffleSeed, setFeedShuffleSeed] = useState(0);
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
   const [reportModalPost, setReportModalPost] = useState<HomePost | null>(null);
@@ -939,6 +919,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
+  const [carouselPageByPostId, setCarouselPageByPostId] = useState<Record<number, number>>({});
   const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
   const [activeReelMusicPostId, setActiveReelMusicPostId] = useState<number | null>(null);
   /** Web: start muted (browser autoplay). Native: start with sound so reel / track audio is audible. */
@@ -1012,23 +993,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const tabPosts = useMemo(() => {
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return shuffleHomeFeedDiscoverStyle(strip(posts), feedShuffleSeed);
+    if (activeHomeTab === "Feed") return sortPostsNewestFirst(strip(posts));
     if (activeHomeTab === "Reels") {
       const reels = strip(posts).filter((p) => isFullScreenReelItem(p));
-      return shuffleHomeFeedDiscoverStyle(reels, feedShuffleSeed);
+      return sortPostsNewestFirst(reels);
     }
     if (activeHomeTab === "Friends") {
-      return strip(
-        posts.filter((p) => {
-          if (!p.videoUrl) return false;
-          const uid = Number(p.userId);
-          return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
-        })
+      return sortPostsNewestFirst(
+        strip(
+          posts.filter((p) => {
+            if (!p.videoUrl) return false;
+            const uid = Number(p.userId);
+            return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
+          })
+        )
       );
     }
     if (activeHomeTab === "live") return [];
-    return strip(posts);
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed]);
+    return sortPostsNewestFirst(strip(posts));
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1403,7 +1386,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               : Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
           }))
         );
-        setFeedShuffleSeed((Date.now() >>> 0) ^ (rows.length * 0x9e3779b1));
       } catch {
         if (!mounted) return;
         setPosts([]);
@@ -2587,6 +2569,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const nextPost = reelRowPosts[index + 1];
       const gallery = postImageGallery(post);
+      const isCarousel = gallery.length > 1;
       const thumbUri = post.thumbnailUrl || gallery[0] || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
       const reelPoster =
         post.thumbnailUrl || gallery[0] || post.imageUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl;
@@ -2625,12 +2608,58 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
+            ) : isCarousel ? (
+              <FlatList
+                data={gallery}
+                horizontal
+                pagingEnabled
+                nestedScrollEnabled
+                scrollEnabled
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(uri, i) => `reel-carousel-${post.id}-${i}-${uri.slice(-24)}`}
+                style={{ width: reelContentWidth, height: pageH }}
+                onMomentumScrollEnd={(e) => {
+                  if (reelContentWidth <= 0) return;
+                  const page = Math.round(e.nativeEvent.contentOffset.x / reelContentWidth);
+                  setCarouselPageByPostId((prev) => ({ ...prev, [post.id]: page }));
+                }}
+                renderItem={({ item: uri }) => (
+                  <View
+                    style={{
+                      width: reelContentWidth,
+                      height: pageH,
+                      backgroundColor: "#000",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}
+                  >
+                    <Image
+                      source={{ uri }}
+                      style={{ width: reelContentWidth, height: pageH }}
+                      resizeMode="contain"
+                    />
+                  </View>
+                )}
+              />
             ) : reelPoster ? (
               <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
             ) : (
               <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
             )}
           </Pressable>
+          {isCarousel ? (
+            <View style={[styles.postCarouselDots, styles.reelCarouselDots]} pointerEvents="none">
+              {gallery.map((_, i) => {
+                const active = (carouselPageByPostId[post.id] ?? 0) === i;
+                return (
+                  <View
+                    key={i}
+                    style={[styles.postCarouselDot, active ? styles.postCarouselDotActive : styles.postCarouselDotInactive]}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
           {creativeOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">
@@ -2925,8 +2954,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                   showsHorizontalScrollIndicator={false}
                   keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
                   style={{ width: feedMediaWidth, height: feedMediaWidth }}
+                  onMomentumScrollEnd={(e) => {
+                    if (feedMediaWidth <= 0) return;
+                    const page = Math.round(e.nativeEvent.contentOffset.x / feedMediaWidth);
+                    setCarouselPageByPostId((prev) => ({ ...prev, [post.id]: page }));
+                  }}
                   renderItem={({ item: uri }) => (
-                    <Image style={{ width: feedMediaWidth, height: feedMediaWidth }} source={{ uri }} resizeMode="cover" />
+                    <View
+                      style={{
+                        width: feedMediaWidth,
+                        height: feedMediaWidth,
+                        backgroundColor: "#111",
+                        alignItems: "center",
+                        justifyContent: "center"
+                      }}
+                    >
+                      <Image
+                        style={{ width: feedMediaWidth, height: feedMediaWidth }}
+                        source={{ uri }}
+                        resizeMode="contain"
+                      />
+                    </View>
                   )}
                 />
               </Pressable>
@@ -2941,9 +2989,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             )}
             {isCarousel ? (
               <View style={styles.postCarouselDots} pointerEvents="none">
-                {gallery.map((_, i) => (
-                  <View key={i} style={styles.postCarouselDot} />
-                ))}
+                {gallery.map((_, i) => {
+                  const active = (carouselPageByPostId[post.id] ?? 0) === i;
+                  return (
+                    <View
+                      key={i}
+                      style={[styles.postCarouselDot, active ? styles.postCarouselDotActive : styles.postCarouselDotInactive]}
+                    />
+                  );
+                })}
               </View>
             ) : null}
           </View>
@@ -4256,9 +4310,18 @@ const styles = StyleSheet.create({
   postCarouselDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.85)"
+    borderRadius: 3
   },
+  postCarouselDotActive: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#C9FF35"
+  },
+  postCarouselDotInactive: {
+    backgroundColor: "rgba(255,255,255,0.45)"
+  },
+  reelCarouselDots: { bottom: 88 },
   storyViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
   storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
