@@ -36,6 +36,14 @@ import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
 import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
 import { WebCameraCapture } from "./WebCameraCapture";
+import { StoryCameraPreview } from "./StoryCameraPreview";
+import {
+  fetchGalleryAlbums,
+  fetchGalleryAssets,
+  recentsAlbumId,
+  type GalleryAlbum,
+  type GalleryGridAsset
+} from "../utils/galleryAlbums";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -202,13 +210,7 @@ type MediaCreativeProps = {
   shouldPlay?: boolean;
 };
 
-type RecentGridAsset = {
-  id: string;
-  uri: string;
-  mediaType: "image" | "video";
-  filename?: string;
-  duration?: number;
-};
+const CAMERA_GRID_ID = "__camera__";
 
 const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
   { uri, isVideo, filter, overlayText, font, textColor, textBackground, musicLabel, shouldPlay = true },
@@ -304,7 +306,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [audioSearchResults, setAudioSearchResults] = useState<CreativeAudioTrack[]>([]);
   const [audioSearchLoading, setAudioSearchLoading] = useState(false);
   const [audioSearchError, setAudioSearchError] = useState("");
-  const [recentGridAssets, setRecentGridAssets] = useState<RecentGridAsset[]>([]);
+  const [recentGridAssets, setRecentGridAssets] = useState<GalleryGridAsset[]>([]);
+  const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   const [entryMultiSelect, setEntryMultiSelect] = useState(false);
   const [postLocation, setPostLocation] = useState("");
@@ -483,10 +488,30 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     };
   }, [audioQuery, showAudioPanel]);
 
+  const selectedAlbumTitle =
+    galleryAlbums.find((a) => a.id === (selectedAlbumId ?? recentsAlbumId()))?.title ?? "Recents";
+
+  const refreshGallery = React.useCallback(async () => {
+    if (Platform.OS === "web") {
+      setGalleryAlbums([{ id: recentsAlbumId(), title: "Recents", assetCount: 0 }]);
+      setRecentGridAssets([]);
+      return;
+    }
+    try {
+      const albums = await fetchGalleryAlbums();
+      setGalleryAlbums(albums);
+      const assets = await fetchGalleryAssets(selectedAlbumId, entryType);
+      setRecentGridAssets(assets);
+    } catch {
+      setGalleryAlbums([{ id: recentsAlbumId(), title: "Recents", assetCount: 0 }]);
+      setRecentGridAssets([]);
+    }
+  }, [entryType, selectedAlbumId]);
+
   React.useEffect(() => {
     if (!visible || createType) return;
-    void loadRecentGridAssets();
-  }, [createType, visible]);
+    void refreshGallery();
+  }, [createType, refreshGallery, visible]);
 
   React.useEffect(() => {
     if (!showTagPeoplePanel) return;
@@ -558,7 +583,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     applyPickedMediaToFlow(assets);
   };
 
-  const onEntryPressAsset = (asset: RecentGridAsset) => {
+  const onEntryPressAsset = (asset: GalleryGridAsset) => {
     setErrorText("");
     if (asset.mediaType === "video") {
       setErrorText("Post grid supports photos only. Choose Reel for video.");
@@ -572,35 +597,16 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     });
   };
 
-  async function loadRecentGridAssets() {
-    if (Platform.OS === "web") {
-      setRecentGridAssets([]);
-      return;
-    }
-    try {
-      const perm = await MediaLibrary.requestPermissionsAsync();
-      if (!perm.granted) {
-        setRecentGridAssets([]);
-        return;
-      }
-      const result = await MediaLibrary.getAssetsAsync({
-        first: 24,
-        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-        sortBy: [MediaLibrary.SortBy.creationTime]
-      });
-      setRecentGridAssets(
-        result.assets.map((a) => ({
-          id: a.id,
-          uri: a.uri,
-          mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "image",
-          filename: a.filename,
-          duration: a.duration
-        }))
-      );
-    } catch {
-      setRecentGridAssets([]);
-    }
-  }
+  const pickStoryFromGallery = (asset: GalleryGridAsset) => {
+    setErrorText("");
+    const pickerAsset = {
+      uri: asset.uri,
+      type: asset.mediaType,
+      fileName: asset.filename,
+      duration: asset.duration
+    } as ImagePicker.ImagePickerAsset;
+    applyPickedMediaToFlow([pickerAsset]);
+  };
 
   async function snapshotComposedImage(): Promise<string | null> {
     if (!previewCaptureRef.current) return null;
@@ -960,6 +966,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const previewWidth = Dimensions.get("window").width - 32;
   const selectedEntryAsset = recentGridAssets.find((a) => a.id === entrySelectedIds[0]) ?? null;
+
+  const postGridData = React.useMemo(
+    () => [{ id: CAMERA_GRID_ID, isCamera: true as const }, ...recentGridAssets],
+    [recentGridAssets]
+  );
   const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostAssets[0]?.uri ?? "";
   const postFirst = pickedPostAssets[0];
   const isSelectedVideo =
@@ -1071,7 +1082,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             </View>
 
             <View style={styles.igPostEntryRecentsRow}>
-              <Text style={styles.igPostEntryRecentsText}>Recents</Text>
+              <Pressable style={styles.igPostAlbumPicker} onPress={() => setShowAlbumPicker(true)}>
+                <Text style={styles.igPostEntryRecentsText}>{selectedAlbumTitle}</Text>
+                <Ionicons name="chevron-down" size={16} color="#f8fafc" />
+              </Pressable>
               <Pressable
                 style={[styles.igPostEntrySelectBtn, entryMultiSelect ? styles.igPostEntrySelectBtnOn : null]}
                 onPress={() => setEntryMultiSelect((v) => !v)}
@@ -1082,34 +1096,32 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             </View>
 
             <FlatList
-              data={recentGridAssets}
-              keyExtractor={(item) => item.id}
+              data={postGridData}
+              keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
               numColumns={4}
               contentContainerStyle={styles.igPostEntryGrid}
-              renderItem={({ item, index }) => (
-                <Pressable
-                  style={styles.igPostEntryCell}
-                  onPress={() => {
-                    if (index === 0) {
-                      openEntryCamera();
-                      return;
-                    }
-                    onEntryPressAsset(item);
-                  }}
-                >
-                  <Image source={{ uri: item.uri }} style={styles.igPostEntryCellImage} resizeMode="cover" />
-                  {index === 0 ? (
-                    <View style={styles.igPostEntryCameraBadge}>
-                      <Ionicons name="camera" size={16} color="#fff" />
-                    </View>
-                  ) : null}
-                  {entrySelectedIds.includes(item.id) ? (
-                    <View style={styles.igPostEntrySelectedBadge}>
-                      <Text style={styles.igPostEntrySelectedText}>{entrySelectedIds.indexOf(item.id) + 1}</Text>
-                    </View>
-                  ) : null}
-                </Pressable>
-              )}
+              renderItem={({ item }) => {
+                if ("isCamera" in item && item.isCamera) {
+                  return (
+                    <Pressable style={styles.igPostEntryCell} onPress={openEntryCamera}>
+                      <View style={styles.igPostEntryCameraCell}>
+                        <Ionicons name="camera" size={28} color="#fff" />
+                      </View>
+                    </Pressable>
+                  );
+                }
+                const asset = item as GalleryGridAsset;
+                return (
+                  <Pressable style={styles.igPostEntryCell} onPress={() => onEntryPressAsset(asset)}>
+                    <Image source={{ uri: asset.uri }} style={styles.igPostEntryCellImage} resizeMode="cover" />
+                    {entrySelectedIds.includes(asset.id) ? (
+                      <View style={styles.igPostEntrySelectedBadge}>
+                        <Text style={styles.igPostEntrySelectedText}>{entrySelectedIds.indexOf(asset.id) + 1}</Text>
+                      </View>
+                    ) : null}
+                  </Pressable>
+                );
+              }}
             />
 
             <View style={styles.igPostEntryModes}>
@@ -1198,26 +1210,42 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               </Pressable>
             </View>
 
-            <Pressable style={styles.igCamViewfinder} onPress={openFullScreenCamera} accessibilityLabel="Open camera">
-              <View style={styles.igCamViewfinderFallback}>
-                <Ionicons name="camera-outline" size={42} color="rgba(255,255,255,0.65)" />
-                <Text style={styles.igCamViewfinderHint}>Tap for camera</Text>
-              </View>
-              <View style={styles.igCamViewfinderShade} pointerEvents="none" />
-              <View style={styles.igCamGuideFrame} pointerEvents="none">
-                <View style={styles.igCamGuideCornerTL} />
-                <View style={styles.igCamGuideCornerTR} />
-                <View style={styles.igCamGuideCornerBL} />
-                <View style={styles.igCamGuideCornerBR} />
-              </View>
-            </Pressable>
+            <View style={styles.igCamViewfinder}>
+              <StoryCameraPreview
+                facing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
+                onPress={openFullScreenCamera}
+              />
+            </View>
           </View>
 
           {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
 
+          {entryType === "story" ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.storyGalleryStrip}
+              contentContainerStyle={styles.storyGalleryStripContent}
+            >
+              <Pressable style={styles.storyGalleryAllBtn} onPress={openEntryGallery}>
+                <Ionicons name="images-outline" size={22} color="#d8ff37" />
+              </Pressable>
+              {recentGridAssets.map((asset) => (
+                <Pressable key={asset.id} style={styles.storyGalleryThumb} onPress={() => pickStoryFromGallery(asset)}>
+                  <Image source={{ uri: asset.uri }} style={styles.storyGalleryThumbImg} resizeMode="cover" />
+                  {asset.mediaType === "video" ? (
+                    <View style={styles.storyGalleryVideoBadge}>
+                      <Ionicons name="play" size={10} color="#fff" />
+                    </View>
+                  ) : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+
           <View style={styles.igCamCaptureRow}>
             <Pressable style={styles.igCamGalleryThumb} onPress={openEntryGallery}>
-              {recentGridAssets[0] ? (
+              {entryType !== "story" && recentGridAssets[0] ? (
                 <Image source={{ uri: recentGridAssets[0].uri }} style={styles.igCamGalleryThumbImg} resizeMode="cover" />
               ) : (
                 <Ionicons name="images-outline" size={22} color="#b7ff37" />
@@ -1939,6 +1967,36 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
     </Modal>
 
+    <Modal visible={showAlbumPicker} transparent animationType="fade" onRequestClose={() => setShowAlbumPicker(false)}>
+      <Pressable style={styles.albumPickerBackdrop} onPress={() => setShowAlbumPicker(false)}>
+        <Pressable style={styles.albumPickerSheet} onPress={(e) => e.stopPropagation()}>
+          <Text style={styles.albumPickerTitle}>Albums</Text>
+          <ScrollView style={styles.albumPickerList}>
+            {galleryAlbums.map((album) => {
+              const selected = (selectedAlbumId ?? recentsAlbumId()) === album.id;
+              return (
+                <Pressable
+                  key={album.id || "recents"}
+                  style={[styles.albumPickerRow, selected ? styles.albumPickerRowOn : null]}
+                  onPress={() => {
+                    setSelectedAlbumId(album.id === recentsAlbumId() ? null : album.id);
+                    setShowAlbumPicker(false);
+                  }}
+                >
+                  <Text style={[styles.albumPickerRowText, selected ? styles.albumPickerRowTextOn : null]}>
+                    {album.title}
+                  </Text>
+                  {album.assetCount > 0 ? (
+                    <Text style={styles.albumPickerRowCount}>{album.assetCount}</Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
     {Platform.OS === "web" ? (
       <WebCameraCapture
         visible={fullScreenCameraOpen}
@@ -2018,7 +2076,80 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10
   },
+  igPostAlbumPicker: { flexDirection: "row", alignItems: "center", gap: 4 },
   igPostEntryRecentsText: { color: "#f8fafc", fontSize: 14, fontWeight: "900" },
+  igPostEntryCameraCell: {
+    flex: 1,
+    backgroundColor: "#111418",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  albumPickerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "center",
+    paddingHorizontal: 24
+  },
+  albumPickerSheet: {
+    backgroundColor: "#1a1f24",
+    borderRadius: 16,
+    maxHeight: "70%",
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#303842"
+  },
+  albumPickerTitle: {
+    color: "#f8fafc",
+    fontSize: 16,
+    fontWeight: "900",
+    paddingHorizontal: 16,
+    paddingBottom: 10
+  },
+  albumPickerList: { maxHeight: 360 },
+  albumPickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#303842"
+  },
+  albumPickerRowOn: { backgroundColor: "rgba(216,255,55,0.12)" },
+  albumPickerRowText: { color: "#e8edf2", fontSize: 15, fontWeight: "700", flex: 1 },
+  albumPickerRowTextOn: { color: "#d8ff37" },
+  albumPickerRowCount: { color: "#8b98a8", fontSize: 13, fontWeight: "600" },
+  storyGalleryStrip: { marginTop: 8, maxHeight: 72 },
+  storyGalleryStripContent: { paddingHorizontal: 10, gap: 8, alignItems: "center" },
+  storyGalleryAllBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#d8ff37",
+    backgroundColor: "#111418",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyGalleryThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#111418"
+  },
+  storyGalleryThumbImg: { width: "100%", height: "100%" },
+  storyGalleryVideoBadge: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
   igPostEntrySelectBtn: {
     flexDirection: "row",
     alignItems: "center",
