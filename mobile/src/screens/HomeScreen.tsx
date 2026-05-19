@@ -213,6 +213,82 @@ function postAuthorAvatarUri(
   return undefined;
 }
 
+function viewerOwnsStory(
+  story: HomeStory,
+  viewer: { id?: number; fullName?: string; username?: string } | null | undefined
+) {
+  if (!viewer) return false;
+  const storyUserId = Number(story.userId);
+  const viewerId = Number(viewer.id);
+  if (Number.isFinite(storyUserId) && storyUserId > 0 && Number.isFinite(viewerId) && viewerId > 0) {
+    return storyUserId === viewerId;
+  }
+  const storyName = normalizeIdentity(story.userName);
+  if (!storyName || storyName === "you") return true;
+  const viewerName = normalizeIdentity(viewer.fullName || "");
+  const viewerUser = normalizeIdentity(String(viewer.username || "").replace(/^@+/, ""));
+  return (viewerName.length > 0 && storyName === viewerName) || (viewerUser.length > 0 && storyName === viewerUser);
+}
+
+type AvatarLookup = { byId: Map<number, string>; byName: Map<string, string> };
+
+function buildAvatarLookup(
+  postsList: HomePost[],
+  viewer: { id?: number; fullName?: string; username?: string; avatarUrl?: string } | null | undefined,
+  socialByUserId: Map<number, string>
+): AvatarLookup {
+  const byId = new Map<number, string>(socialByUserId);
+  const byName = new Map<string, string>();
+  if (viewer) {
+    const viewerId = Number(viewer.id);
+    const viewerAvatar = typeof viewer.avatarUrl === "string" ? viewer.avatarUrl.trim() : "";
+    if (Number.isFinite(viewerId) && viewerId > 0 && viewerAvatar) {
+      byId.set(viewerId, viewerAvatar);
+    }
+    const viewerName = normalizeIdentity(viewer.fullName || "");
+    if (viewerName && viewerAvatar) byName.set(viewerName, viewerAvatar);
+    const viewerUser = normalizeIdentity(String(viewer.username || "").replace(/^@+/, ""));
+    if (viewerUser && viewerAvatar) byName.set(viewerUser, viewerAvatar);
+  }
+  for (const post of postsList) {
+    const avatar = post.authorAvatarUrl;
+    if (typeof avatar !== "string" || !avatar.trim()) continue;
+    const trimmed = avatar.trim();
+    const postUserId = Number(post.userId);
+    if (Number.isFinite(postUserId) && postUserId > 0) byId.set(postUserId, trimmed);
+    const postName = normalizeIdentity(post.userName);
+    if (postName) byName.set(postName, trimmed);
+  }
+  return { byId, byName };
+}
+
+function storyAuthorAvatarUri(
+  story: HomeStory,
+  viewer: { id?: number; fullName?: string; username?: string; avatarUrl?: string } | null | undefined,
+  lookup: AvatarLookup,
+  postsList: HomePost[]
+): string | undefined {
+  const fromStory = story.avatarUrl;
+  if (typeof fromStory === "string" && fromStory.trim()) return fromStory.trim();
+  const storyUserId = Number(story.userId);
+  if (Number.isFinite(storyUserId) && storyUserId > 0) {
+    const fromId = lookup.byId.get(storyUserId);
+    if (fromId) return fromId;
+  }
+  const fromPosts = avatarFromHomePostsForStory(story, postsList);
+  if (fromPosts) return fromPosts;
+  const storyName = normalizeIdentity(story.userName);
+  if (storyName) {
+    const fromName = lookup.byName.get(storyName);
+    if (fromName) return fromName;
+  }
+  if (viewerOwnsStory(story, viewer)) {
+    const viewerAvatar = viewer?.avatarUrl;
+    if (typeof viewerAvatar === "string" && viewerAvatar.trim()) return viewerAvatar.trim();
+  }
+  return undefined;
+}
+
 /** When story API omits avatarUrl, reuse a recent home post author's photo (same user id or display name). */
 function avatarFromHomePostsForStory(head: HomeStory, postsList: HomePost[]): string | undefined {
   const uid = Number(head.userId);
@@ -785,6 +861,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
   const [activeHomeTab, setActiveHomeTab] = useState<HomeTopTab>("Feed");
   const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
+  const [socialAvatarsByUserId, setSocialAvatarsByUserId] = useState<Map<number, string>>(() => new Map());
   const [followerUserIds, setFollowerUserIds] = useState<Set<number>>(new Set());
   const [socialNetworkHydrated, setSocialNetworkHydrated] = useState(false);
   /** Accepted following (name + id) for share sheet — not only users who appear as post authors. */
@@ -1002,6 +1079,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     [currentUserId, currentUserStoryKeys, stories]
   );
 
+  const avatarLookup = useMemo(
+    () => buildAvatarLookup(posts, user, socialAvatarsByUserId),
+    [posts, socialAvatarsByUserId, user]
+  );
+
   const ownPlayableStories = useMemo(
     () => sortStoriesForPlayback(ownStories.filter((s) => storyHasMedia(s))),
     [ownStories]
@@ -1021,12 +1103,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       const sorted = sortStoriesForPlayback(list);
       const head = sorted[0];
       const uid = Number(head.userId);
-      const fromStoryRow =
-        sorted.map((s) => s.avatarUrl).find((u) => typeof u === "string" && u.trim()) ?? head.avatarUrl;
-      const fromApi =
-        fromStoryRow != null && String(fromStoryRow).trim().length > 0 ? String(fromStoryRow).trim() : undefined;
-      const fromPosts = avatarFromHomePostsForStory(head, posts);
-      const av = fromApi || fromPosts;
+      const av = storyAuthorAvatarUri(head, user, avatarLookup, posts);
       groups.push({
         key,
         userId: Number.isFinite(uid) && uid > 0 ? uid : null,
@@ -1038,9 +1115,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     }
     groups.sort((a, b) => storyTimeMs(b.stories[b.stories.length - 1]) - storyTimeMs(a.stories[a.stories.length - 1]));
     return groups;
-  }, [otherStories, posts]);
+  }, [avatarLookup, otherStories, posts, user]);
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
+  const activeStoryAvatarUri = activeStory ? storyAuthorAvatarUri(activeStory, user, avatarLookup, posts) : undefined;
 
   const applyViewedStories = useCallback(
     (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
@@ -1177,6 +1255,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           setFollowingUserIds(new Set());
           setFollowerUserIds(new Set());
           setFollowingSharePeers([]);
+          setSocialAvatarsByUserId(new Map());
           setSocialNetworkHydrated(true);
         }
         return;
@@ -1187,9 +1266,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         const followingIds = new Set<number>();
         const followerIds = new Set<number>();
         const peers: Array<{ id: number; name: string }> = [];
-        for (const person of network.following || []) {
+        const avatarMap = new Map<number, string>();
+        const rememberAvatar = (person: { key?: string; avatarUrl?: string | null }) => {
           const raw = String(person.key || "").trim();
           const uid = /^\d+$/.test(raw) ? Number(raw) : NaN;
+          const av = typeof person.avatarUrl === "string" ? person.avatarUrl.trim() : "";
+          if (Number.isFinite(uid) && uid > 0 && av) avatarMap.set(uid, av);
+          return uid;
+        };
+        for (const person of network.following || []) {
+          const uid = rememberAvatar(person);
           if (Number.isFinite(uid) && uid > 0) {
             followingIds.add(uid);
             const name = String(person.name || "").trim();
@@ -1197,19 +1283,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           }
         }
         for (const person of network.followers || []) {
-          const raw = String(person.key || "").trim();
-          const uid = /^\d+$/.test(raw) ? Number(raw) : NaN;
+          const uid = rememberAvatar(person);
           if (Number.isFinite(uid) && uid > 0) followerIds.add(uid);
         }
         setFollowingUserIds(followingIds);
         setFollowerUserIds(followerIds);
         setFollowingSharePeers(peers);
+        setSocialAvatarsByUserId(avatarMap);
         setSocialNetworkHydrated(true);
       } catch {
         if (!mounted) return;
         setFollowingUserIds(new Set());
         setFollowerUserIds(new Set());
         setFollowingSharePeers([]);
+        setSocialAvatarsByUserId(new Map());
         setSocialNetworkHydrated(true);
       }
     })();
@@ -2110,9 +2197,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               }
               setReelViewerOpen(null);
               setStoryPlaybackQueue(
-                ownPlayableStories.map((s) =>
-                  user?.avatarUrl?.trim() && !s.avatarUrl?.trim() ? { ...s, avatarUrl: user.avatarUrl.trim() } : s
-                )
+                ownPlayableStories.map((s) => {
+                  const av = storyAuthorAvatarUri(s, user, avatarLookup, posts);
+                  return av ? { ...s, avatarUrl: av } : s;
+                })
               );
               setActiveStoryIndex(0);
               setStoryOpen(true);
@@ -2132,7 +2220,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             >
                 <View style={styles.storyInner}>
                 <UserAvatar
-                  uri={user?.avatarUrl}
+                  uri={
+                    (ownPlayableStories.length
+                      ? storyAuthorAvatarUri(ownPlayableStories[0], user, avatarLookup, posts)
+                      : undefined) || user?.avatarUrl
+                  }
                   name={user?.fullName || "You"}
                   size={56}
                   borderRadius={28}
@@ -2175,11 +2267,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 });
                 setStories((prev) => prev.map((s) => (s.id === first.id ? { ...s, viewed: true } : s)));
                 const enriched = group.stories.map((s) => {
-                  const g = group.avatarUrl;
-                  if (typeof g === "string" && g.trim() && !s.avatarUrl?.trim()) {
-                    return { ...s, avatarUrl: g.trim() };
-                  }
-                  return s;
+                  const av = storyAuthorAvatarUri(s, user, avatarLookup, posts) || group.avatarUrl;
+                  return typeof av === "string" && av.trim() ? { ...s, avatarUrl: av.trim() } : s;
                 });
                 setStoryPlaybackQueue(enriched);
                 setActiveStoryIndex(0);
@@ -2194,7 +2283,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
               >
                 <View style={styles.storyInner}>
                   <UserAvatar
-                    uri={group.avatarUrl}
+                    uri={storyAuthorAvatarUri(group.stories[0], user, avatarLookup, posts) || group.avatarUrl}
                     name={group.userName}
                     size={56}
                     borderRadius={28}
@@ -2236,7 +2325,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
         </View>
       </View>
     ),
-    [activeHomeTab, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, user?.avatarUrl, user?.fullName, visibleHomeTopTabs]
+    [activeHomeTab, avatarLookup, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, posts, user, visibleHomeTopTabs]
   );
 
   const renderFullScreenReel = useCallback(
@@ -2815,7 +2904,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
           <View style={styles.storyViewerTopRow}>
             <View style={styles.storyViewerUser}>
               <UserAvatar
-                uri={activeStory?.avatarUrl}
+                uri={activeStoryAvatarUri}
                 name={activeStory?.userName || "U"}
                 size={34}
                 style={styles.storyViewerAvatar}
