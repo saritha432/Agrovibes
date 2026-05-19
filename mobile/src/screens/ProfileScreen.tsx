@@ -286,6 +286,11 @@ export function ProfileScreen() {
   const onReelViewableItemsChangedRef = useRef(onReelViewableItemsChanged);
   onReelViewableItemsChangedRef.current = onReelViewableItemsChanged;
 
+  const closeReelViewer = useCallback(() => {
+    setPlayingReelId(null);
+    setActiveReelIndex(null);
+  }, []);
+
   const profileModel = useMemo(() => {
     if (!user) return null;
     const handle = user.username ? `@${user.username.replace(/^@+/, "")}` : safeHandle(user.fullName || user.email);
@@ -698,8 +703,8 @@ export function ProfileScreen() {
 
       <Modal
         visible={!!activeImagePost}
-        transparent
-        animationType="fade"
+        animationType="none"
+        presentationStyle="fullScreen"
         onRequestClose={() => setActiveImagePost(null)}
         statusBarTranslucent
       >
@@ -754,84 +759,80 @@ export function ProfileScreen() {
 
       <Modal
         visible={activeReelIndex != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setActiveReelIndex(null);
-          setPlayingReelId(null);
-        }}
+        animationType="none"
+        presentationStyle="fullScreen"
+        onRequestClose={closeReelViewer}
         statusBarTranslucent
       >
         <View style={[styles.reelPlayerRoot, { width, height: windowHeight }]}>
-          <FlatList
-            ref={reelViewerListRef}
-            data={visiblePosts}
-            keyExtractor={(item) => String(item.id)}
-            pagingEnabled
-            showsVerticalScrollIndicator={false}
-            initialScrollIndex={Math.max(0, activeReelIndex ?? 0)}
-            getItemLayout={(_, index) => ({ length: windowHeight, offset: windowHeight * index, index })}
-            onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
-            onScrollToIndexFailed={() => {}}
-            removeClippedSubviews
-            initialNumToRender={2}
-            maxToRenderPerBatch={2}
-            windowSize={3}
-            renderItem={({ item, index }) => {
-              const isActive = playingReelId != null ? String(playingReelId) === String(item.id) : false;
-              return (
-              <View style={{ width, height: windowHeight }}>
-                {item.videoUrl && isActive ? (
-                  <Video
-                    style={{ width, height: windowHeight, backgroundColor: "#262626" }}
-                    source={{ uri: item.videoUrl }}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay
-                    isLooping
-                    isMuted={false}
-                    useNativeControls={false}
-                    usePoster={!!(item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0])}
-                    posterSource={
-                      item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0]
-                        ? { uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] }
-                        : undefined
-                    }
-                    progressUpdateIntervalMillis={750}
-                    {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
-                  />
-                ) : item.videoUrl ? (
-                  item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] ? (
-                  <Image
-                    style={{ width, height: windowHeight, backgroundColor: "#262626" }}
-                    source={{ uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] || "" }}
-                    resizeMode="cover"
-                  />
-                  ) : (
-                    <View style={{ width, height: windowHeight, backgroundColor: "#262626" }} />
-                  )
-                ) : null}
-                <View style={styles.reelCaptionWrap} pointerEvents="none">
-                  <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
-                    {item.userName}
-                  </Text>
-                  {item.caption ? (
-                    <Text style={styles.reelCaptionText} numberOfLines={2}>
-                      {item.caption}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-            );
-            }}
-          />
+          {activeReelIndex != null ? (
+            <FlatList
+              ref={reelViewerListRef}
+              data={visiblePosts}
+              keyExtractor={(item) => String(item.id)}
+              pagingEnabled
+              showsVerticalScrollIndicator={false}
+              initialScrollIndex={Math.max(0, activeReelIndex)}
+              getItemLayout={(_, index) => ({ length: windowHeight, offset: windowHeight * index, index })}
+              onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
+              onScrollToIndexFailed={() => {}}
+              removeClippedSubviews={Platform.OS !== "web"}
+              initialNumToRender={2}
+              maxToRenderPerBatch={2}
+              windowSize={3}
+              renderItem={({ item }) => {
+                const isActive = playingReelId != null ? String(playingReelId) === String(item.id) : false;
+                return (
+                  <View style={{ width, height: windowHeight }}>
+                    {item.videoUrl && isActive ? (
+                      <Video
+                        style={{ width, height: windowHeight, backgroundColor: "#262626" }}
+                        source={{ uri: item.videoUrl }}
+                        resizeMode={ResizeMode.COVER}
+                        shouldPlay
+                        isLooping
+                        isMuted={false}
+                        useNativeControls={false}
+                        usePoster={!!(item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0])}
+                        posterSource={
+                          item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0]
+                            ? { uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] }
+                            : undefined
+                        }
+                        progressUpdateIntervalMillis={750}
+                        {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
+                      />
+                    ) : item.videoUrl ? (
+                      item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] ? (
+                        <Image
+                          style={{ width, height: windowHeight, backgroundColor: "#262626" }}
+                          source={{ uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] || "" }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={{ width, height: windowHeight, backgroundColor: "#262626" }} />
+                      )
+                    ) : null}
+                    <View style={styles.reelCaptionWrap} pointerEvents="none">
+                      <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
+                        {item.userName}
+                      </Text>
+                      {item.caption ? (
+                        <Text style={styles.reelCaptionText} numberOfLines={2}>
+                          {item.caption}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              }}
+            />
+          ) : null}
           <Pressable
             style={styles.reelCloseBtn}
             hitSlop={12}
-            onPress={() => {
-              setActiveReelIndex(null);
-              setPlayingReelId(null);
-            }}
+            onPress={closeReelViewer}
             accessibilityLabel="Close reel"
           >
             <Ionicons name="close" size={26} color="#fff" />
