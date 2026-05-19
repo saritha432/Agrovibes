@@ -305,6 +305,8 @@ export interface HomePost {
   savedAt?: string;
   /** Author profile image when joined from learn_users */
   authorAvatarUrl?: string | null;
+  /** Users who liked this post (from feed API — used for likes list without a separate request). */
+  recentLikers?: HomePostLiker[];
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -454,6 +456,31 @@ export async function fetchHomePosts(token?: string | null) {
     throw new Error("Failed to load home posts");
   }
   return (await response.json()) as { posts: HomePost[] };
+}
+
+export type HomePostLiker = {
+  userId: number;
+  fullName: string;
+  username?: string;
+  avatarUrl?: string;
+  createdAt?: string;
+};
+
+export async function fetchHomePostLikes(postId: number, token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/likes`, {
+      headers
+    });
+    if (!response.ok) {
+      return { likers: [] as HomePostLiker[] };
+    }
+    const data = (await response.json()) as { likers?: HomePostLiker[] };
+    return { likers: Array.isArray(data.likers) ? data.likers : [] };
+  } catch {
+    return { likers: [] as HomePostLiker[] };
+  }
 }
 
 export async function likeHomePost(token: string, postId: number) {

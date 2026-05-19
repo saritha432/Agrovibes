@@ -26,3 +26,9 @@ export function navigateToUserSearch() {
     navigationRef.navigate("UserSearch");
   }
 }
+
+export function navigateToPublicProfile(params: RootStackParamList["PublicProfile"]) {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("PublicProfile", params);
+  }
+}
