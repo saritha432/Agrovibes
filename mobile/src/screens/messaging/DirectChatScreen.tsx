@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -12,14 +13,14 @@ import {
   TextInput,
   View
 } from "react-native";
-import { ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { queueOpenSharedPostViewer } from "../../navigation/sharedPostViewerBridge";
 import { UserAvatar } from "../../components/UserAvatar";
-import { fetchMessageThread, sendDirectMessage, type DirectMessageItem } from "../../services/api";
+import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
@@ -33,7 +34,7 @@ function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function parseSharedReel(body: string) {
+function parseSharedCropvibeContent(body: string): HomePost | null {
   const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]"];
   let jsonText = "";
   let matched = false;
@@ -45,36 +46,108 @@ function parseSharedReel(body: string) {
     }
   }
   if (!matched) return null;
-  const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lines = body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (jsonText.startsWith("{")) {
     try {
-      const parsed = JSON.parse(jsonText) as {
-        author?: string;
-        caption?: string;
-        videoUrl?: string | null;
-        imageUrl?: string | null;
-        thumbnailUrl?: string | null;
-        link?: string;
-      };
+      const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      const id = Number(parsed.id);
+      if (!Number.isFinite(id) || id <= 0) return null;
+      const urlsRaw = parsed.imageUrls;
+      const imageUrls =
+        Array.isArray(urlsRaw)
+          ? urlsRaw.map((u) => String(u || "").trim()).filter(Boolean)
+          : undefined;
+      const vid = parsed.videoUrl != null && String(parsed.videoUrl).trim() ? String(parsed.videoUrl).trim() : null;
+      const img =
+        parsed.imageUrl != null && String(parsed.imageUrl).trim()
+          ? String(parsed.imageUrl).trim()
+          : imageUrls && imageUrls.length
+            ? imageUrls[0]
+            : null;
+      const thumb =
+        parsed.thumbnailUrl != null && String(parsed.thumbnailUrl).trim()
+          ? String(parsed.thumbnailUrl).trim()
+          : null;
+      const userIdRaw = parsed.userId;
+      const uid =
+        userIdRaw != null && String(userIdRaw).trim() !== "" && Number.isFinite(Number(userIdRaw))
+          ? Number(userIdRaw)
+          : null;
+      const userName = String(parsed.userName || parsed.author || "User").trim() || "User";
       return {
-        author: parsed.author || "Cropvibe",
-        caption: parsed.caption || "",
-        videoUrl: parsed.videoUrl || "",
-        imageUrl: parsed.imageUrl || parsed.thumbnailUrl || "",
-        link: parsed.link || ""
+        id,
+        userId: uid,
+        userName,
+        location: String(parsed.location || ""),
+        caption: String(parsed.caption || ""),
+        likesCount: Number(parsed.likesCount ?? 0) || 0,
+        commentsCount: Number(parsed.commentsCount ?? 0) || 0,
+        videoUrl: vid,
+        imageUrl: img,
+        imageUrls: imageUrls && imageUrls.length > 0 ? imageUrls : undefined,
+        thumbnailUrl: thumb || undefined,
+        musicLabel: (parsed.musicLabel as string) ?? null,
+        musicAudioUrl: (parsed.musicAudioUrl as string) ?? null,
+        creativeMeta: parsed.creativeMeta as HomePost["creativeMeta"],
+        authorAvatarUrl: (parsed.authorAvatarUrl as string) ?? null,
+        createdAt: String(parsed.createdAt || new Date().toISOString()),
+        viewerHasLiked: Boolean(parsed.viewerHasLiked),
+        viewerHasSaved: Boolean(parsed.viewerHasSaved)
       };
     } catch {
-      // fall through to legacy text parsing
+      // fall through
     }
   }
   const link = lines.find((line) => line.includes("/reel/")) || "";
+  const idMatch = link.match(/\/reel\/(\d+)/i);
+  const legacyId = idMatch ? Number(idMatch[1]) : NaN;
+  if (!Number.isFinite(legacyId) || legacyId <= 0) return null;
   return {
-    author: lines[1] || "Cropvibe",
+    id: legacyId,
+    userId: null,
+    userName: String(lines[1] || "User"),
+    location: "",
     caption: lines.slice(2).filter((line) => line !== link).join("\n"),
-    videoUrl: "",
-    imageUrl: "",
-    link
+    likesCount: 0,
+    commentsCount: 0,
+    videoUrl: null,
+    imageUrl: null,
+    createdAt: new Date().toISOString()
   };
+}
+
+function sharedChatCardThumb(post: HomePost): { uri: string | null; showPlayBadge: boolean } {
+  const v = String(post.videoUrl || "").trim();
+  if (v) {
+    const thumb = String(post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || "").trim();
+    return { uri: thumb || null, showPlayBadge: true };
+  }
+  const first =
+    String(post.imageUrl || "").trim() || String(post.imageUrls?.[0] || "").trim() || String(post.thumbnailUrl || "").trim() || null;
+  return { uri: first, showPlayBadge: false };
+}
+
+function hasRenderableMedia(post: HomePost) {
+  return !!(
+    String(post.videoUrl || "").trim() ||
+    String(post.imageUrl || "").trim() ||
+    (post.imageUrls && post.imageUrls.length > 0)
+  );
+}
+
+async function hydrateSharedPostFromFeed(post: HomePost, token: string | null): Promise<HomePost> {
+  if (!token) return post;
+  try {
+    const res = await fetchHomePosts(token);
+    const found = res.posts.find((p) => p.id === post.id);
+    if (found) return { ...post, ...found };
+  } catch {
+    // ignore
+  }
+  return post;
 }
 
 export function DirectChatScreen() {
@@ -138,6 +211,21 @@ export function DirectChatScreen() {
 
   const bottomPad = Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8;
 
+  const openSharedCropvibeCard = useCallback(
+    async (body: string) => {
+      let post = parseSharedCropvibeContent(body);
+      if (!post) return;
+      post = await hydrateSharedPostFromFeed(post, token ?? null);
+      if (!hasRenderableMedia(post)) {
+        Alert.alert("Can't open this share", "This post isn't available. Try again after refreshing your feed.");
+        return;
+      }
+      queueOpenSharedPostViewer(post, true);
+      navigation.navigate("Main", { screen: "Home" });
+    },
+    [navigation, token]
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -180,46 +268,42 @@ export function DirectChatScreen() {
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => {
           const isSelf = Number(item.senderId) === Number(user?.id);
-          const sharedReel = parseSharedReel(item.body);
+          const sharedPost = parseSharedCropvibeContent(item.body);
+          const thumb = sharedPost ? sharedChatCardThumb(sharedPost) : { uri: null as string | null, showPlayBadge: false };
           return (
             <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
-              <View style={sharedReel ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer]}>
-                {sharedReel ? (
-                  <View style={styles.sharedReelCard}>
+              <View style={sharedPost ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer]}>
+                {sharedPost ? (
+                  <Pressable style={styles.sharedReelCard} onPress={() => void openSharedCropvibeCard(item.body)}>
                     <View style={styles.sharedReelThumb}>
-                      {sharedReel.videoUrl ? (
-                        <Video
-                          source={{ uri: sharedReel.videoUrl }}
-                          style={styles.sharedReelMedia}
-                          resizeMode={ResizeMode.COVER}
-                          shouldPlay={false}
-                          isLooping
-                          useNativeControls
-                        />
-                      ) : sharedReel.imageUrl ? (
-                        <Image source={{ uri: sharedReel.imageUrl }} style={styles.sharedReelMedia} resizeMode="cover" />
+                      {thumb.uri ? (
+                        <Image source={{ uri: thumb.uri }} style={styles.sharedReelMedia} resizeMode="cover" />
                       ) : (
-                        <Ionicons name="play" size={22} color="#fff" />
+                        <View style={[styles.sharedReelMedia, styles.sharedReelThumbPlaceholder]}>
+                          <Ionicons name="image-outline" size={22} color="#fff" />
+                        </View>
                       )}
-                      <View style={styles.sharedReelPlayBadge}>
-                        <Ionicons name="play" size={18} color="#111" />
-                      </View>
+                      {thumb.showPlayBadge ? (
+                        <View style={styles.sharedReelPlayBadge}>
+                          <Ionicons name="play" size={18} color="#111" />
+                        </View>
+                      ) : null}
                       <View style={styles.sharedReelOverlay}>
                         <Text style={styles.sharedReelAuthor} numberOfLines={1}>
-                          {sharedReel.author}
+                          {sharedPost.userName}
                         </Text>
-                        {sharedReel.caption ? (
+                        {sharedPost.caption ? (
                           <Text style={styles.sharedReelCaption} numberOfLines={1}>
-                            {sharedReel.caption}
+                            {sharedPost.caption}
                           </Text>
                         ) : null}
                       </View>
                     </View>
-                  </View>
+                  </Pressable>
                 ) : (
                   <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{item.body}</Text>
                 )}
-                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, sharedReel ? styles.reelMeta : null]}>
+                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, sharedPost ? styles.reelMeta : null]}>
                   {formatMsgTime(new Date(item.createdAt).getTime())}
                 </Text>
               </View>
@@ -377,6 +461,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#1d2126"
+  },
+  sharedReelThumbPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2a3038"
   },
   sharedReelMedia: { width: "100%", height: "100%" },
   sharedReelPlayBadge: {
