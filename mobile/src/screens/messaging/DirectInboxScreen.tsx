@@ -19,8 +19,8 @@ const BG = "#262626";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";
-const YELLOW = "#d8ff37";
-const CARD = "#111418";
+const YELLOW = "#C9FF35";
+const CARD = "#262626";
 
 function formatTime(ts: number) {
   const d = new Date(ts);

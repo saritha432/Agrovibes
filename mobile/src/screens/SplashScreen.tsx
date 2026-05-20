@@ -31,7 +31,7 @@ export function SplashScreen() {
   return (
     <View style={styles.root}>
       <Text style={styles.wordmark}>Cropvibes</Text>
-      <ActivityIndicator size="large" color="#0a9f46" style={styles.spinner} />
+      <ActivityIndicator size="large" color="#C9FF35" style={styles.spinner} />
     </View>
   );
 }

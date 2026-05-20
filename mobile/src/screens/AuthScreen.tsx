@@ -9,7 +9,7 @@ import { authLogin, authRegister } from "../services/api";
 
 type Mode = "login" | "register";
 
-const GREEN = "#0a9f46";
+const GREEN = "#C9FF35";
 const BORDER = "#dce3e1";
 
 export function AuthScreen() {

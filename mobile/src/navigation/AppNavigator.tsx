@@ -79,5 +79,5 @@ export function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f2f5f4" }
+  root: { flex: 1, backgroundColor: "#262626" }
 });

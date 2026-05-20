@@ -7,8 +7,8 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { resetPasswordWithOtp, sendPhoneOtp } from "../../services/api";
 import { useLanguage } from "../../localization/LanguageContext";
 
-const GREEN = "#b9f530";
-const BG = "#1d2126";
+const GREEN = "#C9FF35";
+const BG = "#262626";
 const CARD = "#252a30";
 const BORDER = "#3a424c";
 

@@ -49,14 +49,15 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
+import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
 
-const TEAL = "#d8ff37";
-const CREAM = "#262626";
-const CARD = "#111418";
+const TEAL = APP_LIME;
+const CREAM = APP_BLACK;
+const CARD = APP_SURFACE;
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
-const BEIGE_FOLLOW = "#1d2126";
-const LIME = "#d8ff37";
+const BEIGE_FOLLOW = APP_BLACK;
+const LIME = APP_LIME;
 
 function safeHandle(name: string) {
   const base = String(name || "user")
@@ -1231,7 +1232,7 @@ const styles = StyleSheet.create({
     width: 86,
     height: 86,
     borderRadius: 43,
-    backgroundColor: "#1d2126",
+    backgroundColor: "#262626",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
@@ -1264,7 +1265,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#1d2126",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "#303842",
     paddingHorizontal: 8,
@@ -1339,7 +1340,7 @@ const styles = StyleSheet.create({
   iconTabSpacer: { marginTop: 6, height: 2, width: 28 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
-  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#1d2126", borderWidth: 1, borderColor: "#303842", position: "relative" },
+  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#262626", borderWidth: 1, borderColor: "#303842", position: "relative" },
   gridImage: { width: "100%", height: "100%" },
   gridPlayBadge: {
     position: "absolute",
@@ -1357,11 +1358,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 }
   },
   gridPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 12 },
-  gridVideoBg: { backgroundColor: "#1d2126" },
+  gridVideoBg: { backgroundColor: "#262626" },
   gridVideoPlaceholder: { alignItems: "center", justifyContent: "center" },
-  gridPastelA: { backgroundColor: "#1d2126" },
-  gridPastelB: { backgroundColor: "#111418" },
-  gridPastelC: { backgroundColor: "#1d2126" },
+  gridPastelA: { backgroundColor: "#262626" },
+  gridPastelB: { backgroundColor: "#262626" },
+  gridPastelC: { backgroundColor: "#262626" },
   placeholderGridRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
 
   emptyWrap: {
@@ -1449,7 +1450,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: "#1d2126"
+    backgroundColor: "#262626"
   },
   personRowMenuOpen: { zIndex: 40 },
   personListAvatar: { marginRight: 10 },
@@ -1518,7 +1519,7 @@ const styles = StyleSheet.create({
   followBackBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedPillText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followingPill: { backgroundColor: "rgba(216,255,55,0.18)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followingPill: { backgroundColor: "rgba(201,255,53,0.18)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   followingPillText: { color: LIME, fontWeight: "800", fontSize: 12 },
   unfollowBtn: { backgroundColor: "#111827", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },

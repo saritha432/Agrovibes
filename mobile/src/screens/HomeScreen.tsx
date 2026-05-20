@@ -69,7 +69,8 @@ import {
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
-import { APP_DARK_BG } from "../theme/appColors";
+import { LiveHomeSection } from "./live/LiveHomeSection";
+import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 interface HomeScreenProps {
   refreshToken?: number;
@@ -81,7 +82,7 @@ interface HomeScreenProps {
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
 const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
 type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
-const likeActiveColor = "#C9FF35";
+const likeActiveColor = APP_LIME;
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
@@ -1020,7 +1021,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         )
       );
     }
-    if (activeHomeTab === "live") return [];
+    if (activeHomeTab === "live") {
+      return sortPostsNewestFirst(strip(posts.filter((p) => !!p.videoUrl)));
+    }
     return sortPostsNewestFirst(strip(posts));
   }, [activeHomeTab, posts, followingUserIds, dismissedPostIds]);
 
@@ -1073,7 +1076,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
   const isReelSurfaceTab =
-    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
+    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
+  const isLiveTab = activeHomeTab === "live";
 
   const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
     if (!postHasViewableMedia(post)) return;
@@ -2543,7 +2547,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <View style={[styles.homeTopTabPillDark, isActive ? styles.homeTopTabPillActiveDark : null]}>
                     <Text style={[styles.homeTopTabTextDark, isActive ? styles.homeTopTabTextActivePillDark : null]}>
-                      {tab}
+                      {tab === "live" ? "Live" : tab}
                     </Text>
                   </View>
                 </Pressable>
@@ -3144,11 +3148,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           : "Create a reel to start filling this section.";
 
   const useFullScreenReelLayout =
-    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
+    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
 
   return (
-    <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
-      {useFullScreenReelLayout ? (
+    <View style={[styles.screen, isReelSurfaceTab || isLiveTab ? styles.screenDark : null]}>
+      {isLiveTab ? (
+        <View style={styles.reelsColumn}>
+          {listHeader}
+          <LiveHomeSection posts={posts} onOpenCreate={() => onOpenCreate?.("live")} />
+        </View>
+      ) : useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
           <View style={[styles.reelSlot, isReelSurfaceTab ? styles.reelSlotCardGap : null]}>
@@ -3695,7 +3704,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <Ionicons
                   name={activeReelOptionsPost?.viewerHasSaved ? "bookmark" : "bookmark-outline"}
                   size={22}
-                  color="#d8ff37"
+                  color="#C9FF35"
                 />
               </View>
               <View style={styles.reelOptionTextCol}>
@@ -3712,7 +3721,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               }}
             >
               <View style={styles.reelOptionIcon}>
-                <Ionicons name="link-outline" size={22} color="#d8ff37" />
+                <Ionicons name="link-outline" size={22} color="#C9FF35" />
               </View>
               <View style={styles.reelOptionTextCol}>
                 <Text style={styles.reelOptionTitle}>Copy link</Text>
@@ -3726,7 +3735,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               }}
             >
               <View style={styles.reelOptionIcon}>
-                <Ionicons name="eye-off-outline" size={22} color="#d8ff37" />
+                <Ionicons name="eye-off-outline" size={22} color="#C9FF35" />
               </View>
               <View style={styles.reelOptionTextCol}>
                 <Text style={styles.reelOptionTitle}>Not interested</Text>
@@ -3740,7 +3749,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               }}
             >
               <View style={styles.reelOptionIcon}>
-                <Ionicons name="flag-outline" size={22} color="#d8ff37" />
+                <Ionicons name="flag-outline" size={22} color="#C9FF35" />
               </View>
               <View style={styles.reelOptionTextCol}>
                 <Text style={styles.reelOptionTitle}>Report</Text>
@@ -3787,7 +3796,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Text>
             {reportSubmitBusy ? (
               <View style={{ paddingVertical: 24, alignItems: "center" }}>
-                <ActivityIndicator color="#d8ff37" />
+                <ActivityIndicator color="#C9FF35" />
               </View>
             ) : (
               <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -3798,7 +3807,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     onPress={() => void submitReportWithReason(r.key)}
                   >
                     <View style={styles.reelOptionIcon}>
-                      <Ionicons name="alert-circle-outline" size={22} color="#d8ff37" />
+                      <Ionicons name="alert-circle-outline" size={22} color="#C9FF35" />
                     </View>
                     <View style={styles.reelOptionTextCol}>
                       <Text style={styles.reelOptionTitle}>{r.label}</Text>
@@ -3823,7 +3832,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           <Pressable style={[styles.shareSheet, { paddingBottom: Math.max(insets.bottom + 10, 20) }]} onPress={(e) => e.stopPropagation?.()}>
             <View style={styles.shareHandle} />
             <View style={styles.shareSearchRow}>
-              <Ionicons name="search" size={16} color="#b7ff37" />
+              <Ionicons name="search" size={16} color="#C9FF35" />
               <TextInput
                 value={shareSearch}
                 onChangeText={setShareSearch}
@@ -3832,7 +3841,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 style={styles.shareSearchInput}
               />
               <Pressable style={styles.shareSearchAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
-                <Ionicons name="person-add-outline" size={16} color="#b7ff37" />
+                <Ionicons name="person-add-outline" size={16} color="#C9FF35" />
               </Pressable>
             </View>
 
@@ -3847,7 +3856,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   >
                     <View style={styles.sharePersonAvatar}>
                       {shareBusyUserId === recipient.id ? (
-                        <Ionicons name="checkmark" size={18} color="#d8ff37" />
+                        <Ionicons name="checkmark" size={18} color="#C9FF35" />
                       ) : (
                         <UserAvatar
                           uri={recipient.avatarUrl}
@@ -3855,7 +3864,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                           size={52}
                           borderRadius={26}
                           fallbackBackgroundColor="#343b43"
-                          initialsColor="#d8ff37"
+                          initialsColor="#C9FF35"
                         />
                       )}
                     </View>
@@ -3871,27 +3880,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
             <View style={styles.shareFooterRow}>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onAddReelToStory(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="add-circle-outline" size={20} color="#b7ff37" /></View>
+                <View style={styles.shareFooterIcon}><Ionicons name="add-circle-outline" size={20} color="#C9FF35" /></View>
                 <Text style={styles.shareFooterText}>Add to story</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="link-outline" size={20} color="#b7ff37" /></View>
+                <View style={styles.shareFooterIcon}><Ionicons name="link-outline" size={20} color="#C9FF35" /></View>
                 <Text style={styles.shareFooterText}>Copy Link</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="open-outline" size={20} color="#b7ff37" /></View>
+                <View style={styles.shareFooterIcon}><Ionicons name="open-outline" size={20} color="#C9FF35" /></View>
                 <Text style={styles.shareFooterText}>Share To..</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToWhatsApp(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color="#b7ff37" /></View>
+                <View style={styles.shareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color="#C9FF35" /></View>
                 <Text style={styles.shareFooterText}>Whatsapp</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToMessenger(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color="#b7ff37" /></View>
+                <View style={styles.shareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color="#C9FF35" /></View>
                 <Text style={styles.shareFooterText}>Messenger</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSnapchat(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="logo-snapchat" size={20} color="#b7ff37" /></View>
+                <View style={styles.shareFooterIcon}><Ionicons name="logo-snapchat" size={20} color="#C9FF35" /></View>
                 <Text style={styles.shareFooterText}>Snapchat</Text>
               </Pressable>
             </View>
@@ -4207,7 +4216,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: "center"
   },
-  emptyTabTitleDark: { fontWeight: "900", color: "#d8ff37", fontSize: 15 },
+  emptyTabTitleDark: { fontWeight: "900", color: "#C9FF35", fontSize: 15 },
   emptyTabSubDark: { marginTop: 6, color: "rgba(255,255,255,0.65)", fontWeight: "600" },
   storyRow: {
     paddingHorizontal: 8,
@@ -4227,8 +4236,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  storyRingNew: { backgroundColor: "#d8ff37" },
-  storyRingViewed: { backgroundColor: "#d8ff37" },
+  storyRingNew: { backgroundColor: "#C9FF35" },
+  storyRingViewed: { backgroundColor: "#C9FF35" },
   storyRingEmptyDark: {
     backgroundColor: "transparent",
     borderWidth: 2,
@@ -4266,7 +4275,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#d8ff37",
+    backgroundColor: "#C9FF35",
     borderWidth: 2,
     borderColor: "#fff",
     alignItems: "center",
@@ -4564,7 +4573,7 @@ const styles = StyleSheet.create({
     borderTopColor: "#303236",
     backgroundColor: "rgba(184,255,55,0.08)"
   },
-  replyingToBannerText: { flex: 1, color: "#d8ff37", fontSize: 12, fontWeight: "800" },
+  replyingToBannerText: { flex: 1, color: "#C9FF35", fontSize: 12, fontWeight: "800" },
   replyingToCancel: { paddingVertical: 4, paddingHorizontal: 6 },
   replyingToCancelText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
   emojiRow: {
@@ -4602,14 +4611,14 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "#b7ff37",
+    backgroundColor: "#C9FF35",
     alignItems: "center",
     justifyContent: "center"
   },
   reelOptionsSheet: {
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
-    backgroundColor: "#1d2126",
+    backgroundColor: "#262626",
     borderTopWidth: 1,
     borderColor: "#343b43",
     paddingHorizontal: 14,
@@ -4653,7 +4662,7 @@ const styles = StyleSheet.create({
   shareSheet: {
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    backgroundColor: "#1d2126",
+    backgroundColor: "#262626",
     borderTopWidth: 1,
     borderColor: "#343b43",
     paddingHorizontal: 10,
@@ -4665,7 +4674,7 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     alignSelf: "center",
     marginBottom: 8,
-    backgroundColor: "#b7ff37"
+    backgroundColor: "#C9FF35"
   },
   shareSearchRow: {
     height: 38,
@@ -4701,7 +4710,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#4a525c"
   },
-  sharePersonAvatarText: { color: "#d8ff37", fontWeight: "900", fontSize: 16 },
+  sharePersonAvatarText: { color: "#C9FF35", fontWeight: "900", fontSize: 16 },
   sharePersonName: { color: "#d5dde4", fontSize: 10, fontWeight: "700", maxWidth: 62, textAlign: "center" },
   shareNoPeopleText: { color: "#97a0a8", fontSize: 12, fontWeight: "700", paddingVertical: 18, paddingHorizontal: 8 },
   shareFooterRow: {

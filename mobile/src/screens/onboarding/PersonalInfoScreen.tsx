@@ -107,5 +107,5 @@ const styles = StyleSheet.create({
   toggleTitle: { fontWeight: "900", color: "#22312d" },
   toggleSub: { marginTop: 4, fontWeight: "600", color: "#6b7874", fontSize: 12 },
   skipHint: { marginTop: 8, alignSelf: "flex-start" },
-  skipHintText: { fontWeight: "800", color: "#0a9f46", fontSize: 13 }
+  skipHintText: { fontWeight: "800", color: "#C9FF35", fontSize: 13 }
 });

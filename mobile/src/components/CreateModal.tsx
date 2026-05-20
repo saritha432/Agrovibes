@@ -892,12 +892,41 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           setSubmitting(false);
           return;
         }
-        Alert.alert(
-          "Live selected",
-          liveMode === "now"
-            ? "Start live selected. Connect livestream backend to continue."
-            : "Schedule live selected. Add scheduling flow next."
-        );
+        if (liveMode === "schedule") {
+          Alert.alert("Schedule live", "Scheduling will be available in a future update.");
+          setSubmitting(false);
+          return;
+        }
+        const pick = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+          allowsEditing: false,
+          quality: 0.85
+        });
+        if (pick.canceled || !pick.assets?.[0]?.uri) {
+          setSubmitting(false);
+          return;
+        }
+        const v = pick.assets[0];
+        await validateVideoSize(v.uri, 80);
+        let derivedThumb: string | undefined;
+        try {
+          const thumb = await VideoThumbnails.getThumbnailAsync(v.uri, { time: 400, quality: 0.72 });
+          const { url } = await uploadImageFile(thumb.uri);
+          derivedThumb = url;
+        } catch {
+          /* optional */
+        }
+        const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
+        const liveCaption = caption.trim() ? caption.trim() : "Live stream";
+        const { post: newPost } = await createHomePost({
+          userId: user?.id,
+          userName: user?.fullName?.trim() || "Farmer",
+          location: user?.locationLabel?.trim() || "Unknown",
+          caption: `[LIVE] ${liveCaption}`,
+          videoUrl: mediaUrl,
+          thumbnailUrl: derivedThumb
+        }, token ?? null);
+        createdFeedPost = newPost;
       } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
           setErrorText("Please record or upload story media.");
@@ -1310,7 +1339,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           <View style={[styles.igCaptureCameraRoot, Platform.OS === "web" ? styles.igCameraEntryRootWeb : null]}>
             {entryType === "live" ? (
               <View style={styles.igCaptureLiveFallback}>
-                <Ionicons name="radio-outline" size={48} color="#d8ff37" />
+                <Ionicons name="radio-outline" size={48} color="#C9FF35" />
                 <Text style={styles.igCaptureLiveText}>Go live from here</Text>
               </View>
             ) : (
@@ -1336,7 +1365,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 </Pressable>
                 <View style={styles.igCaptureTopCenterTools} pointerEvents="box-none">
                   <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
-                    <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#b7ff37" />
+                    <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#C9FF35" />
                   </Pressable>
                   <Pressable
                     style={styles.igCamRoundControl}
@@ -1365,7 +1394,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                       resizeMode="cover"
                     />
                   ) : (
-                    <Ionicons name="images-outline" size={22} color="#b7ff37" />
+                    <Ionicons name="images-outline" size={22} color="#C9FF35" />
                   )}
                 </Pressable>
                 <View style={styles.igCamCaptureRowSpacer} />
@@ -1382,7 +1411,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   }
                   hitSlop={8}
                 >
-                  <Ionicons name="camera-reverse-outline" size={28} color="#b7ff37" />
+                  <Ionicons name="camera-reverse-outline" size={28} color="#C9FF35" />
                 </Pressable>
               </View>
 
@@ -1588,11 +1617,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 }}
                 hitSlop={10}
               >
-                <Ionicons name="arrow-back" size={24} color="#d8ff37" />
+                <Ionicons name="arrow-back" size={24} color="#C9FF35" />
               </Pressable>
               <Text style={styles.igComposeTitle}>New {createType === "reel" ? "Reel" : "Post"}</Text>
               <Pressable onPress={submitPostVideo} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator size="small" color="#d8ff37" /> : <Text style={styles.igComposeShare}>Share</Text>}
+                {isSubmitting ? <ActivityIndicator size="small" color="#C9FF35" /> : <Text style={styles.igComposeShare}>Share</Text>}
               </Pressable>
             </View>
             {pickedPostAssets.length > 1 ? (
@@ -1617,7 +1646,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     {composeOptions.map(({ icon, label, onPress, displayText }) => (
                       <Pressable key={label} style={styles.igComposeOptionRow} onPress={onPress}>
                         <View style={styles.igComposeOptionLeft}>
-                          <Ionicons name={icon as any} size={18} color="#d8ff37" />
+                          <Ionicons name={icon as any} size={18} color="#C9FF35" />
                           <Text style={styles.igComposeOptionText} numberOfLines={1}>
                             {displayText}
                           </Text>
@@ -1652,7 +1681,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                     {composeOptions.map(({ icon, label, onPress, displayText }) => (
                       <Pressable key={label} style={styles.igComposeOptionRow} onPress={onPress}>
                         <View style={styles.igComposeOptionLeft}>
-                          <Ionicons name={icon as any} size={18} color="#d8ff37" />
+                          <Ionicons name={icon as any} size={18} color="#C9FF35" />
                           <Text style={styles.igComposeOptionText} numberOfLines={1}>
                             {displayText}
                           </Text>
@@ -1914,7 +1943,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           />
           {audioSearchLoading ? (
             <View style={styles.audioSearchStateRow}>
-              <ActivityIndicator size="small" color="#0a9f46" />
+              <ActivityIndicator size="small" color="#C9FF35" />
               <Text style={styles.audioSearchStateText}>Searching songs...</Text>
             </View>
           ) : null}
@@ -2027,7 +2056,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           />
           {followableLoading ? (
             <View style={styles.audioSearchStateRow}>
-              <ActivityIndicator size="small" color="#0a9f46" />
+              <ActivityIndicator size="small" color="#C9FF35" />
               <Text style={styles.audioSearchStateText}>Loading people…</Text>
             </View>
           ) : null}
@@ -2054,7 +2083,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <View
                     style={[
                       styles.audioTrackPlayBtn,
-                      { backgroundColor: selected ? "#0a9f46" : "#d8ff37" }
+                      { backgroundColor: selected ? "#C9FF35" : "#C9FF35" }
                     ]}
                   >
                     <Ionicons name={selected ? "checkmark" : "add"} size={16} color={selected ? "#fff" : "#111"} />
@@ -2150,12 +2179,12 @@ const styles = StyleSheet.create({
   },
   igPostEntryTopBtn: { width: 32, alignItems: "flex-start", justifyContent: "center" },
   igPostEntryTitle: { color: "#f8fafc", fontWeight: "900", fontSize: 15 },
-  igPostEntryNext: { color: "#d8ff37", fontWeight: "900", fontSize: 14 },
+  igPostEntryNext: { color: "#C9FF35", fontWeight: "900", fontSize: 14 },
   igPostEntryNextDisabled: { opacity: 0.45 },
   igPostEntryPreview: {
     width: "100%",
     aspectRatio: 1,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     position: "relative"
   },
   igPostEntryPreviewImage: { width: "100%", height: "100%" },
@@ -2189,7 +2218,7 @@ const styles = StyleSheet.create({
   igPostEntryRecentsText: { color: "#f8fafc", fontSize: 14, fontWeight: "900" },
   igPostEntryCameraCell: {
     flex: 1,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     alignItems: "center",
     justifyContent: "center"
   },
@@ -2224,9 +2253,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#303842"
   },
-  albumPickerRowOn: { backgroundColor: "rgba(216,255,55,0.12)" },
+  albumPickerRowOn: { backgroundColor: "rgba(201,255,53,0.12)" },
   albumPickerRowText: { color: "#e8edf2", fontSize: 15, fontWeight: "700", flex: 1 },
-  albumPickerRowTextOn: { color: "#d8ff37" },
+  albumPickerRowTextOn: { color: "#C9FF35" },
   albumPickerRowCount: { color: "#8b98a8", fontSize: 13, fontWeight: "600" },
   storyGalleryStrip: { marginTop: 8, maxHeight: 72 },
   storyGalleryStripContent: { paddingHorizontal: 10, gap: 8, alignItems: "center" },
@@ -2235,8 +2264,8 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: "#d8ff37",
-    backgroundColor: "#111418",
+    borderColor: "#C9FF35",
+    backgroundColor: "#262626",
     alignItems: "center",
     justifyContent: "center"
   },
@@ -2245,7 +2274,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 10,
     overflow: "hidden",
-    backgroundColor: "#111418"
+    backgroundColor: "#262626"
   },
   storyGalleryThumbImg: { width: "100%", height: "100%" },
   storyGalleryVideoBadge: {
@@ -2266,11 +2295,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "#303842"
   },
-  igPostEntrySelectBtnOn: { backgroundColor: "rgba(216,255,55,0.16)", borderColor: "#d8ff37" },
+  igPostEntrySelectBtnOn: { backgroundColor: "rgba(201,255,53,0.16)", borderColor: "#C9FF35" },
   igPostEntrySelectText: { color: "#f8fafc", fontWeight: "700", fontSize: 12 },
   igPostEntryGrid: { paddingBottom: 8 },
   igPostEntryCell: {
@@ -2299,7 +2328,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "#d8ff37",
+    backgroundColor: "#C9FF35",
     alignItems: "center",
     justifyContent: "center"
   },
@@ -2315,7 +2344,7 @@ const styles = StyleSheet.create({
   },
   igPostEntryModeItem: { paddingHorizontal: 2, paddingVertical: 6 },
   igPostEntryModeText: { color: "rgba(255,255,255,0.55)", fontWeight: "800", fontSize: 11, letterSpacing: 0.8 },
-  igPostEntryModeTextOn: { color: "#d8ff37" },
+  igPostEntryModeTextOn: { color: "#C9FF35" },
   igCaptureCameraRoot: {
     flex: 1,
     backgroundColor: "#000"
@@ -2381,7 +2410,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   igCamTopTitle: { color: "#f8fafc", fontSize: 16, fontWeight: "800" },
-  igCamTopShare: { color: "#d8ff37", fontSize: 14, fontWeight: "900" },
+  igCamTopShare: { color: "#C9FF35", fontSize: 14, fontWeight: "900" },
   igCamTopCenter: {
     flexDirection: "row",
     alignItems: "center",
@@ -2394,14 +2423,14 @@ const styles = StyleSheet.create({
     height: 40,
     paddingHorizontal: 10,
     borderRadius: 20,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "#303842",
     alignItems: "center",
     justifyContent: "center"
   },
   igCamZoomText: {
-    color: "#b7ff37",
+    color: "#C9FF35",
     fontWeight: "800",
     fontSize: 13
   },
@@ -2413,13 +2442,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 22,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "#303842",
     marginBottom: 8
   },
   igAddAudioText: {
-    color: "#b7ff37",
+    color: "#C9FF35",
     fontWeight: "700",
     fontSize: 14
   },
@@ -2451,7 +2480,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   igCamRailLabel: {
-    color: "#d8ff37",
+    color: "#C9FF35",
     fontSize: 11,
     fontWeight: "800",
     textShadowColor: "rgba(0,0,0,0.35)",
@@ -2459,7 +2488,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 2,
     flex: 1
   },
-  igCamRailAa: { color: "#d8ff37", fontSize: 14, fontWeight: "900" },
+  igCamRailAa: { color: "#C9FF35", fontSize: 14, fontWeight: "900" },
   igCamViewfinder: {
     flex: 1,
     marginLeft: -4,
@@ -2502,7 +2531,7 @@ const styles = StyleSheet.create({
     height: 18,
     borderTopWidth: 2,
     borderLeftWidth: 2,
-    borderColor: "rgba(216,255,55,0.95)"
+    borderColor: "rgba(201,255,53,0.95)"
   },
   igCamGuideCornerTR: {
     position: "absolute",
@@ -2512,7 +2541,7 @@ const styles = StyleSheet.create({
     height: 18,
     borderTopWidth: 2,
     borderRightWidth: 2,
-    borderColor: "rgba(216,255,55,0.95)"
+    borderColor: "rgba(201,255,53,0.95)"
   },
   igCamGuideCornerBL: {
     position: "absolute",
@@ -2522,7 +2551,7 @@ const styles = StyleSheet.create({
     height: 18,
     borderBottomWidth: 2,
     borderLeftWidth: 2,
-    borderColor: "rgba(216,255,55,0.95)"
+    borderColor: "rgba(201,255,53,0.95)"
   },
   igCamGuideCornerBR: {
     position: "absolute",
@@ -2532,11 +2561,11 @@ const styles = StyleSheet.create({
     height: 18,
     borderBottomWidth: 2,
     borderRightWidth: 2,
-    borderColor: "rgba(216,255,55,0.95)"
+    borderColor: "rgba(201,255,53,0.95)"
   },
   igCamErrorBanner: {
     color: "#7f1d1d",
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     textAlign: "center",
     fontWeight: "700",
     paddingVertical: 6,
@@ -2557,8 +2586,8 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#b7ff37",
-    backgroundColor: "#111418",
+    borderColor: "#C9FF35",
+    backgroundColor: "#262626",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden"
@@ -2575,7 +2604,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 5,
-    borderColor: "#b7ff37",
+    borderColor: "#C9FF35",
     backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center"
@@ -2621,7 +2650,7 @@ const styles = StyleSheet.create({
     borderRadius: 8
   },
   igCamModeItemOn: {
-    backgroundColor: "rgba(216,255,55,0.16)"
+    backgroundColor: "rgba(201,255,53,0.16)"
   },
   igCamModeItemText: {
     color: "rgba(255,255,255,0.72)",
@@ -2630,7 +2659,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6
   },
   igCamModeItemTextOn: {
-    color: "#b7ff37"
+    color: "#C9FF35"
   },
   igCamModeItemTextHero: {
     fontSize: 13,
@@ -2659,7 +2688,7 @@ const styles = StyleSheet.create({
   creativePanelTitle: { fontSize: 18, fontWeight: "800", color: "#1b2422" },
   creativePanelTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   creativePanelDoneGhost: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 16, backgroundColor: "#e8f7ef" },
-  creativePanelDoneGhostText: { color: "#0a9f46", fontWeight: "800", fontSize: 12 },
+  creativePanelDoneGhostText: { color: "#C9FF35", fontWeight: "800", fontSize: 12 },
   creativeLivePreviewBox: {
     minHeight: 70,
     borderRadius: 10,
@@ -2691,12 +2720,12 @@ const styles = StyleSheet.create({
     borderColor: "#dbe6e1",
     backgroundColor: "#f8faf9"
   },
-  fontChipOn: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
+  fontChipOn: { borderColor: "#C9FF35", backgroundColor: "#e8f7ef" },
   fontChipText: { color: "#4d5f5a", fontWeight: "700", fontSize: 13 },
-  fontChipTextOn: { color: "#0a9f46", fontWeight: "800", fontSize: 13 },
+  fontChipTextOn: { color: "#C9FF35", fontWeight: "800", fontSize: 13 },
   creativePanelDone: {
     marginTop: 16,
-    backgroundColor: "#0a9f46",
+    backgroundColor: "#C9FF35",
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: "center"
@@ -2704,7 +2733,7 @@ const styles = StyleSheet.create({
   creativePanelDoneText: { color: "#fff", fontWeight: "800", fontSize: 16 },
   textColorRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 2 },
   textColorDot: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: "#fff" },
-  textColorDotActive: { borderColor: "#0a9f46", transform: [{ scale: 1.08 }] },
+  textColorDotActive: { borderColor: "#C9FF35", transform: [{ scale: 1.08 }] },
   textBackgroundToggle: {
     marginLeft: "auto",
     width: 34,
@@ -2803,7 +2832,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between"
   },
-  audioTrackRowSelected: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
+  audioTrackRowSelected: { borderColor: "#C9FF35", backgroundColor: "#e8f7ef" },
   audioTrackMeta: { flex: 1, paddingRight: 10 },
   audioTrackTitle: { color: "#1b2422", fontSize: 14, fontWeight: "800" },
   audioTrackArtist: { color: "#62706c", fontSize: 12, marginTop: 2 },
@@ -2811,14 +2840,14 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "#d8ff37",
+    backgroundColor: "#C9FF35",
     alignItems: "center",
     justifyContent: "center"
   },
   audioActionsRow: { flexDirection: "row", gap: 8, marginTop: 12 },
   audioDoneBtn: {
     flex: 1,
-    backgroundColor: "#0a9f46",
+    backgroundColor: "#C9FF35",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
@@ -2859,9 +2888,9 @@ const styles = StyleSheet.create({
     paddingBottom: 12
   },
   igPreviewTitle: { color: "#f8fafc", fontWeight: "900", fontSize: 15 },
-  igPreviewAction: { color: "#d8ff37", fontWeight: "900", fontSize: 14 },
-  igPreviewActionDisabled: { color: "rgba(216,255,55,0.45)" },
-  igMediaPreviewWrap: { flex: 1, borderRadius: 12, overflow: "hidden", backgroundColor: "#111418", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#303842" },
+  igPreviewAction: { color: "#C9FF35", fontWeight: "900", fontSize: 14 },
+  igPreviewActionDisabled: { color: "rgba(201,255,53,0.45)" },
+  igMediaPreviewWrap: { flex: 1, borderRadius: 12, overflow: "hidden", backgroundColor: "#262626", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#303842" },
   igPreviewCarousel: { flex: 1, alignSelf: "center" },
   igPreviewCarouselPage: { justifyContent: "center", alignItems: "center" },
   igMediaPreview: { width: "100%", height: "100%" },
@@ -2878,7 +2907,7 @@ const styles = StyleSheet.create({
   igPostToolPill: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "#303842",
     alignItems: "center",
@@ -2894,7 +2923,7 @@ const styles = StyleSheet.create({
     minWidth: 132,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#d8ff37",
+    backgroundColor: "#C9FF35",
     paddingHorizontal: 18,
     flexDirection: "row",
     alignItems: "center",
@@ -2905,12 +2934,12 @@ const styles = StyleSheet.create({
   igPostNextText: { color: "#111", fontWeight: "900", fontSize: 15 },
   igComposeTopBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, paddingHorizontal: 8, backgroundColor: "#1f1f1f", borderBottomWidth: 1, borderBottomColor: "#303842" },
   igComposeTitle: { color: "#f8fafc", fontWeight: "900", fontSize: 15 },
-  igComposeShare: { color: "#d8ff37", fontWeight: "900", fontSize: 14 },
+  igComposeShare: { color: "#C9FF35", fontWeight: "900", fontSize: 14 },
   igComposeMediaRow: { backgroundColor: "#1f1f1f", padding: 12, gap: 12, borderTopWidth: 1, borderTopColor: "#303842" },
   igComposeCaptionRow: { flexDirection: "row", gap: 10 },
-  igComposeThumb: { width: 88, height: 118, borderRadius: 8, backgroundColor: "#111418" },
+  igComposeThumb: { width: 88, height: 118, borderRadius: 8, backgroundColor: "#262626" },
   igComposeThumbStripInner: { flexDirection: "row", gap: 6, paddingRight: 6, alignItems: "center" },
-  igComposeThumbSmall: { width: 62, height: 62, borderRadius: 8, backgroundColor: "#111418" },
+  igComposeThumbSmall: { width: 62, height: 62, borderRadius: 8, backgroundColor: "#262626" },
   igComposeCaptionInput: { flex: 1, minHeight: 118, textAlignVertical: "top", color: "#f8fafc", fontWeight: "600" },
   igComposeOptions: {
     marginTop: 16,
@@ -2952,7 +2981,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "#303842",
     borderRadius: 10,
@@ -2967,7 +2996,7 @@ const styles = StyleSheet.create({
   helperText: { color: "#6b7976", textAlign: "center", marginBottom: 2 },
   storyActionRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   storyActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 12, alignItems: "center" },
-  storyActionBtnActive: { borderColor: "#0a9f46", backgroundColor: "#e8f7ef" },
+  storyActionBtnActive: { borderColor: "#C9FF35", backgroundColor: "#e8f7ef" },
   storyActionText: { color: "#1b2422", fontWeight: "700" },
   selectedText: { marginTop: 8, color: "#4d5f5a", fontSize: 12 },
   input: {
@@ -2983,6 +3012,6 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   secondaryBtn: { flex: 1, borderWidth: 1, borderColor: "#c6d5cf", borderRadius: 10, alignItems: "center", paddingVertical: 10 },
   secondaryBtnText: { color: "#4d5f5a", fontWeight: "700" },
-  primaryBtn: { marginTop: 10, backgroundColor: "#0a9f46", borderRadius: 10, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
+  primaryBtn: { marginTop: 10, backgroundColor: "#C9FF35", borderRadius: 10, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
   primaryBtnText: { color: "#fff", fontWeight: "700" }
 });

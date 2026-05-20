@@ -18,6 +18,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage, type AppLanguage } from "../localization/LanguageContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { APP_BLACK, APP_LIME } from "../theme/appColors";
 
 const SLIDES = [
   {
@@ -102,12 +103,12 @@ const ONBOARDING_ICONS: Partial<Record<"media" | "marketplace" | "community" | "
 };
 
 const COLORS = {
-  dark: "#242424",
-  ink: "#151711",
-  lime: "#b8ff19",
-  limeSoft: "#d7ff74",
+  dark: APP_BLACK,
+  ink: APP_BLACK,
+  lime: APP_LIME,
+  limeSoft: APP_LIME,
   muted: "#d8ded4",
-  mutedDark: "#384215"
+  mutedDark: "#3d3d3d"
 };
 
 /** Web: expo-av pins the video absolute-fill; relax so object-fit matches resizeMode. */
@@ -199,6 +200,7 @@ export function InitialSetupScreen() {
   const widthRef = React.useRef(width);
 
   widthRef.current = width;
+  const currentSlideInverted = SLIDES[index]?.inverted ?? false;
 
   const requestScrollToIndex = React.useCallback((rawIndex: number, animated: boolean, opts?: { autoplay?: boolean }) => {
     const w = widthRef.current;
@@ -238,9 +240,11 @@ export function InitialSetupScreen() {
     return () => clearInterval(id);
   }, [isFocused, width, requestScrollToIndex]);
 
+  const showFooter = index >= 1;
+
   return (
-    <SafeAreaView style={styles.root}>
-      <View style={styles.carouselShell} pointerEvents="box-none">
+    <SafeAreaView style={[styles.root, currentSlideInverted ? styles.rootLime : null]}>
+      <View style={[styles.carouselShell, currentSlideInverted ? styles.carouselShellLime : null]} pointerEvents="box-none">
         <FlatList
           ref={listRef}
           style={styles.list}
@@ -378,7 +382,8 @@ export function InitialSetupScreen() {
           )}
         />
       </View>
-      <View style={styles.stableFooter}>
+      {showFooter ? (
+        <View style={[styles.stableFooter, currentSlideInverted ? styles.stableFooterLime : styles.stableFooterDark]}>
         {index === SLIDES.length - 1 ? (
           <View style={styles.authActionsWrap}>
             <Pressable
@@ -395,23 +400,45 @@ export function InitialSetupScreen() {
             </Pressable>
           </View>
         ) : null}
-        {index >= 2 ? (
+        {index >= 1 ? (
           <View style={styles.langRow}>
-            {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
-              <Pressable key={lang} style={[styles.langChip, language === lang ? styles.langChipActive : null]} onPress={() => setLanguage(lang)}>
-                <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
-              </Pressable>
-            ))}
+            {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => {
+              const isActive = language === lang;
+              return (
+                <Pressable
+                  key={lang}
+                  style={[
+                    styles.langChip,
+                    currentSlideInverted ? styles.langChipOnLime : styles.langChipOnDark,
+                    isActive ? (currentSlideInverted ? styles.langChipActiveOnLime : styles.langChipActiveOnDark) : null
+                  ]}
+                  onPress={() => setLanguage(lang)}
+                >
+                  <Text
+                    style={[
+                      styles.langChipText,
+                      currentSlideInverted ? styles.langChipTextOnLime : styles.langChipTextOnDark,
+                      isActive ? (currentSlideInverted ? styles.langChipTextActiveOnLime : styles.langChipTextActiveOnDark) : null
+                    ]}
+                  >
+                    {lang}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         ) : null}
-      </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.dark },
+  rootLime: { backgroundColor: COLORS.lime },
   carouselShell: { flex: 1, position: "relative" },
+  carouselShellLime: { backgroundColor: COLORS.lime },
   list: { flex: 1 },
   page: { backgroundColor: COLORS.dark, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12, justifyContent: "space-between" },
   pageBrand: { paddingHorizontal: 0, paddingBottom: 0 },
@@ -420,7 +447,7 @@ const styles = StyleSheet.create({
   progressRow: { flexDirection: "row", alignItems: "center", gap: 5, width: "100%" },
   progressSegment: { flex: 1, height: 4, borderRadius: 2 },
   progressSegmentDoneDark: { backgroundColor: COLORS.lime, opacity: 0.95 },
-  progressSegmentPendingDark: { backgroundColor: "rgba(184, 255, 25, 0.22)" },
+  progressSegmentPendingDark: { backgroundColor: "rgba(201, 255, 53, 0.22)" },
   progressSegmentDoneInverted: { backgroundColor: COLORS.ink },
   progressSegmentPendingInverted: { backgroundColor: "rgba(21, 23, 17, 0.18)" },
   content: { flex: 1 },
@@ -484,10 +511,15 @@ const styles = StyleSheet.create({
   pageFooterSpaceCta: { height: 168 },
   stableFooter: {
     position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 16
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    paddingTop: 10
   },
+  stableFooterDark: { backgroundColor: APP_BLACK },
+  stableFooterLime: { backgroundColor: COLORS.lime },
   authActionsWrap: { marginBottom: 14, gap: 9 },
   getStartedBtn: {
     height: 48,
@@ -506,8 +538,26 @@ const styles = StyleSheet.create({
   },
   signInBtnText: { color: "#1b1f23", fontSize: 14, fontWeight: "700" },
   langRow: { marginTop: 10, flexDirection: "row", gap: 8, justifyContent: "center" },
-  langChip: { borderWidth: 1, borderColor: COLORS.ink, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: "transparent" },
-  langChipActive: { backgroundColor: COLORS.ink, borderColor: COLORS.ink },
-  langChipText: { color: COLORS.mutedDark, fontSize: 10, fontWeight: "800" },
-  langChipTextActive: { color: COLORS.lime }
+  langChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  langChipOnDark: {
+    borderColor: "rgba(201, 255, 53, 0.65)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)"
+  },
+  langChipActiveOnDark: {
+    backgroundColor: COLORS.lime,
+    borderColor: COLORS.lime
+  },
+  langChipTextOnDark: { color: "#F2F4EF", fontSize: 11, fontWeight: "800" },
+  langChipTextActiveOnDark: { color: APP_BLACK },
+  langChipOnLime: {
+    borderColor: APP_BLACK,
+    backgroundColor: "rgba(38, 38, 38, 0.06)"
+  },
+  langChipActiveOnLime: {
+    backgroundColor: APP_BLACK,
+    borderColor: APP_BLACK
+  },
+  langChipTextOnLime: { color: APP_BLACK, fontSize: 11, fontWeight: "800" },
+  langChipTextActiveOnLime: { color: COLORS.lime },
+  langChipText: { fontSize: 11, fontWeight: "800" }
 });

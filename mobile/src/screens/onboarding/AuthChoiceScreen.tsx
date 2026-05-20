@@ -9,11 +9,12 @@ import { useLanguage, type AppLanguage } from "../../localization/LanguageContex
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister } from "../../services/api";
+import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
 
-const GREEN = "#b9f530";
-const BG = "#1d2126";
-const CARD = "#252a30";
-const BORDER = "#3a424c";
+const GREEN = APP_LIME;
+const BG = APP_BLACK;
+const CARD = APP_SURFACE;
+const BORDER = "#3a3a3a";
 
 /** Match backend + register: last 10 digits for @phone.agrovibes (handles +91 / leading 0). */
 function resolvePhoneEmailLocalPart(digits: string): string {
@@ -44,7 +45,6 @@ export function AuthChoiceScreen() {
   const initialMode = route.params?.initialMode === "login" ? "login" : "register";
   const [mode, setMode] = React.useState<"register" | "login">(initialMode);
   const [phone, setPhone] = React.useState("");
-  const [loginIdentifier, setLoginIdentifier] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [fullName, setFullName] = React.useState("");
   const [username, setUsername] = React.useState("");
@@ -53,11 +53,9 @@ export function AuthChoiceScreen() {
 
   const submit = async () => {
     const digits = phone.replace(/\D/g, "");
-    const normalizedLoginIdentifier = loginIdentifier.trim();
     if (password.trim().length < 6 || loadingSubmit) return;
     if (mode === "register" && (!fullName.trim() || !username.trim())) return;
-    if (mode === "register" && digits.length < 10) return;
-    if (mode === "login" && !normalizedLoginIdentifier) return;
+    if (digits.length < 10) return;
     setLoadingSubmit(true);
     setErrorText("");
     try {
@@ -74,7 +72,7 @@ export function AuthChoiceScreen() {
               phone: `+91${phoneLocal}`
             })
           : await (async () => {
-              const candidates = buildLoginIdentifiers(normalizedLoginIdentifier);
+              const candidates = buildLoginIdentifiers(digits);
               let lastError: any = null;
               for (const identifierCandidate of candidates) {
                 try {
@@ -175,30 +173,18 @@ export function AuthChoiceScreen() {
           </>
         ) : null}
         <View style={styles.row}>
-          {mode === "register" ? (
-            <>
-              <View style={styles.countryTag}>
-                <Text style={styles.countryText}>🇮🇳 +91</Text>
-              </View>
-              <TextInput
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                placeholder={t("mobilePlaceholder")}
-                placeholderTextColor="#7f8b93"
-                style={[styles.input, styles.rowInput]}
-              />
-            </>
-          ) : (
-            <TextInput
-              value={loginIdentifier}
-              onChangeText={setLoginIdentifier}
-              placeholder="Mobile, username, or 9876543210@phone.agrovibes"
-              placeholderTextColor="#7f8b93"
-              style={[styles.input, styles.rowInput]}
-              autoCapitalize="none"
-            />
-          )}
+          <View style={styles.countryTag}>
+            <Text style={styles.countryText}>🇮🇳 +91</Text>
+          </View>
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+            placeholder={mode === "login" ? t("loginMobilePlaceholder") : t("mobilePlaceholder")}
+            placeholderTextColor="#7f8b93"
+            style={[styles.input, styles.rowInput]}
+            maxLength={10}
+          />
         </View>
         <TextInput
           value={password}
@@ -213,8 +199,7 @@ export function AuthChoiceScreen() {
           style={[
             styles.primaryBtn,
             password.trim().length < 6 ||
-            (mode === "register" && phone.replace(/\D/g, "").length < 10) ||
-            (mode === "login" && !loginIdentifier.trim()) ||
+            phone.replace(/\D/g, "").length < 10 ||
             (mode === "register" && (!fullName.trim() || !username.trim())) ||
             loadingSubmit
               ? styles.disabled
@@ -261,7 +246,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "#20262d"
+    backgroundColor: APP_SURFACE
   },
   langChipActive: { backgroundColor: GREEN, borderColor: GREEN },
   langChipText: { color: "#9aa5ad", fontSize: 11, fontWeight: "800" },
@@ -273,7 +258,7 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     overflow: "hidden",
     marginBottom: 16,
-    backgroundColor: "#20262d"
+    backgroundColor: APP_SURFACE
   },
   modeSegmentBtn: { flex: 1, paddingVertical: 12, alignItems: "center", justifyContent: "center" },
   modeSegmentBtnActive: { backgroundColor: GREEN },
@@ -294,7 +279,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 10,
-    backgroundColor: "#20262d"
+    backgroundColor: APP_SURFACE
   },
   countryText: { color: "#d6dde2", fontWeight: "700", fontSize: 12 },
   input: {
@@ -305,7 +290,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontWeight: "700",
     color: "#eef4f8",
-    backgroundColor: "#20262d"
+    backgroundColor: APP_SURFACE
   },
   spaced: { marginTop: 10 },
   row: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 10 },

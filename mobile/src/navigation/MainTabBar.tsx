@@ -3,12 +3,13 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { APP_BLACK, APP_LIME } from "../theme/appColors";
 
 type Props = BottomTabBarProps & { onCreatePress: () => void };
 
-const TAB_BG = "#1e1f1f";
+const TAB_BG = APP_BLACK;
 const MUTED = "#b9bec3";
-const BRAND_ACCENT = "#C9FF35";
+const BRAND_ACCENT = APP_LIME;
 
 function tabIcon(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
   switch (routeName) {

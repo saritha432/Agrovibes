@@ -5,8 +5,8 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 
-const GREEN = "#b9f530";
-const BG = "#1d2126";
+const GREEN = "#C9FF35";
+const BG = "#262626";
 const CARD = "#252a30";
 const BORDER = "#3a424c";
 
