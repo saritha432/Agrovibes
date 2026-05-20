@@ -20,13 +20,13 @@ import { updateMyProfile, uploadImageFile } from "../services/api";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 
 /** Align with Profile tab / home social surfaces */
-const SURFACE = "#111418";
-const INPUT_BG = "#1d2126";
+const SURFACE = "#262626";
+const INPUT_BG = "#262626";
 const BORDER = "#303842";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
-const ACCENT = "#d8ff37";
-const ACCENT_TEXT = "#111418";
+const ACCENT = "#C9FF35";
+const ACCENT_TEXT = "#262626";
 
 function safeHandle(value: string) {
   return String(value || "")

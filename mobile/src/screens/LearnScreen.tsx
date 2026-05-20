@@ -12,7 +12,7 @@ import { fetchLearnCourses } from "../services/api";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "LearnHome">;
 
-const GREEN = "#0a9f46";
+const GREEN = "#C9FF35";
 const BORDER = "#dce3e1";
 
 const segments = [

@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { navigateToDirectInbox, navigateToUserSearch } from "../navigation/navigationRef";
-import { APP_DARK_BG } from "../theme/appColors";
+import { APP_BLACK, APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 export function AppTopBar() {
   const { openNotificationSheet, notificationUnreadCount, messageUnreadCount } = useNotificationPanel();
@@ -13,10 +13,10 @@ export function AppTopBar() {
       <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
       <View style={styles.rightSide}>
         <Pressable style={styles.iconBadge} onPress={navigateToUserSearch}>
-          <Ionicons name="search-outline" size={16} color="#d8ff37" />
+          <Ionicons name="search-outline" size={16} color={APP_LIME} />
         </Pressable>
         <Pressable style={styles.iconBadge} onPress={navigateToDirectInbox}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#d8ff37" />
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#C9FF35" />
           {messageUnreadCount > 0 ? (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{Math.min(99, messageUnreadCount)}</Text>
@@ -24,7 +24,7 @@ export function AppTopBar() {
           ) : null}
         </Pressable>
         <Pressable style={styles.iconBadge} onPress={openNotificationSheet}>
-          <Ionicons name="notifications-outline" size={16} color="#d8ff37" />
+          <Ionicons name="notifications-outline" size={16} color={APP_LIME} />
           {notificationUnreadCount > 0 ? (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{Math.min(99, notificationUnreadCount)}</Text>
@@ -60,12 +60,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: -5,
     top: -4,
-    backgroundColor: "#d8ff37",
+    backgroundColor: APP_LIME,
     borderRadius: 7,
     minWidth: 12,
     height: 12,
     alignItems: "center",
     justifyContent: "center"
   },
-  badgeText: { color: "#1f2b28", fontSize: 8, fontWeight: "700" }
+  badgeText: { color: APP_BLACK, fontSize: 8, fontWeight: "700" }
 });

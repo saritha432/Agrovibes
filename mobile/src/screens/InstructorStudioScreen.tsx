@@ -11,7 +11,7 @@ import { createCourse } from "../services/api";
 import { updateCourse } from "../services/api";
 import { uploadVideoFile } from "../services/api";
 
-const GREEN = "#0a9f46";
+const GREEN = "#C9FF35";
 const BORDER = "#dce3e1";
 type DraftLesson = {
   id: string;

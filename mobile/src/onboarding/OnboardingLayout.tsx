@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-const GREEN = "#0a9f46";
+const GREEN = "#C9FF35";
 const BORDER = "#dce3e1";
 
 interface Props {

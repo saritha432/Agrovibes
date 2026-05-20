@@ -33,7 +33,7 @@ export const StoryCameraPreview = forwardRef<CameraView, Props>(function StoryCa
   if (!permission?.granted) {
     return (
       <Pressable style={styles.fallback} onPress={onPress}>
-        <Ionicons name="camera-outline" size={36} color="#b7ff37" />
+        <Ionicons name="camera-outline" size={36} color="#C9FF35" />
         <Text style={styles.hint}>Tap to allow camera</Text>
       </Pressable>
     );
@@ -51,7 +51,7 @@ export const StoryCameraPreview = forwardRef<CameraView, Props>(function StoryCa
       />
       {!ready ? (
         <View style={styles.loading} pointerEvents="none">
-          <ActivityIndicator color="#d8ff37" />
+          <ActivityIndicator color="#C9FF35" />
         </View>
       ) : null}
     </View>

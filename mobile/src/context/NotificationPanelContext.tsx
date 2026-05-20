@@ -333,7 +333,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Notifications</Text>
               <Pressable onPress={closeNotificationSheet}>
-                <Ionicons name="close" size={20} color="#d8ff37" />
+                <Ionicons name="close" size={20} color="#C9FF35" />
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={styles.sheetBody}>
@@ -425,7 +425,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                 if (item.kind === "accepted") {
                   return (
                     <Pressable key={item.key} style={styles.acceptedRow} onPress={() => onMarkAcceptedRead(n)}>
-                      <Ionicons name="checkmark-circle" size={16} color="#0a9f46" />
+                      <Ionicons name="checkmark-circle" size={16} color="#C9FF35" />
                       <Text style={styles.rowText}>{n.actorName} accepted your follow request.</Text>
                     </Pressable>
                   );
@@ -464,7 +464,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#1d2126",
+    backgroundColor: "#262626",
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     maxHeight: "70%",
@@ -473,17 +473,17 @@ const styles = StyleSheet.create({
     borderColor: "#3a424c"
   },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sheetTitle: { color: "#d8ff37", fontWeight: "900", fontSize: 16 },
+  sheetTitle: { color: "#C9FF35", fontWeight: "900", fontSize: 16 },
   sheetBody: { paddingTop: 10, gap: 10 },
   emptyText: { color: "#9ca8b1", fontWeight: "700" },
   row: { borderWidth: 1, borderColor: "#3a424c", borderRadius: 10, backgroundColor: "#252a30", padding: 10, gap: 8 },
   rowText: { color: "#eef4f8", fontWeight: "700", flex: 1 },
   rowActions: { flexDirection: "row", gap: 8 },
-  acceptBtn: { backgroundColor: "#b9f530", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  acceptBtn: { backgroundColor: "#C9FF35", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   acceptText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
   declineBtn: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   declineText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followBackBtn: { backgroundColor: "#0a9f46", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followBackBtn: { backgroundColor: "#C9FF35", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   followBackText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },

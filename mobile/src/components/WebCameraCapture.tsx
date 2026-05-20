@@ -183,7 +183,7 @@ export function WebCameraCapture({ visible, onClose, onCapture, initialFacing = 
 
         {!ready && !errorText ? (
           <View style={styles.centerWrap}>
-            <ActivityIndicator size="large" color="#d8ff37" />
+            <ActivityIndicator size="large" color="#C9FF35" />
             <Text style={styles.loadingText}>Starting camera…</Text>
           </View>
         ) : null}
@@ -202,7 +202,7 @@ export function WebCameraCapture({ visible, onClose, onCapture, initialFacing = 
             <Ionicons name="close" size={28} color="#fff" />
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={() => setFacing((f) => (f === "front" ? "back" : "front"))}>
-            <Ionicons name="camera-reverse-outline" size={28} color="#d8ff37" />
+            <Ionicons name="camera-reverse-outline" size={28} color="#C9FF35" />
           </Pressable>
         </View>
 
@@ -236,11 +236,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.55)",
     zIndex: 2
   },
-  loadingText: { color: "#d8ff37", fontWeight: "600" },
+  loadingText: { color: "#C9FF35", fontWeight: "600" },
   errorText: { color: "#fecaca", textAlign: "center", paddingHorizontal: 24, fontWeight: "600" },
   retryBtn: {
     marginTop: 12,
-    backgroundColor: "#d8ff37",
+    backgroundColor: "#C9FF35",
     borderRadius: 10,
     paddingHorizontal: 18,
     paddingVertical: 10
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     height: 78,
     borderRadius: 39,
     borderWidth: 4,
-    borderColor: "#d8ff37",
+    borderColor: "#C9FF35",
     alignItems: "center",
     justifyContent: "center"
   },

@@ -189,7 +189,7 @@ export function InAppCameraCapture({
       <View style={styles.root}>
         {permissionLoading ? (
           <View style={styles.centerWrap}>
-            <ActivityIndicator size="large" color="#d8ff37" />
+            <ActivityIndicator size="large" color="#C9FF35" />
             <Text style={styles.loadingText}>Starting camera…</Text>
           </View>
         ) : permissionDenied ? (
@@ -231,7 +231,7 @@ export function InAppCameraCapture({
             />
             {!cameraReady ? (
               <View style={styles.centerWrap} pointerEvents="none">
-                <ActivityIndicator size="large" color="#d8ff37" />
+                <ActivityIndicator size="large" color="#C9FF35" />
               </View>
             ) : null}
             <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
@@ -243,7 +243,7 @@ export function InAppCameraCapture({
                 onPress={() => setFacing((f) => (f === "front" ? "back" : "front"))}
                 hitSlop={12}
               >
-                <Ionicons name="camera-reverse-outline" size={28} color="#d8ff37" />
+                <Ionicons name="camera-reverse-outline" size={28} color="#C9FF35" />
               </Pressable>
             </View>
 
@@ -303,14 +303,14 @@ const styles = StyleSheet.create({
   permissionTitle: { color: "#fff", fontSize: 20, fontWeight: "800", marginBottom: 8 },
   permissionSub: { color: "#9ca3af", textAlign: "center", lineHeight: 20, marginBottom: 20 },
   permissionBtn: {
-    backgroundColor: "#d8ff37",
+    backgroundColor: "#C9FF35",
     borderRadius: 12,
     paddingHorizontal: 24,
     paddingVertical: 12,
     marginBottom: 14
   },
   permissionBtnText: { color: "#111", fontWeight: "800", fontSize: 15 },
-  permissionCancel: { color: "#d8ff37", fontWeight: "700" },
+  permissionCancel: { color: "#C9FF35", fontWeight: "700" },
   topBar: {
     position: "absolute",
     top: 0,
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
     height: 78,
     borderRadius: 39,
     borderWidth: 4,
-    borderColor: "#d8ff37",
+    borderColor: "#C9FF35",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.25)"

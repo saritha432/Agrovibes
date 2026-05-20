@@ -26,9 +26,9 @@ const BG = "#262626";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";
-const YELLOW = "#d8ff37";
-const BUBBLE_PEER = "#1d2126";
-const INPUT_BG = "#111418";
+const YELLOW = "#C9FF35";
+const BUBBLE_PEER = "#262626";
+const INPUT_BG = "#262626";
 
 function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -265,7 +265,7 @@ export function DirectChatScreen() {
             size={32}
             borderRadius={16}
             style={styles.headerAvatar}
-            fallbackBackgroundColor="#111418"
+            fallbackBackgroundColor="#262626"
             initialsColor={YELLOW}
           />
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -340,7 +340,7 @@ export function DirectChatScreen() {
                       name={sharedProfile.userName}
                       size={44}
                       borderRadius={22}
-                      fallbackBackgroundColor="#111418"
+                      fallbackBackgroundColor="#262626"
                       initialsColor={YELLOW}
                     />
                     <View style={styles.sharedProfileMeta}>
@@ -406,7 +406,7 @@ export function DirectChatScreen() {
                     name={peerName}
                     size={120}
                     borderRadius={60}
-                    fallbackBackgroundColor="#1d2126"
+                    fallbackBackgroundColor="#262626"
                     initialsColor="#fff"
                   />
                 </View>
@@ -425,7 +425,7 @@ export function DirectChatScreen() {
               size={activeCall === "video" ? 82 : 118}
               borderRadius={activeCall === "video" ? 41 : 59}
               style={[styles.callAvatar, activeCall === "video" ? styles.callAvatarVideo : null]}
-              fallbackBackgroundColor="#d8ff37"
+              fallbackBackgroundColor="#C9FF35"
               initialsColor="#111"
             />
             <Text style={styles.callName}>{peerName}</Text>
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     alignItems: "center",
     justifyContent: "center"
   },
@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
     height: 248,
     borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)"
   },
@@ -509,7 +509,7 @@ const styles = StyleSheet.create({
     width: 230,
     minHeight: 88,
     borderRadius: 16,
-    backgroundColor: "#111418",
+    backgroundColor: "#262626",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     padding: 10,
@@ -519,13 +519,13 @@ const styles = StyleSheet.create({
   },
   sharedProfileMeta: { flex: 1, minWidth: 0 },
   sharedProfileName: { color: "#fff", fontSize: 14, fontWeight: "900" },
-  sharedProfileHandle: { marginTop: 2, color: "#d8ff37", fontSize: 12, fontWeight: "700" },
+  sharedProfileHandle: { marginTop: 2, color: "#C9FF35", fontSize: 12, fontWeight: "700" },
   sharedProfileBio: { marginTop: 2, color: "rgba(255,255,255,0.8)", fontSize: 11 },
   sharedReelThumb: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1d2126"
+    backgroundColor: "#262626"
   },
   sharedReelThumbPlaceholder: {
     alignItems: "center",
@@ -587,7 +587,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#1d2126",
+    backgroundColor: "#262626",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 2
@@ -653,7 +653,7 @@ const styles = StyleSheet.create({
     width: 82,
     height: 82,
     borderRadius: 41,
-    backgroundColor: "rgba(216,255,55,0.85)"
+    backgroundColor: "rgba(201,255,53,0.85)"
   },
   callAvatarText: { color: "#111", fontSize: 42, fontWeight: "900" },
   callName: { marginTop: 18, color: "#fff", fontSize: 25, fontWeight: "900", textAlign: "center" },

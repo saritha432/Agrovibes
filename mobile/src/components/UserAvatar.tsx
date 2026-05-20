@@ -22,7 +22,7 @@ export function UserAvatar({
   style,
   textStyle,
   fallbackBackgroundColor = "#2a3139",
-  initialsColor = "#d8ff37"
+  initialsColor = "#C9FF35"
 }: Props) {
   const r = borderRadius ?? size / 2;
   const trimmed = typeof uri === "string" ? uri.trim() : "";

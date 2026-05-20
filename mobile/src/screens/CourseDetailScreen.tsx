@@ -16,7 +16,7 @@ import { enrollInCourse } from "../services/api";
 type Nav = NativeStackNavigationProp<LearnStackParamList, "CourseDetail">;
 type Rt = RouteProp<LearnStackParamList, "CourseDetail">;
 
-const GREEN = "#0a9f46";
+const GREEN = "#C9FF35";
 const BORDER = "#dce3e1";
 
 function formatCompact(n: number) {

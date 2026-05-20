@@ -7,8 +7,8 @@ import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 
-const GREEN = "#b9f530";
-const BG = "#1d2126";
+const GREEN = "#C9FF35";
+const BG = "#262626";
 
 export function AllowNotificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();

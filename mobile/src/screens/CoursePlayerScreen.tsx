@@ -14,7 +14,7 @@ import { fetchCourseProgress } from "../services/api";
 type Nav = NativeStackNavigationProp<LearnStackParamList, "CoursePlayer">;
 type Rt = RouteProp<LearnStackParamList, "CoursePlayer">;
 
-const GREEN = "#0a9f46";
+const GREEN = "#C9FF35";
 const BORDER = "#dce3e1";
 
 function lessonIsPlayable(lesson: CourseLesson) {
