@@ -49,17 +49,12 @@
     "web": {
       "favicon": "./assets/logo.png"
     },
-    "extra": {
-      "eas": {
-        "projectId": "03e098eb-cfad-496b-8385-dab904b3d946"
-      }
-    },
-    "owner": "saritha-s",
+    "owner": "mounika-m",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/03e098eb-cfad-496b-8385-dab904b3d946"
+      "url": "https://u.expo.dev/f6754164-ad7d-4832-89d0-36119b56026b"
     },
     "plugins": [
       [
@@ -70,6 +65,11 @@
           "recordAudioAndroid": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f6754164-ad7d-4832-89d0-36119b56026b"
+      }
+    }
   }
 }

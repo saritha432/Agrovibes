@@ -48,7 +48,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     onboardingSlide7Tag: "Logistics",
     onboardingSlide7Title: "Reliable Farm Delivery",
     onboardingSlide7Subtitle: "Track your produce shipments from source to market through trusted transport options.",
-    onboardingSlide8Tag: "Logistics",
+    onboardingSlide8Tag: "All Done!",
     onboardingSlide8Title: "Reliable Farm Delivery",
     onboardingSlide8Subtitle: "Now Your Produce Reaches Market Securely And Quickly Without Hassle."
   },

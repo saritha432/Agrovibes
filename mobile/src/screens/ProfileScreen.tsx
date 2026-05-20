@@ -4,18 +4,22 @@ import {
   Alert,
   FlatList,
   Image,
+  Linking,
   Modal,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   ViewToken,
   useWindowDimensions
 } from "react-native";
 import { Audio, ResizeMode, Video } from "expo-av";
+import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
@@ -27,9 +31,11 @@ import {
   fetchProfileStats,
   fetchSocialNetwork,
   fetchTaggedHomePosts,
+  getWebAppOrigin,
   HomePost,
   removeFollower,
   sendFollowRequest,
+  sendDirectMessage,
   unfollowUser,
 } from "../services/api";
 import {
@@ -97,7 +103,9 @@ export function ProfileScreen() {
   const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
   const [playingReelId, setPlayingReelId] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
-  const [isFollowing, setFollowing] = useState(false);
+  const [shareProfileOpen, setShareProfileOpen] = useState(false);
+  const [shareBusyByUserId, setShareBusyByUserId] = useState<Record<number, boolean>>({});
+  const [shareProfileSearch, setShareProfileSearch] = useState("");
   const isMountedRef = useRef(true);
 
   const gridGap = 6;
@@ -328,6 +336,96 @@ export function ProfileScreen() {
     navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] });
   };
 
+  const profileShareRecipients = useMemo(() => {
+    const map = new Map<number, { id: number; name: string; avatarUrl?: string | null }>();
+    // Share sheet should only show users the viewer is following.
+    for (const p of followingList) {
+      const id = p.key && /^\d+$/.test(String(p.key)) ? Number(p.key) : null;
+      if (!id || map.has(id)) continue;
+      map.set(id, { id, name: p.name, avatarUrl: p.avatarUrl });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [followingList]);
+
+  const filteredProfileShareRecipients = useMemo(() => {
+    const q = String(shareProfileSearch || "").trim().toLowerCase();
+    if (!q) return profileShareRecipients;
+    return profileShareRecipients.filter((r) => String(r.name || "").toLowerCase().includes(q));
+  }, [profileShareRecipients, shareProfileSearch]);
+
+  const profileChatMessage = useCallback(() => {
+    if (!user) return "";
+    const handle = profileModel?.handle || safeHandle(user.fullName || user.username || "user");
+    return `[Cropvibe Profile]\n${JSON.stringify({
+      userId: Number(user.id) || undefined,
+      userName: user.fullName || "User",
+      handle,
+      bio: user.bio || "",
+      avatarUrl: user.avatarUrl || null
+    })}`;
+  }, [profileModel?.handle, user]);
+
+  const profileShareLink = useMemo(() => {
+    if (!user) return "";
+    const uid = Number(user.id);
+    if (Number.isFinite(uid) && uid > 0) return `${getWebAppOrigin()}/profile/${uid}`;
+    return `${getWebAppOrigin()}/profile/${encodeURIComponent(profileModel?.handle || safeHandle(user.fullName || user.username || "user"))}`;
+  }, [profileModel?.handle, user]);
+
+  const onShareProfileSystem = useCallback(async () => {
+    if (!user) return;
+    const shareHandle = profileModel?.handle || safeHandle(user.fullName || user.username || "user");
+    const text = [`${user.fullName}'s profile on Agrovibes`, shareHandle, profileShareLink].filter(Boolean).join("\n");
+    try {
+      await Share.share({ title: `${user.fullName} - Agrovibes Profile`, message: text });
+    } catch {
+      // ignore
+    }
+  }, [profileModel?.handle, profileShareLink, user]);
+
+  const onCopyProfileLink = useCallback(async () => {
+    if (!profileShareLink) return;
+    await Clipboard.setStringAsync(profileShareLink);
+    Alert.alert("Copied", "Profile link copied.");
+  }, [profileShareLink]);
+
+  const onShareProfileToWhatsApp = useCallback(async () => {
+    if (!profileShareLink) return;
+    const text = encodeURIComponent(`Check out this profile on Agrovibes\n${profileShareLink}`);
+    const appUrl = `whatsapp://send?text=${text}`;
+    const webUrl = `https://wa.me/?text=${text}`;
+    try {
+      const supported = await Linking.canOpenURL(appUrl);
+      await Linking.openURL(supported ? appUrl : webUrl);
+    } catch {
+      await onShareProfileSystem();
+    }
+  }, [onShareProfileSystem, profileShareLink]);
+
+  const handleSendProfileToRecipient = useCallback(async (recipient: { id: number; name: string }) => {
+    if (!token || !user) return;
+    setShareBusyByUserId((prev) => ({ ...prev, [recipient.id]: true }));
+    try {
+      await sendDirectMessage(token, recipient.id, profileChatMessage());
+      Alert.alert("Shared", `Profile sent to ${recipient.name}`);
+      setShareProfileOpen(false);
+    } catch {
+      Alert.alert("Share failed", "Could not send profile right now.");
+    } finally {
+      setShareBusyByUserId((prev) => ({ ...prev, [recipient.id]: false }));
+    }
+  }, [profileChatMessage, token, user]);
+
+  const handleShareProfile = useCallback(async () => {
+    if (!user) return;
+    if (!profileShareRecipients.length) {
+      Alert.alert("No recipients", "Follow users or get followers to share your profile in chat.");
+      return;
+    }
+    setShareProfileSearch("");
+    setShareProfileOpen(true);
+  }, [profileShareRecipients.length, user]);
+
   const followBackFromFollowersList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
     const targetId = person.key && /^\d+$/.test(String(person.key)) ? Number(person.key) : null;
@@ -526,16 +624,7 @@ export function ProfileScreen() {
                     Edit Profile
                   </Text>
                 </Pressable>
-                <Pressable
-                  style={[styles.followCompactBtn, isFollowing ? styles.followWideBtnActive : null]}
-                  onPress={() => setFollowing((v) => !v)}
-                >
-                  <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color={TEXT} />
-                  <Text style={styles.followCompactBtnText} numberOfLines={1}>
-                    {isFollowing ? "Following" : "Follow"}
-                  </Text>
-                </Pressable>
-                <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Share", "Share coming soon.")}>
+                <Pressable style={styles.iconActionSquare} onPress={handleShareProfile}>
                   <Ionicons name="share-outline" size={20} color={TEXT} />
                 </Pressable>
               </View>
@@ -841,6 +930,90 @@ export function ProfileScreen() {
       </Modal>
 
       <Modal
+        visible={shareProfileOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShareProfileOpen(false)}
+      >
+        <View style={styles.overlay}>
+          <Pressable style={styles.overlayTapAboveSheet} onPress={() => setShareProfileOpen(false)} />
+          <View style={styles.sheet} collapsable={false}>
+            <View style={styles.profileShareHandle} />
+            <View style={styles.profileShareSearchRow}>
+              <Ionicons name="search" size={16} color={LIME} />
+              <TextInput
+                value={shareProfileSearch}
+                onChangeText={setShareProfileSearch}
+                placeholder="Search"
+                placeholderTextColor={MUTED}
+                style={styles.profileShareSearchInput}
+              />
+              <Pressable style={styles.profileShareSearchAction} onPress={onShareProfileSystem}>
+                <Ionicons name="person-add-outline" size={16} color={LIME} />
+              </Pressable>
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.profileSharePeopleRow}>
+              {filteredProfileShareRecipients.length ? (
+                filteredProfileShareRecipients.map((recipient) => (
+                  <Pressable
+                    key={recipient.id}
+                    style={styles.profileSharePersonItem}
+                    onPress={() => void handleSendProfileToRecipient(recipient)}
+                    disabled={!!shareBusyByUserId[recipient.id]}
+                  >
+                    <View style={styles.profileSharePersonAvatar}>
+                      {shareBusyByUserId[recipient.id] ? (
+                        <Ionicons name="checkmark" size={18} color={LIME} />
+                      ) : (
+                        <UserAvatar
+                          uri={recipient.avatarUrl}
+                          name={recipient.name}
+                          size={52}
+                          borderRadius={26}
+                          fallbackBackgroundColor="#29303a"
+                          initialsColor={LIME}
+                        />
+                      )}
+                    </View>
+                    <Text style={styles.profileSharePersonName} numberOfLines={1}>{recipient.name}</Text>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={styles.sheetEmpty}>No chats found.</Text>
+              )}
+            </ScrollView>
+            <View style={styles.profileShareFooterRow}>
+              <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
+                <View style={styles.profileShareFooterIcon}><Ionicons name="add-circle-outline" size={20} color={LIME} /></View>
+                <Text style={styles.profileShareFooterText}>Add to story</Text>
+              </Pressable>
+              <Pressable style={styles.profileShareFooterAction} onPress={onCopyProfileLink}>
+                <View style={styles.profileShareFooterIcon}><Ionicons name="link-outline" size={20} color={LIME} /></View>
+                <Text style={styles.profileShareFooterText}>Copy Link</Text>
+              </Pressable>
+              <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
+                <View style={styles.profileShareFooterIcon}><Ionicons name="open-outline" size={20} color={LIME} /></View>
+                <Text style={styles.profileShareFooterText}>Share To..</Text>
+              </Pressable>
+              <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileToWhatsApp}>
+                <View style={styles.profileShareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color={LIME} /></View>
+                <Text style={styles.profileShareFooterText}>Whatsapp</Text>
+              </Pressable>
+              <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
+                <View style={styles.profileShareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color={LIME} /></View>
+                <Text style={styles.profileShareFooterText}>Messenger</Text>
+              </Pressable>
+              <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
+                <View style={styles.profileShareFooterIcon}><Ionicons name="logo-snapchat" size={20} color={LIME} /></View>
+                <Text style={styles.profileShareFooterText}>Snapchat</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={!!activeListType}
         transparent
         animationType="slide"
@@ -1133,22 +1306,6 @@ const styles = StyleSheet.create({
     gap: 6
   },
   editProfileBtnText: { color: "#111", fontWeight: "900", fontSize: 14 },
-  followCompactBtn: {
-    flex: 1,
-    minWidth: 0,
-    backgroundColor: BEIGE_FOLLOW,
-    borderRadius: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: "#303842"
-  },
-  followWideBtnActive: { backgroundColor: "rgba(216,255,55,0.18)", borderColor: TEAL },
-  followCompactBtnText: { color: TEXT, fontWeight: "900", fontSize: 14 },
   iconActionSquare: {
     width: 46,
     height: 46,
@@ -1425,5 +1582,71 @@ const styles = StyleSheet.create({
     borderColor: "#b91c1c"
   },
   confirmBtnDangerText: { color: "#fff", fontWeight: "900", fontSize: 15 },
-  confirmBtnDisabled: { opacity: 0.55 }
+  confirmBtnDisabled: { opacity: 0.55 },
+
+  profileShareHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#3a434f",
+    marginBottom: 10
+  },
+  profileShareSearchRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#303842",
+    backgroundColor: "#1f2937",
+    paddingHorizontal: 10,
+    gap: 8
+  },
+  profileShareSearchInput: { flex: 1, color: TEXT, fontSize: 13, fontWeight: "600", paddingVertical: 9 },
+  profileShareSearchAction: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827"
+  },
+  profileSharePeopleRow: {
+    gap: 10,
+    paddingTop: 12,
+    paddingBottom: 8
+  },
+  profileSharePersonItem: { alignItems: "center", width: 70 },
+  profileSharePersonAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2f3741"
+  },
+  profileSharePersonName: { marginTop: 6, color: "#e5edf5", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  profileShareFooterRow: {
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderColor: "#303842",
+    paddingTop: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  profileShareFooterAction: { alignItems: "center", gap: 6, flex: 1 },
+  profileShareFooterIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#374151",
+    backgroundColor: "#1f2937"
+  },
+  profileShareFooterText: { color: MUTED, fontSize: 9, fontWeight: "700", textAlign: "center" }
 });
