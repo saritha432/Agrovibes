@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -57,7 +58,17 @@ export function InAppCameraCapture({
   const cameraRef = useRef<CameraView>(null);
   const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
   const recordingStartedAtRef = useRef<number>(0);
+  const recordingActiveRef = useRef(false);
   const unavailableNotifiedRef = useRef(false);
+
+  /** Release APK builds need the native camera in video mode before recordAsync (picture mode records no frames). */
+  const waitForNativeRecordReady = useCallback(async () => {
+    if (Platform.OS === "android") {
+      await new Promise<void>((resolve) => setTimeout(resolve, 280));
+      return;
+    }
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }, []);
 
   const [facing, setFacing] = useState<CameraFacing>(initialFacing);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -74,6 +85,9 @@ export function InAppCameraCapture({
     setRecording(false);
     setBusy(false);
     setCameraReady(false);
+    recordingActiveRef.current = false;
+    recordingPromiseRef.current = null;
+    recordingStartedAtRef.current = 0;
     unavailableNotifiedRef.current = false;
   }, [initialFacing, visible]);
 
@@ -120,13 +134,16 @@ export function InAppCameraCapture({
       }
     }
     setErrorText("");
-    if (recording) {
+    if (recording || recordingActiveRef.current) {
       setBusy(true);
       try {
+        if (!recordingPromiseRef.current) {
+          throw new Error("Recording did not start. Try again.");
+        }
         // expo-camera can fail with "stopped before any data could be produced"
         // if stop is requested too quickly after start. Wait a short minimum window.
         const elapsed = Date.now() - (recordingStartedAtRef.current || 0);
-        const minMs = 650;
+        const minMs = Platform.OS === "android" ? 1000 : 650;
         if (elapsed > 0 && elapsed < minMs) {
           await new Promise((resolve) => setTimeout(resolve, minMs - elapsed));
         }
@@ -134,6 +151,7 @@ export function InAppCameraCapture({
         const video = await recordingPromiseRef.current;
         recordingPromiseRef.current = null;
         recordingStartedAtRef.current = 0;
+        recordingActiveRef.current = false;
         setRecording(false);
         setBusy(false);
         if (!video?.uri) {
@@ -145,28 +163,54 @@ export function InAppCameraCapture({
       } catch (e) {
         recordingPromiseRef.current = null;
         recordingStartedAtRef.current = 0;
+        recordingActiveRef.current = false;
         setRecording(false);
         setBusy(false);
         const msg = e instanceof Error ? e.message : "Video recording failed.";
-        if (/before any data could be produced/i.test(msg)) {
-          setErrorText("Recording was too short. Hold for a moment, then stop.");
+        if (/before any data could be produced|did not start/i.test(msg)) {
+          setErrorText("Recording failed to start. Wait a second, then tap record again.");
         } else {
           setErrorText(msg);
         }
       }
       return;
     }
-    if (busy) return;
+    if (busy || !cameraReady) {
+      if (!cameraReady) setErrorText("Camera is still starting. Try again in a moment.");
+      return;
+    }
+    recordingActiveRef.current = true;
     setRecording(true);
     try {
+      // mode "any" switches picture → video on this render; native layer must settle before recordAsync.
+      if (mode === "any") {
+        await waitForNativeRecordReady();
+      } else if (Platform.OS === "android") {
+        await waitForNativeRecordReady();
+      }
+      if (!cameraRef.current) {
+        throw new Error("Camera unavailable.");
+      }
       recordingStartedAtRef.current = Date.now();
       recordingPromiseRef.current = cameraRef.current.recordAsync({ maxDuration: 60 });
     } catch (e) {
       recordingStartedAtRef.current = 0;
+      recordingActiveRef.current = false;
+      recordingPromiseRef.current = null;
       setRecording(false);
       setErrorText(e instanceof Error ? e.message : "Could not start recording.");
     }
-  }, [busy, micPermission?.granted, onCapture, onClose, recording, requestMicPermission]);
+  }, [
+    busy,
+    cameraReady,
+    micPermission?.granted,
+    mode,
+    onCapture,
+    onClose,
+    recording,
+    requestMicPermission,
+    waitForNativeRecordReady
+  ]);
 
   const onShutterPress = () => {
     if (mode === "video") {
@@ -179,7 +223,9 @@ export function InAppCameraCapture({
   if (!visible) return null;
 
   const wantsVideo = mode === "video" || mode === "any";
-  const cameraViewMode = recording && wantsVideo ? "video" : "picture";
+  // Reels use mode="video" — must stay in video mode before recordAsync (release APKs record zero frames in picture mode).
+  const cameraViewMode: "picture" | "video" =
+    mode === "video" || (recording && wantsVideo) ? "video" : "picture";
 
   const permissionLoading = cameraPermission == null;
   const permissionDenied = cameraPermission != null && !cameraPermission.granted;
