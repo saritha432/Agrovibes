@@ -26,8 +26,10 @@ import {
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
+import { takePendingSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -1071,15 +1073,30 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const isReelSurfaceTab =
     activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
-  const openPostFromFeed = useCallback((post: HomePost) => {
+  const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
     if (!postHasViewableMedia(post)) return;
-    const list = tabPosts.filter((p) => postHasViewableMedia(p));
-    const ordered = list.length ? list : [post];
-    const ix = ordered.findIndex((p) => p.id === post.id);
-    const initialIndex = ix >= 0 ? ix : 0;
+    let ordered: HomePost[];
+    let initialIndex: number;
+    if (opts?.isolated) {
+      ordered = [post];
+      initialIndex = 0;
+    } else {
+      const list = tabPosts.filter((p) => postHasViewableMedia(p));
+      ordered = list.length ? list : [post];
+      const ix = ordered.findIndex((p) => p.id === post.id);
+      initialIndex = ix >= 0 ? ix : 0;
+    }
     setPlayingPostId(post.id);
     setReelViewerOpen({ posts: ordered, initialIndex });
   }, [tabPosts]);
+
+  /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
+  useFocusEffect(
+    useCallback(() => {
+      const pending = takePendingSharedPostViewer();
+      if (pending) openPostFromFeed(pending.post, { isolated: pending.isolated });
+    }, [openPostFromFeed])
+  );
 
   const resolveLikerProfile = useCallback(
     (liker: PostLiker): PostLiker => {
@@ -1742,14 +1759,26 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const reelChatMessage = useCallback(
     (post: HomePost) => {
-      const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
       return `[Cropvibe Reel]\n${JSON.stringify({
         id: post.id,
+        userId: post.userId ?? null,
+        userName: post.userName,
         author: post.userName,
-        caption,
+        location: post.location || "",
+        caption: post.caption || "",
+        likesCount: post.likesCount ?? 0,
+        commentsCount: post.commentsCount ?? 0,
         videoUrl: post.videoUrl || null,
-        imageUrl: post.imageUrl || post.thumbnailUrl || null,
+        imageUrl: post.imageUrl || null,
+        imageUrls: Array.isArray(post.imageUrls) && post.imageUrls.length > 0 ? post.imageUrls : undefined,
         thumbnailUrl: post.thumbnailUrl || post.imageUrl || null,
+        musicLabel: post.musicLabel ?? null,
+        musicAudioUrl: post.musicAudioUrl ?? null,
+        creativeMeta: post.creativeMeta,
+        authorAvatarUrl: post.authorAvatarUrl ?? null,
+        createdAt: post.createdAt || new Date().toISOString(),
+        viewerHasLiked: post.viewerHasLiked,
+        viewerHasSaved: post.viewerHasSaved,
         link: buildShareLink(post)
       })}`;
     },
@@ -2661,7 +2690,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
             </ScrollView>
           ) : reelPoster ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "cover" : "contain"} />
             </Pressable>
           ) : (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
