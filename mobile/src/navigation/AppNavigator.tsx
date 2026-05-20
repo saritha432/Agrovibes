@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StyleSheet, View } from "react-native";
 import { CreateModal } from "../components/CreateModal";
 import { HomeScreen } from "../screens/HomeScreen";
+import type { HomePost } from "../services/api";
 import { MarketStackNavigator } from "./MarketStackNavigator";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { ServicesScreen } from "../screens/ServicesScreen";
@@ -17,6 +18,13 @@ export function AppNavigator() {
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [homeRefreshToken, setHomeRefreshToken] = useState(0);
   const [createPresetType, setCreatePresetType] = useState<CreateType | null>(null);
+  /** Newly created post from API — consumed on the next Home feed fetch so it appears immediately even if GET is briefly stale. */
+  const pendingFeedPostRef = useRef<HomePost | undefined>(undefined);
+  const takePendingFeedPost = useCallback(() => {
+    const next = pendingFeedPostRef.current;
+    pendingFeedPostRef.current = undefined;
+    return next;
+  }, []);
 
   return (
     <NotificationPanelProvider>
@@ -38,6 +46,7 @@ export function AppNavigator() {
           children={() => (
             <HomeScreen
               refreshToken={homeRefreshToken}
+              takePendingFeedPost={takePendingFeedPost}
               onOpenCreate={(type) => {
                 setCreatePresetType(type ?? null);
                 setCreateOpen(true);
@@ -58,7 +67,10 @@ export function AppNavigator() {
             setCreatePresetType(null);
             setCreateOpen(false);
           }}
-          onVideoPosted={() => setHomeRefreshToken((v) => v + 1)}
+          onVideoPosted={(post) => {
+            if (post) pendingFeedPostRef.current = post;
+            setHomeRefreshToken((v) => v + 1);
+          }}
         />
       ) : null}
     </View>

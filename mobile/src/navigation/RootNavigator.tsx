@@ -91,7 +91,19 @@ export function RootNavigator() {
       <Stack.Screen name="SecurityVerification" component={SecurityVerificationScreen} />
       <Stack.Screen name="Main" component={AppNavigator} />
       <Stack.Screen name="InstructorStudio" component={InstructorStudioScreen} />
-      <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: "Edit Profile" }} />
+      <Stack.Screen
+        name="EditProfile"
+        component={EditProfileScreen}
+        options={{
+          headerShown: true,
+          title: "Edit Profile",
+          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
+          headerTintColor: socialDiscoveryTheme.navTint,
+          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
       <Stack.Screen
         name="UserSearch"
         component={UserSearchScreen}
