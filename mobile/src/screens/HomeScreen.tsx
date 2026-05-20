@@ -26,8 +26,10 @@ import {
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
+import { takePendingSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -379,6 +381,13 @@ function postImageGallery(post: HomePost | null | undefined): string[] {
   if (ordered.length === 1) return ordered;
   const single = String(post.imageUrl || "").trim();
   return single ? [single] : [];
+}
+
+/** Dot / pager index for horizontal image carousels (works with onScroll + paging; avoids relying on onMomentumScrollEnd only). */
+function carouselIndexFromOffset(offsetX: number, pageWidth: number, maxIndex: number): number {
+  if (pageWidth <= 0) return 0;
+  const idx = Math.round(offsetX / pageWidth);
+  return Math.min(maxIndex, Math.max(0, idx));
 }
 
 type HomeCommentRow = {
@@ -1064,15 +1073,30 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
   const isReelSurfaceTab =
     activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends" || activeHomeTab === "live";
 
-  const openPostFromFeed = useCallback((post: HomePost) => {
+  const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
     if (!postHasViewableMedia(post)) return;
-    const list = tabPosts.filter((p) => postHasViewableMedia(p));
-    const ordered = list.length ? list : [post];
-    const ix = ordered.findIndex((p) => p.id === post.id);
-    const initialIndex = ix >= 0 ? ix : 0;
+    let ordered: HomePost[];
+    let initialIndex: number;
+    if (opts?.isolated) {
+      ordered = [post];
+      initialIndex = 0;
+    } else {
+      const list = tabPosts.filter((p) => postHasViewableMedia(p));
+      ordered = list.length ? list : [post];
+      const ix = ordered.findIndex((p) => p.id === post.id);
+      initialIndex = ix >= 0 ? ix : 0;
+    }
     setPlayingPostId(post.id);
     setReelViewerOpen({ posts: ordered, initialIndex });
   }, [tabPosts]);
+
+  /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
+  useFocusEffect(
+    useCallback(() => {
+      const pending = takePendingSharedPostViewer();
+      if (pending) openPostFromFeed(pending.post, { isolated: pending.isolated });
+    }, [openPostFromFeed])
+  );
 
   const resolveLikerProfile = useCallback(
     (liker: PostLiker): PostLiker => {
@@ -1735,14 +1759,26 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
   const reelChatMessage = useCallback(
     (post: HomePost) => {
-      const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
       return `[Cropvibe Reel]\n${JSON.stringify({
         id: post.id,
+        userId: post.userId ?? null,
+        userName: post.userName,
         author: post.userName,
-        caption,
+        location: post.location || "",
+        caption: post.caption || "",
+        likesCount: post.likesCount ?? 0,
+        commentsCount: post.commentsCount ?? 0,
         videoUrl: post.videoUrl || null,
-        imageUrl: post.imageUrl || post.thumbnailUrl || null,
+        imageUrl: post.imageUrl || null,
+        imageUrls: Array.isArray(post.imageUrls) && post.imageUrls.length > 0 ? post.imageUrls : undefined,
         thumbnailUrl: post.thumbnailUrl || post.imageUrl || null,
+        musicLabel: post.musicLabel ?? null,
+        musicAudioUrl: post.musicAudioUrl ?? null,
+        creativeMeta: post.creativeMeta,
+        authorAvatarUrl: post.authorAvatarUrl ?? null,
+        createdAt: post.createdAt || new Date().toISOString(),
+        viewerHasLiked: post.viewerHasLiked,
+        viewerHasSaved: post.viewerHasSaved,
         link: buildShareLink(post)
       })}`;
     },
@@ -2588,11 +2624,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth }]}>
-          <Pressable
-            style={StyleSheet.absoluteFillObject}
-            onPress={() => onReelSurfaceTap(post)}
-          >
-            {post.videoUrl && (isActive || isNearActive) ? (
+          {post.videoUrl && (isActive || isNearActive) ? (
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
@@ -2608,45 +2641,62 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
-            ) : isCarousel ? (
-              <FlatList
-                data={gallery}
-                horizontal
-                pagingEnabled
-                nestedScrollEnabled
-                scrollEnabled
-                showsHorizontalScrollIndicator={false}
-                keyExtractor={(uri, i) => `reel-carousel-${post.id}-${i}-${uri.slice(-24)}`}
-                style={{ width: reelContentWidth, height: pageH }}
-                onMomentumScrollEnd={(e) => {
-                  if (reelContentWidth <= 0) return;
-                  const page = Math.round(e.nativeEvent.contentOffset.x / reelContentWidth);
-                  setCarouselPageByPostId((prev) => ({ ...prev, [post.id]: page }));
-                }}
-                renderItem={({ item: uri }) => (
-                  <View
-                    style={{
-                      width: reelContentWidth,
-                      height: pageH,
-                      backgroundColor: "#000",
-                      alignItems: "center",
-                      justifyContent: "center"
-                    }}
-                  >
-                    <Image
-                      source={{ uri }}
-                      style={{ width: reelContentWidth, height: pageH }}
-                      resizeMode="contain"
-                    />
-                  </View>
-                )}
-              />
-            ) : reelPoster ? (
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
-            ) : (
+            </Pressable>
+          ) : isCarousel ? (
+            <ScrollView
+              horizontal
+              pagingEnabled
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              style={{ width: reelContentWidth, height: pageH }}
+              contentContainerStyle={{ width: reelContentWidth * gallery.length }}
+              onScroll={(e) => {
+                const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
+                if (w <= 0) return;
+                const page = carouselIndexFromOffset(e.nativeEvent.contentOffset.x, w, gallery.length - 1);
+                setCarouselPageByPostId((prev) =>
+                  prev[post.id] === page ? prev : { ...prev, [post.id]: page }
+                );
+              }}
+              scrollEventThrottle={16}
+              onMomentumScrollEnd={(e) => {
+                const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
+                if (w <= 0) return;
+                const page = carouselIndexFromOffset(e.nativeEvent.contentOffset.x, w, gallery.length - 1);
+                setCarouselPageByPostId((prev) =>
+                  prev[post.id] === page ? prev : { ...prev, [post.id]: page }
+                );
+              }}
+            >
+              {gallery.map((uri, i) => (
+                <Pressable
+                  key={`reel-carousel-${post.id}-${i}-${uri.slice(-24)}`}
+                  style={{
+                    width: reelContentWidth,
+                    height: pageH,
+                    backgroundColor: "#000",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                  onPress={() => onReelSurfaceTap(post)}
+                >
+                  <Image
+                    source={{ uri }}
+                    style={{ width: reelContentWidth, height: pageH }}
+                    resizeMode="contain"
+                  />
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : reelPoster ? (
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "cover" : "contain"} />
+            </Pressable>
+          ) : (
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
-            )}
-          </Pressable>
+            </Pressable>
+          )}
           {isCarousel ? (
             <View style={[styles.postCarouselDots, styles.reelCarouselDots]} pointerEvents="none">
               {gallery.map((_, i) => {
@@ -2810,6 +2860,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       );
     },
     [
+      carouselPageByPostId,
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
@@ -2944,23 +2995,35 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                 )}
               </Pressable>
             ) : isCarousel ? (
-              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
-                <FlatList
-                  data={gallery}
+              <View style={styles.videoTapArea}>
+                <ScrollView
                   horizontal
                   pagingEnabled
                   nestedScrollEnabled
-                  scrollEnabled
                   showsHorizontalScrollIndicator={false}
-                  keyExtractor={(uri, i) => `${post.id}-${i}-${uri}`}
                   style={{ width: feedMediaWidth, height: feedMediaWidth }}
-                  onMomentumScrollEnd={(e) => {
-                    if (feedMediaWidth <= 0) return;
-                    const page = Math.round(e.nativeEvent.contentOffset.x / feedMediaWidth);
-                    setCarouselPageByPostId((prev) => ({ ...prev, [post.id]: page }));
+                  contentContainerStyle={{ width: feedMediaWidth * gallery.length }}
+                  onScroll={(e) => {
+                    const w = e.nativeEvent.layoutMeasurement.width || feedMediaWidth;
+                    if (w <= 0) return;
+                    const page = carouselIndexFromOffset(e.nativeEvent.contentOffset.x, w, gallery.length - 1);
+                    setCarouselPageByPostId((prev) =>
+                      prev[post.id] === page ? prev : { ...prev, [post.id]: page }
+                    );
                   }}
-                  renderItem={({ item: uri }) => (
-                    <View
+                  scrollEventThrottle={16}
+                  onMomentumScrollEnd={(e) => {
+                    const w = e.nativeEvent.layoutMeasurement.width || feedMediaWidth;
+                    if (w <= 0) return;
+                    const page = carouselIndexFromOffset(e.nativeEvent.contentOffset.x, w, gallery.length - 1);
+                    setCarouselPageByPostId((prev) =>
+                      prev[post.id] === page ? prev : { ...prev, [post.id]: page }
+                    );
+                  }}
+                >
+                  {gallery.map((uri, i) => (
+                    <Pressable
+                      key={`${post.id}-${i}-${uri}`}
                       style={{
                         width: feedMediaWidth,
                         height: feedMediaWidth,
@@ -2968,16 +3031,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
                         alignItems: "center",
                         justifyContent: "center"
                       }}
+                      onPress={() => openPostFromFeed(post)}
                     >
                       <Image
                         style={{ width: feedMediaWidth, height: feedMediaWidth }}
                         source={{ uri }}
                         resizeMode="contain"
                       />
-                    </View>
-                  )}
-                />
-              </Pressable>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
             ) : gallery[0] ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
@@ -3041,6 +3105,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     },
     [
       activeHomeTab,
+      carouselPageByPostId,
       commentsByPost,
       feedMediaWidth,
       followBusyByUserId,
