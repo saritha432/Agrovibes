@@ -1,5 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
+import i18next from "i18next";
+import { initReactI18next } from "react-i18next";
 
 type AppLanguage = "English" | "Hindi" | "Telugu" | "Punjabi" | "Gujarati" | "Bengali" | "Marathi" | "Tamil";
 
@@ -11,6 +13,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     getStarted: "Get Started",
     createAccount: "Create Account",
     login: "Login",
+    signIn: "Sign In",
     createSubtitle: "Enter details to create your account.",
     loginSubtitle: "Enter mobile number and password to login.",
     name: "Name",
@@ -38,24 +41,30 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     onboardingSlide3Subtitle: "Post reels, showcase your products, and learn from other farmers across the community.",
     onboardingSlide4Tag: "Marketplace",
     onboardingSlide4Title: "Buy & Sell With Ease",
-    onboardingSlide4Subtitle: "Sell your farm produce and reach buyers directly for better prices and simple deals.",
+    onboardingSlide4Subtitle: "Get the best price for your crops or shop for seeds, tools, and equipment all in one place.",
     onboardingSlide5Tag: "Community",
     onboardingSlide5Title: "Grow Together",
-    onboardingSlide5Subtitle: "Collaborate with nearby farmers, ask expert questions, and share practical advice.",
+    onboardingSlide5Subtitle: "Connect with farmers, buyers, and experts—ask questions, share knowledge, and support each other.",
     onboardingSlide6Tag: "Education",
     onboardingSlide6Title: "Learn Modern Farming",
     onboardingSlide6Subtitle: "Explore expert tips, smart techniques, and short learning videos to improve productivity.",
     onboardingSlide7Tag: "Logistics",
     onboardingSlide7Title: "Reliable Farm Delivery",
-    onboardingSlide7Subtitle: "Track your produce shipments from source to market through trusted transport options.",
-    onboardingSlide8Tag: "Logistics",
-    onboardingSlide8Title: "Reliable Farm Delivery",
-    onboardingSlide8Subtitle: "Now Your Produce Reaches Market Securely And Quickly Without Hassle."
+    onboardingSlide7Subtitle: "Move your produce faster with trusted transport and doorstep pickup services.",
+    onboardingAllDoneTag: "All Done!!",
+    onboardingAllDoneTitle: "Reliable Farm Delivery",
+    onboardingAllDoneSubtitle: "Move your produce faster with trusted transport and doorstep pickup services.",
+    editProfile: "Edit Profile",
+    share: "Share",
+    shareProfileTitle: "Agrovibes Profile",
+    shareProfileJoinLine: "Join me on Agrovibes.",
+    shareProfileError: "Could not open share options right now."
   },
   Hindi: {
     getStarted: "शुरू करें",
     createAccount: "खाता बनाएं",
     login: "लॉगिन",
+    signIn: "साइन इन",
     createSubtitle: "खाता बनाने के लिए अपनी जानकारी भरें।",
     loginSubtitle: "लॉगिन के लिए मोबाइल नंबर और पासवर्ड दर्ज करें।",
     name: "नाम",
@@ -95,12 +104,21 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     onboardingSlide7Subtitle: "अपनी उपज की डिलीवरी स्रोत से बाज़ार तक आसानी से ट्रैक करें।",
     onboardingSlide8Tag: "लॉजिस्टिक्स",
     onboardingSlide8Title: "विश्वसनीय फार्म डिलीवरी",
-    onboardingSlide8Subtitle: "अब आपकी उपज सुरक्षित और तेज़ी से बाज़ार तक पहुंचेगी।"
+    onboardingSlide8Subtitle: "अब आपकी उपज सुरक्षित और तेज़ी से बाज़ार तक पहुंचेगी।",
+    onboardingAllDoneTag: "सब हो गया!!",
+    onboardingAllDoneTitle: "विश्वसनीय फार्म डिलीवरी",
+    onboardingAllDoneSubtitle: "विश्वसनीय परिवहन और घर पर पिकअप सेवाओं के साथ अपनी उपज तेज़ी से पहुँचाएं।",
+    editProfile: "प्रोफाइल संपादित करें",
+    share: "शेयर",
+    shareProfileTitle: "एग्रोवाइब्स प्रोफाइल",
+    shareProfileJoinLine: "मुझसे एग्रोवाइब्स पर जुड़ें।",
+    shareProfileError: "अभी शेयर विकल्प नहीं खुल सके।"
   },
   Telugu: {
     getStarted: "ప్రారంభించండి",
     createAccount: "ఖాతా సృష్టించండి",
     login: "లాగిన్",
+    signIn: "సైన్ ఇన్",
     createSubtitle: "ఖాతా సృష్టించడానికి వివరాలు నమోదు చేయండి.",
     loginSubtitle: "లాగిన్ కోసం మొబైల్ నంబర్ మరియు పాస్‌వర్డ్ నమోదు చేయండి.",
     name: "పేరు",
@@ -140,9 +158,23 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     onboardingSlide7Subtitle: "మీ ఉత్పత్తి రవాణాను మూలం నుంచి మార్కెట్ వరకు ట్రాక్ చేయండి.",
     onboardingSlide8Tag: "లాజిస్టిక్స్",
     onboardingSlide8Title: "నమ్మకమైన ఫారం డెలివరీ",
-    onboardingSlide8Subtitle: "ఇప్పుడు మీ ఉత్పత్తి సురక్షితంగా, వేగంగా మార్కెట్‌కు చేరుతుంది."
+    onboardingSlide8Subtitle: "ఇప్పుడు మీ ఉత్పత్తి సురక్షితంగా, వేగంగా మార్కెట్‌కు చేరుతుంది.",
+    onboardingAllDoneTag: "అంతా పూర్తైంది!!",
+    onboardingAllDoneTitle: "నమ్మకమైన ఫారం డెలివరీ",
+    onboardingAllDoneSubtitle: "నమ్మకమైన రవాణా మరియు డోర్‌స్టెప్ పికప్ సేవలతో మీ ఉత్పత్తిని వేగంగా తరలించండి.",
+    editProfile: "ప్రొఫైల్ ఎడిట్ చేయండి",
+    share: "షేర్",
+    shareProfileTitle: "అగ్రోవైబ్స్ ప్రొఫైల్",
+    shareProfileJoinLine: "అగ్రోవైబ్స్‌లో నాతో కనెక్ట్ అవ్వండి.",
+    shareProfileError: "ఇప్పుడు షేర్ ఆప్షన్లు తెరవలేకపోయాము."
   }
 };
+
+const I18N_RESOURCES = {
+  English: { translation: TRANSLATIONS.English },
+  Hindi: { translation: TRANSLATIONS.Hindi },
+  Telugu: { translation: TRANSLATIONS.Telugu }
+} as const;
 
 type LanguageContextValue = {
   language: AppLanguage;
@@ -161,9 +193,18 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
     (async () => {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved = raw as AppLanguage | null;
+      const initialLanguage = saved && I18N_RESOURCES[saved as keyof typeof I18N_RESOURCES] ? saved : DEFAULT_LANGUAGE;
+      await i18next.use(initReactI18next).init({
+        resources: I18N_RESOURCES,
+        lng: initialLanguage,
+        fallbackLng: DEFAULT_LANGUAGE,
+        interpolation: { escapeValue: false }
+      });
       if (!mounted) return;
-      if (raw) {
-        setLanguageState(raw as AppLanguage);
+      setLanguageState(initialLanguage);
+      if (!raw || raw !== initialLanguage) {
+        await AsyncStorage.setItem(STORAGE_KEY, initialLanguage);
       }
       setLoading(false);
     })();
@@ -173,13 +214,15 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setLanguage = React.useCallback(async (next: AppLanguage) => {
+    if (!I18N_RESOURCES[next as keyof typeof I18N_RESOURCES]) return;
+    await i18next.changeLanguage(next);
     setLanguageState(next);
     await AsyncStorage.setItem(STORAGE_KEY, next);
   }, []);
 
   const t = React.useCallback(
-    (key: string) => TRANSLATIONS[language]?.[key] || TRANSLATIONS.English?.[key] || key,
-    [language]
+    (key: string) => i18next.t(key, { defaultValue: TRANSLATIONS.English?.[key] || key }),
+    []
   );
 
   const value = React.useMemo(() => ({ language, setLanguage, t, loading }), [language, setLanguage, t, loading]);

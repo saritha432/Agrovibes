@@ -22,6 +22,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
+import { useLanguage } from "../localization/LanguageContext";
 import {
   fetchSavedHomePosts,
   fetchHomePosts,
@@ -78,6 +79,7 @@ export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width, height: windowHeight } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
+  const { t } = useLanguage();
   const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
@@ -335,19 +337,19 @@ export function ProfileScreen() {
       `${user.fullName}'s profile on Agrovibes`,
       shareHandle,
       user.bio?.trim() || "",
-      "Join me on Agrovibes."
+      t("shareProfileJoinLine")
     ]
       .filter(Boolean)
       .join("\n");
     try {
       await Share.share({
-        title: `${user.fullName} - Agrovibes Profile`,
+        title: `${user.fullName} - ${t("shareProfileTitle")}`,
         message: shareText
       });
     } catch {
-      Alert.alert("Share", "Could not open share options right now.");
+      Alert.alert(t("share"), t("shareProfileError"));
     }
-  }, [profileModel?.handle, user]);
+  }, [profileModel?.handle, t, user]);
 
   const followBackFromFollowersList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
@@ -544,7 +546,7 @@ export function ProfileScreen() {
                 <Pressable style={styles.editProfileBtnCompact} onPress={navigateToEditProfile}>
                   <Ionicons name="create-outline" size={18} color="#111" />
                   <Text style={styles.editProfileBtnText} numberOfLines={1}>
-                    Edit Profile
+                    {t("editProfile")}
                   </Text>
                 </Pressable>
                 <Pressable style={styles.iconActionSquare} onPress={handleShareProfile}>
