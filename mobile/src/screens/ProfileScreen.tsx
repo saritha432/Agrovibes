@@ -7,6 +7,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  Share,
   ScrollView,
   StyleSheet,
   Text,
@@ -97,7 +98,6 @@ export function ProfileScreen() {
   const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
   const [playingReelId, setPlayingReelId] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
-  const [isFollowing, setFollowing] = useState(false);
   const isMountedRef = useRef(true);
 
   const gridGap = 6;
@@ -328,6 +328,27 @@ export function ProfileScreen() {
     navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] });
   };
 
+  const handleShareProfile = useCallback(async () => {
+    if (!user) return;
+    const shareHandle = profileModel?.handle || safeHandle(user.fullName || user.username || "user");
+    const shareText = [
+      `${user.fullName}'s profile on Agrovibes`,
+      shareHandle,
+      user.bio?.trim() || "",
+      "Join me on Agrovibes."
+    ]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      await Share.share({
+        title: `${user.fullName} - Agrovibes Profile`,
+        message: shareText
+      });
+    } catch {
+      Alert.alert("Share", "Could not open share options right now.");
+    }
+  }, [profileModel?.handle, user]);
+
   const followBackFromFollowersList = async (person: { name: string; key?: string }) => {
     if (!user?.fullName) return;
     const targetId = person.key && /^\d+$/.test(String(person.key)) ? Number(person.key) : null;
@@ -526,16 +547,7 @@ export function ProfileScreen() {
                     Edit Profile
                   </Text>
                 </Pressable>
-                <Pressable
-                  style={[styles.followCompactBtn, isFollowing ? styles.followWideBtnActive : null]}
-                  onPress={() => setFollowing((v) => !v)}
-                >
-                  <Ionicons name={isFollowing ? "checkmark" : "person-add-outline"} size={18} color={TEXT} />
-                  <Text style={styles.followCompactBtnText} numberOfLines={1}>
-                    {isFollowing ? "Following" : "Follow"}
-                  </Text>
-                </Pressable>
-                <Pressable style={styles.iconActionSquare} onPress={() => Alert.alert("Share", "Share coming soon.")}>
+                <Pressable style={styles.iconActionSquare} onPress={handleShareProfile}>
                   <Ionicons name="share-outline" size={20} color={TEXT} />
                 </Pressable>
               </View>
@@ -1133,22 +1145,6 @@ const styles = StyleSheet.create({
     gap: 6
   },
   editProfileBtnText: { color: "#111", fontWeight: "900", fontSize: 14 },
-  followCompactBtn: {
-    flex: 1,
-    minWidth: 0,
-    backgroundColor: BEIGE_FOLLOW,
-    borderRadius: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: "#303842"
-  },
-  followWideBtnActive: { backgroundColor: "rgba(216,255,55,0.18)", borderColor: TEAL },
-  followCompactBtnText: { color: TEXT, fontWeight: "900", fontSize: 14 },
   iconActionSquare: {
     width: 46,
     height: 46,

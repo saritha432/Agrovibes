@@ -1,6 +1,18 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Asset } from "expo-asset";
+import { ResizeMode, Video, type AVPlaybackSource } from "expo-av";
 import React from "react";
-import { FlatList, Image, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import {
+  FlatList,
+  Image,
+  ImageSourcePropType,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+  useWindowDimensions
+} from "react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage, type AppLanguage } from "../localization/LanguageContext";
@@ -16,17 +28,11 @@ const SLIDES = [
     inverted: false
   },
   {
-    titleKey: "onboardingBrandTitle",
-    subtitleKey: "onboardingBrandSubtitle",
-    descriptionKey: "",
-    mode: "pattern",
-    inverted: false
-  },
-  {
     titleKey: "onboardingSlide3Title",
     subtitleKey: "onboardingSlide3Subtitle",
     descriptionKey: "onboardingSlide3Tag",
     mode: "feature",
+    imageKey: "media",
     inverted: false
   },
   {
@@ -34,6 +40,7 @@ const SLIDES = [
     subtitleKey: "onboardingSlide4Subtitle",
     descriptionKey: "onboardingSlide4Tag",
     mode: "feature",
+    imageKey: "marketplace",
     inverted: true
   },
   {
@@ -41,6 +48,7 @@ const SLIDES = [
     subtitleKey: "onboardingSlide5Subtitle",
     descriptionKey: "onboardingSlide5Tag",
     mode: "feature",
+    imageKey: "community",
     inverted: false
   },
   {
@@ -48,6 +56,7 @@ const SLIDES = [
     subtitleKey: "onboardingSlide6Subtitle",
     descriptionKey: "onboardingSlide6Tag",
     mode: "feature",
+    imageKey: "learn",
     inverted: true
   },
   {
@@ -55,6 +64,7 @@ const SLIDES = [
     subtitleKey: "onboardingSlide7Subtitle",
     descriptionKey: "onboardingSlide7Tag",
     mode: "feature",
+    imageKey: "logistics1",
     inverted: false
   },
   {
@@ -62,11 +72,26 @@ const SLIDES = [
     subtitleKey: "onboardingSlide8Subtitle",
     descriptionKey: "onboardingSlide8Tag",
     mode: "cta",
+    imageKey: "logistics2",
     inverted: true
   }
 ] as const;
+
 const FIRST_WORDMARK = require("../../assets/Cropvibe1.png");
-const PATTERN_IMAGE = require("../../assets/cropvibe2.png");
+const SPLASH_VIDEO = require("../../assets/splash.mp4");
+
+const ONBOARDING_IMAGES: Record<
+  "media" | "marketplace" | "community" | "learn" | "logistics1" | "logistics2",
+  ImageSourcePropType
+> = {
+  media: require("../../assets/onboarding/media.png"),
+  marketplace: require("../../assets/onboarding/marketplace.png"),
+  community: require("../../assets/onboarding/community.png"),
+  learn: require("../../assets/onboarding/learn.png"),
+  logistics1: require("../../assets/onboarding/logistics1.png"),
+  logistics2: require("../../assets/onboarding/logistics2.png")
+};
+
 const COLORS = {
   dark: "#242424",
   ink: "#151711",
@@ -76,8 +101,79 @@ const COLORS = {
   mutedDark: "#384215"
 };
 
-/** Time each onboarding slide stays visible before auto-advancing. */
+/** Web: expo-av pins the video absolute-fill; relax so object-fit matches resizeMode. */
+const WEB_SPLASH_VIDEO_STYLE: ViewStyle | undefined =
+  Platform.OS === "web"
+    ? ({
+        position: "relative",
+        left: undefined,
+        top: undefined,
+        right: undefined,
+        bottom: undefined,
+        width: "100%",
+        height: "100%",
+        objectFit: "cover"
+      } as ViewStyle)
+    : undefined;
+
+function BrandSplashVideo({ playing }: { playing: boolean }) {
+  const videoRef = React.useRef<Video | null>(null);
+  const [source, setSource] = React.useState<AVPlaybackSource | null>(() =>
+    Platform.OS === "web" ? null : SPLASH_VIDEO
+  );
+
+  React.useEffect(() => {
+    if (Platform.OS !== "web") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const asset = Asset.fromModule(SPLASH_VIDEO);
+        await asset.downloadAsync();
+        const uri = asset.localUri ?? asset.uri;
+        if (!cancelled && uri) setSource({ uri });
+      } catch {
+        if (!cancelled) setSource(SPLASH_VIDEO);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const v = videoRef.current;
+    if (!v || source == null) return;
+    if (playing) {
+      void v.playAsync().catch(() => {});
+    } else {
+      void v.pauseAsync().catch(() => {});
+    }
+  }, [playing, source]);
+
+  if (source == null) {
+    return <View style={styles.brandVideo} />;
+  }
+
+  return (
+    <Video
+      ref={videoRef}
+      source={source}
+      style={styles.brandVideo}
+      resizeMode={ResizeMode.COVER}
+      videoStyle={WEB_SPLASH_VIDEO_STYLE}
+      isLooping
+      isMuted
+      shouldPlay={playing}
+      useNativeControls={false}
+      onError={(msg) => {
+        if (__DEV__) console.warn("[BrandSplashVideo] playback error:", msg);
+      }}
+    />
+  );
+}
+
 const AUTOPLAY_INTERVAL_MS = 4500;
+const ONBOARDING_LOOP_START_INDEX = 1;
 
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -87,31 +183,15 @@ export function InitialSetupScreen() {
   const [index, setIndex] = React.useState(0);
   const indexRef = React.useRef(0);
   const listRef = React.useRef<FlatList<(typeof SLIDES)[number]>>(null);
-  /** True while user is dragging the carousel (pointer / touch). */
   const userDraggingRef = React.useRef(false);
-  /** Skip adding "user cooldown" after momentum end — used for autoplay-driven scrolls. */
   const suppressUserCooldownRef = React.useRef(false);
-  /** Avoid stacking autoplay ticks while a programmatic scroll is still settling. */
   const autoplayScrollInFlightRef = React.useRef(false);
-  /** After manual swipe / arrow / dot, wait before auto-advancing again. */
   const pauseAutoplayUntilRef = React.useRef(0);
   const widthRef = React.useRef(width);
 
   widthRef.current = width;
   const currentSlideInverted = SLIDES[index]?.inverted;
 
-  const finish = () => {
-    navigation.reset({ index: 0, routes: [{ name: "AuthChoice" }] });
-  };
-
-  const openLogin = () => {
-    navigation.reset({ index: 0, routes: [{ name: "AuthChoice", params: { initialMode: "login" } }] });
-  };
-
-  /**
-   * Scroll to slide by index. Index + UI state are updated in `onMomentumScrollEnd` from the
-   * actual offset so autoplay never fights manual swipes (especially on web).
-   */
   const requestScrollToIndex = React.useCallback((rawIndex: number, animated: boolean, opts?: { autoplay?: boolean }) => {
     const w = widthRef.current;
     const normalizedIndex = opts?.autoplay
@@ -131,7 +211,6 @@ export function InitialSetupScreen() {
   }, []);
 
   React.useEffect(() => {
-    // Keep the current slide aligned when orientation or web viewport width changes.
     listRef.current?.scrollToOffset({ offset: indexRef.current * width, animated: false });
   }, [width]);
 
@@ -142,8 +221,7 @@ export function InitialSetupScreen() {
       if (Date.now() < pauseAutoplayUntilRef.current) return;
       if (autoplayScrollInFlightRef.current) return;
       if (indexRef.current >= SLIDES.length - 1) {
-        // Reset to first slide without reverse animation through previous pages.
-        requestScrollToIndex(0, false, { autoplay: true });
+        requestScrollToIndex(Math.min(ONBOARDING_LOOP_START_INDEX, SLIDES.length - 1), false, { autoplay: true });
         return;
       }
       const next = indexRef.current + 1;
@@ -206,61 +284,81 @@ export function InitialSetupScreen() {
             }
             suppressUserCooldownRef.current = false;
           }}
-          renderItem={({ item }) => (
-            <View style={[styles.page, { width, height }, item.inverted ? styles.pageInverted : null]}>
+          renderItem={({ item, index: slideIndex }) => (
+            <View
+              style={[
+                styles.page,
+                { width, height },
+                item.inverted ? styles.pageInverted : null,
+                item.mode === "brand" ? styles.pageBrand : null
+              ]}
+            >
               <View style={styles.topBarWrap}>
                 <View style={[styles.topBar, item.inverted ? styles.topBarDark : null]} />
               </View>
               <View style={styles.content}>
                 {item.mode === "brand" ? (
-                  <View style={styles.logoOnlyWrap}>
-                    <Image source={FIRST_WORDMARK} style={styles.logoImage} resizeMode="contain" />
-                  </View>
-                ) : item.mode === "pattern" ? (
-                  <View style={styles.heroWrap}>
-                    <View style={styles.heroLogoArea}>
-                      <Image source={FIRST_WORDMARK} style={styles.logoImage} resizeMode="contain" />
-                    </View>
-                    <Image source={PATTERN_IMAGE} style={styles.heroPatternImage} resizeMode="cover" />
+                  <View style={styles.brandVideoWrap}>
+                    <BrandSplashVideo playing={Boolean(isFocused && index === 0 && slideIndex === 0)} />
                   </View>
                 ) : (
-                  <View style={styles.copyWrap}>
-                    <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>{t(item.descriptionKey)}</Text>
-                    <Text style={[styles.copyText, item.inverted ? styles.copyTextInverted : null]}>{t(item.titleKey)}</Text>
-                    <Text style={[styles.copySubText, item.inverted ? styles.copySubTextInverted : null]}>{t(item.subtitleKey)}</Text>
+                  <View style={styles.featureWrap}>
+                    <View style={styles.copyWrap}>
+                      <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>
+                        {t(item.descriptionKey)}
+                      </Text>
+                      <Text style={[styles.copyText, item.inverted ? styles.copyTextInverted : null]}>{t(item.titleKey)}</Text>
+                      <Text style={[styles.copySubText, item.inverted ? styles.copySubTextInverted : null]}>
+                        {t(item.subtitleKey)}
+                      </Text>
+                    </View>
+                    {"imageKey" in item && item.imageKey && item.mode !== "cta" ? (
+                      <View style={styles.featureArtWrap}>
+                        {item.imageKey === "logistics1" ? (
+                          <View style={styles.logisticsComboWrap}>
+                            <Image source={ONBOARDING_IMAGES.logistics1} style={styles.logisticsMapImage} resizeMode="contain" />
+                            <Image source={ONBOARDING_IMAGES.logistics2} style={styles.logisticsScooterImage} resizeMode="contain" />
+                          </View>
+                        ) : (
+                          <Image
+                            source={ONBOARDING_IMAGES[item.imageKey]}
+                            style={styles.featureArtImage}
+                            resizeMode="contain"
+                          />
+                        )}
+                      </View>
+                    ) : null}
                   </View>
                 )}
               </View>
-              <View style={styles.pageFooterSpace} />
+              <View
+                style={
+                  item.mode === "brand"
+                    ? styles.pageFooterSpaceBrand
+                    : styles.pageFooterSpaceFeature
+                }
+              />
             </View>
           )}
         />
-        <Pressable
-          style={[styles.carouselArrow, styles.carouselArrowLeft]}
-          onPress={() => requestScrollToIndex(indexRef.current - 1, true)}
-          disabled={index <= 0}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Previous slide"
-        >
-          <View style={[styles.carouselArrowInner, index <= 0 ? styles.carouselArrowDisabled : null]}>
-            <Ionicons name="chevron-back" size={Platform.OS === "web" ? 26 : 28} color={COLORS.lime} />
-          </View>
-        </Pressable>
-        <Pressable
-          style={[styles.carouselArrow, styles.carouselArrowRight]}
-          onPress={() => requestScrollToIndex(indexRef.current + 1, true)}
-          disabled={index >= SLIDES.length - 1}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Next slide"
-        >
-          <View style={[styles.carouselArrowInner, index >= SLIDES.length - 1 ? styles.carouselArrowDisabled : null]}>
-            <Ionicons name="chevron-forward" size={Platform.OS === "web" ? 26 : 28} color={COLORS.lime} />
-          </View>
-        </Pressable>
       </View>
       <View style={styles.stableFooter}>
+        {index === SLIDES.length - 1 ? (
+          <View style={styles.authActionsWrap}>
+            <Pressable
+              style={styles.getStartedBtn}
+              onPress={() => navigation.navigate("AuthChoice", { initialMode: "register" })}
+            >
+              <Text style={styles.getStartedBtnText}>Get Started</Text>
+            </Pressable>
+            <Pressable
+              style={styles.signInBtn}
+              onPress={() => navigation.navigate("AuthChoice", { initialMode: "login" })}
+            >
+              <Text style={styles.signInBtnText}>Sign In</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <View style={styles.paginationRow}>
           {SLIDES.map((_, dotIndex) => (
             <Pressable
@@ -280,21 +378,15 @@ export function InitialSetupScreen() {
             </Pressable>
           ))}
         </View>
-        <View style={styles.langRow}>
-          {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
-            <Pressable key={lang} style={[styles.langChip, language === lang ? styles.langChipActive : null]} onPress={() => setLanguage(lang)}>
-              <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.actionStack}>
-          <Pressable style={styles.getStartedBtn} onPress={finish}>
-            <Text style={styles.getStartedText}>Register</Text>
-          </Pressable>
-          <Pressable style={styles.signInBtn} onPress={openLogin}>
-            <Text style={styles.signInText}>{t("login")}</Text>
-          </Pressable>
-        </View>
+        {index >= 2 ? (
+          <View style={styles.langRow}>
+            {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
+              <Pressable key={lang} style={[styles.langChip, language === lang ? styles.langChipActive : null]} onPress={() => setLanguage(lang)}>
+                <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -304,38 +396,64 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.dark },
   carouselShell: { flex: 1, position: "relative" },
   list: { flex: 1 },
-  carouselArrow: {
-    position: "absolute",
-    top: "42%",
-    zIndex: 4,
-    justifyContent: "center"
-  },
-  carouselArrowLeft: { left: 4 },
-  carouselArrowRight: { right: 4 },
-  carouselArrowInner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(21, 23, 17, 0.55)",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  carouselArrowDisabled: {
-    opacity: 0.28
-  },
   page: { backgroundColor: COLORS.dark, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12, justifyContent: "space-between" },
+  pageBrand: { paddingHorizontal: 0, paddingBottom: 0 },
   pageInverted: { backgroundColor: COLORS.lime },
   topBarWrap: { height: 20, justifyContent: "center", alignItems: "center" },
   topBar: { width: 86, height: 3, borderRadius: 2, backgroundColor: COLORS.lime, opacity: 0.95 },
   topBarDark: { backgroundColor: COLORS.ink },
   content: { flex: 1 },
-  logoOnlyWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroWrap: { flex: 1, marginHorizontal: -18, justifyContent: "space-between" },
-  heroLogoArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },
+  brandVideoWrap: {
+    flex: 1,
+    backgroundColor: "#000",
+    borderRadius: 0,
+    overflow: "hidden"
+  },
+  brandVideo: {
+    ...StyleSheet.absoluteFillObject,
+    ...(Platform.OS === "web" ? { width: "100%", height: "100%" } : null)
+  },
+  heroWrap: { flex: 1, marginHorizontal: -18, justifyContent: "flex-start" },
+  heroLogoArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 18, minHeight: 200 },
   logoImage: { width: "82%", height: 62 },
-  heroPatternImage: { width: "100%", height: "43%" },
-  logoSub: { color: COLORS.limeSoft, fontWeight: "700", textAlign: "center", fontSize: 12, letterSpacing: 0.2 },
-  copyWrap: { paddingTop: 22 },
+  heroPatternWrap: { width: "100%", height: "45%", justifyContent: "flex-end" },
+  heroPatternImage: { width: "100%", height: "100%" },
+  featureWrap: { flex: 1, paddingTop: 34 },
+  copyWrap: { paddingTop: 8, paddingHorizontal: 2, minHeight: 146 },
+  featureArtWrap: {
+    flex: 1,
+    marginTop: 25,
+    marginHorizontal: -18,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    minHeight: 220
+  },
+  featureArtImage: {
+    width: "100%",
+    height: "100%",
+    maxHeight: 308
+  },
+  logisticsComboWrap: {
+    width: "100%",
+    height: "100%",
+    maxHeight: 330,
+    position: "relative",
+    justifyContent: "flex-end"
+  },
+  logisticsMapImage: {
+    position: "absolute",
+    left: 0,
+    bottom: 0,
+    width: "62%",
+    height: "95%"
+  },
+  logisticsScooterImage: {
+    position: "absolute",
+    right: 4,
+    bottom: 8,
+    width: "58%",
+    height: "48%"
+  },
   slideTag: { color: COLORS.lime, fontSize: 20, fontWeight: "400", marginBottom: 7, letterSpacing: 0.2 },
   slideTagInverted: { color: COLORS.mutedDark },
   copyText: {
@@ -347,34 +465,34 @@ const styles = StyleSheet.create({
     textTransform: "capitalize"
   },
   copyTextInverted: { color: COLORS.ink },
-  copySubText: { marginTop: 9, color: COLORS.muted, fontWeight: "400", lineHeight: 18, fontSize: 16 },
+  copySubText: { marginTop: 9, color: COLORS.muted, fontWeight: "400", lineHeight: 20, fontSize: 15, maxWidth: "96%" },
   copySubTextInverted: { color: COLORS.mutedDark },
-  pageFooterSpace: { height: 200 },
+  pageFooterSpaceBrand: { height: 14 },
+  pageFooterSpace: { height: 175 },
+  pageFooterSpaceFeature: { height: 100 },
   stableFooter: {
     position: "absolute",
     left: 18,
     right: 18,
     bottom: 16
   },
-  actionStack: { marginTop: 10, gap: 8 },
-  signInBtn: {
-    height: 36,
-    borderRadius: 3,
-    borderWidth: 1,
-    borderColor: COLORS.ink,
-    backgroundColor: "#f7ffd9",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  signInText: { color: COLORS.ink, fontWeight: "900", fontSize: 12 },
+  authActionsWrap: { marginBottom: 14, gap: 9 },
   getStartedBtn: {
-    height: 36,
-    borderRadius: 3,
-    backgroundColor: COLORS.ink,
+    height: 42,
+    borderRadius: 6,
+    backgroundColor: "#1b1f23",
     alignItems: "center",
     justifyContent: "center"
   },
-  getStartedText: { color: COLORS.lime, fontWeight: "900", fontSize: 12 },
+  getStartedBtnText: { color: COLORS.lime, fontSize: 12, fontWeight: "700" },
+  signInBtn: {
+    height: 42,
+    borderRadius: 6,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  signInBtnText: { color: "#1b1f23", fontSize: 12, fontWeight: "700" },
   langRow: { marginTop: 10, flexDirection: "row", gap: 8, justifyContent: "center" },
   langChip: { borderWidth: 1, borderColor: COLORS.ink, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: "transparent" },
   langChipActive: { backgroundColor: COLORS.ink, borderColor: COLORS.ink },
@@ -387,4 +505,3 @@ const styles = StyleSheet.create({
   dotActiveOnDark: { width: 22, backgroundColor: COLORS.lime },
   dotActiveOnInverted: { width: 22, backgroundColor: COLORS.ink }
 });
-
