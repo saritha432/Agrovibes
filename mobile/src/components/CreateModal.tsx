@@ -31,7 +31,8 @@ import {
   fetchSocialNetwork,
   shouldUseImageUpload,
   uploadImageFile,
-  uploadPickedMedia
+  uploadPickedMedia,
+  type HomePost
 } from "../services/api";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
@@ -51,7 +52,8 @@ type TaggedPerson = { id: number; name: string };
 interface CreateModalProps {
   visible: boolean;
   onClose: () => void;
-  onVideoPosted?: () => void;
+  /** Called after a post or reel is created successfully (not for stories). Includes API `post` for optimistic feed merge. */
+  onVideoPosted?: (post?: HomePost) => void;
   initialType?: CreateType | null;
 }
 
@@ -882,6 +884,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const submitPostVideo = async () => {
     setSubmitting(true);
     setErrorText("");
+    let createdFeedPost: HomePost | undefined;
     try {
       if (createType === "live") {
         if (!liveMode) {
@@ -993,7 +996,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   }
                 }
               : {};
-          await createHomePost({
+          const { post: newPost } = await createHomePost({
             userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
             location: resolvedLocation,
@@ -1004,6 +1007,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             ...reelAudio,
             ...reelCreative
           });
+          createdFeedPost = newPost;
         } else {
           const urls: string[] = [];
           for (let i = 0; i < images.length; i++) {
@@ -1018,7 +1022,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             setSubmitting(false);
             return;
           }
-          await createHomePost({
+          const { post: newPost } = await createHomePost({
             userId: user?.id,
             userName: user?.fullName?.trim() || "Farmer",
             location: resolvedLocation,
@@ -1027,6 +1031,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             imageUrls: urls,
             ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
           });
+          createdFeedPost = newPost;
         }
       }
       setCreateType(null);
@@ -1040,7 +1045,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setComposedImageUri(null);
       setPostLocation("");
       setTaggedPeople([]);
-      onVideoPosted?.();
+      onVideoPosted?.(createdFeedPost);
       onClose();
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "Failed to publish video.");
