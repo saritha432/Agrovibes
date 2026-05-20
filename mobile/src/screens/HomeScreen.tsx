@@ -1808,18 +1808,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     for (const peer of followingSharePeers) {
       add(peer.name, peer.id);
     }
-    for (const p of posts) {
-      const uid = Number(p.userId);
-      const av = p.authorAvatarUrl;
-      add(p.userName, Number.isFinite(uid) && uid > 0 ? uid : null, typeof av === "string" ? av : null);
-    }
-
     const q = normalizeIdentity(shareSearch);
     return rows
       .filter((item) => !q || normalizeIdentity(item.name).includes(q))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
       .slice(0, 48);
-  }, [followingSharePeers, posts, shareSearch, user?.fullName, user?.id]);
+  }, [followingSharePeers, shareSearch, user?.fullName, user?.id]);
 
   const onSendReelToChat = useCallback(
     async (post: HomePost, recipient: { id: number | null; name: string; avatarUrl?: string | null }) => {

@@ -119,6 +119,28 @@ function parseSharedCropvibeContent(body: string): HomePost | null {
   };
 }
 
+function parseSharedProfileContent(body: string): { userId?: number; userName: string; handle?: string; bio?: string; avatarUrl?: string | null } | null {
+  const prefix = "[Cropvibe Profile]";
+  if (!String(body || "").startsWith(prefix)) return null;
+  const jsonText = String(body || "").slice(prefix.length).trim();
+  if (!jsonText.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const userName = String(parsed.userName || parsed.fullName || "User").trim() || "User";
+    const rawId = Number(parsed.userId);
+    const userId = Number.isFinite(rawId) && rawId > 0 ? rawId : undefined;
+    return {
+      userId,
+      userName,
+      handle: String(parsed.handle || "").trim() || undefined,
+      bio: String(parsed.bio || "").trim() || undefined,
+      avatarUrl: parsed.avatarUrl ? String(parsed.avatarUrl) : undefined
+    };
+  } catch {
+    return null;
+  }
+}
+
 function sharedChatCardThumb(post: HomePost): { uri: string | null; showPlayBadge: boolean } {
   const v = String(post.videoUrl || "").trim();
   if (v) {
@@ -269,10 +291,11 @@ export function DirectChatScreen() {
         renderItem={({ item }) => {
           const isSelf = Number(item.senderId) === Number(user?.id);
           const sharedPost = parseSharedCropvibeContent(item.body);
+          const sharedProfile = parseSharedProfileContent(item.body);
           const thumb = sharedPost ? sharedChatCardThumb(sharedPost) : { uri: null as string | null, showPlayBadge: false };
           return (
             <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
-              <View style={sharedPost ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer]}>
+              <View style={sharedPost || sharedProfile ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer]}>
                 {sharedPost ? (
                   <Pressable style={styles.sharedReelCard} onPress={() => void openSharedCropvibeCard(item.body)}>
                     <View style={styles.sharedReelThumb}>
@@ -300,10 +323,36 @@ export function DirectChatScreen() {
                       </View>
                     </View>
                   </Pressable>
+                ) : sharedProfile ? (
+                  <Pressable
+                    style={styles.sharedProfileCard}
+                    onPress={() => {
+                      if (!sharedProfile.userId) return;
+                      navigation.navigate("PublicProfile", {
+                        userId: sharedProfile.userId,
+                        userName: sharedProfile.userName,
+                        avatarUrl: sharedProfile.avatarUrl || undefined
+                      });
+                    }}
+                  >
+                    <UserAvatar
+                      uri={sharedProfile.avatarUrl}
+                      name={sharedProfile.userName}
+                      size={44}
+                      borderRadius={22}
+                      fallbackBackgroundColor="#111418"
+                      initialsColor={YELLOW}
+                    />
+                    <View style={styles.sharedProfileMeta}>
+                      <Text style={styles.sharedProfileName} numberOfLines={1}>{sharedProfile.userName}</Text>
+                      {sharedProfile.handle ? <Text style={styles.sharedProfileHandle} numberOfLines={1}>{sharedProfile.handle}</Text> : null}
+                      {sharedProfile.bio ? <Text style={styles.sharedProfileBio} numberOfLines={1}>{sharedProfile.bio}</Text> : null}
+                    </View>
+                  </Pressable>
                 ) : (
                   <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{item.body}</Text>
                 )}
-                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, sharedPost ? styles.reelMeta : null]}>
+                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, sharedPost || sharedProfile ? styles.reelMeta : null]}>
                   {formatMsgTime(new Date(item.createdAt).getTime())}
                 </Text>
               </View>
@@ -456,6 +505,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)"
   },
+  sharedProfileCard: {
+    width: 230,
+    minHeight: 88,
+    borderRadius: 16,
+    backgroundColor: "#111418",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  sharedProfileMeta: { flex: 1, minWidth: 0 },
+  sharedProfileName: { color: "#fff", fontSize: 14, fontWeight: "900" },
+  sharedProfileHandle: { marginTop: 2, color: "#d8ff37", fontSize: 12, fontWeight: "700" },
+  sharedProfileBio: { marginTop: 2, color: "rgba(255,255,255,0.8)", fontSize: 11 },
   sharedReelThumb: {
     flex: 1,
     alignItems: "center",
