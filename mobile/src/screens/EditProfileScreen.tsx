@@ -17,12 +17,16 @@ import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { updateMyProfile, uploadImageFile } from "../services/api";
+import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 
-const TEXT = "#0f0f0f";
-const MUTED = "#7a7a7a";
-const BORDER = "#e5e5e5";
-const INPUT_BG = "#fafafa";
-const TEAL = "#0f9b8e";
+/** Align with Profile tab / home social surfaces */
+const SURFACE = "#111418";
+const INPUT_BG = "#1d2126";
+const BORDER = "#303842";
+const TEXT = "#f8fafc";
+const MUTED = "#97a0a8";
+const ACCENT = "#d8ff37";
+const ACCENT_TEXT = "#111418";
 
 function safeHandle(value: string) {
   return String(value || "")
@@ -159,76 +163,105 @@ export function EditProfileScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(24, insets.bottom + 10) }]}>
-        <View style={styles.avatarWrap}>
-          <View style={styles.avatar}>
-            {avatarUrl ? <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" /> : <Text style={styles.avatarText}>{initials || "U"}</Text>}
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(24, insets.bottom + 10) }
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.card}>
+          <View style={styles.avatarWrap}>
+            <View style={styles.avatarRing}>
+              <View style={styles.avatar}>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
+                ) : (
+                  <Text style={styles.avatarText}>{initials || "U"}</Text>
+                )}
+              </View>
+            </View>
+            <Pressable
+              onPress={pickProfilePhoto}
+              disabled={isUploadingPhoto}
+              style={({ pressed }) => [styles.changePhotoBtn, pressed && styles.changePhotoBtnPressed]}
+            >
+              <Ionicons name="camera-outline" size={18} color={ACCENT_TEXT} style={{ marginRight: 8 }} />
+              <Text style={styles.changePhotoText}>{isUploadingPhoto ? "Uploading…" : "Change profile photo"}</Text>
+            </Pressable>
           </View>
-          <Pressable onPress={pickProfilePhoto} disabled={isUploadingPhoto}>
-            <Text style={styles.changePhotoText}>{isUploadingPhoto ? "Uploading..." : "Change profile photo"}</Text>
-          </Pressable>
+
+          <View style={styles.form}>
+            <View style={styles.field}>
+              <Text style={styles.label}>Name</Text>
+              <TextInput
+                value={fullName}
+                onChangeText={setFullName}
+                style={styles.input}
+                placeholder="Name"
+                placeholderTextColor={MUTED}
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Username</Text>
+              <TextInput
+                value={username}
+                onChangeText={(t) => setUsername(safeHandle(t))}
+                style={styles.input}
+                autoCapitalize="none"
+                placeholder="username"
+                placeholderTextColor={MUTED}
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Website</Text>
+              <TextInput
+                value={website}
+                onChangeText={setWebsite}
+                style={styles.input}
+                autoCapitalize="none"
+                keyboardType="url"
+                placeholder="https://"
+                placeholderTextColor={MUTED}
+              />
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Bio</Text>
+              <TextInput
+                value={bio}
+                onChangeText={setBio}
+                style={[styles.input, styles.bioInput]}
+                multiline
+                maxLength={150}
+                placeholder="Tell people about your farm or work"
+                placeholderTextColor={MUTED}
+              />
+              <Text style={styles.helper}>{bio.length}/150</Text>
+            </View>
+
+            <View style={[styles.field, styles.fieldLast]}>
+              <Text style={styles.label}>Location</Text>
+              <TextInput
+                value={location}
+                onChangeText={setLocation}
+                style={styles.input}
+                placeholder="District or region"
+                placeholderTextColor={MUTED}
+              />
+            </View>
+          </View>
         </View>
 
-        <View style={styles.form}>
-          <View style={styles.field}>
-            <Text style={styles.label}>Name</Text>
-            <TextInput value={fullName} onChangeText={setFullName} style={styles.input} placeholder="Name" placeholderTextColor={MUTED} />
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>Username</Text>
-            <TextInput
-              value={username}
-              onChangeText={(t) => setUsername(safeHandle(t))}
-              style={styles.input}
-              autoCapitalize="none"
-              placeholder="username"
-              placeholderTextColor={MUTED}
-            />
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>Website</Text>
-            <TextInput
-              value={website}
-              onChangeText={setWebsite}
-              style={styles.input}
-              autoCapitalize="none"
-              keyboardType="url"
-              placeholder="Website"
-              placeholderTextColor={MUTED}
-            />
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>Bio</Text>
-            <TextInput
-              value={bio}
-              onChangeText={setBio}
-              style={[styles.input, styles.bioInput]}
-              multiline
-              maxLength={150}
-              placeholder="Bio"
-              placeholderTextColor={MUTED}
-            />
-            <Text style={styles.helper}>{bio.length}/150</Text>
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>Location</Text>
-            <TextInput
-              value={location}
-              onChangeText={setLocation}
-              style={styles.input}
-              placeholder="Location"
-              placeholderTextColor={MUTED}
-            />
-          </View>
-        </View>
-
-        <Pressable style={[styles.saveBtn, isSaving ? styles.saveBtnDisabled : null]} onPress={save} disabled={isSaving}>
-          <Ionicons name="checkmark" size={18} color="#fff" />
-          <Text style={styles.saveText}>{isSaving ? "Saving..." : "Done"}</Text>
+        <Pressable
+          style={[styles.saveBtn, isSaving ? styles.saveBtnDisabled : null]}
+          onPress={save}
+          disabled={isSaving}
+        >
+          <Ionicons name="checkmark" size={20} color={ACCENT_TEXT} />
+          <Text style={styles.saveText}>{isSaving ? "Saving…" : "Done"}</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -236,49 +269,84 @@ export function EditProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#fff" },
-  content: { paddingHorizontal: 16, paddingTop: 12 },
-  avatarWrap: { alignItems: "center", paddingTop: 6, paddingBottom: 18 },
+  root: { flex: 1, backgroundColor: socialDiscoveryTheme.bg },
+  content: { paddingHorizontal: 16, paddingTop: 16 },
+  card: {
+    borderRadius: 16,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 8
+  },
+  avatarWrap: { alignItems: "center", paddingBottom: 8 },
+  avatarRing: {
+    padding: 3,
+    borderRadius: 56,
+    borderWidth: 2,
+    borderColor: ACCENT
+  },
   avatar: {
     width: 94,
     height: 94,
     borderRadius: 47,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#ececec"
+    backgroundColor: INPUT_BG,
+    overflow: "hidden"
   },
   avatarText: { fontSize: 34, fontWeight: "800", color: TEXT },
-  avatarImage: { width: "100%", height: "100%", borderRadius: 47 },
-  changePhotoText: { marginTop: 12, fontSize: 14, fontWeight: "700", color: "#3897f0" },
-  form: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER },
+  avatarImage: { width: "100%", height: "100%" },
+  changePhotoBtn: {
+    marginTop: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: ACCENT,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12
+  },
+  changePhotoBtnPressed: { opacity: 0.88 },
+  changePhotoText: { fontSize: 14, fontWeight: "800", color: ACCENT_TEXT },
+  form: {
+    marginTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: BORDER
+  },
   field: {
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: BORDER
   },
-  label: { fontSize: 13, color: MUTED, marginBottom: 6, fontWeight: "600" },
+  fieldLast: {
+    borderBottomWidth: 0
+  },
+  label: { fontSize: 13, color: MUTED, marginBottom: 8, fontWeight: "600" },
   input: {
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === "ios" ? 12 : 10,
     backgroundColor: INPUT_BG,
     fontSize: 15,
     color: TEXT
   },
-  bioInput: { minHeight: 92, textAlignVertical: "top" },
-  helper: { marginTop: 6, color: MUTED, fontSize: 12, textAlign: "right" },
+  bioInput: { minHeight: 96, textAlignVertical: "top" },
+  helper: { marginTop: 8, color: MUTED, fontSize: 12, textAlign: "right" },
   saveBtn: {
-    marginTop: 18,
-    backgroundColor: TEAL,
-    borderRadius: 12,
-    height: 46,
+    marginTop: 20,
+    backgroundColor: ACCENT,
+    borderRadius: 14,
+    height: 50,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8
+    gap: 8,
+    borderWidth: 1,
+    borderColor: BORDER
   },
-  saveBtnDisabled: { opacity: 0.65 },
-  saveText: { color: "#fff", fontSize: 15, fontWeight: "800" }
+  saveBtnDisabled: { opacity: 0.6 },
+  saveText: { color: ACCENT_TEXT, fontSize: 16, fontWeight: "800" }
 });

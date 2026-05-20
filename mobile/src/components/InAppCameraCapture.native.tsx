@@ -56,6 +56,7 @@ export function InAppCameraCapture({
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
+  const recordingStartedAtRef = useRef<number>(0);
   const unavailableNotifiedRef = useRef(false);
 
   const [facing, setFacing] = useState<CameraFacing>(initialFacing);
@@ -122,9 +123,17 @@ export function InAppCameraCapture({
     if (recording) {
       setBusy(true);
       try {
+        // expo-camera can fail with "stopped before any data could be produced"
+        // if stop is requested too quickly after start. Wait a short minimum window.
+        const elapsed = Date.now() - (recordingStartedAtRef.current || 0);
+        const minMs = 650;
+        if (elapsed > 0 && elapsed < minMs) {
+          await new Promise((resolve) => setTimeout(resolve, minMs - elapsed));
+        }
         cameraRef.current.stopRecording();
         const video = await recordingPromiseRef.current;
         recordingPromiseRef.current = null;
+        recordingStartedAtRef.current = 0;
         setRecording(false);
         setBusy(false);
         if (!video?.uri) {
@@ -134,17 +143,26 @@ export function InAppCameraCapture({
         onCapture(toPickerAsset({ uri: video.uri, type: "video", duration: null }));
         onClose();
       } catch (e) {
+        recordingPromiseRef.current = null;
+        recordingStartedAtRef.current = 0;
         setRecording(false);
         setBusy(false);
-        setErrorText(e instanceof Error ? e.message : "Video recording failed.");
+        const msg = e instanceof Error ? e.message : "Video recording failed.";
+        if (/before any data could be produced/i.test(msg)) {
+          setErrorText("Recording was too short. Hold for a moment, then stop.");
+        } else {
+          setErrorText(msg);
+        }
       }
       return;
     }
     if (busy) return;
     setRecording(true);
     try {
+      recordingStartedAtRef.current = Date.now();
       recordingPromiseRef.current = cameraRef.current.recordAsync({ maxDuration: 60 });
     } catch (e) {
+      recordingStartedAtRef.current = 0;
       setRecording(false);
       setErrorText(e instanceof Error ? e.message : "Could not start recording.");
     }

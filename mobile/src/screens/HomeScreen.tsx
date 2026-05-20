@@ -74,6 +74,8 @@ import { APP_DARK_BG } from "../theme/appColors";
 interface HomeScreenProps {
   refreshToken?: number;
   onOpenCreate?: (type?: CreateType) => void;
+  /** Returns at most once per successful create: API post to merge into the feed after refetch (read clears the slot). */
+  takePendingFeedPost?: () => HomePost | undefined;
 }
 
 const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
@@ -872,7 +874,7 @@ function ReelLikeBurst({ postId, trigger, seenRef }: ReelLikeBurstProps) {
   );
 }
 
-export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) {
+export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost }: HomeScreenProps) {
   const { token, user } = useAuth();
   const insets = useSafeAreaInsets();
   /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
@@ -1395,14 +1397,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
       try {
         const data = await fetchHomePosts(token ?? null);
         if (!mounted) return;
+        const pending = takePendingFeedPost?.();
+        const rows = dedupeHomePosts(data.posts);
+        const merged = pending ? dedupeHomePosts([pending, ...rows]) : rows;
         const localLikes = await getLocalLikeStateForPosts(
           localLikeViewerIdentity(user || {}),
-          data.posts.map((p) => p.id)
+          merged.map((p) => p.id)
         );
         if (!mounted) return;
-        const rows = dedupeHomePosts(data.posts);
         setPosts(
-          rows.map((p) => ({
+          merged.map((p) => ({
             ...p,
             viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
             likesCount: token
@@ -1418,7 +1422,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     return () => {
       mounted = false;
     };
-  }, [refreshToken, token, user?.email, user?.fullName, user?.id]);
+  }, [refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
 
   useEffect(() => {
     let mounted = true;
@@ -1808,18 +1812,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate }: HomeScreenProps) 
     for (const peer of followingSharePeers) {
       add(peer.name, peer.id);
     }
-    for (const p of posts) {
-      const uid = Number(p.userId);
-      const av = p.authorAvatarUrl;
-      add(p.userName, Number.isFinite(uid) && uid > 0 ? uid : null, typeof av === "string" ? av : null);
-    }
-
     const q = normalizeIdentity(shareSearch);
     return rows
       .filter((item) => !q || normalizeIdentity(item.name).includes(q))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
       .slice(0, 48);
-  }, [followingSharePeers, posts, shareSearch, user?.fullName, user?.id]);
+  }, [followingSharePeers, shareSearch, user?.fullName, user?.id]);
 
   const onSendReelToChat = useCallback(
     async (post: HomePost, recipient: { id: number | null; name: string; avatarUrl?: string | null }) => {
