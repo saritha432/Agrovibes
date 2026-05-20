@@ -464,8 +464,8 @@ const styles = StyleSheet.create({
     maxHeight: 308
   },
   featureArtImageCta: { maxHeight: 340 },
-  slideTag: { color: "#37474F", fontSize: 18, fontWeight: "600", letterSpacing: 0.1 },
-  slideTagInverted: { color: "#37474F" },
+  slideTag: { color: COLORS.lime, fontSize: 18, fontWeight: "600", letterSpacing: 0.1 },
+  slideTagInverted: { color: "#262626" },
   copyText: {
     color: COLORS.lime,
     fontWeight: "600",
