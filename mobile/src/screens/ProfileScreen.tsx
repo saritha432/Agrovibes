@@ -25,6 +25,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
+import { useLanguage } from "../localization/LanguageContext";
 import {
   fetchSavedHomePosts,
   fetchHomePosts,
@@ -83,6 +84,7 @@ export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width, height: windowHeight } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
+  const { t } = useLanguage();
   const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
@@ -621,7 +623,7 @@ export function ProfileScreen() {
                 <Pressable style={styles.editProfileBtnCompact} onPress={navigateToEditProfile}>
                   <Ionicons name="create-outline" size={18} color="#111" />
                   <Text style={styles.editProfileBtnText} numberOfLines={1}>
-                    Edit Profile
+                    {t("editProfile")}
                   </Text>
                 </Pressable>
                 <Pressable style={styles.iconActionSquare} onPress={handleShareProfile}>
