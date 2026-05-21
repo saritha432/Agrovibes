@@ -48,6 +48,7 @@ import {
   type GalleryGridAsset
 } from "../utils/galleryAlbums";
 import { APP_LIME, APP_LIME_SOFT_BG } from "../theme/appColors";
+import { useLanguage } from "../localization/LanguageContext";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -276,6 +277,30 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
 });
 
 export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
+  const { t } = useLanguage();
+  const createModes = React.useMemo(
+    () =>
+      [
+        { key: "post" as const, label: t("createModePost") },
+        { key: "story" as const, label: t("createModeStory") },
+        { key: "reel" as const, label: t("createModeReel") },
+        { key: "live" as const, label: t("createModeLive") }
+      ],
+    [t]
+  );
+  const filterOptions = React.useMemo(
+    () =>
+      [
+        { id: "none" as const, label: t("filterNormal") },
+        { id: "warm" as const, label: t("filterWarm") },
+        { id: "cool" as const, label: t("filterCool") },
+        { id: "mono" as const, label: t("filterBw") },
+        { id: "vivid" as const, label: t("filterVivid") },
+        { id: "sunset" as const, label: t("filterSunset") },
+        { id: "noir" as const, label: t("filterNoir") }
+      ],
+    [t]
+  );
   const insets = useSafeAreaInsets();
   const { user, token } = useAuth();
   const [createType, setCreateType] = useState<CreateType | null>(null);
@@ -394,7 +419,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         audioPreviewRef.current = sound;
         setAudioPreviewTrackId(track.id);
       } catch {
-        setErrorText("Could not preview this audio track.");
+        setErrorText(t("createErrAudioPreview"));
       }
     },
     [audioPreviewTrackId, stopAudioPreview]
@@ -599,11 +624,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       .map((id) => recentGridAssets.find((a) => a.id === id))
       .filter((a): a is GalleryGridAsset => !!a);
     if (!selected.length) {
-      setErrorText("Please select at least one photo.");
+      setErrorText(t("createErrSelectPhoto"));
       return;
     }
     if (selected.length > 1 && selected.some((a) => a.mediaType === "video")) {
-      setErrorText("Photo carousels can only include pictures. Pick one video for a video post.");
+      setErrorText(t("createErrCarouselPhotos"));
       return;
     }
     const assets: ImagePicker.ImagePickerAsset[] = selected.map((a) => ({
@@ -618,7 +643,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const onEntryPressAsset = (asset: GalleryGridAsset) => {
     setErrorText("");
     if (asset.mediaType === "video") {
-      setErrorText("Post grid supports photos only. Choose Reel for video.");
+      setErrorText(t("createErrPostPhotosOnly"));
       return;
     }
     setEntrySelectedIds((prev) => {
@@ -775,7 +800,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
     if (entryType === "reel") {
       if (shouldUseImageUpload(uri, first)) {
-        setErrorText("Reels support video only. Please select or record a video.");
+        setErrorText(t("createErrReelVideoOnly"));
         return;
       }
       setPickedPostAssets([first]);
@@ -787,7 +812,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       if (assets.length > 1) {
         const allImg = assets.every((a) => shouldUseImageUpload(a.uri, a));
         if (!allImg) {
-          setErrorText("Photo carousels can only include pictures. Pick one video for a video post.");
+          setErrorText(t("createErrCarouselPhotos"));
           return;
         }
       }
@@ -858,7 +883,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     try {
       const photo = await entryCameraRef.current?.takePictureAsync({ quality: 0.9 });
       if (!photo?.uri) {
-        setErrorText("Could not capture photo.");
+        setErrorText(t("createErrCapturePhoto"));
         return;
       }
       applyPickedMediaToFlow([
@@ -965,7 +990,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const onCaptureGalleryAsset = (asset: GalleryGridAsset) => {
     if (entryType === "reel" && asset.mediaType !== "video") {
-      setErrorText("Reels support video only.");
+      setErrorText(t("createErrReelVideoOnlyShort"));
       return;
     }
     pickStoryFromGallery(asset);
@@ -976,7 +1001,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     if (Platform.OS !== "web") {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        setErrorText("Media library permission is required.");
+        setErrorText(t("createErrMediaPerm"));
         return;
       }
     }
@@ -1006,7 +1031,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     if (entryType === "story" || entryType === "reel") {
       const perm = await MediaLibrary.requestPermissionsAsync();
       if (!perm.granted) {
-        setErrorText("Media library permission is required.");
+        setErrorText(t("createErrMediaPerm"));
         return;
       }
       setCaptureEntryView("gallery");
@@ -1023,12 +1048,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     try {
       if (createType === "live") {
         if (!liveMode) {
-          setErrorText("Choose an option to continue.");
+          setErrorText(t("createErrChooseOption"));
           setSubmitting(false);
           return;
         }
         if (liveMode === "schedule") {
-          Alert.alert("Schedule live", "Scheduling will be available in a future update.");
+          Alert.alert(t("scheduleLiveTitle"), t("scheduleLiveBody"));
           setSubmitting(false);
           return;
         }
@@ -1064,7 +1089,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         createdFeedPost = newPost;
       } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
-          setErrorText("Please record or upload story media.");
+          setErrorText(t("createErrStoryMedia"));
           setSubmitting(false);
           return;
         }
@@ -1088,35 +1113,35 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         }, token ?? null);
       } else {
         if (!caption.trim()) {
-          setErrorText("Caption is required.");
+          setErrorText(t("createErrCaptionRequired"));
           setSubmitting(false);
           return;
         }
         const assets = [...pickedPostAssets];
         if (!assets.length) {
-          setErrorText(createType === "reel" ? "Please record or upload a reel video." : "Please add media for your post.");
+          setErrorText(createType === "reel" ? t("createErrReelMedia") : t("createErrPostMedia"));
           setSubmitting(false);
           return;
         }
         if (createType === "reel" && assets.length > 1) {
-          setErrorText("A reel must be a single video.");
+          setErrorText(t("createErrReelSingleVideo"));
           setSubmitting(false);
           return;
         }
         const images = assets.filter((a) => shouldUseImageUpload(a.uri, a));
         const videos = assets.filter((a) => !shouldUseImageUpload(a.uri, a));
         if (createType === "reel" && (videos.length !== 1 || images.length > 0)) {
-          setErrorText("Please upload one video reel.");
+          setErrorText(t("createErrUploadReel"));
           setSubmitting(false);
           return;
         }
         if (images.length && videos.length) {
-          setErrorText("Use either one video or multiple photos — not both.");
+          setErrorText(t("createErrMixedMedia"));
           setSubmitting(false);
           return;
         }
         if (videos.length > 1) {
-          setErrorText("Only one video per post.");
+          setErrorText(t("createErrOneVideo"));
           setSubmitting(false);
           return;
         }
@@ -1182,7 +1207,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             urls.push(url);
           }
           if (!urls.length) {
-            setErrorText("Could not upload images.");
+            setErrorText(t("createErrUploadImages"));
             setSubmitting(false);
             return;
           }
@@ -1212,7 +1237,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       onVideoPosted?.(createdFeedPost);
       onClose();
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : "Failed to publish video.");
+      setErrorText(error instanceof Error ? error.message : t("createErrPublish"));
     } finally {
       setSubmitting(false);
     }
@@ -1243,7 +1268,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       : pickedPostAssets.length === 1 && !!postFirst && !shouldUseImageUpload(postFirst.uri, postFirst);
   const canProceedFromPreview =
     (createType === "story" ? !!selectedUri : pickedPostAssets.length > 0) || createType === "live";
-  const previewTitle = createType === "reel" ? "Reel" : createType === "post" ? "New Post" : createType === "story" ? "Story" : "Create";
+  const previewTitle =
+    createType === "reel"
+      ? t("createPreviewReel")
+      : createType === "post"
+        ? t("createPreviewPost")
+        : createType === "story"
+          ? t("createPreviewStory")
+          : t("createPreviewTitle");
   const audioTracksToShow = audioQuery.trim().length >= 2 ? audioSearchResults : AUDIO_TRACKS;
   const selectedAudioTrack =
     [...audioSearchResults, ...AUDIO_TRACKS].find((t) => t.id === selectedAudioTrackId) ?? null;
@@ -1251,11 +1283,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const taggedSummary =
     taggedPeople.length === 0
-      ? "Tag people"
+      ? t("tagPeople")
       : taggedPeople.length === 1
-      ? `Tagged: ${taggedPeople[0].name}`
-      : `Tagged: ${taggedPeople[0].name} + ${taggedPeople.length - 1} more`;
-  const locationSummary = postLocation.trim() ? `Location: ${postLocation.trim()}` : "Add location";
+        ? `${t("tagPeople")}: ${taggedPeople[0].name}`
+        : `${t("tagPeople")}: ${taggedPeople[0].name} + ${taggedPeople.length - 1}`;
+  const locationSummary = postLocation.trim()
+    ? t("locationPrefix", { place: postLocation.trim() })
+    : t("addLocation");
   const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
   const entryCameraActive =
     visible && captureEntryView === "camera" && entryType !== "live";
@@ -1268,13 +1302,15 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   }> = [
     {
       icon: "musical-notes-outline",
-      label: "Add audio",
-      displayText: selectedAudioTrack ? `Audio: ${selectedAudioTrack.title}` : "Add audio",
+      label: t("addAudio"),
+      displayText: selectedAudioTrack
+        ? t("audioPrefix", { title: selectedAudioTrack.title })
+        : t("addAudio"),
       onPress: () => setShowAudioPanel(true)
     },
     {
       icon: "person-add-outline",
-      label: "Tag people",
+      label: t("tagPeople"),
       displayText: taggedSummary,
       onPress: () => {
         setTagSearchQuery("");
@@ -1283,7 +1319,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     },
     {
       icon: "location-outline",
-      label: "Add location",
+      label: t("addLocation"),
       displayText: locationSummary,
       onPress: () => {
         setLocationDraft(postLocation);
@@ -1292,9 +1328,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     },
     {
       icon: "people-outline",
-      label: "Audience",
-      displayText: "Audience",
-      onPress: () => Alert.alert("Audience", "Audience controls coming soon.")
+      label: t("audience"),
+      displayText: t("audience"),
+      onPress: () => Alert.alert(t("audience"), t("audienceSoon"))
     }
   ];
 
@@ -1324,7 +1360,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               </Pressable>
               <Text style={styles.igPostEntryTitle}>New Post</Text>
               <Pressable onPress={startPostFromEntry} disabled={!canProceedFromPostEntry}>
-                <Text style={[styles.igPostEntryNext, !canProceedFromPostEntry ? styles.igPostEntryNextDisabled : null]}>Next</Text>
+                <Text style={[styles.igPostEntryNext, !canProceedFromPostEntry ? styles.igPostEntryNextDisabled : null]}>
+                  {t("nextBtn")}
+                </Text>
               </Pressable>
             </View>
 
@@ -1614,7 +1652,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 disabled={!canProceedFromPreview || isSubmitting}
               >
                 <Text style={[styles.igPreviewAction, !canProceedFromPreview ? styles.igPreviewActionDisabled : null]}>
-                  {createType === "story" ? "Share" : "Next"}
+                  {createType === "story" ? t("shareBtn") : t("nextBtn")}
                 </Text>
               </Pressable>
             </View>
@@ -1978,7 +2016,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
           <Text style={styles.creativePanelTitle}>Filters</Text>
           <View style={styles.filterGrid}>
-            {FILTER_OPTIONS.map((f) => (
+            {filterOptions.map((f) => (
               <Pressable
                 key={f.id}
                 style={[styles.filterChip, creativeFilter === f.id ? styles.filterChipOn : null]}

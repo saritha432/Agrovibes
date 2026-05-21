@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { APP_LIME } from "../../theme/appColors";
@@ -13,15 +14,52 @@ const CARD = "#252a30";
 const BORDER = "#3a424c";
 
 const GROUPS = [
-  { title: "GRAINS & CEREALS", items: ["Rice", "Wheat", "Jowar", "Maize", "Bajra"] },
-  { title: "VEGETABLES", items: ["Tomato", "Potato", "Onion", "Chilli", "Brinjal"] },
-  { title: "FRUITS", items: ["Mango", "Banana", "Grapes", "Orange", "Apple"] },
-  { title: "PULSES", items: ["Tur", "Moong", "Urad", "Masoor", "Chana"] }
+  {
+    titleKey: "cropGroupGrains",
+    items: [
+      { id: "Rice", labelKey: "cropRice" },
+      { id: "Wheat", labelKey: "cropWheat" },
+      { id: "Jowar", labelKey: "cropJowar" },
+      { id: "Maize", labelKey: "cropMaize" },
+      { id: "Bajra", labelKey: "cropBajra" }
+    ]
+  },
+  {
+    titleKey: "cropGroupVegetables",
+    items: [
+      { id: "Tomato", labelKey: "cropTomato" },
+      { id: "Potato", labelKey: "cropPotato" },
+      { id: "Onion", labelKey: "cropOnion" },
+      { id: "Chilli", labelKey: "cropChilli" },
+      { id: "Brinjal", labelKey: "cropBrinjal" }
+    ]
+  },
+  {
+    titleKey: "cropGroupFruits",
+    items: [
+      { id: "Mango", labelKey: "cropMango" },
+      { id: "Banana", labelKey: "cropBanana" },
+      { id: "Grapes", labelKey: "cropGrapes" },
+      { id: "Orange", labelKey: "cropOrange" },
+      { id: "Apple", labelKey: "cropApple" }
+    ]
+  },
+  {
+    titleKey: "cropGroupPulses",
+    items: [
+      { id: "Tur", labelKey: "cropTur" },
+      { id: "Moong", labelKey: "cropMoong" },
+      { id: "Urad", labelKey: "cropUrad" },
+      { id: "Masoor", labelKey: "cropMasoor" },
+      { id: "Chana", labelKey: "cropChana" }
+    ]
+  }
 ] as const;
 
 export function FirstTimeCropsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, updateUser } = useAuth();
+  const { t } = useLanguage();
   const [search, setSearch] = React.useState("");
   const [selected, setSelected] = React.useState<string[]>(["Rice"]);
 
@@ -37,14 +75,16 @@ export function FirstTimeCropsScreen() {
     navigation.reset({ index: 0, routes: [{ name: "Main" }] });
   };
 
+  const query = search.trim().toLowerCase();
+
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>What do you grow?</Text>
-      <Text style={styles.subtitle}>Tell us what crops you grow to receive relevant recommendations.</Text>
+      <Text style={styles.title}>{t("firstTimeCropsTitle")}</Text>
+      <Text style={styles.subtitle}>{t("firstTimeCropsSubtitle")}</Text>
 
       <TextInput
         style={styles.search}
-        placeholder="Search by crop"
+        placeholder={t("searchByCrop")}
         placeholderTextColor="#7f8b93"
         value={search}
         onChangeText={setSearch}
@@ -52,17 +92,24 @@ export function FirstTimeCropsScreen() {
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {GROUPS.map((group) => {
-          const items = group.items.filter((item) => item.toLowerCase().includes(search.trim().toLowerCase()));
+          const items = group.items.filter(
+            (item) =>
+              !query || item.id.toLowerCase().includes(query) || t(item.labelKey).toLowerCase().includes(query)
+          );
           if (items.length === 0) return null;
           return (
-            <View key={group.title} style={styles.group}>
-              <Text style={styles.groupTitle}>{group.title}</Text>
+            <View key={group.titleKey} style={styles.group}>
+              <Text style={styles.groupTitle}>{t(group.titleKey)}</Text>
               <View style={styles.chips}>
                 {items.map((item) => {
-                  const isSelected = selected.includes(item);
+                  const isSelected = selected.includes(item.id);
                   return (
-                    <Pressable key={item} onPress={() => toggle(item)} style={[styles.chip, isSelected ? styles.chipSelected : null]}>
-                      <Text style={[styles.chipText, isSelected ? styles.chipTextSelected : null]}>{item}</Text>
+                    <Pressable
+                      key={item.id}
+                      onPress={() => toggle(item.id)}
+                      style={[styles.chip, isSelected ? styles.chipSelected : null]}
+                    >
+                      <Text style={[styles.chipText, isSelected ? styles.chipTextSelected : null]}>{t(item.labelKey)}</Text>
                     </Pressable>
                   );
                 })}
@@ -73,7 +120,7 @@ export function FirstTimeCropsScreen() {
       </ScrollView>
 
       <Pressable style={[styles.primaryBtn, selected.length === 0 ? styles.disabledBtn : null]} onPress={finish} disabled={selected.length === 0}>
-        <Text style={styles.primaryText}>Continue</Text>
+        <Text style={styles.primaryText}>{t("continue")}</Text>
       </Pressable>
     </View>
   );

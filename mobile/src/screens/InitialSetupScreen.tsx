@@ -1,24 +1,20 @@
 import { Asset } from "expo-asset";
-import { ResizeMode, Video, type AVPlaybackSource } from "expo-av";
-import React from "react";
+import React, { createElement } from "react";
 import {
   FlatList,
   Image,
-  ImageSourcePropType,
   Platform,
   Pressable,
-  StatusBar,
   StyleSheet,
   Text,
   View,
-  type ViewStyle,
   useWindowDimensions
 } from "react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage, type AppLanguage } from "../localization/LanguageContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
 
 const SLIDES = [
@@ -79,29 +75,99 @@ const SLIDES = [
   }
 ] as const;
 
-const FIRST_WORDMARK = require("../../assets/Cropvibe1.png");
-const SPLASH_VIDEO = require("../../assets/splash.mp4");
+const CROPVIBE_GIF = require("../../assets/cropvibe.gif");
 
-const ONBOARDING_IMAGES: Record<
-  "media" | "marketplace" | "community" | "learn" | "logistics" | "alldone",
-  ImageSourcePropType
-> = {
-  media: require("../../assets/onboarding/media.png"),
-  marketplace: require("../../assets/onboarding/marketplace.png"),
-  community: require("../../assets/onboarding/community.png"),
-  learn: require("../../assets/onboarding/learn.png"),
-  logistics: require("../../assets/onboarding/logistics.png"),
-  alldone: require("../../assets/onboarding/alldone.png")
+type OnboardingImageKey = "media" | "marketplace" | "community" | "learn" | "logistics" | "alldone";
+
+/** Metro may return a URL string on web, or a numeric module id on native. */
+type OnboardingArtModule = number | string | { uri?: string; default?: string };
+
+const ONBOARDING_ART: Record<OnboardingImageKey, OnboardingArtModule> = {
+  media: require("../../assets/onboarding/media.svg"),
+  marketplace: require("../../assets/onboarding/marketplace.svg"),
+  community: require("../../assets/onboarding/community.svg"),
+  learn: require("../../assets/onboarding/educators.svg"),
+  logistics: require("../../assets/onboarding/logistics.svg"),
+  alldone: require("../../assets/onboarding/alldone.svg")
 };
 
-const ONBOARDING_ICONS: Partial<Record<"media" | "marketplace" | "community" | "learn" | "logistics" | "alldone", ImageSourcePropType>> = {
-  media: require("../../assets/onboarding/media-icon (1).png"),
-  marketplace: require("../../assets/onboarding/market-icon.png"),
-  community: require("../../assets/onboarding/community-icon.png"),
-  learn: require("../../assets/onboarding/educator-icon.png"),
-  logistics: require("../../assets/onboarding/logistics-icon.png"),
-  alldone: require("../../assets/onboarding/done-icon.png")
-};
+function artModuleToUri(module: OnboardingArtModule): string | null {
+  if (typeof module === "string" && module.length > 0) return module;
+  if (typeof module === "object" && module !== null) {
+    if (typeof module.uri === "string" && module.uri.length > 0) return module.uri;
+    if (typeof module.default === "string" && module.default.length > 0) return module.default;
+  }
+  if (Platform.OS !== "web" && typeof module === "number") {
+    const resolved = Image.resolveAssetSource(module);
+    return resolved?.uri ?? null;
+  }
+  return null;
+}
+
+function OnboardingIllustration({ imageKey }: { imageKey: OnboardingImageKey }) {
+  const artSource = ONBOARDING_ART[imageKey];
+  const [uri, setUri] = React.useState<string | null>(() => artModuleToUri(artSource));
+  const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
+
+  React.useEffect(() => {
+    const direct = artModuleToUri(artSource);
+    if (direct) {
+      setUri(direct);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const asset = Asset.fromModule(artSource as number | string);
+        await asset.downloadAsync();
+        const nextUri = asset.localUri ?? asset.uri;
+        if (!cancelled && nextUri) setUri(nextUri);
+      } catch {
+        /* leave uri null — layout placeholder stays */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [artSource]);
+
+  const onLayout = (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
+    const { width, height } = e.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setSize({ w: Math.round(width), h: Math.round(height) });
+    }
+  };
+
+  if (!size || !uri) {
+    return <View style={styles.featureArtSvgWrap} onLayout={onLayout} />;
+  }
+
+  if (Platform.OS === "web") {
+    return (
+      <View style={styles.featureArtSvgWrap} onLayout={onLayout}>
+        {createElement("img", {
+          src: uri,
+          alt: "",
+          style: {
+            width: size.w,
+            height: size.h,
+            objectFit: "contain",
+            display: "block",
+            pointerEvents: "none"
+          }
+        })}
+      </View>
+    );
+  }
+
+  const { SvgUri } = require("react-native-svg") as typeof import("react-native-svg");
+  return (
+    <View style={styles.featureArtSvgWrap} onLayout={onLayout}>
+      <SvgUri uri={uri} width={size.w} height={size.h} />
+    </View>
+  );
+}
 
 const COLORS = {
   dark: APP_BLACK,
@@ -112,85 +178,28 @@ const COLORS = {
   mutedDark: "#3d3d3d"
 };
 
-/** Web: expo-av pins the video absolute-fill; relax so object-fit matches resizeMode. */
-const WEB_SPLASH_VIDEO_STYLE: ViewStyle | undefined =
-  Platform.OS === "web"
-    ? ({
-        position: "relative",
-        left: undefined,
-        top: undefined,
-        right: undefined,
-        bottom: undefined,
-        width: "100%",
-        height: "100%",
-        objectFit: "cover"
-      } as ViewStyle)
-    : undefined;
-
-function BrandSplashVideo({ playing }: { playing: boolean }) {
-  const videoRef = React.useRef<Video | null>(null);
-  const [source, setSource] = React.useState<AVPlaybackSource | null>(() =>
-    Platform.OS === "web" ? null : SPLASH_VIDEO
-  );
-
-  React.useEffect(() => {
-    if (Platform.OS !== "web") return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const asset = Asset.fromModule(SPLASH_VIDEO);
-        await asset.downloadAsync();
-        const uri = asset.localUri ?? asset.uri;
-        if (!cancelled && uri) setSource({ uri });
-      } catch {
-        if (!cancelled) setSource(SPLASH_VIDEO);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    const v = videoRef.current;
-    if (!v || source == null) return;
-    if (playing) {
-      void v.playAsync().catch(() => {});
-    } else {
-      void v.pauseAsync().catch(() => {});
-    }
-  }, [playing, source]);
-
-  if (source == null) {
-    return <View style={styles.brandVideo} />;
-  }
-
-  return (
-    <Video
-      ref={videoRef}
-      source={source}
-      style={styles.brandVideo}
-      resizeMode={ResizeMode.COVER}
-      videoStyle={WEB_SPLASH_VIDEO_STYLE}
-      isLooping
-      isMuted
-      shouldPlay={playing}
-      useNativeControls={false}
-      onError={(msg) => {
-        if (__DEV__) console.warn("[BrandSplashVideo] playback error:", msg);
-      }}
-    />
-  );
+function BrandSplashGif() {
+  return <Image source={CROPVIBE_GIF} style={styles.brandGif} resizeMode="cover" />;
 }
 
-const AUTOPLAY_INTERVAL_MS = 4500;
-const ONBOARDING_LOOP_START_INDEX = 1;
+/** Auto-advance between onboarding slides (lower ms = faster). */
+const AUTOPLAY_INTERVAL_MS = 1000;
+
+/** Matches fixed footer: 2 buttons + language row + padding (prevents art clipped under buttons). */
+const ONBOARDING_FOOTER_BASE_HEIGHT = 186;
+
+/** Auto-scroll loops feature slides only; index 0 is the brand GIF (manual swipe to view). */
+const ONBOARDING_AUTOPLAY_START_INDEX = 1;
+
+const ONBOARDING_PROGRESS_STEP_COUNT = SLIDES.length - ONBOARDING_AUTOPLAY_START_INDEX;
 
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
   const { language, setLanguage, t } = useLanguage();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const footerReserveHeight = ONBOARDING_FOOTER_BASE_HEIGHT + insets.bottom;
   const [index, setIndex] = React.useState(0);
   const indexRef = React.useRef(0);
   const listRef = React.useRef<FlatList<(typeof SLIDES)[number]>>(null);
@@ -202,12 +211,15 @@ export function InitialSetupScreen() {
 
   widthRef.current = width;
   const currentSlideInverted = SLIDES[index]?.inverted ?? false;
+  const isBrandSlide = index === 0;
 
   const requestScrollToIndex = React.useCallback((rawIndex: number, animated: boolean, opts?: { autoplay?: boolean }) => {
     const w = widthRef.current;
-    const normalizedIndex = opts?.autoplay
-      ? (Math.round(rawIndex) + SLIDES.length) % SLIDES.length
-      : Math.max(0, Math.min(Math.round(rawIndex), SLIDES.length - 1));
+    const clamped = Math.max(0, Math.min(Math.round(rawIndex), SLIDES.length - 1));
+    const normalizedIndex =
+      opts?.autoplay && clamped < ONBOARDING_AUTOPLAY_START_INDEX
+        ? ONBOARDING_AUTOPLAY_START_INDEX
+        : clamped;
     if (opts?.autoplay) {
       suppressUserCooldownRef.current = true;
       autoplayScrollInFlightRef.current = true;
@@ -232,7 +244,7 @@ export function InitialSetupScreen() {
       if (Date.now() < pauseAutoplayUntilRef.current) return;
       if (autoplayScrollInFlightRef.current) return;
       if (indexRef.current >= SLIDES.length - 1) {
-        requestScrollToIndex(Math.min(ONBOARDING_LOOP_START_INDEX, SLIDES.length - 1), false, { autoplay: true });
+        requestScrollToIndex(ONBOARDING_AUTOPLAY_START_INDEX, true, { autoplay: true });
         return;
       }
       const next = indexRef.current + 1;
@@ -240,8 +252,6 @@ export function InitialSetupScreen() {
     }, AUTOPLAY_INTERVAL_MS);
     return () => clearInterval(id);
   }, [isFocused, width, requestScrollToIndex]);
-
-  const showFooter = index >= 1;
 
   return (
     <SafeAreaView
@@ -309,42 +319,43 @@ export function InitialSetupScreen() {
                 item.mode === "brand" ? styles.pageBrand : null
               ]}
             >
-              <View style={styles.topBarWrap}>
-                <View style={styles.progressRow}>
-                  {SLIDES.map((_, segIndex) => (
-                    <View
-                      key={`progress-${segIndex}`}
-                      style={[
-                        styles.progressSegment,
-                        item.inverted
-                          ? segIndex <= slideIndex
-                            ? styles.progressSegmentDoneInverted
-                            : styles.progressSegmentPendingInverted
-                          : segIndex <= slideIndex
-                            ? styles.progressSegmentDoneDark
-                            : styles.progressSegmentPendingDark
-                      ]}
-                    />
-                  ))}
+              {item.mode !== "brand" ? (
+                <View style={styles.topBarWrap}>
+                  <View style={styles.progressRow}>
+                    {Array.from({ length: ONBOARDING_PROGRESS_STEP_COUNT }, (_, stepIndex) => {
+                      const filledSteps = slideIndex - ONBOARDING_AUTOPLAY_START_INDEX + 1;
+                      const isDone = stepIndex < filledSteps;
+                      return (
+                        <View
+                          key={`progress-${stepIndex}`}
+                          style={[
+                            styles.progressSegment,
+                            item.inverted
+                              ? isDone
+                                ? styles.progressSegmentDoneInverted
+                                : styles.progressSegmentPendingInverted
+                              : isDone
+                                ? styles.progressSegmentDoneDark
+                                : styles.progressSegmentPendingDark
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
                 </View>
-              </View>
+              ) : null}
               <View style={styles.content}>
                 {item.mode === "brand" ? (
-                  <View style={styles.brandVideoWrap}>
-                    <BrandSplashVideo playing={Boolean(isFocused && index === 0 && slideIndex === 0)} />
+                  <View style={styles.brandGifWrap}>
+                    <BrandSplashGif />
                   </View>
                 ) : (
                   <View style={[styles.featureWrap, item.mode === "cta" ? styles.featureWrapCta : null]}>
                     <View style={[styles.copyWrap, item.mode === "cta" ? styles.copyWrapCta : null]}>
                       {item.descriptionKey ? (
-                        <View style={styles.tagRow}>
-                          {"imageKey" in item && item.imageKey && ONBOARDING_ICONS[item.imageKey] ? (
-                            <Image source={ONBOARDING_ICONS[item.imageKey]} style={styles.sectionIcon} resizeMode="contain" />
-                          ) : null}
-                          <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>
-                            {t(item.descriptionKey)}
-                          </Text>
-                        </View>
+                        <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>
+                          {t(item.descriptionKey)}
+                        </Text>
                       ) : null}
                       <Text
                         style={[
@@ -363,11 +374,7 @@ export function InitialSetupScreen() {
                     </View>
                     {"imageKey" in item && item.imageKey ? (
                       <View style={[styles.featureArtWrap, item.mode === "cta" ? styles.featureArtWrapCta : null]}>
-                        <Image
-                          source={ONBOARDING_IMAGES[item.imageKey]}
-                          style={[styles.featureArtImage, item.mode === "cta" ? styles.featureArtImageCta : null]}
-                          resizeMode="contain"
-                        />
+                        <OnboardingIllustration imageKey={item.imageKey} />
                       </View>
                     ) : null}
                   </View>
@@ -377,34 +384,49 @@ export function InitialSetupScreen() {
                 style={
                   item.mode === "brand"
                     ? styles.pageFooterSpaceBrand
-                    : item.mode === "cta"
-                      ? styles.pageFooterSpaceCta
-                      : styles.pageFooterSpaceFeature
+                    : { height: footerReserveHeight }
                 }
               />
             </View>
           )}
         />
       </View>
-      {showFooter ? (
-        <View style={[styles.stableFooter, currentSlideInverted ? styles.stableFooterLime : styles.stableFooterDark]}>
-        {index === SLIDES.length - 1 ? (
+      {!isBrandSlide ? (
+        <View
+          style={[
+            styles.stableFooter,
+            { paddingBottom: Math.max(16, insets.bottom + 8) },
+            currentSlideInverted ? styles.stableFooterLime : styles.stableFooterDark
+          ]}
+        >
           <View style={styles.authActionsWrap}>
             <Pressable
-              style={styles.getStartedBtn}
+              style={[
+                styles.getStartedBtn,
+                currentSlideInverted ? styles.getStartedBtnOnLime : null
+              ]}
               onPress={() => navigation.navigate("AuthChoice", { initialMode: "register" })}
             >
-              <Text style={styles.getStartedBtnText}>{t("getStarted")}</Text>
+              <Text
+                style={[
+                  styles.getStartedBtnText,
+                  currentSlideInverted ? styles.getStartedBtnTextOnLime : null
+                ]}
+              >
+                {t("getStarted")}
+              </Text>
             </Pressable>
             <Pressable
-              style={styles.signInBtn}
+              style={[styles.signInBtn, currentSlideInverted ? styles.signInBtnOnLime : null]}
               onPress={() => navigation.navigate("AuthChoice", { initialMode: "login" })}
             >
-              <Text style={styles.signInBtnText}>{t("signIn")}</Text>
+              <Text
+                style={[styles.signInBtnText, currentSlideInverted ? styles.signInBtnTextOnLime : null]}
+              >
+                {t("signIn")}
+              </Text>
             </Pressable>
           </View>
-        ) : null}
-        {index >= 1 ? (
           <View style={styles.langRow}>
             {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => {
               const isActive = language === lang;
@@ -431,7 +453,6 @@ export function InitialSetupScreen() {
               );
             })}
           </View>
-        ) : null}
         </View>
       ) : null}
     </SafeAreaView>
@@ -455,47 +476,49 @@ const styles = StyleSheet.create({
   progressSegmentDoneInverted: { backgroundColor: COLORS.ink },
   progressSegmentPendingInverted: { backgroundColor: "rgba(21, 23, 17, 0.18)" },
   content: { flex: 1 },
-  brandVideoWrap: {
+  brandGifWrap: {
     flex: 1,
     backgroundColor: "#000",
     borderRadius: 0,
     overflow: "hidden"
   },
-  brandVideo: {
-    ...StyleSheet.absoluteFillObject,
-    ...(Platform.OS === "web" ? { width: "100%", height: "100%" } : null)
+  brandGif: {
+    width: "100%",
+    height: "100%"
   },
   heroWrap: { flex: 1, marginHorizontal: -18, justifyContent: "flex-start" },
   heroLogoArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 18, minHeight: 200 },
   logoImage: { width: "82%", height: 62 },
   heroPatternWrap: { width: "100%", height: "45%", justifyContent: "flex-end" },
   heroPatternImage: { width: "100%", height: "100%" },
-  featureWrap: { flex: 1, paddingTop: 28 },
-  featureWrapCta: { paddingTop: 12 },
-  copyWrap: { paddingTop: 8, paddingHorizontal: 2, minHeight: 146 },
+  featureWrap: { flex: 1, paddingTop: 44 },
+  featureWrapCta: { paddingTop: 28 },
+  copyWrap: { paddingTop: 12, paddingHorizontal: 2, minHeight: 130 },
   copyWrapCta: { minHeight: 0, paddingTop: 4 },
-  tagRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
-  sectionIcon: { width: 20, height: 20 },
+  slideTag: { color: COLORS.lime, fontSize: 18, fontWeight: "600", letterSpacing: 0.1, marginBottom: 10 },
   featureArtWrap: {
     flex: 1,
-    marginTop: 20,
+    marginTop: 36,
     marginHorizontal: -18,
+    paddingTop: 16,
     alignItems: "center",
     justifyContent: "flex-end",
     minHeight: 220
   },
   featureArtWrapCta: {
-    marginTop: 32,
+    marginTop: 40,
+    paddingTop: 16,
     justifyContent: "center",
     minHeight: 260
   },
-  featureArtImage: {
+  featureArtSvgWrap: {
     width: "100%",
-    height: "100%",
-    maxHeight: 308
+    flex: 1,
+    minHeight: 220,
+    maxHeight: 308,
+    alignItems: "center",
+    justifyContent: "center"
   },
-  featureArtImageCta: { maxHeight: 340 },
-  slideTag: { color: COLORS.lime, fontSize: 18, fontWeight: "600", letterSpacing: 0.1 },
   slideTagInverted: { color: "#262626" },
   copyText: {
     color: COLORS.lime,
@@ -509,10 +532,7 @@ const styles = StyleSheet.create({
   copyTextCta: { textTransform: "none", fontSize: 30, lineHeight: 38 },
   copySubText: { marginTop: 10, color: COLORS.lime, fontWeight: "400", lineHeight: 21, fontSize: 15, maxWidth: "100%" },
   copySubTextInverted: { color: COLORS.ink, opacity: 0.82 },
-  pageFooterSpaceBrand: { height: 14 },
-  pageFooterSpace: { height: 175 },
-  pageFooterSpaceFeature: { height: 100 },
-  pageFooterSpaceCta: { height: 168 },
+  pageFooterSpaceBrand: { height: 8 },
   stableFooter: {
     position: "absolute",
     left: 0,
@@ -532,7 +552,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  getStartedBtnOnLime: {
+    backgroundColor: APP_BLACK
+  },
   getStartedBtnText: { color: COLORS.lime, fontSize: 14, fontWeight: "700" },
+  getStartedBtnTextOnLime: { color: COLORS.lime },
   signInBtn: {
     height: 48,
     borderRadius: 10,
@@ -540,7 +564,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  signInBtnOnLime: {
+    backgroundColor: APP_BLACK,
+    borderWidth: 1,
+    borderColor: APP_BLACK
+  },
   signInBtnText: { color: "#1b1f23", fontSize: 14, fontWeight: "700" },
+  signInBtnTextOnLime: { color: COLORS.lime },
   langRow: { marginTop: 10, flexDirection: "row", gap: 8, justifyContent: "center" },
   langChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   langChipOnDark: {

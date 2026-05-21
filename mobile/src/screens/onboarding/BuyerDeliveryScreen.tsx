@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
@@ -9,6 +10,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 export function BuyerDeliveryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { completeBuyerStep } = useOnboarding();
+  const { t } = useLanguage();
   const [line1, setLine1] = React.useState("");
   const [district, setDistrict] = React.useState("");
   const [pin, setPin] = React.useState("");
@@ -20,20 +22,20 @@ export function BuyerDeliveryScreen() {
 
   return (
     <OnboardingLayout
-      title="Delivery address"
-      subtitle="Default drop-off for marketplace orders (you can add more later)."
-      primaryLabel="Continue"
+      title={t("buyerDeliveryTitle")}
+      subtitle={t("buyerDeliverySubtitle")}
+      primaryLabel={t("continue")}
       onPrimary={next}
       primaryDisabled={!line1.trim() || !district.trim()}
       onBack={() => navigation.goBack()}
     >
-      <Text style={styles.label}>Address line</Text>
-      <TextInput value={line1} onChangeText={setLine1} style={styles.input} placeholder="Village, landmark, street" />
+      <Text style={styles.label}>{t("addressLineLabel")}</Text>
+      <TextInput value={line1} onChangeText={setLine1} style={styles.input} placeholder={t("addressLinePlaceholder")} />
 
-      <Text style={styles.label}>District</Text>
+      <Text style={styles.label}>{t("districtLabel")}</Text>
       <TextInput value={district} onChangeText={setDistrict} style={styles.input} />
 
-      <Text style={styles.label}>PIN code (optional)</Text>
+      <Text style={styles.label}>{t("pinCodeOptional")}</Text>
       <TextInput value={pin} onChangeText={setPin} keyboardType="number-pad" style={styles.input} maxLength={8} />
     </OnboardingLayout>
   );

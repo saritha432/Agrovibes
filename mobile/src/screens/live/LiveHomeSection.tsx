@@ -16,6 +16,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { HomePost } from "../../services/api";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
+import { useLanguage } from "../../localization/LanguageContext";
+import { formatFeedText } from "../../localization/feedDisplay";
 
 const LIME = APP_LIME;
 const RED_LIVE = "#FF3040";
@@ -39,13 +41,13 @@ function livePosterUri(post: HomePost): string | null {
   return c0 || null;
 }
 
-function liveTitle(post: HomePost) {
+function liveTitle(post: HomePost, language: import("../../localization/translations").AppLanguage, t: (k: string) => string) {
   const raw = String(post.caption || "")
-    .replace(/^\[LIVE\]\s*/i, "")
-    .replace(/^\[REEL\]\s*/i, "")
+    .replace(/^\[(?:POST|REEL|LIVE|STORY)\]\s*/i, "")
     .trim();
-  if (raw) return raw.slice(0, 48);
-  return post.musicLabel?.trim() || "Live stream";
+  if (raw) return formatFeedText(raw.slice(0, 48), language, t);
+  const music = post.musicLabel?.trim();
+  return music ? formatFeedText(music, language, t) : t("liveStream");
 }
 
 function viewerCount(post: HomePost) {
@@ -73,6 +75,7 @@ type LiveHomeSectionProps = {
 };
 
 export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
+  const { t, language } = useLanguage();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [watching, setWatching] = React.useState<HomePost | null>(null);
@@ -89,11 +92,11 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 88 }]}
       >
         <View style={styles.sectionHeadRow}>
-          <Text style={styles.sectionTitle}>Live now</Text>
+          <Text style={styles.sectionTitle}>{t("liveNow")}</Text>
           {onOpenCreate ? (
             <Pressable style={styles.goLiveBtn} onPress={onOpenCreate}>
               <Ionicons name="videocam" size={16} color="#111" />
-              <Text style={styles.goLiveBtnText}>Go Live</Text>
+              <Text style={styles.goLiveBtnText}>{t("goLive")}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -123,11 +126,11 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
           </ScrollView>
         ) : (
           <View style={styles.emptyRings}>
-            <Text style={styles.emptyRingsText}>No one is live right now</Text>
+            <Text style={styles.emptyRingsText}>{t("noOneLive")}</Text>
           </View>
         )}
 
-        <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Popular live</Text>
+        <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>{t("popularLive")}</Text>
         {livePosts.length ? (
           <View style={[styles.grid, { paddingHorizontal: gridPad, gap: gridGap }]}>
             {livePosts.map((post) => {
@@ -157,7 +160,7 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
                     </View>
                   </View>
                   <Text style={styles.gridTitle} numberOfLines={2}>
-                    {liveTitle(post)}
+                    {liveTitle(post, language, t)}
                   </Text>
                   <View style={styles.gridHostRow}>
                     <UserAvatar uri={post.authorAvatarUrl} name={post.userName} size={18} borderRadius={9} />
@@ -172,11 +175,11 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
         ) : (
           <View style={styles.emptyGrid}>
             <Ionicons name="radio-outline" size={40} color="rgba(255,255,255,0.25)" />
-            <Text style={styles.emptyGridTitle}>No live streams yet</Text>
-            <Text style={styles.emptyGridSub}>When creators go live, they will show up here.</Text>
+            <Text style={styles.emptyGridTitle}>{t("noLiveStreamsYet")}</Text>
+            <Text style={styles.emptyGridSub}>{t("noLiveStreamsSub")}</Text>
             {onOpenCreate ? (
               <Pressable style={styles.goLiveBtnLarge} onPress={onOpenCreate}>
-                <Text style={styles.goLiveBtnLargeText}>Start a live</Text>
+                <Text style={styles.goLiveBtnLargeText}>{t("startLive")}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -220,7 +223,7 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
                 <View style={styles.viewerHostText}>
                   <Text style={styles.viewerHostName}>{watching.userName}</Text>
                   <Text style={styles.viewerHostTitle} numberOfLines={2}>
-                    {liveTitle(watching)}
+                    {liveTitle(watching, language, t)}
                   </Text>
                 </View>
               </View>

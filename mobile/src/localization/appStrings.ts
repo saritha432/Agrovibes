@@ -155,7 +155,17 @@ export const APP_STRINGS_EN = {
   postKindReel: "reel",
   postKindPost: "post",
   photoUpdatedTitle: "Updated",
-  writeReply: "Write a reply…"
+  writeReply: "Write a reply…",
+  you: "You",
+  userWithId: "User {{id}}",
+  originalAudio: "Original audio",
+  feedDemoTest: "Test",
+  feedDemoTestVideoCapture: "Test video capture",
+  feedTestingFromCamera: "Testing from mobile app camera",
+  farmerDefaultName: "Farmer",
+  likesCountLabel: "{{count}} likes",
+  shareReelMessage: "{{name}} shared a reel on Cropvibe",
+  reportUserPrompt: "Why are you reporting {{name}}?"
 } as const;
 
 export const APP_STRINGS_HI: typeof APP_STRINGS_EN = {
@@ -314,7 +324,17 @@ export const APP_STRINGS_HI: typeof APP_STRINGS_EN = {
   postKindReel: "रील",
   postKindPost: "पोस्ट",
   photoUpdatedTitle: "अपडेट",
-  writeReply: "जवाब लिखें…"
+  writeReply: "जवाब लिखें…",
+  you: "आप",
+  userWithId: "उपयोगकर्ता {{id}}",
+  originalAudio: "मूल ऑडियो",
+  feedDemoTest: "टेस्ट",
+  feedDemoTestVideoCapture: "टेस्ट वीडियो कैप्चर",
+  feedTestingFromCamera: "मोबाइल ऐप कैमरा से परीक्षण",
+  farmerDefaultName: "किसान",
+  likesCountLabel: "{{count}} लाइक",
+  shareReelMessage: "{{name}} ने Cropvibe पर एक रील साझा की",
+  reportUserPrompt: "आप {{name}} की रिपोर्ट क्यों कर रहे हैं?"
 };
 
 export const APP_STRINGS_TE: typeof APP_STRINGS_EN = {
@@ -473,5 +493,15 @@ export const APP_STRINGS_TE: typeof APP_STRINGS_EN = {
   postKindReel: "రీల్",
   postKindPost: "పోస్ట్",
   photoUpdatedTitle: "నవీకరించబడింది",
-  writeReply: "సమాధానం రాయండి…"
+  writeReply: "సమాధానం రాయండి…",
+  you: "మీరు",
+  userWithId: "వినియోగదారు {{id}}",
+  originalAudio: "అసలు ఆడియో",
+  feedDemoTest: "టెస్ట్",
+  feedDemoTestVideoCapture: "టెస్ట్ వీడియో క్యాప్చర్",
+  feedTestingFromCamera: "మొబైల్ యాప్ కెమెరా నుండి పరీక్ష",
+  farmerDefaultName: "రైతు",
+  likesCountLabel: "{{count}} లైక్‌లు",
+  shareReelMessage: "{{name}} Cropvibeలో రీల్ షేర్ చేశారు",
+  reportUserPrompt: "{{name}}ని ఎందుకు రిపోర్ట్ చేస్తున్నారు?"
 };

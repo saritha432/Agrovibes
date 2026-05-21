@@ -21,6 +21,8 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { fetchHomePosts, fetchProfileStats, sendFollowRequest, type HomePost } from "../services/api";
 import { sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
+import { useLanguage } from "../localization/LanguageContext";
+import { formatDisplayName } from "../localization/feedDisplay";
 
 function normalizeName(value: string) {
   return String(value || "")
@@ -30,10 +32,12 @@ function normalizeName(value: string) {
 }
 
 export function PublicProfileScreen() {
+  const { t, language } = useLanguage();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { token, user } = useAuth();
   const route = useRoute<RouteProp<RootStackParamList, "PublicProfile">>();
   const { userId, userName, userKey, avatarUrl: avatarFromRoute } = route.params;
+  const displayName = formatDisplayName(userName, language, t);
   const [posts, setPosts] = useState<HomePost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
@@ -62,8 +66,8 @@ export function PublicProfileScreen() {
   );
 
   useEffect(() => {
-    navigation.setOptions({ title: userName });
-  }, [navigation, userName]);
+    navigation.setOptions({ title: displayName });
+  }, [navigation, displayName]);
 
   useEffect(() => {
     let mounted = true;
@@ -125,7 +129,7 @@ export function PublicProfileScreen() {
       setIsFollowing(true);
       setFollowersCount((v) => v + 1);
     } catch {
-      Alert.alert("Follow failed", "Try again in a moment.");
+      Alert.alert(t("followFailed"), t("tryAgainMoment"));
     } finally {
       setFollowBusy(false);
     }
@@ -133,7 +137,7 @@ export function PublicProfileScreen() {
 
   const openMessage = async () => {
     if (!userId) {
-      Alert.alert("Unavailable", "Cannot open chat for this user yet.");
+      Alert.alert(t("unavailable"), t("cannotOpenChat"));
       return;
     }
     navigation.navigate("DirectChat", {
@@ -153,7 +157,7 @@ export function PublicProfileScreen() {
           disabled={!avatarUrl}
           style={({ pressed }) => [styles.avatarPressable, pressed && avatarUrl ? { opacity: 0.85 } : null]}
           accessibilityRole="button"
-          accessibilityLabel="View profile photo"
+          accessibilityLabel={t("viewProfilePhoto")}
         >
           <View style={styles.avatar}>
             {avatarUrl ? (
@@ -178,8 +182,8 @@ export function PublicProfileScreen() {
           </View>
         </View>
       </View>
-      <Text style={styles.name}>{userName}</Text>
-      <Text style={styles.sub}>Public account</Text>
+      <Text style={styles.name}>{displayName}</Text>
+      <Text style={styles.sub}>{t("publicAccount")}</Text>
 
       <View style={styles.actionsRow}>
         <Pressable
@@ -188,11 +192,11 @@ export function PublicProfileScreen() {
           disabled={isFollowing || followBusy}
         >
           <Text style={[styles.actionText, isFollowing ? styles.actionTextMuted : styles.actionTextPrimary]}>
-            {isFollowing ? "Following" : followBusy ? "..." : "Follow"}
+            {isFollowing ? t("following") : followBusy ? t("followBusy") : t("follow")}
           </Text>
         </Pressable>
         <Pressable style={[styles.actionBtn, styles.actionBtnMuted]} onPress={openMessage}>
-          <Text style={[styles.actionText, styles.actionTextMuted]}>Message</Text>
+          <Text style={[styles.actionText, styles.actionTextMuted]}>{t("messageBtn")}</Text>
         </Pressable>
       </View>
 

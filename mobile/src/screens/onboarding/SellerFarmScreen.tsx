@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
@@ -9,6 +10,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 export function SellerFarmScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { completeSellerStep } = useOnboarding();
+  const { t } = useLanguage();
   const [farmName, setFarmName] = React.useState("");
   const [acres, setAcres] = React.useState("");
   const [primaryCrop, setPrimaryCrop] = React.useState("");
@@ -20,21 +22,21 @@ export function SellerFarmScreen() {
 
   return (
     <OnboardingLayout
-      title="Farm details"
-      subtitle="Tell buyers who you are. You can refine this on your seller profile later."
-      primaryLabel="Continue"
+      title={t("sellerFarmTitle")}
+      subtitle={t("sellerFarmSubtitle")}
+      primaryLabel={t("continue")}
       onPrimary={next}
       primaryDisabled={!farmName.trim() || !primaryCrop.trim()}
       onBack={() => navigation.navigate("RoleSelection")}
     >
-      <Text style={styles.label}>Farm or business name</Text>
+      <Text style={styles.label}>{t("farmNameLabel")}</Text>
       <TextInput value={farmName} onChangeText={setFarmName} style={styles.input} />
 
-      <Text style={styles.label}>Land under cultivation (acres, optional)</Text>
-      <TextInput value={acres} onChangeText={setAcres} keyboardType="decimal-pad" style={styles.input} placeholder="e.g. 12.5" />
+      <Text style={styles.label}>{t("landAcresLabel")}</Text>
+      <TextInput value={acres} onChangeText={setAcres} keyboardType="decimal-pad" style={styles.input} placeholder={t("acresPlaceholder")} />
 
-      <Text style={styles.label}>Primary crop or product</Text>
-      <TextInput value={primaryCrop} onChangeText={setPrimaryCrop} style={styles.input} placeholder="e.g. Basmati, dairy, nursery" />
+      <Text style={styles.label}>{t("primaryCropLabel")}</Text>
+      <TextInput value={primaryCrop} onChangeText={setPrimaryCrop} style={styles.input} placeholder={t("primaryCropPlaceholder")} />
     </OnboardingLayout>
   );
 }
