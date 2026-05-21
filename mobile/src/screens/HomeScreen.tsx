@@ -2660,7 +2660,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
-                fit="contain"
+                fit={reelViewerOpen ? "contain" : "cover"}
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
                 useNativeControls={false}
