@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-nati
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
@@ -12,6 +13,7 @@ export function PersonalInfoScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, updateUser, signOut } = useAuth();
   const { setPersonalInfoCompleted } = useOnboarding();
+  const { t } = useLanguage();
 
   const [fullName, setFullName] = React.useState(user?.fullName ?? "");
   const [email, setEmail] = React.useState(user?.email ?? "");
@@ -34,9 +36,9 @@ export function PersonalInfoScreen() {
 
   return (
     <OnboardingLayout
-      title="About you"
-      subtitle="We use this to personalize Cropvibe. You can edit it anytime in profile."
-      primaryLabel="Create account"
+      title={t("personalInfoTitle")}
+      subtitle={t("personalInfoSubtitle")}
+      primaryLabel={t("personalInfoPrimaryLabel")}
       onPrimary={submit}
       primaryDisabled={!(fullName.trim() || (user?.fullName ?? "").trim())}
       onBack={async () => {
@@ -45,41 +47,41 @@ export function PersonalInfoScreen() {
       }}
       showBack
     >
-      <Text style={styles.label}>Full name</Text>
-      <TextInput value={fullName} onChangeText={setFullName} style={styles.input} placeholder="Your name" />
+      <Text style={styles.label}>{t("fullNameLabel")}</Text>
+      <TextInput value={fullName} onChangeText={setFullName} style={styles.input} placeholder={t("fullNamePlaceholder")} />
 
-      <Text style={styles.label}>Email</Text>
+      <Text style={styles.label}>{t("emailLabel")}</Text>
       <TextInput
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
         style={styles.input}
-        placeholder="you@example.com"
+        placeholder={t("emailPlaceholder")}
       />
 
-      <Text style={styles.label}>Date of birth</Text>
-      <TextInput value={dob} onChangeText={setDob} style={styles.input} placeholder="YYYY-MM-DD (optional)" />
+      <Text style={styles.label}>{t("dobLabel")}</Text>
+      <TextInput value={dob} onChangeText={setDob} style={styles.input} placeholder={t("dobPlaceholder")} />
 
       <View style={styles.toggleRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.toggleTitle}>Language & location</Text>
-          <Text style={styles.toggleSub}>Optional shortcuts for regional content</Text>
+          <Text style={styles.toggleTitle}>{t("languageLocationTitle")}</Text>
+          <Text style={styles.toggleSub}>{t("languageLocationSub")}</Text>
         </View>
         <Switch value={quickPrefs} onValueChange={setQuickPrefs} />
       </View>
 
       {quickPrefs ? (
         <>
-          <Text style={styles.label}>Preferred language</Text>
-          <TextInput value={language} onChangeText={setLanguage} style={styles.input} placeholder="e.g. English, తెలుగు" />
+          <Text style={styles.label}>{t("preferredLanguageLabel")}</Text>
+          <TextInput value={language} onChangeText={setLanguage} style={styles.input} placeholder={t("preferredLanguagePlaceholder")} />
 
-          <Text style={styles.label}>Location</Text>
-          <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder="District or city" />
+          <Text style={styles.label}>{t("locationLabel")}</Text>
+          <TextInput value={location} onChangeText={setLocation} style={styles.input} placeholder={t("districtOrCityPlaceholder")} />
         </>
       ) : (
         <Pressable onPress={() => setQuickPrefs(true)} style={styles.skipHint}>
-          <Text style={styles.skipHintText}>Add language & location</Text>
+          <Text style={styles.skipHintText}>{t("addLanguageLocation")}</Text>
         </Pressable>
       )}
     </OnboardingLayout>

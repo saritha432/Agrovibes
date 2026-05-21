@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
@@ -9,6 +10,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 export function SecurityVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { completeSecurity } = useOnboarding();
+  const { t } = useLanguage();
 
   const finish = async () => {
     await completeSecurity();
@@ -22,17 +24,17 @@ export function SecurityVerificationScreen() {
 
   return (
     <OnboardingLayout
-      title="Security verification"
-      subtitle="Face liveness, ID OCR, and third-party KYC would plug in here. Tap below to simulate a successful check."
-      primaryLabel="Complete verification (demo)"
+      title={t("securityVerificationTitle")}
+      subtitle={t("securityVerificationSubtitle")}
+      primaryLabel={t("completeVerificationDemo")}
       onPrimary={finish}
       showBack={false}
     >
       <View style={styles.block}>
-        <Text style={styles.blockTitle}>Checks</Text>
-        <Text style={styles.item}>• Face liveness (anti-spoof)</Text>
-        <Text style={styles.item}>• Government ID capture & OCR</Text>
-        <Text style={styles.item}>• Optional vendor KYC match</Text>
+        <Text style={styles.blockTitle}>{t("checksTitle")}</Text>
+        <Text style={styles.item}>{t("checkFaceLiveness")}</Text>
+        <Text style={styles.item}>{t("checkGovIdOcr")}</Text>
+        <Text style={styles.item}>{t("checkVendorKyc")}</Text>
       </View>
     </OnboardingLayout>
   );

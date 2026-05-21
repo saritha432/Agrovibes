@@ -4,6 +4,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { sendPhoneOtp, verifyPhoneOtp } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
@@ -17,6 +18,7 @@ export function OtpVerifyScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "OtpVerify">>();
   const { signIn } = useAuth();
+  const { t } = useLanguage();
   const [code, setCode] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [resending, setResending] = React.useState(false);
@@ -41,7 +43,7 @@ export function OtpVerifyScreen() {
       await signIn({ token: auth.token, user: auth.user });
       navigation.reset({ index: 0, routes: [{ name: "Main" }] });
     } catch (e: any) {
-      setError(e?.message || "Invalid OTP. Please try again.");
+      setError(e?.message || t("invalidOtp"));
     } finally {
       setLoading(false);
     }
@@ -55,7 +57,7 @@ export function OtpVerifyScreen() {
       await sendPhoneOtp({ phone: route.params.phone });
       setCountdown(30);
     } catch (e: any) {
-      setError(e?.message || "Failed to resend OTP.");
+      setError(e?.message || t("failedResendOtp"));
     } finally {
       setResending(false);
     }
@@ -65,11 +67,11 @@ export function OtpVerifyScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>6 Digit Code</Text>
-      <Text style={styles.subtitle}>Please enter the verification code sent to {route.params.phone}</Text>
+      <Text style={styles.title}>{t("otpTitle")}</Text>
+      <Text style={styles.subtitle}>{t("otpSubtitle", { phone: route.params.phone })}</Text>
 
       <Pressable onPress={() => navigation.goBack()} style={styles.backPill}>
-        <Text style={styles.backText}>Back</Text>
+        <Text style={styles.backText}>{t("back")}</Text>
       </Pressable>
 
       <Pressable style={styles.codeRow} onPress={() => otpInputRef.current?.focus()}>
@@ -91,15 +93,15 @@ export function OtpVerifyScreen() {
       />
 
       <Pressable onPress={submit} style={[styles.verifyBtn, digitsOnly.length !== 6 || loading ? styles.disabledBtn : null]}>
-        <Text style={styles.verifyText}>{loading ? "Verifying..." : "Verify & Continue"}</Text>
+        <Text style={styles.verifyText}>{loading ? t("verifying") : t("verifyContinue")}</Text>
       </Pressable>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       <View style={styles.resendRow}>
-        <Text style={styles.hintText}>Resend the code?</Text>
+        <Text style={styles.hintText}>{t("resendCode")}</Text>
         <Pressable onPress={resendOtp} disabled={resending || countdown > 0}>
           <Text style={[styles.resendText, resending || countdown > 0 ? styles.disabledText : null]}>
-            {countdown > 0 ? `${countdown}s` : resending ? "Sending..." : "Resend"}
+            {countdown > 0 ? `${countdown}s` : resending ? t("sending") : t("resend")}
           </Text>
         </Pressable>
       </View>

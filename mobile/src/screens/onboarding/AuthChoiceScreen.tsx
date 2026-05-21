@@ -21,21 +21,6 @@ function resolvePhoneEmailLocalPart(digits: string): string {
   return d.length >= 10 ? d.slice(-10) : d;
 }
 
-/** Try multiple identifier formats so users can login with just phone number. */
-function buildLoginIdentifiers(raw: string): string[] {
-  const base = raw.trim().toLowerCase();
-  if (!base) return [];
-  const candidates = [base];
-  const digits = base.replace(/\D/g, "");
-  if (digits.length >= 10) {
-    const last10 = digits.slice(-10);
-    candidates.push(last10);
-    candidates.push(`+91${last10}`);
-    candidates.push(`${last10}@phone.agrovibes`);
-  }
-  return [...new Set(candidates)];
-}
-
 export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "AuthChoice">>();
@@ -43,12 +28,19 @@ export function AuthChoiceScreen() {
   const { t, language, setLanguage } = useLanguage();
   const initialMode = route.params?.initialMode === "login" ? "login" : "register";
   const [mode, setMode] = React.useState<"register" | "login">(initialMode);
-  const [phone, setPhone] = React.useState("");
-  const [password, setPassword] = React.useState("");
+  const [loginPhone, setLoginPhone] = React.useState("");
+  const [loginPassword, setLoginPassword] = React.useState("");
+  const [registerPhone, setRegisterPhone] = React.useState("");
+  const [registerPassword, setRegisterPassword] = React.useState("");
   const [fullName, setFullName] = React.useState("");
   const [username, setUsername] = React.useState("");
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
+
+  const phone = mode === "login" ? loginPhone : registerPhone;
+  const setPhone = mode === "login" ? setLoginPhone : setRegisterPhone;
+  const password = mode === "login" ? loginPassword : registerPassword;
+  const setPassword = mode === "login" ? setLoginPassword : setRegisterPassword;
 
   const submit = async () => {
     const digits = phone.replace(/\D/g, "");
@@ -70,22 +62,10 @@ export function AuthChoiceScreen() {
               username: username.trim(),
               phone: `+91${phoneLocal}`
             })
-          : await (async () => {
-              const candidates = buildLoginIdentifiers(digits);
-              let lastError: any = null;
-              for (const identifierCandidate of candidates) {
-                try {
-                  return await authLogin({
-                    identifier: identifierCandidate,
-                    password: password.trim()
-                  });
-                } catch (error: any) {
-                  lastError = error;
-                  if (error?.status !== 401) throw error;
-                }
-              }
-              throw lastError || new Error("Failed to login. Please try again.");
-            })();
+          : await authLogin({
+              identifier: syntheticEmail,
+              password: password.trim()
+            });
       await signIn(auth);
       if (mode === "login" && auth?.user?.id != null) {
         await markLaunchSetupComplete(auth.user.id);

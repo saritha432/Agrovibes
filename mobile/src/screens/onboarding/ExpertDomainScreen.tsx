@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
@@ -9,6 +10,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 export function ExpertDomainScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { completeExpertStep } = useOnboarding();
+  const { t } = useLanguage();
   const [topics, setTopics] = React.useState("");
   const [years, setYears] = React.useState("");
 
@@ -19,30 +21,30 @@ export function ExpertDomainScreen() {
 
   return (
     <OnboardingLayout
-      title="Your domain"
-      subtitle="What topics or crops do you advise on? Shown on your expert profile."
-      primaryLabel="Continue"
+      title={t("expertDomainTitle")}
+      subtitle={t("expertDomainSubtitle")}
+      primaryLabel={t("continue")}
       onPrimary={next}
       primaryDisabled={!topics.trim()}
       onBack={() => navigation.navigate("RoleSelection")}
     >
-      <Text style={styles.label}>Specializations</Text>
+      <Text style={styles.label}>{t("specializationsLabel")}</Text>
       <TextInput
         value={topics}
         onChangeText={setTopics}
         style={[styles.input, styles.inputTall]}
         multiline
-        placeholder="e.g. Soil health, polyhouse tomatoes, organic certification"
+        placeholder={t("specializationsPlaceholder")}
         placeholderTextColor="#9aa9a5"
       />
 
-      <Text style={styles.label}>Years of experience (optional)</Text>
+      <Text style={styles.label}>{t("yearsExperienceLabel")}</Text>
       <TextInput
         value={years}
         onChangeText={setYears}
         keyboardType="number-pad"
         style={styles.input}
-        placeholder="e.g. 8"
+        placeholder={t("yearsPlaceholder")}
         placeholderTextColor="#9aa9a5"
       />
     </OnboardingLayout>

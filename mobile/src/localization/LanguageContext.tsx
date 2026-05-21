@@ -1,6 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
+import { ActivityIndicator, View } from "react-native";
 import i18next from "i18next";
+import { APP_BLACK, APP_LIME } from "../theme/appColors";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import {
   AppLanguage,
@@ -74,13 +76,17 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       const initialLanguage = isSupportedLanguage(raw) ? raw : DEFAULT_LANGUAGE;
-      await i18next.use(initReactI18next).init({
-        resources: I18N_RESOURCES,
-        lng: initialLanguage,
-        fallbackLng: DEFAULT_LANGUAGE,
-        supportedLngs: SUPPORTED_LANGUAGES,
-        interpolation: { escapeValue: false }
-      });
+      if (!i18next.isInitialized) {
+        await i18next.use(initReactI18next).init({
+          resources: I18N_RESOURCES,
+          lng: initialLanguage,
+          fallbackLng: DEFAULT_LANGUAGE,
+          supportedLngs: SUPPORTED_LANGUAGES,
+          interpolation: { escapeValue: false }
+        });
+      } else if (i18next.language !== initialLanguage) {
+        await i18next.changeLanguage(initialLanguage);
+      }
       if (!mounted) return;
       if (!raw || raw !== initialLanguage) {
         await AsyncStorage.setItem(STORAGE_KEY, initialLanguage);
@@ -92,7 +98,13 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  if (!ready) return null;
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: APP_BLACK }}>
+        <ActivityIndicator size="large" color={APP_LIME} />
+      </View>
+    );
+  }
 
   return (
     <I18nextProvider i18n={i18next}>
