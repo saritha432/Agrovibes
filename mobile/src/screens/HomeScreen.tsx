@@ -71,6 +71,12 @@ import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalF
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection } from "./live/LiveHomeSection";
 import { useLanguage } from "../localization/LanguageContext";
+import {
+  formatDisplayName,
+  formatFeedText,
+  formatReelCaption,
+  stripInternalCaptionPrefix
+} from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 interface HomeScreenProps {
@@ -160,15 +166,15 @@ function sortPostsNewestFirst(list: HomePost[]): HomePost[] {
   return [...list].sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
 }
 
-const REPORT_REASONS = [
-  { key: "spam", label: "Spam or misleading" },
-  { key: "harassment", label: "Harassment or bullying" },
-  { key: "hate", label: "Hate speech or symbols" },
-  { key: "nudity", label: "Nudity or sexual content" },
-  { key: "violence", label: "Violence or dangerous acts" },
-  { key: "scam", label: "Scam or fraud" },
-  { key: "ip", label: "Intellectual property violation" },
-  { key: "other", label: "Something else" }
+const REPORT_REASON_KEYS = [
+  { key: "spam", labelKey: "reportSpam" },
+  { key: "harassment", labelKey: "reportHarassment" },
+  { key: "hate", labelKey: "reportHate" },
+  { key: "nudity", labelKey: "reportNudity" },
+  { key: "violence", labelKey: "reportViolence" },
+  { key: "scam", labelKey: "reportScam" },
+  { key: "ip", labelKey: "reportIp" },
+  { key: "other", labelKey: "reportOther" }
 ] as const;
 
 function dismissedPostsStorageKey(userId: string | number | undefined) {
@@ -877,7 +883,22 @@ function ReelLikeBurst({ postId, trigger, seenRef }: ReelLikeBurstProps) {
 }
 
 export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost }: HomeScreenProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+
+  const displayPersonName = React.useCallback(
+    (name: string) => formatDisplayName(name, language, t),
+    [language, t]
+  );
+
+  const displayFeedCopy = React.useCallback(
+    (text: string) => formatFeedText(text, language, t),
+    [language, t]
+  );
+
+  const displayPostCaption = React.useCallback(
+    (caption: string | null | undefined) => formatReelCaption(caption, language, t),
+    [language, t]
+  );
   const { token, user } = useAuth();
   const insets = useSafeAreaInsets();
   /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
@@ -893,6 +914,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (tab === "Friends") return t("tabFriends");
       return tab;
     },
+    [t]
+  );
+
+  const reportReasons = React.useMemo(
+    () => REPORT_REASON_KEYS.map((r) => ({ key: r.key, label: t(r.labelKey) })),
     [t]
   );
 
@@ -1790,11 +1816,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const shareMessage = useCallback(
     (post: HomePost) => {
-      const caption = String(post.caption || "").replace(/^\[REEL\]\s*/i, "").trim();
+      const caption = displayPostCaption(post.caption);
       const link = buildShareLink(post);
-      return `${post.userName} shared a reel on Cropvibe${caption ? `\n${caption}` : ""}\n${link}`;
+      const intro = t("shareReelMessage", { name: displayPersonName(post.userName) });
+      return `${intro}${caption ? `\n${caption}` : ""}\n${link}`;
     },
-    [buildShareLink]
+    [buildShareLink, displayPersonName, displayPostCaption, t]
   );
 
   const reelChatMessage = useCallback(
@@ -1858,11 +1885,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const onSendReelToChat = useCallback(
     async (post: HomePost, recipient: { id: number | null; name: string; avatarUrl?: string | null }) => {
       if (!token) {
-        Alert.alert("Login required", "Please log in to send reels in chat.");
+        Alert.alert(t("loginRequired"), t("loginRequiredChat"));
         return;
       }
       if (!recipient.id) {
-        Alert.alert("Chat unavailable", "This user cannot receive messages yet.");
+        Alert.alert(t("chatUnavailable"), t("chatUnavailableSend"));
         return;
       }
       setShareBusyUserId(recipient.id);
@@ -1870,7 +1897,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         await sendDirectMessage(token, recipient.id, reelChatMessage(post));
         setSharePost(null);
         setShareSearch("");
-        Alert.alert("Sent", `Reel sent to ${recipient.name}.`);
+        Alert.alert(t("sentTitle"), t("reelSentTo", { name: displayPersonName(recipient.name) }));
       } catch {
         Alert.alert(t("sendFailed"), t("sendFailedReel"));
       } finally {
@@ -1898,7 +1925,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       try {
         await Share.share({ message: shareMessage(post) });
       } catch {
-        Alert.alert("Share failed", "Could not open system share.");
+        Alert.alert(t("shareFailed"), t("shareFailedSystem"));
       }
     },
     [shareMessage]
@@ -1935,7 +1962,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     async (post: HomePost) => {
       const media = post.videoUrl ? { videoUrl: post.videoUrl } : post.imageUrl ? { imageUrl: post.imageUrl } : null;
       if (!media) {
-        Alert.alert("No media", "This reel has no media to add as story.");
+        Alert.alert(t("noMediaTitle"), t("noMediaStory"));
         return;
       }
       const optimistic: HomeStory = normalizeStoryRow({
@@ -1970,7 +1997,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         );
         setStories((prev) => applyViewedStories(mergeStories([serverStory, ...prev], [])));
         setSharePost(null);
-        Alert.alert("Added", "Reel added to your story.");
+        Alert.alert(t("addedTitle"), t("addedToStory"));
       } catch {
         // fallback to existing create flow when API is unavailable
         setSharePost(null);
@@ -2160,7 +2187,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const togglePostSave = useCallback(
     async (post: HomePost) => {
       if (!token) {
-        Alert.alert("Login required", "Please log in to save reels.");
+        Alert.alert(t("loginRequired"), t("loginRequiredSave"));
         return;
       }
       const nextSaved = !post.viewerHasSaved;
@@ -2185,9 +2212,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       try {
         await Clipboard.setStringAsync(buildShareLink(post));
         setActiveReelOptionsPost(null);
-        Alert.alert("Copied", "Post link copied to clipboard.");
+        Alert.alert(t("copied"), t("copiedPostLink"));
       } catch {
-        Alert.alert("Copy failed", "Could not copy the link.");
+        Alert.alert(t("copyFailedTitle"), t("copyFailed"));
       }
     },
     [buildShareLink]
@@ -2212,7 +2239,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     });
     setPlayingPostId((cur) => (cur === post.id ? null : cur));
     setActiveReelOptionsPost(null);
-    Alert.alert("Got it", "We will hide this post and tune what we show you on this device.");
+    Alert.alert(t("gotItHidePost"), t("gotItHidePostMsg"));
   }, []);
 
   const submitReportWithReason = useCallback(
@@ -2222,10 +2249,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       try {
         await reportHomePost(token, reportModalPost.id, reasonKey);
         setReportModalPost(null);
-        Alert.alert("Thanks", "We received your report and will review it.");
+        Alert.alert(t("thanksReport"), t("thanksReportMsg"));
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Could not send report.";
-        Alert.alert("Report failed", msg);
+        Alert.alert(t("reportFailed"), msg);
       } finally {
         setReportSubmitBusy(false);
       }
@@ -2237,7 +2264,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     (post: HomePost) => {
       setActiveReelOptionsPost(null);
       if (!token) {
-        Alert.alert("Login required", "Please log in to report posts.");
+        Alert.alert(t("loginRequired"), t("loginRequiredReport"));
         return;
       }
       setReportModalPost(post);
@@ -2251,7 +2278,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Please log in to delete posts.");
         } else {
-          Alert.alert("Login required", "Please log in to delete posts.");
+          Alert.alert(t("loginRequired"), t("loginRequiredDelete"));
         }
         return;
       }
@@ -2259,7 +2286,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("You can only delete your own posts.");
         } else {
-          Alert.alert("Not allowed", "You can only delete your own posts.");
+          Alert.alert(t("notAllowedTitle"), t("notAllowedDeleteOwn"));
         }
         return;
       }
@@ -2282,7 +2309,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           if (Platform.OS === "web" && typeof window !== "undefined") {
             window.alert(msg);
           } else {
-            Alert.alert("Delete failed", msg);
+            Alert.alert(t("deleteFailed"), msg);
           }
         }
       };
@@ -2291,18 +2318,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (Platform.OS === "web" && typeof window !== "undefined") {
         setActiveReelOptionsPost(null);
         setTimeout(() => {
-          if (!window.confirm("Delete this post? This cannot be undone.")) return;
+          if (!window.confirm(`${t("deletePostTitle")} ${t("deletePostBody")}`)) return;
           void runDelete();
         }, 0);
         return;
       }
 
-      Alert.alert("Delete this post?", "This cannot be undone.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => void runDelete() }
+      Alert.alert(t("deletePostTitle"), t("deletePostBody"), [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("deleteConfirm"), style: "destructive", onPress: () => void runDelete() }
       ]);
     },
-    [token, user]
+    [t, token, user]
   );
 
   const submitComment = useCallback(async () => {
@@ -2559,7 +2586,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </View>
               </View>
               <Text style={styles.storyNameDark} numberOfLines={1}>
-                {group.userName}
+                {displayPersonName(group.userName)}
               </Text>
             </Pressable>
           ))}
@@ -2590,7 +2617,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         </View>
       </View>
     ),
-    [activeHomeTab, avatarLookup, homeTabLabel, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, posts, user, visibleHomeTopTabs]
+    [
+      activeHomeTab,
+      avatarLookup,
+      displayPersonName,
+      homeTabLabel,
+      isReelSurfaceTab,
+      onOpenCreate,
+      otherStoryGroups,
+      ownPlayableStories,
+      posts,
+      user,
+      visibleHomeTopTabs
+    ]
   );
 
   const renderFullScreenReel = useCallback(
@@ -2634,16 +2673,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const thumbUri = post.thumbnailUrl || gallery[0] || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
       const reelPoster =
         post.thumbnailUrl || gallery[0] || post.imageUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl;
-      const musicLabel =
-        (post.musicLabel && post.musicLabel.trim()) ||
-        post.caption?.replace(/^\[REEL\]\s*/i, "").trim().slice(0, 36) ||
-        "Original audio";
       const reelProgress = reelProgressByPostId[post.id];
       const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
       const creativeMeta = post.creativeMeta || {};
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
-      const creativeOverlayText = String(creativeMeta.overlayText || "").trim();
+      const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
       const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
+      const musicSource =
+        (post.musicLabel && post.musicLabel.trim()) ||
+        stripInternalCaptionPrefix(post.caption).slice(0, 36) ||
+        "";
+      const musicLabel = musicSource ? displayFeedCopy(musicSource) : t("originalAudio");
+      const reelCaptionText = displayPostCaption(post.caption);
+      const reelDisplayName = displayPersonName(post.userName);
+      const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
       const hasMusicTrack = !!post.musicAudioUrl?.trim();
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
@@ -2660,7 +2703,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
-                fit="contain"
+                fit={reelViewerOpen ? "contain" : "cover"}
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
                 useNativeControls={false}
@@ -2736,7 +2779,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
           ) : null}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
-          {creativeOverlayText ? (
+          {reelOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">
               <Text
                 style={[
@@ -2746,7 +2789,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 ]}
                 numberOfLines={2}
               >
-                {creativeOverlayText}
+                {reelOverlayText}
               </Text>
             </View>
           ) : null}
@@ -2777,7 +2820,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   initialsColor="#fff"
                 />
                 <Text style={styles.reelUserName} numberOfLines={1}>
-                  {post.userName}
+                  {reelDisplayName}
                 </Text>
                 {!isOwnPost ? (
                   <Pressable
@@ -2813,9 +2856,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   {musicLabel}
                 </Text>
               </View>
-              <Text style={styles.reelCaptionDark} numberOfLines={3}>
-                {post.caption}
-              </Text>
+              {reelCaptionText ? (
+                <Text style={styles.reelCaptionDark} numberOfLines={3}>
+                  {reelCaptionText}
+                </Text>
+              ) : null}
             </View>
             <View style={styles.reelActionsCol} pointerEvents="auto">
               <View style={styles.reelActionItem}>
@@ -2920,12 +2965,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       windowHeight,
       windowWidth,
       reelViewerOpen,
-      onReelSurfaceTap
+      onReelSurfaceTap,
+      displayFeedCopy,
+      displayPersonName,
+      displayPostCaption,
+      t,
+      labelForFollowStatus
     ]
   );
 
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
+      const feedDisplayName = displayPersonName(post.userName);
+      const feedCaption = displayPostCaption(post.caption);
       const isActive = playingPostId === post.id && !!post.videoUrl;
       const gallery = postImageGallery(post);
       const isCarousel = !post.videoUrl && gallery.length > 1;
@@ -2964,7 +3016,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               />
               <View>
                 <Text style={styles.userName}>
-                  {post.userName} <Text style={styles.timeText}>• 13h</Text>
+                  {feedDisplayName} <Text style={styles.timeText}>• 13h</Text>
                 </Text>
               </View>
             </View>
@@ -3108,10 +3160,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           </View>
 
           <Pressable onPress={() => void openPostLikesSheet(post)} disabled={!post.likesCount}>
-            <Text style={styles.likes}>{post.likesCount} likes</Text>
+            <Text style={styles.likes}>{t("likesCountLabel", { count: post.likesCount })}</Text>
           </Pressable>
           <Text style={styles.caption}>
-            <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
+            <Text style={styles.captionUser}>{feedDisplayName}</Text>
+            {feedCaption ? ` ${feedCaption}` : ""}
           </Text>
           <Pressable onPress={() => openCommentsForPost(post)}>
             <Text style={styles.comments}>{t("viewAllComments", { count: shownCommentsCount })}</Text>
@@ -3136,6 +3189,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       relationships,
       toggleFollow,
       togglePostLike,
+      displayPersonName,
+      displayPostCaption,
+      t,
+      labelForFollowStatus,
       user?.avatarUrl,
       user?.fullName,
       user?.id
@@ -3289,7 +3346,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 initialsColor="#fff"
               />
               <View>
-                <Text style={styles.storyViewerName}>{activeStory?.userName ?? ""}</Text>
+                <Text style={styles.storyViewerName}>
+                  {activeStory?.userName ? displayPersonName(activeStory.userName) : ""}
+                </Text>
               </View>
             </View>
             <Pressable onPress={closeStory} hitSlop={10}>
@@ -3498,7 +3557,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                         initialsColor="#fafafa"
                       />
                       <Text style={styles.likesRowName} numberOfLines={1}>
-                        {liker.userName}
+                        {displayPersonName(liker.userName)}
                       </Text>
                     </Pressable>
                   ))}
@@ -3806,7 +3865,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             <View style={styles.shareHandle} />
             <Text style={styles.reelOptionsTitle}>Report post</Text>
             <Text style={[styles.reelOptionSub, { marginBottom: 6 }]}>
-              {reportModalPost ? `Why are you reporting ${reportModalPost.userName}?` : ""}
+              {reportModalPost ? t("reportUserPrompt", { name: displayPersonName(reportModalPost.userName) }) : ""}
             </Text>
             {reportSubmitBusy ? (
               <View style={{ paddingVertical: 24, alignItems: "center" }}>
@@ -3814,7 +3873,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </View>
             ) : (
               <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                {REPORT_REASONS.map((r) => (
+                {reportReasons.map((r) => (
                   <Pressable
                     key={r.key}
                     style={styles.reelOptionRow}

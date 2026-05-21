@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import { appRoleToApiRole } from "../../onboarding/roleMap";
 import type { AppRole } from "../../onboarding/types";
@@ -12,16 +13,17 @@ import { onboardingTheme } from "../../onboarding/OnboardingLayout";
 
 const { BORDER, GREEN } = onboardingTheme;
 
-const ROLES: { id: AppRole; title: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { id: "buyer", title: "Buyer", desc: "Shop produce, machinery, and services", icon: "basket-outline" },
-  { id: "seller", title: "Seller", desc: "List from your farm and manage orders", icon: "storefront-outline" },
-  { id: "expert", title: "Expert", desc: "Teach courses and advise the community", icon: "school-outline" }
-];
-
 export function RoleSelectionScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { updateUser } = useAuth();
   const { setAppRole } = useOnboarding();
+  const { t } = useLanguage();
+
+  const ROLES: { id: AppRole; title: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { id: "buyer", title: t("roleBuyerTitle"), desc: t("roleBuyerDesc"), icon: "basket-outline" },
+    { id: "seller", title: t("roleSellerTitle"), desc: t("roleSellerDesc"), icon: "storefront-outline" },
+    { id: "expert", title: t("roleExpertTitle"), desc: t("roleExpertDesc"), icon: "school-outline" }
+  ];
 
   const pick = async (role: AppRole) => {
     await updateUser({ role: appRoleToApiRole(role) });
@@ -33,8 +35,8 @@ export function RoleSelectionScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>How will you use Cropvibe?</Text>
-      <Text style={styles.sub}>Pick one — you can explore other areas anytime.</Text>
+      <Text style={styles.title}>{t("roleSelectionTitle")}</Text>
+      <Text style={styles.sub}>{t("roleSelectionSub")}</Text>
       <View style={styles.list}>
         {ROLES.map((r) => (
           <Pressable key={r.id} onPress={() => pick(r.id)} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>

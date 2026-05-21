@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, TextInput } from "react-native";
+import { Platform, StyleSheet, Text, TextInput } from "react-native";
 import { fontFamilyForWeight, FONT_REGULAR } from "./typography";
 
 function withPoppinsFont<T extends { style?: unknown }>(props: T): T {
@@ -17,6 +17,18 @@ function withPoppinsFont<T extends { style?: unknown }>(props: T): T {
 
 /** Apply Poppins to all Text and TextInput (maps fontWeight → correct font file on Android). */
 export function installAppFonts(): void {
+  if (Platform.OS === "web") {
+    // @ts-expect-error defaultProps exists at runtime
+    Text.defaultProps = Text.defaultProps ?? {};
+    // @ts-expect-error defaultProps exists at runtime
+    Text.defaultProps.style = [{ fontFamily: FONT_REGULAR }, Text.defaultProps.style];
+    // @ts-expect-error defaultProps exists at runtime
+    TextInput.defaultProps = TextInput.defaultProps ?? {};
+    // @ts-expect-error defaultProps exists at runtime
+    TextInput.defaultProps.style = [{ fontFamily: FONT_REGULAR }, TextInput.defaultProps.style];
+    return;
+  }
+
   const textRender = (Text as unknown as { render?: (...args: unknown[]) => React.ReactNode }).render;
   if (textRender) {
     (Text as unknown as { render: (...args: unknown[]) => React.ReactNode }).render = function render(

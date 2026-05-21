@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { APP_LIME } from "../../theme/appColors";
 
@@ -11,17 +12,18 @@ const BG = "#262626";
 const CARD = "#252a30";
 const BORDER = "#3a424c";
 
-const ROLES = [
-  { key: "farmer", title: "Farmer", subtitle: "I cultivate crops and sell my produce." },
-  { key: "consumer", title: "Consumer", subtitle: "I buy produce for home and business use." },
-  { key: "educator", title: "Educator", subtitle: "I share knowledge, tools and best practices." },
-  { key: "logistics", title: "Logistics", subtitle: "I help move farm produce and inputs." }
-] as const;
-
 export function FirstTimeRoleScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { updateUser } = useAuth();
-  const [selected, setSelected] = React.useState<(typeof ROLES)[number]["key"]>("farmer");
+  const { t } = useLanguage();
+  const [selected, setSelected] = React.useState<"farmer" | "consumer" | "educator" | "logistics">("farmer");
+
+  const ROLES = [
+    { key: "farmer" as const, title: t("firstTimeRoleFarmer"), subtitle: t("firstTimeRoleFarmerSub") },
+    { key: "consumer" as const, title: t("firstTimeRoleConsumer"), subtitle: t("firstTimeRoleConsumerSub") },
+    { key: "educator" as const, title: t("firstTimeRoleEducator"), subtitle: t("firstTimeRoleEducatorSub") },
+    { key: "logistics" as const, title: t("firstTimeRoleLogistics"), subtitle: t("firstTimeRoleLogisticsSub") }
+  ];
 
   const next = async () => {
     await updateUser({ role: selected === "educator" ? "instructor" : "student" });
@@ -30,8 +32,8 @@ export function FirstTimeRoleScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>What do you do?</Text>
-      <Text style={styles.subtitle}>Select your role within the app.</Text>
+      <Text style={styles.title}>{t("firstTimeRoleTitle")}</Text>
+      <Text style={styles.subtitle}>{t("firstTimeRoleSubtitle")}</Text>
       <View style={styles.list}>
         {ROLES.map((item) => (
           <Pressable
@@ -46,7 +48,7 @@ export function FirstTimeRoleScreen() {
       </View>
 
       <Pressable style={styles.primaryBtn} onPress={next}>
-        <Text style={styles.primaryText}>Continue</Text>
+        <Text style={styles.primaryText}>{t("continue")}</Text>
       </Pressable>
     </View>
   );

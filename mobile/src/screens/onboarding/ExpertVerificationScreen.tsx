@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
@@ -10,6 +11,7 @@ import { APP_LIME } from "../../theme/appColors";
 export function ExpertVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { completeExpertStep } = useOnboarding();
+  const { t } = useLanguage();
 
   const next = async () => {
     await completeExpertStep("verification");
@@ -18,17 +20,15 @@ export function ExpertVerificationScreen() {
 
   return (
     <OnboardingLayout
-      title="Expert verification"
-      subtitle="We review credentials and sample content before badges go live. This demo marks the step complete when you continue."
-      primaryLabel="Submit for review (demo)"
+      title={t("expertVerificationTitle")}
+      subtitle={t("expertVerificationSubtitle")}
+      primaryLabel={t("submitForReviewDemo")}
       onPrimary={next}
       onBack={() => navigation.goBack()}
     >
       <View style={styles.callout}>
-        <Text style={styles.calloutTitle}>What happens next</Text>
-        <Text style={styles.calloutBody}>
-          Production: upload a short teaching clip, references, and optional ID. Our team typically responds within 48 hours.
-        </Text>
+        <Text style={styles.calloutTitle}>{t("whatHappensNext")}</Text>
+        <Text style={styles.calloutBody}>{t("expertVerificationBody")}</Text>
       </View>
     </OnboardingLayout>
   );

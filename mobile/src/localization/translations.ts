@@ -1,4 +1,5 @@
 import { APP_STRINGS_EN, APP_STRINGS_HI, APP_STRINGS_TE } from "./appStrings";
+import { COMMON_UI_EN, COMMON_UI_HI, COMMON_UI_TE } from "./commonUiStrings";
 
 export type AppLanguage = "English" | "Hindi" | "Telugu";
 
@@ -172,9 +173,9 @@ const ONBOARDING_TE = {
 };
 
 export const TRANSLATIONS: Record<AppLanguage, Record<string, string>> = {
-  English: { ...ONBOARDING_EN, ...APP_STRINGS_EN },
-  Hindi: { ...ONBOARDING_HI, ...APP_STRINGS_HI },
-  Telugu: { ...ONBOARDING_TE, ...APP_STRINGS_TE }
+  English: { ...ONBOARDING_EN, ...APP_STRINGS_EN, ...COMMON_UI_EN },
+  Hindi: { ...ONBOARDING_HI, ...APP_STRINGS_HI, ...COMMON_UI_HI },
+  Telugu: { ...ONBOARDING_TE, ...APP_STRINGS_TE, ...COMMON_UI_TE }
 };
 
 export const I18N_RESOURCES = {

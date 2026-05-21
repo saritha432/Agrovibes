@@ -2,20 +2,18 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useLanguage } from "../../localization/LanguageContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { APP_LIME } from "../../theme/appColors";
 
-const NUDGES = [
-  "Pull down on Home to refresh your feed.",
-  "Use the + tab to post a harvest story or question.",
-  "Verified badges on listings mean the seller passed basic checks."
-];
-
 export function BuyerWalkthroughScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { completeBuyerStep } = useOnboarding();
+  const { t } = useLanguage();
+
+  const nudges = [t("buyerWalkthroughNudge1"), t("buyerWalkthroughNudge2"), t("buyerWalkthroughNudge3")];
 
   const next = async () => {
     await completeBuyerStep("walkthrough");
@@ -24,13 +22,13 @@ export function BuyerWalkthroughScreen() {
 
   return (
     <OnboardingLayout
-      title="Quick tips"
-      subtitle="A short walk-through — we'll remind you inside the app with gentle nudges."
-      primaryLabel="Continue to security"
+      title={t("buyerWalkthroughTitle")}
+      subtitle={t("buyerWalkthroughSubtitle")}
+      primaryLabel={t("continueToSecurity")}
       onPrimary={next}
       onBack={() => navigation.goBack()}
     >
-      {NUDGES.map((line, i) => (
+      {nudges.map((line, i) => (
         <View key={i} style={styles.row}>
           <Text style={styles.bullet}>{i + 1}</Text>
           <Text style={styles.line}>{line}</Text>
