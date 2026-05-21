@@ -8,6 +8,7 @@ import { AuthProvider } from "./src/auth/AuthContext";
 import { OnboardingProvider } from "./src/onboarding/OnboardingContext";
 import { CartProvider } from "./src/cart/CartContext";
 import { LanguageProvider } from "./src/localization/LanguageContext";
+import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK, APP_LIME } from "./src/theme/appColors";
 
@@ -26,6 +27,7 @@ export default function App() {
     <SafeAreaProvider>
       <LanguageProvider>
         <AuthProvider>
+          <LanguageSync />
           <OnboardingProvider>
             <CartProvider>
               <NavigationContainer ref={navigationRef}>

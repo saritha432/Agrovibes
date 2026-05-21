@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useLayoutEffect, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -15,6 +15,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchMessageThreads, type MessageThread } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
+import { useLanguage } from "../../localization/LanguageContext";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
@@ -36,15 +37,20 @@ function formatTime(ts: number) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function previewMessage(body: string) {
-  if (String(body || "").startsWith("[Cropvibe Reel]") || String(body || "").startsWith("[AgroVibe Reel]")) return "Shared a reel";
-  if (String(body || "").startsWith("[Cropvibe Profile]")) return "Shared a profile";
+function previewMessage(body: string, t: (key: string) => string) {
+  if (String(body || "").startsWith("[Cropvibe Reel]") || String(body || "").startsWith("[AgroVibe Reel]")) return t("sharedReel");
+  if (String(body || "").startsWith("[Cropvibe Profile]")) return t("sharedProfile");
   return body;
 }
 
 export function DirectInboxScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { t } = useLanguage();
   const { user, token } = useAuth();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: t("messagesTitle") });
+  }, [navigation, t]);
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
 
@@ -91,7 +97,7 @@ export function DirectInboxScreen() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Search"
+          placeholder={t("search")}
           placeholderTextColor={MUTED}
           style={styles.searchInput}
           autoCorrect={false}
@@ -102,8 +108,8 @@ export function DirectInboxScreen() {
       {filtered.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="chatbubbles-outline" size={56} color={BORDER} />
-          <Text style={styles.emptyTitle}>No messages yet</Text>
-          <Text style={styles.emptySub}>When someone reaches out, you will see it here.</Text>
+          <Text style={styles.emptyTitle}>{t("noMessagesTitle")}</Text>
+          <Text style={styles.emptySub}>{t("noMessagesSub")}</Text>
         </View>
       ) : (
         <FlatList
@@ -129,7 +135,7 @@ export function DirectInboxScreen() {
                   <Text style={styles.time}>{formatTime(new Date(item.lastAt).getTime())}</Text>
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>
-                  {previewMessage(item.lastMessage)}
+                  {previewMessage(item.lastMessage, t)}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={BORDER} />

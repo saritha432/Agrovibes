@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useLayoutEffect, useMemo, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import {
   Alert,
@@ -19,6 +19,7 @@ import { useAuth } from "../auth/AuthContext";
 import { updateMyProfile, uploadImageFile } from "../services/api";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 import { APP_LIME } from "../theme/appColors";
+import { useLanguage } from "../localization/LanguageContext";
 
 /** Align with Profile tab / home social surfaces */
 const SURFACE = "#262626";
@@ -40,7 +41,12 @@ function safeHandle(value: string) {
 export function EditProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const { t } = useLanguage();
   const { user, token, signIn, updateUser } = useAuth();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: t("editProfileTitle") });
+  }, [navigation, t]);
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [username, setUsername] = useState(() => safeHandle(user?.username || (user?.email || "").split("@")[0] || ""));
   const [bio, setBio] = useState(user?.bio || "");
@@ -79,7 +85,7 @@ export function EditProfileScreen() {
   const save = async () => {
     const name = fullName.trim();
     if (!name) {
-      Alert.alert("Name required", "Please enter your name.");
+      Alert.alert(t("nameRequired"), t("nameRequiredMessage"));
       return;
     }
     const payload = {
@@ -100,10 +106,10 @@ export function EditProfileScreen() {
       } else {
         await updateUser(payload);
       }
-      Alert.alert("Saved", "Profile updated.");
+      Alert.alert(t("profileSaved"), t("profileUpdated"));
       navigation.goBack();
     } catch (error: any) {
-      Alert.alert("Save failed", error?.message ? String(error.message) : "Could not update profile.");
+      Alert.alert(t("saveFailed"), error?.message ? String(error.message) : t("saveFailedProfile"));
     } finally {
       setSaving(false);
     }
@@ -113,7 +119,7 @@ export function EditProfileScreen() {
     if (isUploadingPhoto) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert("Permission needed", "Please allow photo library access.");
+      Alert.alert(t("permissionNeeded"), t("photoLibraryPermission"));
       return;
     }
     const picked = await ImagePicker.launchImageLibraryAsync({
@@ -151,12 +157,12 @@ export function EditProfileScreen() {
       } else {
         await updateUser({ avatarUrl: uploaded.url });
       }
-      Alert.alert("Updated", "Profile picture uploaded.");
+      Alert.alert(t("photoUpdatedTitle"), t("profilePhotoUpdated"));
     } catch (error: any) {
       // Keep local uri so user sees immediate change in development even if cloud upload is unavailable.
       setAvatarUrl(localUri);
       await updateUser({ avatarUrl: localUri });
-      Alert.alert("Photo saved locally", error?.message ? String(error.message) : "Could not upload to server, using local preview.");
+      Alert.alert(t("photoSavedLocal"), error?.message ? String(error.message) : t("photoSavedLocalMessage"));
     } finally {
       setUploadingPhoto(false);
     }
@@ -188,68 +194,68 @@ export function EditProfileScreen() {
               style={({ pressed }) => [styles.changePhotoBtn, pressed && styles.changePhotoBtnPressed]}
             >
               <Ionicons name="camera-outline" size={18} color={ACCENT_TEXT} style={{ marginRight: 8 }} />
-              <Text style={styles.changePhotoText}>{isUploadingPhoto ? "Uploading…" : "Change profile photo"}</Text>
+              <Text style={styles.changePhotoText}>{isUploadingPhoto ? t("uploading") : t("changeProfilePhoto")}</Text>
             </Pressable>
           </View>
 
           <View style={styles.form}>
             <View style={styles.field}>
-              <Text style={styles.label}>Name</Text>
+              <Text style={styles.label}>{t("name")}</Text>
               <TextInput
                 value={fullName}
                 onChangeText={setFullName}
                 style={styles.input}
-                placeholder="Name"
+                placeholder={t("name")}
                 placeholderTextColor={MUTED}
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>Username</Text>
+              <Text style={styles.label}>{t("username")}</Text>
               <TextInput
                 value={username}
-                onChangeText={(t) => setUsername(safeHandle(t))}
+                onChangeText={(text) => setUsername(safeHandle(text))}
                 style={styles.input}
                 autoCapitalize="none"
-                placeholder="username"
+                placeholder={t("usernamePlaceholder")}
                 placeholderTextColor={MUTED}
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>Website</Text>
+              <Text style={styles.label}>{t("website")}</Text>
               <TextInput
                 value={website}
                 onChangeText={setWebsite}
                 style={styles.input}
                 autoCapitalize="none"
                 keyboardType="url"
-                placeholder="https://"
+                placeholder={t("websitePlaceholder")}
                 placeholderTextColor={MUTED}
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>Bio</Text>
+              <Text style={styles.label}>{t("bio")}</Text>
               <TextInput
                 value={bio}
                 onChangeText={setBio}
                 style={[styles.input, styles.bioInput]}
                 multiline
                 maxLength={150}
-                placeholder="Tell people about your farm or work"
+                placeholder={t("bioPlaceholder")}
                 placeholderTextColor={MUTED}
               />
               <Text style={styles.helper}>{bio.length}/150</Text>
             </View>
 
             <View style={[styles.field, styles.fieldLast]}>
-              <Text style={styles.label}>Location</Text>
+              <Text style={styles.label}>{t("location")}</Text>
               <TextInput
                 value={location}
                 onChangeText={setLocation}
                 style={styles.input}
-                placeholder="District or region"
+                placeholder={t("locationPlaceholder")}
                 placeholderTextColor={MUTED}
               />
             </View>
@@ -262,7 +268,7 @@ export function EditProfileScreen() {
           disabled={isSaving}
         >
           <Ionicons name="checkmark" size={20} color={ACCENT_TEXT} />
-          <Text style={styles.saveText}>{isSaving ? "Saving…" : "Done"}</Text>
+          <Text style={styles.saveText}>{isSaving ? t("saving") : t("done")}</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>

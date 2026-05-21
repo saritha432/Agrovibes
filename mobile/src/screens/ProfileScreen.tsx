@@ -389,7 +389,7 @@ export function ProfileScreen() {
   const onCopyProfileLink = useCallback(async () => {
     if (!profileShareLink) return;
     await Clipboard.setStringAsync(profileShareLink);
-    Alert.alert("Copied", "Profile link copied.");
+    Alert.alert(t("copied"), t("profileLinkCopied"));
   }, [profileShareLink]);
 
   const onShareProfileToWhatsApp = useCallback(async () => {
@@ -410,10 +410,10 @@ export function ProfileScreen() {
     setShareBusyByUserId((prev) => ({ ...prev, [recipient.id]: true }));
     try {
       await sendDirectMessage(token, recipient.id, profileChatMessage());
-      Alert.alert("Shared", `Profile sent to ${recipient.name}`);
+      Alert.alert(t("shared"), t("profileSharedTo", { name: recipient.name }));
       setShareProfileOpen(false);
     } catch {
-      Alert.alert("Share failed", "Could not send profile right now.");
+      Alert.alert(t("shareFailed"), t("shareFailedProfile"));
     } finally {
       setShareBusyByUserId((prev) => ({ ...prev, [recipient.id]: false }));
     }
@@ -422,7 +422,7 @@ export function ProfileScreen() {
   const handleShareProfile = useCallback(async () => {
     if (!user) return;
     if (!profileShareRecipients.length) {
-      Alert.alert("No recipients", "Follow users or get followers to share your profile in chat.");
+      Alert.alert(t("noRecipients"), t("shareProfileNoRecipients"));
       return;
     }
     setShareProfileSearch("");
@@ -509,7 +509,7 @@ export function ProfileScreen() {
   const openPersonChat = (person: { name: string; key?: string; avatarUrl?: string | null }) => {
     const peerUserId = parsePersonUserId(person);
     if (!peerUserId) {
-      Alert.alert("Unavailable", "Chat is available only for synced users.");
+      Alert.alert(t("unavailable"), t("chatUnavailable"));
       return;
     }
     navigation.navigate("DirectChat", {
@@ -549,11 +549,11 @@ export function ProfileScreen() {
 
         {!user ? (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Welcome</Text>
-            <Text style={styles.cardSub}>Start from the launch screens to create your account.</Text>
+            <Text style={styles.cardTitle}>{t("welcome")}</Text>
+            <Text style={styles.cardSub}>{t("welcomeSub")}</Text>
             <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
               <Ionicons name="log-in-outline" size={18} color="#111" />
-              <Text style={styles.primaryBtnText}>Get Started</Text>
+              <Text style={styles.primaryBtnText}>{t("getStarted")}</Text>
             </Pressable>
           </View>
         ) : (
@@ -580,15 +580,15 @@ export function ProfileScreen() {
                 <View style={styles.statsRow}>
                   <View style={styles.statItem}>
                     <Text style={styles.statValue}>{profileModel?.posts}</Text>
-                    <Text style={styles.statLabel}>Posts</Text>
+                    <Text style={styles.statLabel}>{t("posts")}</Text>
                   </View>
                   <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
                     <Text style={styles.statValue}>{profileModel?.followers}</Text>
-                    <Text style={styles.statLabel}>Followers</Text>
+                    <Text style={styles.statLabel}>{t("followers")}</Text>
                   </Pressable>
                   <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
                     <Text style={styles.statValue}>{profileModel?.following}</Text>
-                    <Text style={styles.statLabel}>Following</Text>
+                    <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
                   </Pressable>
                 </View>
               </View>
@@ -597,7 +597,7 @@ export function ProfileScreen() {
                 <Text style={styles.fullName}>{user.fullName}</Text>
                 <View style={styles.kycPill}>
                   <Ionicons name="checkmark-circle" size={14} color={TEAL} />
-                  <Text style={styles.kycText}>KYC Verified</Text>
+                  <Text style={styles.kycText}>{t("kycVerified")}</Text>
                 </View>
               </View>
 
@@ -765,12 +765,12 @@ export function ProfileScreen() {
                     {activeGalleryTab === "Tagged" ? (
                       <View style={styles.emptyWrap}>
                         <Ionicons name="pricetag-outline" size={22} color={MUTED} />
-                        <Text style={styles.emptyText}>No tagged posts yet.</Text>
+                        <Text style={styles.emptyText}>{t("noTaggedPosts")}</Text>
                       </View>
                     ) : activeGalleryTab === "Saved" ? (
                       <View style={styles.emptyWrap}>
                         <Ionicons name="bookmark-outline" size={22} color={MUTED} />
-                        <Text style={styles.emptyText}>Saved reels will appear here.</Text>
+                        <Text style={styles.emptyText}>{t("savedReelsEmpty")}</Text>
                       </View>
                     ) : (
                       <>
@@ -947,7 +947,7 @@ export function ProfileScreen() {
               <TextInput
                 value={shareProfileSearch}
                 onChangeText={setShareProfileSearch}
-                placeholder="Search"
+                placeholder={t("search")}
                 placeholderTextColor={MUTED}
                 style={styles.profileShareSearchInput}
               />
@@ -983,17 +983,17 @@ export function ProfileScreen() {
                   </Pressable>
                 ))
               ) : (
-                <Text style={styles.sheetEmpty}>No chats found.</Text>
+                <Text style={styles.sheetEmpty}>{t("noChatsFound")}</Text>
               )}
             </ScrollView>
             <View style={styles.profileShareFooterRow}>
               <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
                 <View style={styles.profileShareFooterIcon}><Ionicons name="add-circle-outline" size={20} color={LIME} /></View>
-                <Text style={styles.profileShareFooterText}>Add to story</Text>
+                <Text style={styles.profileShareFooterText}>{t("addToStory")}</Text>
               </Pressable>
               <Pressable style={styles.profileShareFooterAction} onPress={onCopyProfileLink}>
                 <View style={styles.profileShareFooterIcon}><Ionicons name="link-outline" size={20} color={LIME} /></View>
-                <Text style={styles.profileShareFooterText}>Copy Link</Text>
+                <Text style={styles.profileShareFooterText}>{t("copyLink")}</Text>
               </Pressable>
               <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
                 <View style={styles.profileShareFooterIcon}><Ionicons name="open-outline" size={20} color={LIME} /></View>
@@ -1001,15 +1001,15 @@ export function ProfileScreen() {
               </Pressable>
               <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileToWhatsApp}>
                 <View style={styles.profileShareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color={LIME} /></View>
-                <Text style={styles.profileShareFooterText}>Whatsapp</Text>
+                <Text style={styles.profileShareFooterText}>{t("whatsapp")}</Text>
               </Pressable>
               <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
                 <View style={styles.profileShareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color={LIME} /></View>
-                <Text style={styles.profileShareFooterText}>Messenger</Text>
+                <Text style={styles.profileShareFooterText}>{t("messenger")}</Text>
               </Pressable>
               <Pressable style={styles.profileShareFooterAction} onPress={onShareProfileSystem}>
                 <View style={styles.profileShareFooterIcon}><Ionicons name="logo-snapchat" size={20} color={LIME} /></View>
-                <Text style={styles.profileShareFooterText}>Snapchat</Text>
+                <Text style={styles.profileShareFooterText}>{t("snapchat")}</Text>
               </Pressable>
             </View>
           </View>
@@ -1035,7 +1035,7 @@ export function ProfileScreen() {
           />
           <View style={styles.sheet} collapsable={false}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>{activeListType === "followers" ? "Followers" : "Following"}</Text>
+              <Text style={styles.sheetTitle}>{activeListType === "followers" ? t("followers") : t("profileFollowing")}</Text>
               <Pressable
                 onPress={() => {
                   setFollowingActionMenuFor(null);
@@ -1053,7 +1053,7 @@ export function ProfileScreen() {
               bounces={false}
             >
               {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
-                <Text style={styles.sheetEmpty}>No users found.</Text>
+                <Text style={styles.sheetEmpty}>{t("noUsersFound")}</Text>
               ) : (
                 (activeListType === "followers" ? followersList : followingList).map((person, idx) => {
                   const rowId = personUniqueId(person);

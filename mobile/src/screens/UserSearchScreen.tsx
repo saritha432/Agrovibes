@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Image,
@@ -21,6 +21,7 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
+import { useLanguage } from "../localization/LanguageContext";
 
 type SearchUserFollowRow = "following" | "requested" | "follow_back" | "follow";
 
@@ -55,7 +56,12 @@ function parsePersonUserId(person: { key?: string }) {
 
 export function UserSearchScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { t } = useLanguage();
   const { token, user } = useAuth();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: t("searchUsers") });
+  }, [navigation, t]);
   const [query, setQuery] = useState("");
   const [users, setUsers] = useState<SearchUser[]>([]);
   const [busyName, setBusyName] = useState<string | null>(null);
@@ -195,7 +201,7 @@ export function UserSearchScreen() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Search users"
+          placeholder={t("searchUsers")}
           placeholderTextColor={T.muted}
           style={styles.input}
           autoCapitalize="none"
@@ -206,7 +212,7 @@ export function UserSearchScreen() {
         data={filtered}
         keyExtractor={(item) => `${item.key || item.name}`}
         keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={<Text style={styles.empty}>No users found.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{t("noUsersFound")}</Text>}
         renderItem={({ item }) => (
           <View style={styles.row}>
             <Pressable
@@ -232,16 +238,16 @@ export function UserSearchScreen() {
               </Text>
             </Pressable>
             {item.followRow === "following" ? (
-              <Text style={styles.followingText}>Following</Text>
+              <Text style={styles.followingText}>{t("following")}</Text>
             ) : item.followRow === "requested" ? (
-              <Text style={styles.requestedText}>Requested</Text>
+              <Text style={styles.requestedText}>{t("requested")}</Text>
             ) : item.followRow === "follow_back" ? (
               <Pressable style={styles.followBtn} onPress={() => onFollow(item)} disabled={busyName === item.name}>
-                <Text style={styles.followBtnText}>{busyName === item.name ? "..." : "Follow back"}</Text>
+                <Text style={styles.followBtnText}>{busyName === item.name ? t("followBusy") : t("followBack")}</Text>
               </Pressable>
             ) : (
               <Pressable style={styles.followBtn} onPress={() => onFollow(item)} disabled={busyName === item.name}>
-                <Text style={styles.followBtnText}>{busyName === item.name ? "..." : "Follow"}</Text>
+                <Text style={styles.followBtnText}>{busyName === item.name ? t("followBusy") : t("follow")}</Text>
               </Pressable>
             )}
           </View>
