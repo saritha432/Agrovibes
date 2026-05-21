@@ -6,8 +6,9 @@ import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { sendPhoneOtp, verifyPhoneOtp } from "../../services/api";
+import { APP_LIME } from "../../theme/appColors";
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BG = "#262626";
 const CARD = "#252a30";
 const BORDER = "#3a424c";

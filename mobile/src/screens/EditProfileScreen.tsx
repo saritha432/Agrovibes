@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { updateMyProfile, uploadImageFile } from "../services/api";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
+import { APP_LIME } from "../theme/appColors";
 
 /** Align with Profile tab / home social surfaces */
 const SURFACE = "#262626";
@@ -25,7 +26,7 @@ const INPUT_BG = "#262626";
 const BORDER = "#303842";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
-const ACCENT = "#C9FF35";
+const ACCENT = APP_LIME;
 const ACCENT_TEXT = "#262626";
 
 function safeHandle(value: string) {

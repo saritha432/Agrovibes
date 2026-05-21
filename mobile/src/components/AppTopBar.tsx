@@ -16,7 +16,7 @@ export function AppTopBar() {
           <Ionicons name="search-outline" size={16} color={APP_LIME} />
         </Pressable>
         <Pressable style={styles.iconBadge} onPress={navigateToDirectInbox}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#C9FF35" />
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={APP_LIME} />
           {messageUnreadCount > 0 ? (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{Math.min(99, messageUnreadCount)}</Text>

@@ -27,6 +27,7 @@
     "preview:adaptive-icon": "node scripts/preview-adaptive-icon.cjs"
   },
   "dependencies": {
+    "@expo-google-fonts/poppins": "^0.4.1",
     "@expo/metro-runtime": "~3.2.3",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-navigation/bottom-tabs": "^6.6.1",
@@ -37,6 +38,7 @@
     "expo-camera": "~15.0.16",
     "expo-clipboard": "~6.0.3",
     "expo-file-system": "~17.0.1",
+    "expo-font": "~12.0.10",
     "expo-image-picker": "~15.1.0",
     "expo-linear-gradient": "~13.0.2",
     "expo-media-library": "~16.0.5",

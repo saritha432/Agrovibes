@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { APP_LIME } from "../../theme/appColors";
 
 const NUDGES = [
   "Pull down on Home to refresh your feed.",
@@ -47,7 +48,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#eef8f1",
-    color: "#C9FF35",
+    color: APP_LIME,
     fontWeight: "900",
     textAlign: "center",
     lineHeight: 26,

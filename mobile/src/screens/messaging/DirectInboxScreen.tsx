@@ -14,12 +14,13 @@ import { useAuth } from "../../auth/AuthContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchMessageThreads, type MessageThread } from "../../services/api";
+import { APP_LIME } from "../../theme/appColors";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";
-const YELLOW = "#C9FF35";
+const YELLOW = APP_LIME;
 const CARD = "#262626";
 
 function formatTime(ts: number) {

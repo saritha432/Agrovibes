@@ -7,6 +7,7 @@ import {
   ImageSourcePropType,
   Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -243,7 +244,10 @@ export function InitialSetupScreen() {
   const showFooter = index >= 1;
 
   return (
-    <SafeAreaView style={[styles.root, currentSlideInverted ? styles.rootLime : null]}>
+    <SafeAreaView
+      style={[styles.root, currentSlideInverted ? styles.rootLime : null]}
+      edges={["top", "left", "right"]}
+    >
       <View style={[styles.carouselShell, currentSlideInverted ? styles.carouselShellLime : null]} pointerEvents="box-none">
         <FlatList
           ref={listRef}
@@ -503,7 +507,7 @@ const styles = StyleSheet.create({
   },
   copyTextInverted: { color: COLORS.ink },
   copyTextCta: { textTransform: "none", fontSize: 30, lineHeight: 38 },
-  copySubText: { marginTop: 10, color: COLORS.muted, fontWeight: "400", lineHeight: 21, fontSize: 15, maxWidth: "100%" },
+  copySubText: { marginTop: 10, color: COLORS.lime, fontWeight: "400", lineHeight: 21, fontSize: 15, maxWidth: "100%" },
   copySubTextInverted: { color: COLORS.ink, opacity: 0.82 },
   pageFooterSpaceBrand: { height: 14 },
   pageFooterSpace: { height: 175 },

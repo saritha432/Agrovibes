@@ -11,6 +11,12 @@ export const APP_SURFACE = "#303030";
 /** Muted lime for inactive dots / subtle fills. */
 export const APP_LIME_MUTED = "rgba(201, 255, 53, 0.24)";
 
+/** Soft lime fill for selected chips / rows on light backgrounds. */
+export const APP_LIME_SOFT_BG = "rgba(201, 255, 53, 0.24)";
+
+/** @deprecated Use APP_LIME — alias for legacy GREEN constants */
+export const APP_GREEN = APP_LIME;
+
 /** Primary text on dark backgrounds. */
 export const APP_TEXT = "#f8fafc";
 

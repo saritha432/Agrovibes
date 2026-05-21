@@ -10,8 +10,9 @@ import type { Course } from "../services/api";
 import { createCourse } from "../services/api";
 import { updateCourse } from "../services/api";
 import { uploadVideoFile } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 type DraftLesson = {
   id: string;

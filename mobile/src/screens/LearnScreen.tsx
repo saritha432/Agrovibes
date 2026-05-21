@@ -9,10 +9,11 @@ import { AppTopBar } from "../components/AppTopBar";
 import type { LearnStackParamList } from "../navigation/LearnStackNavigator";
 import type { Course } from "../services/api";
 import { fetchLearnCourses } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "LearnHome">;
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 
 const segments = [
@@ -300,7 +301,7 @@ const styles = StyleSheet.create({
   levelPill: { backgroundColor: "rgba(255,255,255,0.85)", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   levelPillText: { color: "#22312d", fontWeight: "800", fontSize: 11 },
   heroIconWrap: { alignItems: "center", marginTop: 8, marginBottom: 8 },
-  heroIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(10,159,70,0.25)" },
+  heroIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(201,255,53,0.25)" },
   featuredTitle: { marginTop: 3, color: "#111616", fontSize: 14, fontWeight: "800" },
   featuredAuthor: { marginTop: 2, color: "#7a867f", fontSize: 11, fontWeight: "600" },
   featuredMetaRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6, flexWrap: "wrap" },

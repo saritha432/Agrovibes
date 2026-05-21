@@ -6,10 +6,11 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { markLaunchSetupComplete } from "../onboarding/launchSetup";
 import { authLogin, authRegister } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 
 type Mode = "login" | "register";
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 
 export function AuthScreen() {

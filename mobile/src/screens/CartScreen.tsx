@@ -15,10 +15,11 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { CheckoutBill, MarketStackParamList } from "../navigation/MarketStackNavigator";
 import { useCart } from "../cart/CartContext";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
+import { APP_LIME } from "../theme/appColors";
 
 const TEAL = "#0d9488";
 const TEAL_STEPPER = "#0f766e";
-const CTA_GREEN = "#2d6a4f";
+const CTA_GREEN = APP_LIME;
 const MUSTARD = "#ffb703";
 const MUSTARD_SOFT = "#fff8e6";
 const BG = "#fdf7f2";
@@ -387,7 +388,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999
   },
-  itemsPillText: { color: "#047857", fontWeight: "800", fontSize: 12 },
+  itemsPillText: { color: APP_LIME, fontWeight: "800", fontSize: 12 },
   scroll: { paddingHorizontal: 12 },
   empty: { alignItems: "center", paddingVertical: 48, gap: 8 },
   emptyTitle: { fontSize: 18, fontWeight: "800", color: "#334155" },

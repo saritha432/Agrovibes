@@ -10,11 +10,12 @@ import { fetchLearnCourseById } from "../services/api";
 import type { Course, CourseLesson } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { saveCourseProgress } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "LessonVideo">;
 type Rt = RouteProp<LearnStackParamList, "LessonVideo">;
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 
 function isProbablyMp4Url(url: string) {
@@ -202,7 +203,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: "#C9FF35",
+    backgroundColor: APP_LIME,
     flexDirection: "row",
     alignItems: "center",
     gap: 10
