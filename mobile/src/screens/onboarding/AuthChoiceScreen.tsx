@@ -208,7 +208,7 @@ export function AuthChoiceScreen() {
 
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
         <Text style={styles.helperText}>
-          {mode === "register" ? "Already registered users can switch to login." : "Use the same mobile number used while registering."}
+          {mode === "register" ? t("registerHelper") : t("loginHelper")}
         </Text>
       </View>
       {Platform.OS === "ios" ? <View style={styles.bottomHomeBar} /> : null}

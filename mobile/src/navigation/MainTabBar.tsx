@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLanguage } from "../localization/LanguageContext";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
 
 type Props = BottomTabBarProps & { onCreatePress: () => void };
@@ -56,6 +57,7 @@ function TabSlot({ focused, onPress, accessibilityLabel, label, children }: TabS
 }
 
 export function MainTabBar({ state, navigation, onCreatePress }: Props) {
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
 
@@ -111,8 +113,8 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
         <TabSlot
           focused={marketFocused}
           onPress={() => pressRoute("Market")}
-          accessibilityLabel="Market"
-          label="Market"
+          accessibilityLabel={t("tabMarket")}
+          label={t("tabMarket")}
         >
           <Ionicons
             name={tabIcon("Market", marketFocused)}
@@ -121,15 +123,15 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
           />
         </TabSlot>
 
-        <TabSlot focused={false} onPress={onCreatePress} accessibilityLabel="Create" label="Create">
+        <TabSlot focused={false} onPress={onCreatePress} accessibilityLabel={t("tabCreate")} label={t("tabCreate")}>
           <Ionicons name="add-circle-outline" size={15} color={MUTED} />
         </TabSlot>
 
         <TabSlot
           focused={servicesFocused}
           onPress={() => pressRoute("Services")}
-          accessibilityLabel="Community"
-          label="Community"
+          accessibilityLabel={t("tabCommunity")}
+          label={t("tabCommunity")}
         >
           <Ionicons
             name={tabIcon("Services", servicesFocused)}
@@ -141,8 +143,8 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
         <TabSlot
           focused={profileFocused}
           onPress={() => pressRoute("Profile")}
-          accessibilityLabel="Profile"
-          label="Profile"
+          accessibilityLabel={t("tabProfile")}
+          label={t("tabProfile")}
         >
           <Ionicons
             name={tabIcon("Profile", profileFocused)}

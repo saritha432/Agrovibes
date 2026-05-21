@@ -17,7 +17,6 @@ import {
   TextStyle,
   View
 } from "react-native";
-import { CameraView } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { Audio, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -39,6 +38,8 @@ import { useAuth } from "../auth/AuthContext";
 import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
 import { WebCameraCapture } from "./WebCameraCapture";
 import { StoryCameraPreview } from "./StoryCameraPreview";
+import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
+import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 import {
   fetchGalleryAlbums,
   fetchGalleryAssets,
@@ -315,7 +316,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [captureEntryView, setCaptureEntryView] = useState<"camera" | "gallery">("camera");
-  const entryCameraRef = useRef<CameraView>(null);
+  const entryCameraRef = useRef<StoryCameraPreviewHandle>(null);
+  const entryShutterLongPressRef = useRef(false);
+  const entryAutoRecordDoneRef = useRef(false);
+  const [entryIsRecording, setEntryIsRecording] = useState(false);
+  const [entryRecordSecondsLeft, setEntryRecordSecondsLeft] = useState(REEL_MAX_RECORD_SECONDS);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   /** Instagram-style: post flow allows multiple photos by default (up to 10). */
   const [entryMultiSelect, setEntryMultiSelect] = useState(true);
@@ -524,8 +529,15 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   }, [createType, refreshGallery, visible]);
 
   React.useEffect(() => {
-    if (entryType === "post" || entryType === "live") return;
-    setCaptureEntryView("camera");
+    if (!visible) return;
+    entryAutoRecordDoneRef.current = false;
+    setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
+  }, [visible]);
+
+  React.useEffect(() => {
+    if (entryType === "live") return;
+    if (entryType === "post") setCaptureEntryView("gallery");
+    else setCaptureEntryView("camera");
   }, [entryType]);
 
   React.useEffect(() => {
@@ -692,7 +704,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const cameraCaptureMode = (): InAppCameraCaptureMode => {
     if (entryType === "reel") return "video";
-    if (entryType === "post") return "photo";
     return "any";
   };
 
@@ -792,22 +803,56 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
   };
 
-  const openEntryCamera = () => {
-    void captureEntryShutter();
+  /** POST grid camera cell → inline live camera (not gallery / file picker). */
+  const openPostInlineCamera = () => {
+    setErrorText("");
+    setCaptureEntryView("camera");
   };
 
-  const captureEntryShutter = async () => {
+  const stopEntryVideoRecording = React.useCallback(async () => {
+    if (entryAutoRecordDoneRef.current) return;
+    if (Platform.OS === "web") return;
+    if (!entryCameraRef.current?.isRecording()) return;
+    try {
+      const video = await entryCameraRef.current.stopRecording();
+      setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
+      if (!video?.uri) {
+        setErrorText("Could not save video.");
+        return;
+      }
+      entryAutoRecordDoneRef.current = true;
+      applyPickedMediaToFlow([
+        { uri: video.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset
+      ]);
+    } catch (e) {
+      setErrorText(e instanceof Error ? e.message : "Video capture failed.");
+    }
+  }, []);
+
+  const startEntryVideoRecording = React.useCallback(async () => {
+    if (entryAutoRecordDoneRef.current) return;
+    if (entryCameraRef.current?.isRecording()) return;
+    entryAutoRecordDoneRef.current = false;
     setErrorText("");
-    if (entryType === "live") {
-      setCreateType("live");
-      return;
-    }
-    if (entryType === "reel") {
-      openFullScreenCamera();
-      return;
-    }
     if (Platform.OS === "web") {
       openFullScreenCamera();
+      return;
+    }
+    try {
+      setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
+      await entryCameraRef.current?.startRecording({
+        maxDurationSec: entryType === "reel" ? REEL_MAX_RECORD_SECONDS : 90
+      });
+    } catch (e) {
+      setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
+      setErrorText(e instanceof Error ? e.message : "Could not start recording.");
+    }
+  }, [entryType]);
+
+  const captureEntryPhoto = async () => {
+    if (entryType === "reel") return;
+    if (Platform.OS === "web") {
+      void openEntryCameraWeb();
       return;
     }
     try {
@@ -828,6 +873,95 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setErrorText(e instanceof Error ? e.message : "Photo capture failed.");
     }
   };
+
+  const handleEntryShutterPress = () => {
+    setErrorText("");
+    if (entryType === "live") {
+      setCreateType("live");
+      return;
+    }
+    if (entryShutterLongPressRef.current) {
+      entryShutterLongPressRef.current = false;
+      return;
+    }
+    if (entryType === "reel") {
+      if (entryIsRecording) void stopEntryVideoRecording();
+      else void startEntryVideoRecording();
+      return;
+    }
+    void captureEntryPhoto();
+  };
+
+  const handleEntryShutterLongPress = async () => {
+    setErrorText("");
+    if (entryType === "live") return;
+    entryShutterLongPressRef.current = true;
+    if (entryType === "reel") {
+      if (!entryIsRecording) await startEntryVideoRecording();
+      return;
+    }
+    if (Platform.OS === "web") {
+      openFullScreenCamera();
+      return;
+    }
+    try {
+      await entryCameraRef.current?.startRecording({
+        maxDurationSec: 90
+      });
+    } catch (e) {
+      entryShutterLongPressRef.current = false;
+      setErrorText(e instanceof Error ? e.message : "Could not start recording.");
+    }
+  };
+
+  const handleEntryShutterRelease = async () => {
+    entryShutterLongPressRef.current = false;
+    if (entryType === "reel") return;
+    if (entryAutoRecordDoneRef.current) return;
+    if (!entryCameraRef.current?.isRecording()) return;
+    if (Platform.OS === "web") return;
+    try {
+      const video = await entryCameraRef.current.stopRecording();
+      if (!video?.uri) {
+        setErrorText("Could not save video.");
+        return;
+      }
+      applyPickedMediaToFlow([
+        { uri: video.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset
+      ]);
+    } catch (e) {
+      setErrorText(e instanceof Error ? e.message : "Video capture failed.");
+    }
+  };
+
+  const onInlineAutoRecordFinished = (payload: { uri: string }) => {
+    if (entryAutoRecordDoneRef.current) return;
+    entryAutoRecordDoneRef.current = true;
+    entryShutterLongPressRef.current = false;
+    setEntryRecordSecondsLeft(0);
+    applyPickedMediaToFlow([
+      { uri: payload.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset
+    ]);
+  };
+
+  const onEntryRecordingChange = React.useCallback((recording: boolean) => {
+    setEntryIsRecording(recording);
+    if (recording) setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
+  }, []);
+
+  React.useEffect(() => {
+    if (!entryIsRecording || entryType !== "reel") return;
+    const timer = setInterval(() => {
+      setEntryRecordSecondsLeft((prev) => {
+        if (prev <= 1) {
+          void stopEntryVideoRecording();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [entryIsRecording, entryType, stopEntryVideoRecording]);
 
   const onCaptureGalleryAsset = (asset: GalleryGridAsset) => {
     if (entryType === "reel" && asset.mediaType !== "video") {
@@ -1124,7 +1258,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const locationSummary = postLocation.trim() ? `Location: ${postLocation.trim()}` : "Add location";
   const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
   const entryCameraActive =
-    visible && captureEntryView === "camera" && (entryType === "story" || entryType === "reel");
+    visible && captureEntryView === "camera" && entryType !== "live";
 
   const composeOptions: Array<{
     icon: keyof typeof Ionicons.glyphMap;
@@ -1182,7 +1316,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       onRequestClose={handleClose}
     >
       {visible && !createType ? (
-        entryType === "post" ? (
+        entryType === "post" && captureEntryView === "gallery" ? (
           <View style={[styles.igPostEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
             <View style={styles.igPostEntryTop}>
               <Pressable style={styles.igPostEntryTopBtn} onPress={handleClose}>
@@ -1242,7 +1376,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               renderItem={({ item }) => {
                 if ("isCamera" in item && item.isCamera) {
                   return (
-                    <Pressable style={styles.igPostEntryCell} onPress={openEntryCamera}>
+                    <Pressable style={styles.igPostEntryCell} onPress={openPostInlineCamera}>
                       <View style={styles.igPostEntryCameraCell}>
                         <Ionicons name="camera" size={28} color="#fff" />
                       </View>
@@ -1348,8 +1482,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 ref={entryCameraRef}
                 active={entryCameraActive}
                 facing={entryFacing}
-                mode={entryType === "reel" ? "video" : "picture"}
-                onPress={openFullScreenCamera}
+                mode={entryType === "reel" ? "video" : entryType === "post" ? "picture" : "picture"}
+                onRecordingChange={onEntryRecordingChange}
+                onAutoRecordFinished={onInlineAutoRecordFinished}
               />
             )}
 
@@ -1364,6 +1499,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
                   <Ionicons name="close" size={26} color="#fff" />
                 </Pressable>
+                {entryIsRecording && entryType === "reel" ? (
+                  <View style={styles.reelCountdownBadge} pointerEvents="none">
+                    <View style={styles.reelCountdownDot} />
+                    <Text style={styles.reelCountdownText}>{formatReelCountdown(entryRecordSecondsLeft)}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.igCaptureTopTimerSpacer} pointerEvents="none" />
+                )}
                 <View style={styles.igCaptureTopCenterTools} pointerEvents="box-none">
                   <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
                     <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#C9FF35" />
@@ -1387,7 +1530,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               ) : null}
 
               <View style={styles.igCamCaptureRow} pointerEvents="box-none">
-                <Pressable style={styles.igCamGalleryThumb} onPress={openEntryGallery}>
+                <Pressable
+                  style={styles.igCamGalleryThumb}
+                  onPress={() => {
+                    if (entryType === "post") setCaptureEntryView("gallery");
+                    else void openEntryGallery();
+                  }}
+                >
                   {recentGridAssets[0] ? (
                     <Image
                       source={{ uri: recentGridAssets[0].uri }}
@@ -1399,8 +1548,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   )}
                 </Pressable>
                 <View style={styles.igCamCaptureRowSpacer} />
-                <Pressable style={styles.igCamCaptureOuter} onPress={openEntryCamera}>
-                  <View style={styles.igCamCaptureInner} />
+                <Pressable
+                  style={[styles.igCamCaptureOuter, entryIsRecording ? styles.igCamCaptureOuterRecording : null]}
+                  onPress={handleEntryShutterPress}
+                  onLongPress={() => void handleEntryShutterLongPress()}
+                  onPressOut={() => void handleEntryShutterRelease()}
+                  delayLongPress={280}
+                >
+                  <View style={[styles.igCamCaptureInner, entryIsRecording ? styles.igCamCaptureInnerRecording : null]} />
                 </Pressable>
                 <View style={styles.igCamCaptureRowSpacer} />
                 <Pressable
@@ -2151,8 +2306,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         visible
         onClose={() => setFullScreenCameraOpen(false)}
         onUnavailable={() => {
-          setFullScreenCameraOpen(false);
-          void openNativeCameraPicker();
+          setErrorText("Live camera is not available. Check camera permission in settings.");
         }}
         onCapture={(asset) => {
           setFullScreenCameraOpen(false);
@@ -2160,6 +2314,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         }}
         initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
         mode={cameraCaptureMode()}
+        maxVideoDurationSec={entryType === "reel" ? REEL_MAX_RECORD_SECONDS : 90}
       />
     ) : null}
     </>
@@ -2615,6 +2770,39 @@ const styles = StyleSheet.create({
     height: 62,
     borderRadius: 31,
     backgroundColor: "#303030"
+  },
+  igCamCaptureOuterRecording: {
+    borderColor: "#ef4444"
+  },
+  igCamCaptureInnerRecording: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: "#ef4444"
+  },
+  igCaptureTopTimerSpacer: { flex: 1 },
+  reelCountdownBadge: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.55)"
+  },
+  reelCountdownDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#ef4444"
+  },
+  reelCountdownText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"]
   },
   igCamAuxDots: {
     justifyContent: "center",

@@ -5,19 +5,28 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import { markLaunchSetupComplete, setLaunchLanguage } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { useLanguage, type AppLanguage, SUPPORTED_LANGUAGES } from "../../localization/LanguageContext";
 import { APP_LIME } from "../../theme/appColors";
 
 const GREEN = APP_LIME;
 const BG = "#262626";
 const BORDER = "#3a424c";
+/** Full list shown in onboarding; app UI uses English / Hindi / Telugu via i18n. */
 const LANGUAGES = ["English", "Hindi", "Telugu", "Punjabi", "Gujarati", "Bengali", "Marathi", "Tamil"];
+
+function toAppLanguage(selected: string): AppLanguage {
+  return SUPPORTED_LANGUAGES.includes(selected as AppLanguage) ? (selected as AppLanguage) : "English";
+}
 
 export function ChooseLanguageScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, updateUser } = useAuth();
-  const [selected, setSelected] = React.useState("English");
+  const { t, setLanguage, language } = useLanguage();
+  const [selected, setSelected] = React.useState(language || "English");
 
   const finish = async () => {
+    const appLang = toAppLanguage(selected);
+    await setLanguage(appLang);
     if (user?.id != null) {
       await setLaunchLanguage(user.id, selected);
       await markLaunchSetupComplete(user.id);
@@ -28,8 +37,8 @@ export function ChooseLanguageScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>Choose{"\n"}Your Language</Text>
-      <Text style={styles.subtitle}>Select your preferred language to personalize your app experience.</Text>
+      <Text style={styles.title}>{t("chooseLanguageTitle")}</Text>
+      <Text style={styles.subtitle}>{t("chooseLanguageSub")}</Text>
       <View style={styles.list}>
         {LANGUAGES.map((item) => (
           <Pressable
@@ -42,7 +51,7 @@ export function ChooseLanguageScreen() {
         ))}
       </View>
       <Pressable style={styles.primaryBtn} onPress={finish}>
-        <Text style={styles.primaryText}>Select Language</Text>
+        <Text style={styles.primaryText}>{t("selectLanguage")}</Text>
       </Pressable>
     </View>
   );

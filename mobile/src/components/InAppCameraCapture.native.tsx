@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 
 export type InAppCameraCaptureMode = "photo" | "video" | "any";
 export type CameraFacing = "front" | "back";
@@ -23,6 +24,8 @@ type Props = {
   onUnavailable?: () => void;
   initialFacing?: CameraFacing;
   mode?: InAppCameraCaptureMode;
+  /** Cap for recordAsync (reels use 3 minutes). */
+  maxVideoDurationSec?: number;
 };
 
 function toPickerAsset(payload: {
@@ -52,14 +55,17 @@ export function InAppCameraCapture({
   onCapture,
   onUnavailable,
   initialFacing = "front",
-  mode = "any"
+  mode = "any",
+  maxVideoDurationSec = REEL_MAX_RECORD_SECONDS
 }: Props) {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
   const recordingStartedAtRef = useRef<number>(0);
   const recordingActiveRef = useRef(false);
+  const longPressCaptureRef = useRef(false);
   const unavailableNotifiedRef = useRef(false);
+  const maxDuration = Math.min(Math.max(maxVideoDurationSec, 1), REEL_MAX_RECORD_SECONDS);
 
   /** Release APK builds need the native camera in video mode before recordAsync (picture mode records no frames). */
   const waitForNativeRecordReady = useCallback(async () => {
@@ -77,6 +83,7 @@ export function InAppCameraCapture({
   const [recording, setRecording] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
+  const [recordSecondsLeft, setRecordSecondsLeft] = useState(maxVideoDurationSec);
 
   useEffect(() => {
     if (!visible) return;
@@ -89,7 +96,19 @@ export function InAppCameraCapture({
     recordingPromiseRef.current = null;
     recordingStartedAtRef.current = 0;
     unavailableNotifiedRef.current = false;
-  }, [initialFacing, visible]);
+    setRecordSecondsLeft(maxVideoDurationSec);
+  }, [initialFacing, maxVideoDurationSec, visible]);
+
+  React.useEffect(() => {
+    if (!recording || mode !== "video") return;
+    const timer = setInterval(() => {
+      setRecordSecondsLeft((prev) => {
+        if (prev <= 1) return 0;
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [mode, recording]);
 
   useEffect(() => {
     if (!visible) return;
@@ -181,6 +200,7 @@ export function InAppCameraCapture({
     }
     recordingActiveRef.current = true;
     setRecording(true);
+    setRecordSecondsLeft(maxDuration);
     try {
       // mode "any" switches picture → video on this render; native layer must settle before recordAsync.
       if (mode === "any") {
@@ -192,7 +212,24 @@ export function InAppCameraCapture({
         throw new Error("Camera unavailable.");
       }
       recordingStartedAtRef.current = Date.now();
-      recordingPromiseRef.current = cameraRef.current.recordAsync({ maxDuration: 60 });
+      const recordPromise = cameraRef.current.recordAsync({ maxDuration });
+      recordingPromiseRef.current = recordPromise;
+      void recordPromise
+        .then((video) => {
+          if (!recordingActiveRef.current) return;
+          recordingPromiseRef.current = null;
+          recordingStartedAtRef.current = 0;
+          recordingActiveRef.current = false;
+          longPressCaptureRef.current = false;
+          setRecording(false);
+          setBusy(false);
+          if (!video?.uri) return;
+          onCapture(toPickerAsset({ uri: video.uri, type: "video", duration: null }));
+          onClose();
+        })
+        .catch(() => {
+          /* manual stop handled in toggleVideoRecording */
+        });
     } catch (e) {
       recordingStartedAtRef.current = 0;
       recordingActiveRef.current = false;
@@ -212,7 +249,26 @@ export function InAppCameraCapture({
     waitForNativeRecordReady
   ]);
 
+  const startRecordingFromHold = useCallback(async () => {
+    longPressCaptureRef.current = true;
+    if (!recording && !recordingActiveRef.current) {
+      await toggleVideoRecording();
+    }
+  }, [recording, toggleVideoRecording]);
+
+  const stopRecordingFromHold = useCallback(async () => {
+    longPressCaptureRef.current = false;
+    if (mode === "video") return;
+    if (recording || recordingActiveRef.current) {
+      await toggleVideoRecording();
+    }
+  }, [mode, recording, toggleVideoRecording]);
+
   const onShutterPress = () => {
+    if (longPressCaptureRef.current) {
+      longPressCaptureRef.current = false;
+      return;
+    }
     if (mode === "video") {
       void toggleVideoRecording();
       return;
@@ -284,6 +340,14 @@ export function InAppCameraCapture({
               <Pressable style={styles.iconBtn} onPress={onClose} hitSlop={12}>
                 <Ionicons name="close" size={28} color="#fff" />
               </Pressable>
+              {mode === "video" && recording ? (
+                <View style={styles.fsCountdownBadge} pointerEvents="none">
+                  <View style={styles.fsCountdownDot} />
+                  <Text style={styles.fsCountdownText}>{formatReelCountdown(recordSecondsLeft)}</Text>
+                </View>
+              ) : (
+                <View style={styles.topBarSpacer} />
+              )}
               <Pressable
                 style={styles.iconBtn}
                 onPress={() => setFacing((f) => (f === "front" ? "back" : "front"))}
@@ -300,15 +364,18 @@ export function InAppCameraCapture({
             ) : null}
 
             <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-              {wantsVideo && mode === "any" ? (
-                <Pressable style={styles.modeHint} onPress={() => void toggleVideoRecording()} disabled={busy}>
-                  <Text style={styles.modeHintText}>{recording ? "Tap to stop" : "Long-press shutter for video"}</Text>
-                </Pressable>
+              {wantsVideo ? (
+                <View style={styles.modeHint}>
+                  <Text style={styles.modeHintText}>
+                    {mode === "video" ? "Tap or hold to record (max 3 min)" : "Tap for photo · hold for video"}
+                  </Text>
+                </View>
               ) : null}
               <Pressable
                 style={[styles.shutterOuter, recording ? styles.shutterOuterRecording : null]}
                 onPress={onShutterPress}
-                onLongPress={wantsVideo && mode === "any" ? () => void toggleVideoRecording() : undefined}
+                onLongPress={wantsVideo ? () => void startRecordingFromHold() : undefined}
+                onPressOut={wantsVideo ? () => void stopRecordingFromHold() : undefined}
                 delayLongPress={280}
                 disabled={(busy && !recording) || !cameraReady}
               >
@@ -319,7 +386,7 @@ export function InAppCameraCapture({
                 )}
               </Pressable>
               <Text style={styles.captureLabel}>
-                {mode === "video" ? (recording ? "Recording…" : "Tap to record") : "Tap to capture"}
+                {mode === "video" ? (recording ? "Recording…" : "Tap or hold to record") : "Tap for photo"}
               </Text>
             </View>
           </>
@@ -364,9 +431,24 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 2,
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14
   },
+  topBarSpacer: { flex: 1 },
+  fsCountdownBadge: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.5)"
+  },
+  fsCountdownDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#ef4444" },
+  fsCountdownText: { color: "#fff", fontSize: 17, fontWeight: "800" },
   iconBtn: {
     width: 44,
     height: 44,

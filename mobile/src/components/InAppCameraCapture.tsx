@@ -11,6 +11,7 @@ type Props = {
   onUnavailable?: () => void;
   initialFacing?: CameraFacing;
   mode?: InAppCameraCaptureMode;
+  maxVideoDurationSec?: number;
 };
 
 /** In-app expo-camera is native-only; web uses WebCameraCapture instead. */

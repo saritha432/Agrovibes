@@ -22,6 +22,7 @@ import { queueOpenSharedPostViewer } from "../../navigation/sharedPostViewerBrid
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
+import { useLanguage } from "../../localization/LanguageContext";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
@@ -178,6 +179,7 @@ export function DirectChatScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
   const { peerUserId, peerName, peerAvatarUrl } = route.params;
+  const { t } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
@@ -376,7 +378,7 @@ export function DirectChatScreen() {
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder="Message..."
+          placeholder={t("messagePlaceholder")}
           placeholderTextColor={MUTED}
           style={styles.input}
           multiline

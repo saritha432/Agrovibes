@@ -17,6 +17,7 @@ import { fetchMarketplaceListings, MarketplaceListing } from "../services/api";
 import { useCart } from "../cart/CartContext";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
+import { useLanguage } from "../localization/LanguageContext";
 
 type MarketCategory = "All" |"Vegetables" | "Fruits" | "Dairy" | "InputsSupplies" | "Seeds" | "Fertilizers" | "Tools";
 
@@ -133,6 +134,7 @@ function ListingCartControl({
 }
 
 export function MarketplaceScreen() {
+  const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { addFromListing, itemCount } = useCart();
@@ -209,7 +211,7 @@ export function MarketplaceScreen() {
       </View>
 
       <View style={styles.titleRow}>
-        <Text style={styles.title}>Agri Market</Text>
+        <Text style={styles.title}>{t("marketTitle")}</Text>
         <Pressable style={styles.filterSquare}>
           <Ionicons name="options-outline" size={20} color="#1f2c29" />
         </Pressable>
@@ -218,7 +220,7 @@ export function MarketplaceScreen() {
       <View style={styles.searchRow}>
         <Ionicons name="search-outline" size={18} color="#64748b" />
         <TextInput
-          placeholder="Search produce, farmers, equipment..."
+          placeholder={t("marketSearchPlaceholder")}
           placeholderTextColor="#94a3b8"
           style={styles.searchInput}
           value={search}

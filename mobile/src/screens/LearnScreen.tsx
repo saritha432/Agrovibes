@@ -9,6 +9,7 @@ import { AppTopBar } from "../components/AppTopBar";
 import type { LearnStackParamList } from "../navigation/LearnStackNavigator";
 import type { Course } from "../services/api";
 import { fetchLearnCourses } from "../services/api";
+import { useLanguage } from "../localization/LanguageContext";
 import { APP_LIME } from "../theme/appColors";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "LearnHome">;
@@ -31,6 +32,7 @@ function formatCompact(n: number) {
 }
 
 export function LearnScreen() {
+  const { t } = useLanguage();
   const navigation = useNavigation<Nav>();
   const [segment, setSegment] = useState<SegmentId>("courses");
   const [courses, setCourses] = useState<Course[]>([]);
@@ -53,7 +55,7 @@ export function LearnScreen() {
         await load();
       } catch (e: any) {
         if (!mounted) return;
-        setError(e?.message || "Failed to load courses");
+        setError(e?.message || t("failedLoadCourses"));
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -77,7 +79,7 @@ export function LearnScreen() {
             try {
               await load();
             } catch (e: any) {
-              setError(e?.message || "Failed to load courses");
+              setError(e?.message || t("failedLoadCourses"));
             } finally {
               setRefreshing(false);
             }
@@ -88,8 +90,8 @@ export function LearnScreen() {
       <AppTopBar />
 
       <View style={styles.header}>
-        <Text style={styles.title}>Learn & Community</Text>
-        <Text style={styles.sub}>Courses, expert guidance, Q&A and farmer groups</Text>
+        <Text style={styles.title}>{t("learnTitle")}</Text>
+        <Text style={styles.sub}>{t("learnSub")}</Text>
       </View>
 
       <View style={styles.segmentRow}>
@@ -120,7 +122,7 @@ export function LearnScreen() {
       {segment !== "courses" ? (
         <View style={styles.placeholderCard}>
           <Ionicons name="construct-outline" size={18} color="#4b5a56" />
-          <Text style={styles.placeholderText}>This section is coming next. Courses are ready now.</Text>
+          <Text style={styles.placeholderText}>{t("coursesComingSoon")}</Text>
         </View>
       ) : (
         <>
@@ -132,11 +134,11 @@ export function LearnScreen() {
             ))}
           </View>
 
-          <Text style={styles.sectionTitle}>FEATURED COURSE</Text>
+          <Text style={styles.sectionTitle}>{t("featuredCourse")}</Text>
           {loading ? (
             <View style={styles.loadingCard}>
               <ActivityIndicator color={GREEN} />
-              <Text style={styles.loadingText}>Loading courses…</Text>
+              <Text style={styles.loadingText}>{t("loadingCourses")}</Text>
             </View>
           ) : error ? (
             <View style={styles.loadingCard}>
@@ -145,7 +147,7 @@ export function LearnScreen() {
             </View>
           ) : !featured ? (
             <View style={styles.loadingCard}>
-              <Text style={styles.loadingText}>No courses yet.</Text>
+              <Text style={styles.loadingText}>{t("noCoursesYet")}</Text>
             </View>
           ) : (
             <Pressable

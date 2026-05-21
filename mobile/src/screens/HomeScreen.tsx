@@ -70,6 +70,7 @@ import {
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection } from "./live/LiveHomeSection";
+import { useLanguage } from "../localization/LanguageContext";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 interface HomeScreenProps {
@@ -876,6 +877,7 @@ function ReelLikeBurst({ postId, trigger, seenRef }: ReelLikeBurstProps) {
 }
 
 export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost }: HomeScreenProps) {
+  const { t } = useLanguage();
   const { token, user } = useAuth();
   const insets = useSafeAreaInsets();
   /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
@@ -883,6 +885,36 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
     return Math.max(insets.top, sbh);
   }, [insets.top]);
+
+  const homeTabLabel = React.useCallback(
+    (tab: HomeTopTab) => {
+      if (tab === "live") return t("tabLive");
+      if (tab === "Feed") return t("tabFeed");
+      if (tab === "Friends") return t("tabFriends");
+      return tab;
+    },
+    [t]
+  );
+
+  const labelForFollowStatus = React.useCallback(
+    (
+      viewerStatus: string | undefined,
+      localViewerStatus: string | undefined,
+      legacyStatus: "none" | "pending" | "accepted",
+      busy: boolean
+    ) => {
+      if (viewerStatus === "accepted" || localViewerStatus === "accepted" || legacyStatus === "accepted") {
+        return t("following");
+      }
+      if (viewerStatus === "pending" || localViewerStatus === "pending" || legacyStatus === "pending") {
+        return t("requested");
+      }
+      if (busy) return t("followBusy");
+      return t("follow");
+    },
+    [t]
+  );
+
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
@@ -1608,7 +1640,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           }
         }));
       } catch (error: any) {
-        Alert.alert("Follow failed", error?.message || "Could not send follow request.");
+        Alert.alert(t("followFailed"), error?.message || t("followFailedMessage"));
       } finally {
         setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: false }));
       }
@@ -1840,7 +1872,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setShareSearch("");
         Alert.alert("Sent", `Reel sent to ${recipient.name}.`);
       } catch {
-        Alert.alert("Send failed", "Could not send this reel. Try again.");
+        Alert.alert(t("sendFailed"), t("sendFailedReel"));
       } finally {
         setShareBusyUserId(null);
       }
@@ -2140,7 +2172,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setActiveReelOptionsPost((current) => (current?.id === post.id ? { ...current, viewerHasSaved: res.saved } : current));
       } catch {
         setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, viewerHasSaved: !nextSaved } : p)));
-        Alert.alert("Save failed", "Could not update saved reels. Please try again.");
+        Alert.alert(t("saveFailed"), t("savePostFailed"));
       } finally {
         setSaveBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
       }
@@ -2478,7 +2510,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </View>
               </View>
             <Text style={isReelSurfaceTab ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
-              Your story
+              {t("yourStory")}
             </Text>
           </Pressable>
 
@@ -2547,7 +2579,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <View style={[styles.homeTopTabPillDark, isActive ? styles.homeTopTabPillActiveDark : null]}>
                     <Text style={[styles.homeTopTabTextDark, isActive ? styles.homeTopTabTextActivePillDark : null]}>
-                      {tab === "live" ? "Live" : tab}
+                      {homeTabLabel(tab)}
                     </Text>
                   </View>
                 </Pressable>
@@ -2558,7 +2590,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         </View>
       </View>
     ),
-    [activeHomeTab, avatarLookup, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, posts, user, visibleHomeTopTabs]
+    [activeHomeTab, avatarLookup, homeTabLabel, isReelSurfaceTab, onOpenCreate, otherStoryGroups, ownPlayableStories, posts, user, visibleHomeTopTabs]
   );
 
   const renderFullScreenReel = useCallback(
@@ -2585,21 +2617,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           : relationship?.viewerStatus === "pending" || localRelationship?.viewerStatus === "pending" || legacyStatus === "pending"
             ? "pending"
             : "none";
-      const followLabel = relationship?.viewerStatus === "accepted"
-        ? "Following"
-        : relationship?.viewerStatus === "pending"
-          ? "Requested"
-          : localRelationship?.viewerStatus === "accepted"
-            ? "Following"
-            : localRelationship?.viewerStatus === "pending"
-              ? "Requested"
-              : legacyStatus === "accepted"
-                ? "Following"
-                : legacyStatus === "pending"
-                  ? "Requested"
-                  : followBusyByUserId[postUserId]
-                    ? "..."
-                    : "Follow";
+      const followLabel = labelForFollowStatus(
+        relationship?.viewerStatus,
+        localRelationship?.viewerStatus,
+        legacyStatus,
+        !!(postUserId > 0 && followBusyByUserId[postUserId])
+      );
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
@@ -2761,9 +2784,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     onPress={() => toggleFollow(postUserId > 0 ? postUserId : null, post.userName, currentFollowStatus)}
                     style={[
                       styles.reelFollowBtn,
-                      followLabel === "Following"
+                      currentFollowStatus === "accepted"
                         ? styles.reelFollowFollowing
-                        : followLabel === "Requested"
+                        : currentFollowStatus === "pending"
                           ? styles.reelFollowRequested
                           : styles.reelFollowDefault
                     ]}
@@ -2772,9 +2795,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     <Text
                       style={[
                         styles.reelFollowBtnText,
-                        followLabel === "Following"
+                        currentFollowStatus === "accepted"
                           ? styles.reelFollowBtnTextLime
-                          : followLabel === "Requested"
+                          : currentFollowStatus === "pending"
                             ? styles.reelFollowBtnTextMuted
                             : styles.reelFollowBtnTextOnDark
                       ]}
@@ -2921,21 +2944,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           : relationship?.viewerStatus === "pending" || localRelationship?.viewerStatus === "pending" || legacyStatus === "pending"
             ? "pending"
             : "none";
-      const followLabel = relationship?.viewerStatus === "accepted"
-        ? "Following"
-        : relationship?.viewerStatus === "pending"
-          ? "Requested"
-            : localRelationship?.viewerStatus === "accepted"
-              ? "Following"
-              : localRelationship?.viewerStatus === "pending"
-                ? "Requested"
-            : legacyStatus === "accepted"
-              ? "Following"
-              : legacyStatus === "pending"
-                ? "Requested"
-                : followBusyByUserId[postUserId]
-                  ? "..."
-                  : "Follow";
+      const followLabel = labelForFollowStatus(
+        relationship?.viewerStatus,
+        localRelationship?.viewerStatus,
+        legacyStatus,
+        !!(postUserId > 0 && followBusyByUserId[postUserId])
+      );
       return (
         <View style={styles.postCard}>
           <View style={styles.postTop}>
@@ -3100,7 +3114,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             <Text style={styles.captionUser}>{post.userName}</Text> {post.caption}
           </Text>
           <Pressable onPress={() => openCommentsForPost(post)}>
-            <Text style={styles.comments}>View all {shownCommentsCount} comments</Text>
+            <Text style={styles.comments}>{t("viewAllComments", { count: shownCommentsCount })}</Text>
           </Pressable>
         </View>
       );
@@ -3130,22 +3144,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const emptyTabTitle =
     activeHomeTab === "Friends"
-      ? "No reels from people you follow"
+      ? t("emptyFriendsTitle")
       : activeHomeTab === "Reels"
-        ? "No reels yet"
+        ? t("emptyReelsTitle")
         : activeHomeTab === "live"
-          ? "Live streaming is coming soon"
+          ? t("emptyLiveTitle")
           : activeHomeTab === "Feed"
-            ? "No feed posts yet"
-            : "Nothing here yet";
+            ? t("emptyFeedTitle")
+            : t("emptyNothingTitle");
   const emptyTabSubtitle =
     activeHomeTab === "Friends"
-      ? "Follow more creators to see their reels here."
+      ? t("emptyFriendsSub")
       : activeHomeTab === "Reels"
-        ? "Create a reel to get started."
+        ? t("emptyReelsSub")
         : activeHomeTab === "live"
-          ? "We're building live broadcasts. Stay tuned!"
-          : "Create a reel to start filling this section.";
+          ? t("emptyLiveSub")
+          : t("emptyDefaultSub");
 
   const useFullScreenReelLayout =
     activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
@@ -3453,13 +3467,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <Ionicons name="chevron-down" size={28} color="#C9FF35" />
                 </Pressable>
-                <Text style={styles.commentsTitle}>Likes</Text>
+                <Text style={styles.commentsTitle}>{t("likes")}</Text>
                 <View style={styles.commentsHeaderSpacer} />
               </View>
               {likesSheetLoading ? (
                 <ActivityIndicator color="#C9FF35" style={{ marginTop: 24 }} />
               ) : likesSheetUsers.length === 0 ? (
-                <Text style={styles.noCommentsText}>No likes yet</Text>
+                <Text style={styles.noCommentsText}>{t("noLikesYet")}</Text>
               ) : (
                 <ScrollView style={styles.commentsListScroll} contentContainerStyle={styles.likesListInner}>
                   {likesSheetUsers.map((liker, idx) => (
@@ -3519,7 +3533,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <Ionicons name="chevron-down" size={28} color="#C9FF35" />
                 </Pressable>
-                <Text style={styles.commentsTitle}>Comments</Text>
+                <Text style={styles.commentsTitle}>{t("comments")}</Text>
                 <View style={styles.commentsHeaderSpacer} />
               </View>
 
@@ -3531,13 +3545,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               >
                 {(() => {
                   if (!activeCommentsPost) {
-                    return <Text style={styles.noCommentsText}>No Comments</Text>;
+                    return <Text style={styles.noCommentsText}>{t("noComments")}</Text>;
                   }
                   const pid = activeCommentsPost.id;
                   const allRaw = commentsByPost[pid] ?? [];
                   const all = inferParentFromMention(allRaw.map((x) => normalizeCommentRow(x as HomeCommentRow & Record<string, unknown>)));
                   if (all.length === 0) {
-                    return <Text style={styles.noCommentsText}>No Comments</Text>;
+                    return <Text style={styles.noCommentsText}>{t("noComments")}</Text>;
                   }
                   const { roots, children } = buildCommentReplyTree(all);
 
@@ -3640,7 +3654,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     Replying to @{String(replyingTo.user || "").replace(/^@/, "")}
                   </Text>
                   <Pressable hitSlop={8} onPress={() => setReplyingTo(null)} style={styles.replyingToCancel}>
-                    <Text style={styles.replyingToCancelText}>Cancel</Text>
+                    <Text style={styles.replyingToCancelText}>{t("replyCancel")}</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -3666,7 +3680,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <TextInput
                   value={commentDraft}
                   onChangeText={setCommentDraft}
-                  placeholder={replyingTo ? "Write a reply…" : "Add a comment..."}
+                  placeholder={replyingTo ? t("writeReply") : t("addCommentPlaceholder")}
                   placeholderTextColor="#6b7280"
                   style={styles.commentInput}
                 />
@@ -3709,9 +3723,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </View>
               <View style={styles.reelOptionTextCol}>
                 <Text style={styles.reelOptionTitle}>
-                  {activeReelOptionsPost?.viewerHasSaved ? "Remove from saved" : "Save"}
+                  {activeReelOptionsPost?.viewerHasSaved ? t("removeFromSaved") : t("savePost")}
                 </Text>
-                <Text style={styles.reelOptionSub}>Saved posts appear in your profile.</Text>
+                <Text style={styles.reelOptionSub}>{t("savedPostsHint")}</Text>
               </View>
             </Pressable>
             <Pressable
@@ -3821,7 +3835,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               disabled={reportSubmitBusy}
               onPress={() => setReportModalPost(null)}
             >
-              <Text style={[styles.reelOptionTitle, { flex: 1, textAlign: "center" }]}>Cancel</Text>
+              <Text style={[styles.reelOptionTitle, { flex: 1, textAlign: "center" }]}>{t("cancel")}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -3836,7 +3850,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <TextInput
                 value={shareSearch}
                 onChangeText={setShareSearch}
-                placeholder="Search"
+                placeholder={t("search")}
                 placeholderTextColor="#97a0a8"
                 style={styles.shareSearchInput}
               />
@@ -3881,27 +3895,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             <View style={styles.shareFooterRow}>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onAddReelToStory(sharePost)}>
                 <View style={styles.shareFooterIcon}><Ionicons name="add-circle-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>Add to story</Text>
+                <Text style={styles.shareFooterText}>{t("addToStory")}</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
                 <View style={styles.shareFooterIcon}><Ionicons name="link-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>Copy Link</Text>
+                <Text style={styles.shareFooterText}>{t("copyLink")}</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
                 <View style={styles.shareFooterIcon}><Ionicons name="open-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>Share To..</Text>
+                <Text style={styles.shareFooterText}>{t("shareTo")}</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToWhatsApp(sharePost)}>
                 <View style={styles.shareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>Whatsapp</Text>
+                <Text style={styles.shareFooterText}>{t("whatsapp")}</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToMessenger(sharePost)}>
                 <View style={styles.shareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>Messenger</Text>
+                <Text style={styles.shareFooterText}>{t("messenger")}</Text>
               </Pressable>
               <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSnapchat(sharePost)}>
                 <View style={styles.shareFooterIcon}><Ionicons name="logo-snapchat" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>Snapchat</Text>
+                <Text style={styles.shareFooterText}>{t("snapchat")}</Text>
               </Pressable>
             </View>
           </Pressable>

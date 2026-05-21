@@ -24,6 +24,7 @@ import {
   flattenNotificationFeedSnapshot
 } from "../social/notificationFeedSnapshot";
 import { APP_LIME } from "../theme/appColors";
+import { useLanguage } from "../localization/LanguageContext";
 
 type NotificationPanelContextValue = {
   sheetOpen: boolean;
@@ -45,6 +46,7 @@ export function useNotificationPanel(): NotificationPanelContextValue {
 
 export function NotificationPanelProvider({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuth();
+  const { t } = useLanguage();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pending, setPending] = useState<any[]>([]);
   const [accepted, setAccepted] = useState<any[]>([]);
@@ -280,18 +282,16 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   };
 
   const postActivityLabel = (n: any) => {
-    const kind = n.postIsReel ? "reel" : "post";
+    const kind = n.postIsReel ? t("postKindReel") : t("postKindPost");
+    const ex = String(n.commentExcerpt || "").trim();
+    const excerpt = ex ? `: "${ex}"` : "";
     if (n.type === "comment_reply") {
-      const ex = String(n.commentExcerpt || "").trim();
-      const tail = ex ? `: "${ex}"` : "";
-      return `${n.actorName} replied to your comment${tail}`;
+      return t("notifRepliedComment", { name: String(n.actorName || ""), excerpt });
     }
     if (n.type === "post_comment" || (n.isLocal && n.commentExcerpt)) {
-      const ex = String(n.commentExcerpt || "").trim();
-      const tail = ex ? `: "${ex}"` : "";
-      return `${n.actorName} commented on your ${kind}${tail}`;
+      return t("notifCommentedOn", { name: String(n.actorName || ""), kind, excerpt });
     }
-    return `${n.actorName} liked your ${kind}.`;
+    return t("notifLikedYour", { name: String(n.actorName || ""), kind });
   };
 
   const toMillis = (value: any) => {
@@ -332,21 +332,21 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         <Pressable style={styles.overlay} onPress={closeNotificationSheet}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Notifications</Text>
+              <Text style={styles.sheetTitle}>{t("notifications")}</Text>
               <Pressable onPress={closeNotificationSheet}>
                 <Ionicons name="close" size={20} color={APP_LIME} />
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={styles.sheetBody}>
               {notificationItems.length === 0 ? (
-                <Text style={styles.emptyText}>No notifications yet.</Text>
+                <Text style={styles.emptyText}>{t("noNotifications")}</Text>
               ) : null}
               {notificationItems.map((item) => {
                 const n = item.entry;
                 if (item.kind === "pending") {
                   return (
                     <View key={item.key} style={styles.row}>
-                      <Text style={styles.rowText}>{n.actorName} sent a follow request</Text>
+                      <Text style={styles.rowText}>{t("notifFollowRequest", { name: String(n.actorName || "") })}</Text>
                       <View style={styles.rowActions}>
                         <Pressable
                           style={styles.acceptBtn}
@@ -385,10 +385,10 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                             });
                           }}
                         >
-                          <Text style={styles.acceptText}>Accept</Text>
+                          <Text style={styles.acceptText}>{t("accept")}</Text>
                         </Pressable>
                         <Pressable style={styles.declineBtn} onPress={() => onRespond(n, "decline")}>
-                          <Text style={styles.declineText}>Decline</Text>
+                          <Text style={styles.declineText}>{t("decline")}</Text>
                         </Pressable>
                       </View>
                     </View>
@@ -400,23 +400,23 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   const showPrompt = followBackPromptByKey[key] === true;
                   return (
                     <View key={item.key} style={styles.row}>
-                      <Text style={styles.rowText}>{n.actorName} is now following you.</Text>
+                      <Text style={styles.rowText}>{t("notifNowFollowing", { name: String(n.actorName || "") })}</Text>
                       <View style={styles.rowActions}>
                         {status === "accepted" ? (
                           <View style={styles.followingPill}>
-                            <Text style={styles.followingText}>Following</Text>
+                            <Text style={styles.followingText}>{t("following")}</Text>
                           </View>
                         ) : status === "pending" ? (
                           <View style={styles.requestedPill}>
-                            <Text style={styles.requestedText}>Requested</Text>
+                            <Text style={styles.requestedText}>{t("requested")}</Text>
                           </View>
                         ) : showPrompt ? (
                           <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
-                            <Text style={styles.followBackText}>Follow Back</Text>
+                            <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
                           </Pressable>
                         ) : (
                           <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
-                            <Text style={styles.followBackText}>Follow Back</Text>
+                            <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
                           </Pressable>
                         )}
                       </View>
@@ -427,7 +427,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   return (
                     <Pressable key={item.key} style={styles.acceptedRow} onPress={() => onMarkAcceptedRead(n)}>
                       <Ionicons name="checkmark-circle" size={16} color={APP_LIME} />
-                      <Text style={styles.rowText}>{n.actorName} accepted your follow request.</Text>
+                      <Text style={styles.rowText}>{t("notifAcceptedRequest", { name: String(n.actorName || "") })}</Text>
                     </Pressable>
                   );
                 }
@@ -435,7 +435,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   return (
                     <Pressable key={item.key} style={styles.declinedRow} onPress={() => onMarkDeclinedRead(n)}>
                       <Ionicons name="close-circle" size={16} color="#ef4444" />
-                      <Text style={styles.rowText}>{n.actorName} declined your follow request.</Text>
+                      <Text style={styles.rowText}>{t("notifDeclinedRequest", { name: String(n.actorName || "") })}</Text>
                     </Pressable>
                   );
                 }
