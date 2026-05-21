@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -99,19 +98,8 @@ export function AuthChoiceScreen() {
     }
   };
 
-  const handleBack = () => {
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.navigate("InitialSetup");
-    }
-  };
-
   return (
     <View style={styles.screen}>
-      <Pressable onPress={handleBack} style={styles.backBtn} hitSlop={12} accessibilityRole="button" accessibilityLabel="Go back">
-        <Ionicons name="chevron-back" size={28} color={GREEN} />
-      </Pressable>
       <View style={styles.header}>
         <Text style={styles.label}>{mode === "register" ? t("createAccount") : t("login")}</Text>
         <Text style={styles.subtag}>
@@ -230,14 +218,6 @@ export function AuthChoiceScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 48 },
-  backBtn: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: -6,
-    marginBottom: 4
-  },
   header: { marginBottom: 14 },
   langRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 14 },
   langChip: {

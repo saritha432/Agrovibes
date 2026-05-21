@@ -6,8 +6,9 @@ import { useAuth } from "../../auth/AuthContext";
 import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { APP_LIME } from "../../theme/appColors";
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BG = "#262626";
 
 export function AllowNotificationScreen() {

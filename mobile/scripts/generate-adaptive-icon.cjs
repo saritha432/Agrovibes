@@ -9,7 +9,8 @@ const path = require("path");
 async function main() {
   const sharp = require("sharp");
   const root = path.join(__dirname, "..");
-  const input = path.join(root, "assets", "logo.png");
+  const wordmark = path.join(root, "assets", "cropvibe.png");
+  const input = fs.existsSync(wordmark) ? wordmark : path.join(root, "assets", "logo.png");
   const output = path.join(root, "assets", "logo-adaptive-foreground.png");
   if (!fs.existsSync(input)) {
     console.error("Missing:", input);
@@ -17,8 +18,8 @@ async function main() {
   }
 
   const CANVAS = 1024;
-  /** Keep artwork inside circle safe zone (Google ~66% diameter). */
-  const targetMax = Math.floor(CANVAS * 0.62);
+  /** Keep artwork inside circle safe zone (Google ~66% diameter). Wide wordmarks need extra inset. */
+  const targetMax = Math.floor(CANVAS * 0.48);
 
   const resized = await sharp(input)
     .ensureAlpha()

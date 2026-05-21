@@ -79,7 +79,7 @@ interface HomeScreenProps {
   takePendingFeedPost?: () => HomePost | undefined;
 }
 
-const postTints = ["#8a5b00", "#0f5f43", "#8b3a62", "#105f75"];
+const postTints = ["#8a5b00", APP_LIME, "#8b3a62", "#105f75"];
 const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
 type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
 const likeActiveColor = APP_LIME;
@@ -2945,7 +2945,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 name={post.userName}
                 size={34}
                 style={styles.userAvatar}
-                fallbackBackgroundColor="#22c55e"
+                fallbackBackgroundColor={APP_LIME}
                 initialsColor="#fff"
               />
               <View>
@@ -3271,7 +3271,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 name={activeStory?.userName || "U"}
                 size={34}
                 style={styles.storyViewerAvatar}
-                fallbackBackgroundColor="#22c55e"
+                fallbackBackgroundColor={APP_LIME}
                 initialsColor="#fff"
               />
               <View>
@@ -4232,7 +4232,7 @@ const styles = StyleSheet.create({
     width: 66,
     height: 66,
     borderRadius: 33,
-    backgroundColor: "#16a34a",
+    backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -4317,18 +4317,18 @@ const styles = StyleSheet.create({
   followChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#0f7d3d",
+    borderColor: APP_LIME,
     backgroundColor: "#eef8f1",
     paddingHorizontal: 10,
     paddingVertical: 4
   },
-  followChipText: { color: "#0f7d3d", fontWeight: "800", fontSize: 12 },
+  followChipText: { color: APP_LIME, fontWeight: "800", fontSize: 12 },
   postUserRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   userAvatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#22c55e",
+    backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -4400,7 +4400,7 @@ const styles = StyleSheet.create({
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
   storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
   storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
-  storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
+  storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: APP_LIME, alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
   storyViewerName: { color: "#fff", fontWeight: "800" },
   storyViewerBody: {

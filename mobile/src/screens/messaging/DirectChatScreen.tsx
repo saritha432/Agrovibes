@@ -21,12 +21,13 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { queueOpenSharedPostViewer } from "../../navigation/sharedPostViewerBridge";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
+import { APP_LIME } from "../../theme/appColors";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";
-const YELLOW = "#C9FF35";
+const YELLOW = APP_LIME;
 const BUBBLE_PEER = "#262626";
 const INPUT_BG = "#262626";
 
@@ -425,7 +426,7 @@ export function DirectChatScreen() {
               size={activeCall === "video" ? 82 : 118}
               borderRadius={activeCall === "video" ? 41 : 59}
               style={[styles.callAvatar, activeCall === "video" ? styles.callAvatarVideo : null]}
-              fallbackBackgroundColor="#C9FF35"
+              fallbackBackgroundColor={APP_LIME}
               initialsColor="#111"
             />
             <Text style={styles.callName}>{peerName}</Text>
@@ -519,7 +520,7 @@ const styles = StyleSheet.create({
   },
   sharedProfileMeta: { flex: 1, minWidth: 0 },
   sharedProfileName: { color: "#fff", fontSize: 14, fontWeight: "900" },
-  sharedProfileHandle: { marginTop: 2, color: "#C9FF35", fontSize: 12, fontWeight: "700" },
+  sharedProfileHandle: { marginTop: 2, color: APP_LIME, fontSize: 12, fontWeight: "700" },
   sharedProfileBio: { marginTop: 2, color: "rgba(255,255,255,0.8)", fontSize: 11 },
   sharedReelThumb: {
     flex: 1,

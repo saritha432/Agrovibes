@@ -39,7 +39,7 @@
   height: 66px;
   border-radius: 50%;
   padding: 3px;
-  background: linear-gradient(135deg, #c9ff35, #7ed957);
+  background: linear-gradient(135deg, #c9ff35, #c9ff35);
 }
 
 .home-stories__ring--seen {

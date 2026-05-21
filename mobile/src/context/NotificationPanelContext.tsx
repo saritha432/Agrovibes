@@ -23,6 +23,7 @@ import {
   fetchNotificationFeedSnapshot,
   flattenNotificationFeedSnapshot
 } from "../social/notificationFeedSnapshot";
+import { APP_LIME } from "../theme/appColors";
 
 type NotificationPanelContextValue = {
   sheetOpen: boolean;
@@ -333,7 +334,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Notifications</Text>
               <Pressable onPress={closeNotificationSheet}>
-                <Ionicons name="close" size={20} color="#C9FF35" />
+                <Ionicons name="close" size={20} color={APP_LIME} />
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={styles.sheetBody}>
@@ -425,7 +426,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                 if (item.kind === "accepted") {
                   return (
                     <Pressable key={item.key} style={styles.acceptedRow} onPress={() => onMarkAcceptedRead(n)}>
-                      <Ionicons name="checkmark-circle" size={16} color="#C9FF35" />
+                      <Ionicons name="checkmark-circle" size={16} color={APP_LIME} />
                       <Text style={styles.rowText}>{n.actorName} accepted your follow request.</Text>
                     </Pressable>
                   );
@@ -441,7 +442,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                 if (item.kind === "post_like") {
                   return (
                     <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
-                      <Ionicons name="heart" size={16} color="#16a34a" />
+                      <Ionicons name="heart" size={16} color={APP_LIME} />
                       <Text style={styles.rowText}>{postActivityLabel(n)}</Text>
                     </Pressable>
                   );
@@ -473,17 +474,17 @@ const styles = StyleSheet.create({
     borderColor: "#3a424c"
   },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sheetTitle: { color: "#C9FF35", fontWeight: "900", fontSize: 16 },
+  sheetTitle: { color: APP_LIME, fontWeight: "900", fontSize: 16 },
   sheetBody: { paddingTop: 10, gap: 10 },
   emptyText: { color: "#9ca8b1", fontWeight: "700" },
   row: { borderWidth: 1, borderColor: "#3a424c", borderRadius: 10, backgroundColor: "#252a30", padding: 10, gap: 8 },
   rowText: { color: "#eef4f8", fontWeight: "700", flex: 1 },
   rowActions: { flexDirection: "row", gap: 8 },
-  acceptBtn: { backgroundColor: "#C9FF35", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  acceptBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   acceptText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
   declineBtn: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   declineText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followBackBtn: { backgroundColor: "#C9FF35", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followBackBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   followBackText: { color: "#fff", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },

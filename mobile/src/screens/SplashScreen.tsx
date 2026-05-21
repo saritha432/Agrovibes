@@ -4,6 +4,7 @@ import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { APP_LIME } from "../theme/appColors";
 
 export function SplashScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -31,13 +32,13 @@ export function SplashScreen() {
   return (
     <View style={styles.root}>
       <Text style={styles.wordmark}>Cropvibes</Text>
-      <ActivityIndicator size="large" color="#C9FF35" style={styles.spinner} />
+      <ActivityIndicator size="large" color={APP_LIME} style={styles.spinner} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#f2f5f4", alignItems: "center", justifyContent: "center" },
-  wordmark: { fontSize: 28, fontWeight: "900", color: "#0f3d2e", letterSpacing: -0.5 },
+  wordmark: { fontSize: 28, fontWeight: "900", color: APP_LIME, letterSpacing: -0.5 },
   spinner: { marginTop: 20 }
 });

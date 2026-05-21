@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { APP_LIME } from "../theme/appColors";
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 
 interface Props {

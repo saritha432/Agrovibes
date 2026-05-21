@@ -46,6 +46,7 @@ import {
   type GalleryAlbum,
   type GalleryGridAsset
 } from "../utils/galleryAlbums";
+import { APP_LIME, APP_LIME_SOFT_BG } from "../theme/appColors";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -2687,7 +2688,7 @@ const styles = StyleSheet.create({
   },
   creativePanelTitle: { fontSize: 18, fontWeight: "800", color: "#1b2422" },
   creativePanelTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
-  creativePanelDoneGhost: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 16, backgroundColor: "#e8f7ef" },
+  creativePanelDoneGhost: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 16, backgroundColor: APP_LIME_SOFT_BG },
   creativePanelDoneGhostText: { color: "#C9FF35", fontWeight: "800", fontSize: 12 },
   creativeLivePreviewBox: {
     minHeight: 70,
@@ -2720,7 +2721,7 @@ const styles = StyleSheet.create({
     borderColor: "#dbe6e1",
     backgroundColor: "#f8faf9"
   },
-  fontChipOn: { borderColor: "#C9FF35", backgroundColor: "#e8f7ef" },
+  fontChipOn: { borderColor: APP_LIME, backgroundColor: APP_LIME_SOFT_BG },
   fontChipText: { color: "#4d5f5a", fontWeight: "700", fontSize: 13 },
   fontChipTextOn: { color: "#C9FF35", fontWeight: "800", fontSize: 13 },
   creativePanelDone: {
@@ -2832,7 +2833,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between"
   },
-  audioTrackRowSelected: { borderColor: "#C9FF35", backgroundColor: "#e8f7ef" },
+  audioTrackRowSelected: { borderColor: APP_LIME, backgroundColor: APP_LIME_SOFT_BG },
   audioTrackMeta: { flex: 1, paddingRight: 10 },
   audioTrackTitle: { color: "#1b2422", fontSize: 14, fontWeight: "800" },
   audioTrackArtist: { color: "#62706c", fontSize: 12, marginTop: 2 },
@@ -2996,7 +2997,7 @@ const styles = StyleSheet.create({
   helperText: { color: "#6b7976", textAlign: "center", marginBottom: 2 },
   storyActionRow: { flexDirection: "row", gap: 10, marginTop: 10 },
   storyActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 12, alignItems: "center" },
-  storyActionBtnActive: { borderColor: "#C9FF35", backgroundColor: "#e8f7ef" },
+  storyActionBtnActive: { borderColor: APP_LIME, backgroundColor: APP_LIME_SOFT_BG },
   storyActionText: { color: "#1b2422", fontWeight: "700" },
   selectedText: { marginTop: 8, color: "#4d5f5a", fontSize: 12 },
   input: {

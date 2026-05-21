@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
 import { CommunityQuestion, fetchCommunityQuestions } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 
 const groups = ["Women Circle", "Young Farmers", "Crop Groups", "FPO Network"];
 
@@ -74,13 +75,13 @@ const styles = StyleSheet.create({
   question: { marginTop: 6, color: "#111616", fontSize: 17 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
   meta: { color: "#5b6966", fontWeight: "500" },
-  resolved: { color: "#C9FF35", fontWeight: "700" },
+  resolved: { color: APP_LIME, fontWeight: "700" },
   groupRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, marginTop: 8 },
   groupChip: { borderWidth: 1, borderColor: "#c7d5cf", borderRadius: 18, backgroundColor: "#fff", paddingHorizontal: 12, paddingVertical: 7 },
   groupText: { color: "#425652", fontWeight: "600" },
   myCommunity: { margin: 12, borderRadius: 12, borderWidth: 1, borderColor: "#d5dfdc", backgroundColor: "#fff", padding: 12 },
   myTitle: { fontWeight: "700", color: "#22312d", fontSize: 16 },
   myText: { color: "#61726d", marginTop: 4 },
-  askFab: { marginTop: 4, marginRight: 12, marginLeft: "auto", backgroundColor: "#C9FF35", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 6 },
+  askFab: { marginTop: 4, marginRight: 12, marginLeft: "auto", backgroundColor: APP_LIME, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 6 },
   askFabText: { color: "#fff", fontWeight: "700" }
 });

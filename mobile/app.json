@@ -13,7 +13,7 @@
     "splash": {
       "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1f1f1f"
+      "backgroundColor": "#262626"
     },
     "assetBundlePatterns": [
       "./assets/**"
@@ -22,9 +22,14 @@
     "android": {
       "package": "com.agrovibes.app",
       "label": "Cropvibe",
+      "statusBar": {
+        "backgroundColor": "#262626",
+        "barStyle": "light-content",
+        "translucent": false
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
-        "backgroundColor": "#1f1f1f"
+        "backgroundColor": "#262626"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -64,7 +69,8 @@
           "microphonePermission": "Cropvibe uses your microphone to record audio for reels and stories.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {

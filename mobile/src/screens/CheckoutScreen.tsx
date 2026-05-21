@@ -17,8 +17,9 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
 import { createRazorpayOrder, verifyRazorpayPayment } from "../services/api";
 import { useCart } from "../cart/CartContext";
+import { APP_LIME } from "../theme/appColors";
 
-const CTA_GREEN = "#2d6a4f";
+const CTA_GREEN = APP_LIME;
 const BG = "#fdf7f2";
 const BORDER = "#e8e2d9";
 

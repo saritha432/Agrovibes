@@ -6,6 +6,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { APP_LIME } from "../../theme/appColors";
 
 export function PersonalInfoScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -107,5 +108,5 @@ const styles = StyleSheet.create({
   toggleTitle: { fontWeight: "900", color: "#22312d" },
   toggleSub: { marginTop: 4, fontWeight: "600", color: "#6b7874", fontSize: 12 },
   skipHint: { marginTop: 8, alignSelf: "flex-start" },
-  skipHintText: { fontWeight: "800", color: "#C9FF35", fontSize: 13 }
+  skipHintText: { fontWeight: "800", color: APP_LIME, fontSize: 13 }
 });

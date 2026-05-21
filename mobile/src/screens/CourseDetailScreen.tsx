@@ -12,11 +12,12 @@ import { fetchLearnCourseById } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { navigationRef } from "../navigation/navigationRef";
 import { enrollInCourse } from "../services/api";
+import { APP_LIME, APP_LIME_MUTED } from "../theme/appColors";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "CourseDetail">;
 type Rt = RouteProp<LearnStackParamList, "CourseDetail">;
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 
 function formatCompact(n: number) {
@@ -247,7 +248,7 @@ const styles = StyleSheet.create({
   heroPill: { backgroundColor: "rgba(255,255,255,0.9)", borderWidth: 1, borderColor: "rgba(255,255,255,0.9)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   heroPillText: { color: "#22312d", fontWeight: "700", fontSize: 9 },
   heroIconWrap: { alignItems: "center", paddingVertical: 12 },
-  heroIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(10,159,70,0.25)" },
+  heroIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(201,255,53,0.25)" },
 
   body: { paddingHorizontal: 12, paddingTop: 12 },
   courseTitle: { fontSize: 28, fontWeight: "900", color: "#111616", lineHeight: 34 },
@@ -277,8 +278,8 @@ const styles = StyleSheet.create({
   stepCircle: { width: 20, height: 20, borderRadius: 10, backgroundColor: "#f1e6de", alignItems: "center", justifyContent: "center" },
   stepText: { fontWeight: "800", color: "#9f5f4d", fontSize: 10 },
   syllabusTitle: { color: "#111616", fontWeight: "600", fontSize: 10, lineHeight: 14 },
-  previewPill: { backgroundColor: "#d6f8d9", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  previewPillText: { color: "#118247", fontWeight: "700", fontSize: 9 },
+  previewPill: { backgroundColor: APP_LIME_MUTED, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  previewPillText: { color: GREEN, fontWeight: "700", fontSize: 9 },
 
   learnRow: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 7 },
   learnText: { color: "#33443f", fontWeight: "500", fontSize: 11 },

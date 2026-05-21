@@ -10,11 +10,12 @@ import { fetchLearnCourseById } from "../services/api";
 import type { Course, CourseLesson } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { fetchCourseProgress } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "CoursePlayer">;
 type Rt = RouteProp<LearnStackParamList, "CoursePlayer">;
 
-const GREEN = "#C9FF35";
+const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
 
 function lessonIsPlayable(lesson: CourseLesson) {
@@ -158,7 +159,7 @@ export function CoursePlayerScreen() {
         })}
 
         <View style={styles.tipCard}>
-          <Ionicons name="information-circle-outline" size={18} color="#2a5f46" />
+          <Ionicons name="information-circle-outline" size={18} color={GREEN} />
           <Text style={styles.tipText}>
             Locked lessons represent paid content. Later we can add purchase/enrollment to unlock them (Udemy style).
           </Text>
@@ -196,9 +197,9 @@ const styles = StyleSheet.create({
   lessonIndexTextLocked: { color: "#7b8b86" },
   lessonTitle: { color: "#111616", fontWeight: "900" },
   lessonSub: { marginTop: 2, color: "#7b8b86", fontWeight: "800", fontSize: 12 },
-  progressSub: { marginTop: 4, color: "#0f7d3d", fontWeight: "800", fontSize: 12 },
+  progressSub: { marginTop: 4, color: GREEN, fontWeight: "800", fontSize: 12 },
 
   tipCard: { marginTop: 14, backgroundColor: "#eef8f1", borderWidth: 1, borderColor: "#cde9d9", borderRadius: 16, padding: 12, flexDirection: "row", gap: 10, alignItems: "center" },
-  tipText: { color: "#2a5f46", fontWeight: "700", flex: 1, lineHeight: 18 }
+  tipText: { color: GREEN, fontWeight: "700", flex: 1, lineHeight: 18 }
 });
 

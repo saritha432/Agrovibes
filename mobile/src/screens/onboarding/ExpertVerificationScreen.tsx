@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { OnboardingLayout } from "../../onboarding/OnboardingLayout";
 import { useOnboarding } from "../../onboarding/OnboardingContext";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { APP_LIME } from "../../theme/appColors";
 
 export function ExpertVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -41,6 +42,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14
   },
-  calloutTitle: { fontWeight: "900", color: "#0f3d2e", marginBottom: 8 },
+  calloutTitle: { fontWeight: "900", color: APP_LIME, marginBottom: 8 },
   calloutBody: { fontWeight: "600", color: "#4a5753", fontSize: 13, lineHeight: 19 }
 });
