@@ -231,6 +231,30 @@ export async function fetchWithAuth(url: string, token: string | null, init: Req
   return await parseJsonOrThrow(response);
 }
 
+export type TranslationTargetLanguage = "English" | "Hindi" | "Telugu" | "en" | "hi" | "te";
+
+export async function translateText(
+  token: string,
+  payload: {
+    text: string;
+    targetLanguage: TranslationTargetLanguage;
+    sourceLanguage?: TranslationTargetLanguage;
+    contentType?: "post" | "caption" | "comment" | "chat";
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/translate`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as {
+    translatedText: string;
+    sourceLanguage?: string;
+    targetLanguage: string;
+    provider: string;
+    cached: boolean;
+  };
+}
+
 export type MarketplaceListingType = "produce" | "machinery" | "knowledge" | "services";
 
 export interface MarketplaceListing {

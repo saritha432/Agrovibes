@@ -3,6 +3,7 @@ import React, { createElement } from "react";
 import {
   FlatList,
   Image,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -193,6 +194,12 @@ const ONBOARDING_AUTOPLAY_START_INDEX = 1;
 
 const ONBOARDING_PROGRESS_STEP_COUNT = SLIDES.length - ONBOARDING_AUTOPLAY_START_INDEX;
 
+const LANGUAGE_OPTIONS: { value: AppLanguage; label: string; nativeLabel: string; helper: string }[] = [
+  { value: "English", label: "English", nativeLabel: "English", helper: "App language" },
+  { value: "Hindi", label: "Hindi", nativeLabel: "हिन्दी", helper: "ऐप की भाषा" },
+  { value: "Telugu", label: "Telugu", nativeLabel: "తెలుగు", helper: "యాప్ భాష" }
+];
+
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const isFocused = useIsFocused();
@@ -201,6 +208,7 @@ export function InitialSetupScreen() {
   const insets = useSafeAreaInsets();
   const footerReserveHeight = ONBOARDING_FOOTER_BASE_HEIGHT + insets.bottom;
   const [index, setIndex] = React.useState(0);
+  const [isLanguageSheetOpen, setIsLanguageSheetOpen] = React.useState(false);
   const indexRef = React.useRef(0);
   const listRef = React.useRef<FlatList<(typeof SLIDES)[number]>>(null);
   const userDraggingRef = React.useRef(false);
@@ -212,6 +220,15 @@ export function InitialSetupScreen() {
   widthRef.current = width;
   const currentSlideInverted = SLIDES[index]?.inverted ?? false;
   const isBrandSlide = index === 0;
+  const selectedLanguage = LANGUAGE_OPTIONS.find((option) => option.value === language) ?? LANGUAGE_OPTIONS[0];
+
+  const selectLanguage = React.useCallback(
+    async (nextLanguage: AppLanguage) => {
+      await setLanguage(nextLanguage);
+      setIsLanguageSheetOpen(false);
+    },
+    [setLanguage]
+  );
 
   const requestScrollToIndex = React.useCallback((rawIndex: number, animated: boolean, opts?: { autoplay?: boolean }) => {
     const w = widthRef.current;
@@ -428,33 +445,86 @@ export function InitialSetupScreen() {
             </Pressable>
           </View>
           <View style={styles.langRow}>
-            {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => {
-              const isActive = language === lang;
-              return (
-                <Pressable
-                  key={lang}
+            <Pressable
+              accessibilityRole="button"
+              style={[
+                styles.languageSelector,
+                currentSlideInverted ? styles.languageSelectorOnLime : styles.languageSelectorOnDark
+              ]}
+              onPress={() => setIsLanguageSheetOpen(true)}
+            >
+              <Text style={styles.languageGlobe}>◎</Text>
+              <View style={styles.languageSelectorCopy}>
+                <Text
                   style={[
-                    styles.langChip,
-                    currentSlideInverted ? styles.langChipOnLime : styles.langChipOnDark,
-                    isActive ? (currentSlideInverted ? styles.langChipActiveOnLime : styles.langChipActiveOnDark) : null
+                    styles.languageSelectorLabel,
+                    currentSlideInverted ? styles.languageSelectorLabelOnLime : styles.languageSelectorLabelOnDark
                   ]}
-                  onPress={() => setLanguage(lang)}
                 >
-                  <Text
-                    style={[
-                      styles.langChipText,
-                      currentSlideInverted ? styles.langChipTextOnLime : styles.langChipTextOnDark,
-                      isActive ? (currentSlideInverted ? styles.langChipTextActiveOnLime : styles.langChipTextActiveOnDark) : null
-                    ]}
-                  >
-                    {lang}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                  {t("selectLanguage")}
+                </Text>
+                <Text
+                  style={[
+                    styles.languageSelectorValue,
+                    currentSlideInverted ? styles.languageSelectorValueOnLime : styles.languageSelectorValueOnDark
+                  ]}
+                >
+                  {selectedLanguage.label}
+                </Text>
+              </View>
+              <Text
+                style={[
+                  styles.languageChevron,
+                  currentSlideInverted ? styles.languageChevronOnLime : styles.languageChevronOnDark
+                ]}
+              >
+                ˅
+              </Text>
+            </Pressable>
           </View>
         </View>
       ) : null}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={isLanguageSheetOpen}
+        onRequestClose={() => setIsLanguageSheetOpen(false)}
+      >
+        <Pressable style={styles.languageModalBackdrop} onPress={() => setIsLanguageSheetOpen(false)}>
+          <Pressable style={styles.languageSheet} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.languageSheetHandle} />
+            <Text style={styles.languageSheetTitle}>{t("chooseLanguageTitle").replace(/\n/g, " ")}</Text>
+            <Text style={styles.languageSheetSubtitle}>{t("chooseLanguageSub")}</Text>
+            <View style={styles.languageList}>
+              {LANGUAGE_OPTIONS.map((option) => {
+                const isActive = option.value === language;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: isActive }}
+                    style={[styles.languageOption, isActive ? styles.languageOptionActive : null]}
+                    onPress={() => selectLanguage(option.value)}
+                  >
+                    <View style={styles.languageOptionCopy}>
+                      <Text style={[styles.languageOptionLabel, isActive ? styles.languageOptionLabelActive : null]}>
+                        {option.label}
+                      </Text>
+                      <Text style={[styles.languageOptionNative, isActive ? styles.languageOptionNativeActive : null]}>
+                        {option.nativeLabel}
+                      </Text>
+                      <Text style={styles.languageOptionHelper}>{option.helper}</Text>
+                    </View>
+                    <View style={[styles.languageRadio, isActive ? styles.languageRadioActive : null]}>
+                      {isActive ? <Text style={styles.languageRadioCheck}>✓</Text> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -571,27 +641,102 @@ const styles = StyleSheet.create({
   },
   signInBtnText: { color: "#1b1f23", fontSize: 14, fontWeight: "700" },
   signInBtnTextOnLime: { color: COLORS.lime },
-  langRow: { marginTop: 10, flexDirection: "row", gap: 8, justifyContent: "center" },
-  langChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
-  langChipOnDark: {
+  langRow: { marginTop: 10, alignItems: "center" },
+  languageSelector: {
+    minWidth: 214,
+    maxWidth: "100%",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  languageSelectorOnDark: {
     borderColor: "rgba(201, 255, 53, 0.65)",
     backgroundColor: "rgba(255, 255, 255, 0.08)"
   },
-  langChipActiveOnDark: {
-    backgroundColor: COLORS.lime,
-    borderColor: COLORS.lime
-  },
-  langChipTextOnDark: { color: "#F2F4EF", fontSize: 11, fontWeight: "800" },
-  langChipTextActiveOnDark: { color: APP_BLACK },
-  langChipOnLime: {
+  languageSelectorOnLime: {
     borderColor: APP_BLACK,
     backgroundColor: "rgba(38, 38, 38, 0.06)"
   },
-  langChipActiveOnLime: {
-    backgroundColor: APP_BLACK,
-    borderColor: APP_BLACK
+  languageGlobe: { color: COLORS.lime, fontSize: 17, fontWeight: "900" },
+  languageSelectorCopy: { flex: 1, minWidth: 0 },
+  languageSelectorLabel: { fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6 },
+  languageSelectorLabelOnDark: { color: "rgba(242, 244, 239, 0.7)" },
+  languageSelectorLabelOnLime: { color: "rgba(21, 23, 17, 0.65)" },
+  languageSelectorValue: { marginTop: 1, fontSize: 13, fontWeight: "900" },
+  languageSelectorValueOnDark: { color: "#F2F4EF" },
+  languageSelectorValueOnLime: { color: APP_BLACK },
+  languageChevron: { fontSize: 18, fontWeight: "900" },
+  languageChevronOnDark: { color: COLORS.lime },
+  languageChevronOnLime: { color: APP_BLACK },
+  languageModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.58)",
+    justifyContent: "flex-end"
   },
-  langChipTextOnLime: { color: APP_BLACK, fontSize: 11, fontWeight: "800" },
-  langChipTextActiveOnLime: { color: COLORS.lime },
-  langChipText: { fontSize: 11, fontWeight: "800" }
+  languageSheet: {
+    backgroundColor: "#151711",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 26,
+    borderWidth: 1,
+    borderColor: "rgba(201, 255, 53, 0.2)"
+  },
+  languageSheetHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    borderRadius: 4,
+    backgroundColor: "rgba(242, 244, 239, 0.22)",
+    marginBottom: 18
+  },
+  languageSheetTitle: { color: COLORS.lime, fontSize: 22, lineHeight: 28, fontWeight: "900" },
+  languageSheetSubtitle: {
+    color: "rgba(242, 244, 239, 0.72)",
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600",
+    marginTop: 8
+  },
+  languageList: { gap: 10, marginTop: 18 },
+  languageOption: {
+    borderWidth: 1,
+    borderColor: "rgba(242, 244, 239, 0.12)",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  languageOptionActive: {
+    borderColor: COLORS.lime,
+    backgroundColor: "rgba(201, 255, 53, 0.12)"
+  },
+  languageOptionCopy: { flex: 1, minWidth: 0 },
+  languageOptionLabel: { color: "#F2F4EF", fontSize: 15, fontWeight: "900" },
+  languageOptionLabelActive: { color: COLORS.lime },
+  languageOptionNative: { color: "rgba(242, 244, 239, 0.86)", marginTop: 3, fontSize: 13, fontWeight: "800" },
+  languageOptionNativeActive: { color: "#F2F4EF" },
+  languageOptionHelper: { color: "rgba(242, 244, 239, 0.48)", marginTop: 4, fontSize: 11, fontWeight: "700" },
+  languageRadio: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(242, 244, 239, 0.32)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  languageRadioActive: {
+    backgroundColor: COLORS.lime,
+    borderColor: COLORS.lime
+  },
+  languageRadioCheck: { color: APP_BLACK, fontSize: 13, fontWeight: "900" }
 });

@@ -86,6 +86,119 @@ function toCloudinaryHlsUrl(rawUrl) {
   return out;
 }
 
+const APP_LANGUAGE_TO_GOOGLE_CODE = {
+  English: "en",
+  Hindi: "hi",
+  Telugu: "te",
+  en: "en",
+  hi: "hi",
+  te: "te"
+};
+const TRANSLATION_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30;
+const TRANSLATION_MAX_CHARS = 5000;
+const translationMemoryCache = new Map();
+
+function normalizeTranslationLanguage(value) {
+  const raw = String(value || "").trim();
+  return APP_LANGUAGE_TO_GOOGLE_CODE[raw] || APP_LANGUAGE_TO_GOOGLE_CODE[raw.toLowerCase()] || "";
+}
+
+function normalizeTranslationText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function isStructuredSharePayload(text) {
+  const trimmed = String(text || "").trim();
+  return /^\[(?:Cropvibe|AgroVibe)\s+(?:Reel|Profile)\]\s*\{/i.test(trimmed);
+}
+
+function translationCacheKey(text, targetLanguage, sourceLanguage) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${sourceLanguage || "auto"}:${targetLanguage}:${normalizeTranslationText(text)}`)
+    .digest("hex");
+  return `v1:translate:${targetLanguage}:${sourceLanguage || "auto"}:${hash}`;
+}
+
+function decodeBasicHtmlEntities(text) {
+  return String(text || "")
+    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+async function getTranslationCache(key) {
+  const cached = await cacheGetJson(key);
+  if (cached && typeof cached.translatedText === "string") return cached;
+  const memoryHit = translationMemoryCache.get(key);
+  if (memoryHit && memoryHit.expiresAt > Date.now()) return memoryHit.value;
+  if (memoryHit) translationMemoryCache.delete(key);
+  return null;
+}
+
+async function setTranslationCache(key, value) {
+  await cacheSetJson(key, value, TRANSLATION_CACHE_TTL_SECONDS);
+  if (!isRedisConfigured()) {
+    translationMemoryCache.set(key, {
+      value,
+      expiresAt: Date.now() + TRANSLATION_CACHE_TTL_SECONDS * 1000
+    });
+    if (translationMemoryCache.size > 1000) {
+      const firstKey = translationMemoryCache.keys().next().value;
+      if (firstKey) translationMemoryCache.delete(firstKey);
+    }
+  }
+}
+
+async function translateWithGoogle(text, targetLanguage, sourceLanguage) {
+  const apiKey = String(process.env.GOOGLE_TRANSLATE_API_KEY || "").trim();
+  if (!apiKey) {
+    const err = new Error("GOOGLE_TRANSLATE_API_KEY is not configured");
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const body = {
+    q: text,
+    target: targetLanguage,
+    format: "text"
+  };
+  if (sourceLanguage) body.source = sourceLanguage;
+
+  const response = await fetch(
+    `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  );
+  const raw = await response.text();
+  let parsed = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  if (!response.ok) {
+    const err = new Error(parsed?.error?.message || `Translation failed (${response.status})`);
+    err.statusCode = response.status;
+    throw err;
+  }
+
+  const row = parsed?.data?.translations?.[0] || {};
+  return {
+    translatedText: decodeBasicHtmlEntities(row.translatedText || text),
+    sourceLanguage: String(row.detectedSourceLanguage || sourceLanguage || ""),
+    targetLanguage,
+    provider: "google"
+  };
+}
+
 async function ensureLearnUsersTable() {
   if (learnUsersTableReady) return;
   await query(
@@ -2550,6 +2663,64 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to send message", error: error.message });
+  }
+});
+
+router.post("/v1/translate", authRequired, async (req, res) => {
+  try {
+    const originalText = String(req.body?.text || "").trim();
+    const targetLanguage = normalizeTranslationLanguage(req.body?.targetLanguage);
+    const sourceLanguage = normalizeTranslationLanguage(req.body?.sourceLanguage);
+    if (!targetLanguage) {
+      res.status(400).json({ message: "targetLanguage must be English, Hindi, Telugu, en, hi, or te" });
+      return;
+    }
+    if (!originalText) {
+      res.json({
+        translatedText: "",
+        sourceLanguage: sourceLanguage || "",
+        targetLanguage,
+        provider: "none",
+        cached: false
+      });
+      return;
+    }
+    if (originalText.length > TRANSLATION_MAX_CHARS) {
+      res.status(400).json({ message: `Text must be ${TRANSLATION_MAX_CHARS} characters or less` });
+      return;
+    }
+    if (targetLanguage === "en" || sourceLanguage === targetLanguage || isStructuredSharePayload(originalText)) {
+      res.json({
+        translatedText: originalText,
+        sourceLanguage: sourceLanguage || "",
+        targetLanguage,
+        provider: "none",
+        cached: false
+      });
+      return;
+    }
+
+    const cacheKey = translationCacheKey(originalText, targetLanguage, sourceLanguage);
+    const cached = await getTranslationCache(cacheKey);
+    if (cached) {
+      res.json({ ...cached, cached: true });
+      return;
+    }
+
+    const translated = await translateWithGoogle(originalText, targetLanguage, sourceLanguage);
+    const payload = {
+      translatedText: translated.translatedText,
+      sourceLanguage: translated.sourceLanguage,
+      targetLanguage: translated.targetLanguage,
+      provider: translated.provider
+    };
+    await setTranslationCache(cacheKey, payload);
+    res.json({ ...payload, cached: false });
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 500;
+    res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
+      message: error.message || "Failed to translate text"
+    });
   }
 });
 
