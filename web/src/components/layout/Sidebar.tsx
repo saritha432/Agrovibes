@@ -1,6 +1,5 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { SUPPORTED_LANGUAGES, useLanguage, type AppLanguage } from "../../localization/LanguageContext";
 import "./Sidebar.css";
 
 const NAV = [
@@ -64,7 +63,6 @@ function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
 
 export function Sidebar() {
   const { user, signOut } = useAuth();
-  const { language, setLanguage } = useLanguage();
 
   return (
     <aside className="sidebar">
@@ -101,26 +99,6 @@ export function Sidebar() {
           </span>
           <span className="sidebar__label">Create</span>
         </button>
-
-        <label className="sidebar__language" title="Language">
-          <span className="sidebar__icon" aria-hidden>
-            <svg viewBox="0 0 24 24">
-              <path d="M4 5.5h16M5.5 9h13M8 5.5c.7 4.6 2.6 8 6.8 11.1M16 5.5c-.7 4.6-2.6 8-6.8 11.1M4.5 19h15" />
-            </svg>
-          </span>
-          <select
-            className="sidebar__language-select"
-            value={language}
-            onChange={(event) => setLanguage(event.target.value as AppLanguage)}
-            aria-label="Language"
-          >
-            {SUPPORTED_LANGUAGES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </label>
 
         <div className="sidebar__footer">
           <NavLink to="/profile" className="sidebar__profile">
