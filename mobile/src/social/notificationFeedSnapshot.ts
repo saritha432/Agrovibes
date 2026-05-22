@@ -9,6 +9,7 @@ export type NotificationFeedSnapshot = {
   declined: any[];
   postLikes: any[];
   postComments: any[];
+  liveStarts: any[];
 };
 
 export async function fetchNotificationFeedSnapshot(params: {
@@ -25,6 +26,7 @@ export async function fetchNotificationFeedSnapshot(params: {
   let remoteAccepted: any[] = [];
   let remotePostLikes: any[] = [];
   let remotePostComments: any[] = [];
+  let remoteLiveStarts: any[] = [];
   if (token) {
     try {
       const remote = await fetchSocialNotifications(token);
@@ -32,6 +34,7 @@ export async function fetchNotificationFeedSnapshot(params: {
       remoteAccepted = remote.followAccepted || [];
       remotePostLikes = remote.postLikes || [];
       remotePostComments = remote.postComments || [];
+      remoteLiveStarts = remote.liveStarts || [];
     } catch {
       // keep local only
     }
@@ -70,11 +73,11 @@ export async function fetchNotificationFeedSnapshot(params: {
     }))
   ];
 
-  return { pending: mergedPending, accepted, declined, postLikes, postComments };
+  return { pending: mergedPending, accepted, declined, postLikes, postComments, liveStarts: remoteLiveStarts };
 }
 
 export function flattenNotificationFeedSnapshot(snap: NotificationFeedSnapshot): any[] {
-  return [...snap.pending, ...snap.accepted, ...snap.declined, ...snap.postLikes, ...snap.postComments];
+  return [...snap.pending, ...snap.accepted, ...snap.declined, ...snap.postLikes, ...snap.postComments, ...snap.liveStarts];
 }
 
 export function countUnreadSocialNotifications(entries: any[], lastSeenMs: number): number {

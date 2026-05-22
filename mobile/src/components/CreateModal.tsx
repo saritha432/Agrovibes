@@ -28,7 +28,9 @@ import {
   createHomePost,
   createHomeStory,
   fetchSocialNetwork,
+  scheduleLiveSession,
   shouldUseImageUpload,
+  updateHomePostLiveVideo,
   uploadImageFile,
   uploadPickedMedia,
   type HomePost
@@ -104,6 +106,34 @@ const AUDIO_TRACKS: CreativeAudioTrack[] = [
     previewUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
   }
 ];
+
+function formatLiveElapsed(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hours > 0) return `${hours}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function dateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateLabel(date: Date) {
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+function timeLabel(value: string) {
+  const [h, m] = value.split(":").map((part) => Number(part));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return value;
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
 
 const TEXT_COLOR_OPTIONS: { id: CreativeTextColor; hex: string }[] = [
   { id: "white", hex: "#FFFFFF" },
@@ -315,6 +345,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
+  const [liveScheduleTopic, setLiveScheduleTopic] = useState("");
+  const [liveScheduleDate, setLiveScheduleDate] = useState("");
+  const [liveScheduleTime, setLiveScheduleTime] = useState("");
+  const [showLiveDatePicker, setShowLiveDatePicker] = useState(false);
+  const [showLiveTimePicker, setShowLiveTimePicker] = useState(false);
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
   const [pickedStoryAsset, setPickedStoryAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [pickedStoryMediaType, setPickedStoryMediaType] = useState<"image" | "video" | null>(null);
@@ -344,8 +379,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const entryCameraRef = useRef<StoryCameraPreviewHandle>(null);
   const entryShutterLongPressRef = useRef(false);
   const entryAutoRecordDoneRef = useRef(false);
+  const liveDraftPostIdRef = useRef<number | null>(null);
+  const liveServerPostIdRef = useRef<number | null>(null);
   const [entryIsRecording, setEntryIsRecording] = useState(false);
   const [entryRecordSecondsLeft, setEntryRecordSecondsLeft] = useState(REEL_MAX_RECORD_SECONDS);
+  const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(0);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   /** Instagram-style: post flow allows multiple photos by default (up to 10). */
   const [entryMultiSelect, setEntryMultiSelect] = useState(true);
@@ -363,6 +401,27 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const audioPreviewRef = useRef<Audio.Sound | null>(null);
   const [errorText, setErrorText] = useState("");
   const [isSubmitting, setSubmitting] = useState(false);
+
+  const liveDateOptions = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Array.from({ length: 30 }, (_, index) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() + index);
+      return { value: dateKey(d), label: index === 0 ? "Today" : index === 1 ? "Tomorrow" : dateLabel(d) };
+    });
+  }, []);
+
+  const liveTimeOptions = React.useMemo(
+    () =>
+      Array.from({ length: 48 }, (_, index) => {
+        const hours = Math.floor(index / 2);
+        const mins = index % 2 === 0 ? 0 : 30;
+        const value = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+        return { value, label: timeLabel(value) };
+      }),
+    []
+  );
 
   const openCreativePanel = React.useCallback((panel: "text" | "filter" | "overlay") => {
     setShowEditPanel(false);
@@ -436,7 +495,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       void stopAudioPreview();
       return;
     }
-    setCreateType(initialType === "story" ? null : initialType);
+    setCreateType(initialType === "story" || initialType === "live" ? null : initialType);
     setCreateStep("preview");
     const entry = initialType ?? "story";
     setEntryType(entry);
@@ -449,6 +508,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setPickedStoryMediaType(null);
     setPickedPostAssets([]);
     setLiveMode(null);
+    setLiveScheduleTopic("");
+    setLiveScheduleDate("");
+    setLiveScheduleTime("");
+    setShowLiveDatePicker(false);
+    setShowLiveTimePicker(false);
+    liveDraftPostIdRef.current = null;
+    liveServerPostIdRef.current = null;
+    setLiveElapsedSeconds(0);
     setCreativeFilter("none");
     setCreativeText("");
     setCreativeFont("classic");
@@ -603,6 +670,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const handleClose = () => {
     if (isSubmitting) return;
     setFullScreenCameraOpen(false);
+    liveDraftPostIdRef.current = null;
+    liveServerPostIdRef.current = null;
     setCreateType(null);
     setErrorText("");
     setShowCreativeTextPanel(false);
@@ -722,13 +791,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   );
 
   const mediaTypeForEntry = () => {
-    if (entryType === "live") return ImagePicker.MediaTypeOptions.All;
+    if (entryType === "live") return ImagePicker.MediaTypeOptions.Videos;
     if (entryType === "reel") return ImagePicker.MediaTypeOptions.Videos;
     return ImagePicker.MediaTypeOptions.All;
   };
 
   const cameraCaptureMode = (): InAppCameraCaptureMode => {
-    if (entryType === "reel") return "video";
+    if (entryType === "reel" || entryType === "live") return "video";
     return "any";
   };
 
@@ -771,7 +840,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const openFullScreenCamera = () => {
     setErrorText("");
     if (entryType === "live") {
-      setCreateType("live");
+      setCaptureEntryView("camera");
+      setCreateType(null);
       return;
     }
     if (Platform.OS === "web") {
@@ -834,6 +904,96 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setCaptureEntryView("camera");
   };
 
+  const publishLiveRecording = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!asset?.uri) return;
+    setSubmitting(true);
+    setErrorText("");
+    try {
+      await validateVideoSize(asset.uri, 120);
+      let derivedThumb: string | undefined;
+      try {
+        const thumb = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 400, quality: 0.72 });
+        const { url } = await uploadImageFile(thumb.uri);
+        derivedThumb = url;
+      } catch {
+        /* Optional thumbnail; live grid can still show a placeholder. */
+      }
+      const { url: mediaUrl } = await uploadPickedMedia(asset.uri, asset);
+      const liveCaption = caption.trim() || liveScheduleTopic.trim() || "Live stream";
+      const { post: newPost } =
+        token && liveServerPostIdRef.current
+          ? await updateHomePostLiveVideo(token, liveServerPostIdRef.current, {
+              videoUrl: mediaUrl,
+              thumbnailUrl: derivedThumb
+            })
+          : await createHomePost(
+              {
+                userId: user?.id,
+                userName: user?.fullName?.trim() || "Farmer",
+                location: user?.locationLabel?.trim() || "Unknown",
+                caption: `[LIVE] ${liveCaption}`,
+                videoUrl: mediaUrl,
+                thumbnailUrl: derivedThumb
+              },
+              token ?? null
+            );
+      onVideoPosted?.(newPost);
+      liveDraftPostIdRef.current = null;
+      liveServerPostIdRef.current = null;
+      setLiveMode(null);
+      setCreateType(null);
+      setCaption("");
+      setLiveScheduleTopic("");
+      setLiveElapsedSeconds(0);
+      onClose();
+    } catch (e) {
+      setErrorText(e instanceof Error ? e.message : "Failed to publish live recording.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const publishActiveLiveDraft = React.useCallback(async () => {
+    if (liveDraftPostIdRef.current != null) return;
+    const now = new Date().toISOString();
+    const draftId = -Date.now();
+    liveDraftPostIdRef.current = draftId;
+    const draft: HomePost = {
+      id: draftId,
+      userId: user?.id ?? null,
+      userName: user?.fullName?.trim() || "Farmer",
+      location: user?.locationLabel?.trim() || "Unknown",
+      caption: `[LIVE] ${caption.trim() || liveScheduleTopic.trim() || "Live stream"}`,
+      likesCount: 0,
+      commentsCount: 0,
+      videoUrl: null,
+      imageUrl: null,
+      imageUrls: [],
+      createdAt: now,
+      authorAvatarUrl: user?.avatarUrl ?? null,
+      liveStatus: "active",
+      liveViewerCount: 1,
+      liveStartedAt: now
+    };
+    onVideoPosted?.(draft);
+    if (!token) return;
+    try {
+      const { post } = await createHomePost(
+        {
+          userId: user?.id,
+          userName: user?.fullName?.trim() || "Farmer",
+          location: user?.locationLabel?.trim() || "Unknown",
+          caption: draft.caption
+        },
+        token
+      );
+      liveServerPostIdRef.current = post.id;
+      onVideoPosted?.({ ...post, liveStatus: "active", liveViewerCount: 1, liveStartedAt: post.createdAt });
+    } catch {
+      // Keep the local live session running even if follower notification fails.
+    }
+  }, [caption, liveScheduleTopic, onVideoPosted, token, user?.avatarUrl, user?.fullName, user?.id, user?.locationLabel]);
+
   const stopEntryVideoRecording = React.useCallback(async () => {
     if (entryAutoRecordDoneRef.current) return;
     if (Platform.OS === "web") return;
@@ -845,6 +1005,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         setErrorText("Could not save video.");
         return;
       }
+      if (entryType === "live") {
+        void publishLiveRecording({ uri: video.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset);
+        return;
+      }
       entryAutoRecordDoneRef.current = true;
       applyPickedMediaToFlow([
         { uri: video.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset
@@ -852,7 +1016,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     } catch (e) {
       setErrorText(e instanceof Error ? e.message : "Video capture failed.");
     }
-  }, []);
+  }, [entryType]);
 
   const startEntryVideoRecording = React.useCallback(async () => {
     if (entryAutoRecordDoneRef.current) return;
@@ -866,7 +1030,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     try {
       setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
       await entryCameraRef.current?.startRecording({
-        maxDurationSec: entryType === "reel" ? REEL_MAX_RECORD_SECONDS : 90
+        maxDurationSec: entryType === "reel" || entryType === "live" ? REEL_MAX_RECORD_SECONDS : 90
       });
     } catch (e) {
       setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
@@ -899,10 +1063,24 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
   };
 
+  const startLiveRecordingFromSheet = () => {
+    setErrorText("");
+    setCreateType(null);
+    setCaptureEntryView("camera");
+    setTimeout(() => {
+      void startEntryVideoRecording();
+    }, 120);
+  };
+
   const handleEntryShutterPress = () => {
     setErrorText("");
     if (entryType === "live") {
-      setCreateType("live");
+      if (!liveMode) {
+        setCreateType("live");
+        return;
+      }
+      if (entryIsRecording) void stopEntryVideoRecording();
+      else void startEntryVideoRecording();
       return;
     }
     if (entryShutterLongPressRef.current) {
@@ -951,6 +1129,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         setErrorText("Could not save video.");
         return;
       }
+      if (entryType === "live") {
+        void publishLiveRecording({ uri: video.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset);
+        return;
+      }
       applyPickedMediaToFlow([
         { uri: video.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset
       ]);
@@ -964,6 +1146,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     entryAutoRecordDoneRef.current = true;
     entryShutterLongPressRef.current = false;
     setEntryRecordSecondsLeft(0);
+    if (entryType === "live") {
+      void publishLiveRecording({ uri: payload.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset);
+      return;
+    }
     applyPickedMediaToFlow([
       { uri: payload.uri, type: "video", width: 0, height: 0 } as ImagePicker.ImagePickerAsset
     ]);
@@ -972,7 +1158,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const onEntryRecordingChange = React.useCallback((recording: boolean) => {
     setEntryIsRecording(recording);
     if (recording) setEntryRecordSecondsLeft(REEL_MAX_RECORD_SECONDS);
-  }, []);
+    if (recording && entryType === "live") publishActiveLiveDraft();
+  }, [entryType, publishActiveLiveDraft]);
 
   React.useEffect(() => {
     if (!entryIsRecording || entryType !== "reel") return;
@@ -987,6 +1174,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }, 1000);
     return () => clearInterval(timer);
   }, [entryIsRecording, entryType, stopEntryVideoRecording]);
+
+  React.useEffect(() => {
+    if (!entryIsRecording || entryType !== "live") return;
+    setLiveElapsedSeconds(0);
+    const timer = setInterval(() => setLiveElapsedSeconds((prev) => prev + 1), 1000);
+    return () => clearInterval(timer);
+  }, [entryIsRecording, entryType]);
 
   const onCaptureGalleryAsset = (asset: GalleryGridAsset) => {
     if (entryType === "reel" && asset.mediaType !== "video") {
@@ -1020,7 +1214,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const openEntryGallery = async () => {
     setErrorText("");
     if (entryType === "live") {
-      setCreateType("live");
+      setErrorText("Live supports camera video only.");
       return;
     }
     // expo-media-library is native-only; web uses the browser file picker.
@@ -1053,40 +1247,41 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           return;
         }
         if (liveMode === "schedule") {
-          Alert.alert(t("scheduleLiveTitle"), t("scheduleLiveBody"));
+          const topic = liveScheduleTopic.trim() || caption.trim();
+          const rawDate = liveScheduleDate.trim();
+          const rawTime = liveScheduleTime.trim();
+          if (!topic || !rawDate || !rawTime) {
+            setErrorText("Enter live topic, date and time.");
+            setSubmitting(false);
+            return;
+          }
+          const scheduledAt = new Date(`${rawDate}T${rawTime}`);
+          if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+            setErrorText("Choose a future date and time.");
+            setSubmitting(false);
+            return;
+          }
+          if (!token) {
+            setErrorText("Please log in to schedule a live.");
+            setSubmitting(false);
+            return;
+          }
+          await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
+          Alert.alert("Live scheduled", `Followers will be notified now and again 10 minutes before ${scheduledAt.toLocaleString()}.`);
           setSubmitting(false);
+          setLiveMode(null);
+          setLiveScheduleTopic("");
+          setLiveScheduleDate("");
+          setLiveScheduleTime("");
+          setShowLiveDatePicker(false);
+          setShowLiveTimePicker(false);
+          setCreateType(null);
+          onClose();
           return;
         }
-        const pick = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          allowsEditing: false,
-          quality: 0.85
-        });
-        if (pick.canceled || !pick.assets?.[0]?.uri) {
-          setSubmitting(false);
-          return;
-        }
-        const v = pick.assets[0];
-        await validateVideoSize(v.uri, 80);
-        let derivedThumb: string | undefined;
-        try {
-          const thumb = await VideoThumbnails.getThumbnailAsync(v.uri, { time: 400, quality: 0.72 });
-          const { url } = await uploadImageFile(thumb.uri);
-          derivedThumb = url;
-        } catch {
-          /* optional */
-        }
-        const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
-        const liveCaption = caption.trim() ? caption.trim() : "Live stream";
-        const { post: newPost } = await createHomePost({
-          userId: user?.id,
-          userName: user?.fullName?.trim() || "Farmer",
-          location: user?.locationLabel?.trim() || "Unknown",
-          caption: `[LIVE] ${liveCaption}`,
-          videoUrl: mediaUrl,
-          thumbnailUrl: derivedThumb
-        }, token ?? null);
-        createdFeedPost = newPost;
+        setSubmitting(false);
+        startLiveRecordingFromSheet();
+        return;
       } else if (createType === "story") {
         if (!pickedStoryVideoUri) {
           setErrorText(t("createErrStoryMedia"));
@@ -1510,21 +1705,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
           </View>
         ) : (
           <View style={[styles.igCaptureCameraRoot, Platform.OS === "web" ? styles.igCameraEntryRootWeb : null]}>
-            {entryType === "live" ? (
-              <View style={styles.igCaptureLiveFallback}>
-                <Ionicons name="radio-outline" size={48} color="#C9FF35" />
-                <Text style={styles.igCaptureLiveText}>Go live from here</Text>
-              </View>
-            ) : (
-              <StoryCameraPreview
-                ref={entryCameraRef}
-                active={entryCameraActive}
-                facing={entryFacing}
-                mode={entryType === "reel" ? "video" : entryType === "post" ? "picture" : "picture"}
-                onRecordingChange={onEntryRecordingChange}
-                onAutoRecordFinished={onInlineAutoRecordFinished}
-              />
-            )}
+            <StoryCameraPreview
+              ref={entryCameraRef}
+              active={entryCameraActive}
+              facing={entryFacing}
+              mode={entryType === "reel" || entryType === "live" ? "video" : entryType === "post" ? "picture" : "picture"}
+              onRecordingChange={onEntryRecordingChange}
+              onAutoRecordFinished={onInlineAutoRecordFinished}
+            />
 
             <View
               style={[
@@ -1537,10 +1725,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <Pressable style={styles.igCamTopGhostBtn} onPress={handleClose} hitSlop={10}>
                   <Ionicons name="close" size={26} color="#fff" />
                 </Pressable>
-                {entryIsRecording && entryType === "reel" ? (
+                {entryIsRecording && (entryType === "reel" || entryType === "live") ? (
                   <View style={styles.reelCountdownBadge} pointerEvents="none">
                     <View style={styles.reelCountdownDot} />
-                    <Text style={styles.reelCountdownText}>{formatReelCountdown(entryRecordSecondsLeft)}</Text>
+                    <Text style={styles.reelCountdownText}>
+                      {entryType === "live" ? `LIVE ${formatLiveElapsed(liveElapsedSeconds)}` : formatReelCountdown(entryRecordSecondsLeft)}
+                    </Text>
                   </View>
                 ) : (
                   <View style={styles.igCaptureTopTimerSpacer} pointerEvents="none" />
@@ -1562,29 +1752,36 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               <View style={{ flex: 1 }} pointerEvents="none" />
 
               {errorText ? (
-                <Text style={[styles.igCamErrorBanner, styles.igCaptureError]} pointerEvents="none">
+                <Text style={[styles.igCamErrorBanner, styles.igCaptureError]}>
                   {errorText}
                 </Text>
               ) : null}
 
               <View style={styles.igCamCaptureRow} pointerEvents="box-none">
-                <Pressable
-                  style={styles.igCamGalleryThumb}
-                  onPress={() => {
-                    if (entryType === "post") setCaptureEntryView("gallery");
-                    else void openEntryGallery();
-                  }}
-                >
-                  {recentGridAssets[0] ? (
-                    <Image
-                      source={{ uri: recentGridAssets[0].uri }}
-                      style={styles.igCamGalleryThumbImg}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <Ionicons name="images-outline" size={22} color="#C9FF35" />
-                  )}
-                </Pressable>
+                {entryType === "live" ? (
+                  <View style={styles.igCamLiveOnlyPill}>
+                    <Ionicons name="videocam" size={16} color="#C9FF35" />
+                    <Text style={styles.igCamLiveOnlyText}>Video only</Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={styles.igCamGalleryThumb}
+                    onPress={() => {
+                      if (entryType === "post") setCaptureEntryView("gallery");
+                      else void openEntryGallery();
+                    }}
+                  >
+                    {recentGridAssets[0] ? (
+                      <Image
+                        source={{ uri: recentGridAssets[0].uri }}
+                        style={styles.igCamGalleryThumbImg}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Ionicons name="images-outline" size={22} color="#C9FF35" />
+                    )}
+                  </Pressable>
+                )}
                 <View style={styles.igCamCaptureRowSpacer} />
                 <Pressable
                   style={[styles.igCamCaptureOuter, entryIsRecording ? styles.igCamCaptureOuterRecording : null]}
@@ -1920,12 +2117,47 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   onPress={() => {
                     setErrorText("");
                     setLiveMode("schedule");
+                    setLiveScheduleTopic((v) => v || caption.trim());
                   }}
                   disabled={isSubmitting}
                 >
                   <Text style={styles.storyActionText}>Schedule live</Text>
                 </Pressable>
               </View>
+              {liveMode === "schedule" ? (
+                <View style={styles.liveScheduleForm}>
+                  <TextInput
+                    value={liveScheduleTopic}
+                    onChangeText={setLiveScheduleTopic}
+                    style={styles.liveScheduleInput}
+                    placeholder="Live topic"
+                    placeholderTextColor="#7f8b88"
+                  />
+                  <View style={styles.liveScheduleSplitRow}>
+                    <Pressable
+                      style={[styles.liveScheduleInput, styles.liveSchedulePickerInput]}
+                      onPress={() => setShowLiveDatePicker(true)}
+                    >
+                      <Ionicons name="calendar-outline" size={16} color="#4d5f5a" />
+                      <Text style={[styles.liveSchedulePickerText, !liveScheduleDate ? styles.liveSchedulePickerPlaceholder : null]}>
+                        {liveScheduleDate || "Select date"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.liveScheduleInput, styles.liveSchedulePickerInput]}
+                      onPress={() => setShowLiveTimePicker(true)}
+                    >
+                      <Ionicons name="time-outline" size={16} color="#4d5f5a" />
+                      <Text style={[styles.liveSchedulePickerText, !liveScheduleTime ? styles.liveSchedulePickerPlaceholder : null]}>
+                        {liveScheduleTime ? timeLabel(liveScheduleTime) : "Select time"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.liveScheduleHint}>Followers get a schedule notification now and a reminder 10 minutes before.</Text>
+                </View>
+              ) : liveMode === "now" ? (
+                <Text style={styles.liveScheduleHint}>Tap Continue to start recording live now and notify followers.</Text>
+              ) : null}
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
               <View style={styles.actionsRow}>
                 <Pressable style={styles.secondaryBtn} onPress={() => setCreateType(null)} disabled={isSubmitting}>
@@ -1935,7 +2167,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   {isSubmitting ? (
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
-                    <Text style={styles.primaryBtnText}>Continue</Text>
+                    <Text style={styles.primaryBtnText}>{liveMode === "schedule" ? "Schedule" : "Continue"}</Text>
                   )}
                 </Pressable>
               </View>
@@ -1944,6 +2176,61 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       </Pressable>
       )
       )}
+    </Modal>
+
+    <Modal visible={showLiveDatePicker} transparent animationType="fade" onRequestClose={() => setShowLiveDatePicker(false)}>
+      <Pressable style={styles.livePickerBackdrop} onPress={() => setShowLiveDatePicker(false)}>
+        <Pressable style={styles.livePickerCard} onPress={(e) => e.stopPropagation?.()}>
+          <View style={styles.livePickerHeader}>
+            <Text style={styles.livePickerTitle}>Select date</Text>
+            <Pressable onPress={() => setShowLiveDatePicker(false)} hitSlop={10}>
+              <Ionicons name="close" size={20} color="#1b2422" />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.livePickerList}>
+            {liveDateOptions.map((option) => (
+              <Pressable
+                key={option.value}
+                style={[styles.livePickerOption, liveScheduleDate === option.value ? styles.livePickerOptionActive : null]}
+                onPress={() => {
+                  setLiveScheduleDate(option.value);
+                  setShowLiveDatePicker(false);
+                }}
+              >
+                <Text style={styles.livePickerOptionTitle}>{option.label}</Text>
+                <Text style={styles.livePickerOptionSub}>{option.value}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    <Modal visible={showLiveTimePicker} transparent animationType="fade" onRequestClose={() => setShowLiveTimePicker(false)}>
+      <Pressable style={styles.livePickerBackdrop} onPress={() => setShowLiveTimePicker(false)}>
+        <Pressable style={styles.livePickerCard} onPress={(e) => e.stopPropagation?.()}>
+          <View style={styles.livePickerHeader}>
+            <Text style={styles.livePickerTitle}>Select time</Text>
+            <Pressable onPress={() => setShowLiveTimePicker(false)} hitSlop={10}>
+              <Ionicons name="close" size={20} color="#1b2422" />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.livePickerGrid}>
+            {liveTimeOptions.map((option) => (
+              <Pressable
+                key={option.value}
+                style={[styles.liveTimeOption, liveScheduleTime === option.value ? styles.livePickerOptionActive : null]}
+                onPress={() => {
+                  setLiveScheduleTime(option.value);
+                  setShowLiveTimePicker(false);
+                }}
+              >
+                <Text style={styles.livePickerOptionTitle}>{option.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
     </Modal>
 
     <Modal visible={showCreativeTextPanel} transparent animationType="fade" onRequestClose={() => setShowCreativeTextPanel(false)}>
@@ -2334,6 +2621,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         onClose={() => setFullScreenCameraOpen(false)}
         onCapture={(asset) => {
           setFullScreenCameraOpen(false);
+          if (entryType === "live") {
+            void publishLiveRecording(asset);
+            return;
+          }
           applyPickedMediaToFlow([asset]);
         }}
         initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
@@ -2348,11 +2639,15 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         }}
         onCapture={(asset) => {
           setFullScreenCameraOpen(false);
+          if (entryType === "live") {
+            void publishLiveRecording(asset);
+            return;
+          }
           applyPickedMediaToFlow([asset]);
         }}
         initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
         mode={cameraCaptureMode()}
-        maxVideoDurationSec={entryType === "reel" ? REEL_MAX_RECORD_SECONDS : 90}
+        maxVideoDurationSec={entryType === "live" ? 180 : entryType === "reel" ? REEL_MAX_RECORD_SECONDS : 90}
       />
     ) : null}
     </>
@@ -2787,6 +3082,18 @@ const styles = StyleSheet.create({
     overflow: "hidden"
   },
   igCamGalleryThumbImg: { width: "100%", height: "100%" },
+  igCamLiveOnlyPill: {
+    width: 88,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderWidth: 1,
+    borderColor: "rgba(201,255,53,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3
+  },
+  igCamLiveOnlyText: { color: "#C9FF35", fontSize: 11, fontWeight: "800" },
   igCamCaptureRowSpacer: { flex: 1 },
   igCamCaptureCluster: {
     flexDirection: "row",
@@ -3225,6 +3532,59 @@ const styles = StyleSheet.create({
   storyActionBtn: { flex: 1, borderRadius: 12, borderWidth: 1, borderColor: "#dbe6e1", backgroundColor: "#f8faf9", paddingVertical: 12, alignItems: "center" },
   storyActionBtnActive: { borderColor: APP_LIME, backgroundColor: APP_LIME_SOFT_BG },
   storyActionText: { color: "#1b2422", fontWeight: "700" },
+  liveScheduleForm: { gap: 10, marginTop: 12 },
+  liveScheduleInput: {
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    borderRadius: 10,
+    backgroundColor: "#f8faf9",
+    color: "#1b2422",
+    fontWeight: "700",
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  liveScheduleSplitRow: { flexDirection: "row", gap: 10 },
+  liveScheduleSplitInput: { flex: 1 },
+  liveSchedulePickerInput: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  liveSchedulePickerText: { color: "#1b2422", fontWeight: "800", flex: 1 },
+  liveSchedulePickerPlaceholder: { color: "#7f8b88" },
+  liveScheduleHint: { marginTop: 10, color: "#4d5f5a", fontSize: 12, fontWeight: "700", textAlign: "center" },
+  livePickerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: 18 },
+  livePickerCard: {
+    width: "100%",
+    maxWidth: 360,
+    maxHeight: "72%",
+    borderRadius: 18,
+    backgroundColor: "#fff",
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#e5ece8"
+  },
+  livePickerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  livePickerTitle: { color: "#1b2422", fontSize: 17, fontWeight: "900" },
+  livePickerList: { gap: 8, paddingBottom: 4 },
+  livePickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 4 },
+  livePickerOption: {
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    backgroundColor: "#f8faf9",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  liveTimeOption: {
+    width: "31%",
+    borderWidth: 1,
+    borderColor: "#dbe6e1",
+    backgroundColor: "#f8faf9",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: "center"
+  },
+  livePickerOptionActive: { borderColor: APP_LIME, backgroundColor: APP_LIME_SOFT_BG },
+  livePickerOptionTitle: { color: "#1b2422", fontWeight: "900", fontSize: 13 },
+  livePickerOptionSub: { marginTop: 2, color: "#6b7976", fontSize: 12, fontWeight: "700" },
   selectedText: { marginTop: 8, color: "#4d5f5a", fontSize: 12 },
   input: {
     marginTop: 8,

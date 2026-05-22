@@ -60,6 +60,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [followBackPromptByKey, setFollowBackPromptByKey] = useState<Record<string, boolean>>({});
   const [postLikes, setPostLikes] = useState<any[]>([]);
   const [postComments, setPostComments] = useState<any[]>([]);
+  const [liveStarts, setLiveStarts] = useState<any[]>([]);
   const [lastSeenMs, setLastSeenMs] = useState(0);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
 
@@ -108,6 +109,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     setDeclined(snap.declined);
     setPostLikes(snap.postLikes);
     setPostComments(snap.postComments);
+    setLiveStarts(snap.liveStarts);
 
     const fbQueue = followBackQueueRef.current;
     const nameSet = new Set<string>();
@@ -198,10 +200,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       accepted,
       declined,
       postLikes,
-      postComments
+      postComments,
+      liveStarts
     });
     return countUnreadSocialNotifications(entries, lastSeenMs);
-  }, [accepted, declined, lastSeenMs, sheetOpen, pending, postComments, postLikes]);
+  }, [accepted, declined, lastSeenMs, liveStarts, sheetOpen, pending, postComments, postLikes]);
 
   useEffect(() => {
     if (!sheetOpen) return;
@@ -294,6 +297,26 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     return t("notifLikedYour", { name: String(n.actorName || ""), kind });
   };
 
+  const liveStartLabel = (n: any) => {
+    let meta: { topic?: string; scheduledAt?: string } = {};
+    try {
+      const parsed = JSON.parse(String(n.commentExcerpt || ""));
+      if (parsed && typeof parsed === "object") meta = parsed;
+    } catch {
+      meta = {};
+    }
+    const name = String(n.actorName || "Someone");
+    const topic = meta.topic ? `: ${meta.topic}` : "";
+    if (n.type === "live_scheduled") {
+      const when = meta.scheduledAt ? new Date(meta.scheduledAt).toLocaleString() : "soon";
+      return `${name} scheduled a live${topic} at ${when}`;
+    }
+    if (n.type === "live_reminder") {
+      return `${name} is going live in 10 minutes${topic}`;
+    }
+    return `${name} started live`;
+  };
+
   const toMillis = (value: any) => {
     const ts = Date.parse(String(value || ""));
     return Number.isFinite(ts) ? ts : 0;
@@ -308,11 +331,12 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     for (const n of accepted) items.push({ kind: "accepted", createdAt: n.createdAt || "", entry: n, key: `accepted-${String(n.id)}` });
     for (const n of declined) items.push({ kind: "declined", createdAt: n.createdAt || "", entry: n, key: `declined-${String(n.id)}` });
+    for (const n of liveStarts) items.push({ kind: "live_start", createdAt: n.createdAt || "", entry: n, key: `live-${String(n.id)}` });
     for (const n of postLikes) items.push({ kind: "post_like", createdAt: n.createdAt || "", entry: n, key: `like-${n.isLocal ? n.id : `r-${n.id}`}` });
     for (const n of postComments) items.push({ kind: "post_comment", createdAt: n.createdAt || "", entry: n, key: `cmt-${n.isLocal ? n.id : `r-${n.id}`}` });
     items.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
     return items;
-  }, [accepted, declined, followBackQueue, pending, postComments, postLikes]);
+  }, [accepted, declined, followBackQueue, liveStarts, pending, postComments, postLikes]);
 
   const value = useMemo<NotificationPanelContextValue>(
     () => ({
@@ -436,6 +460,14 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     <Pressable key={item.key} style={styles.declinedRow} onPress={() => onMarkDeclinedRead(n)}>
                       <Ionicons name="close-circle" size={16} color="#ef4444" />
                       <Text style={styles.rowText}>{t("notifDeclinedRequest", { name: String(n.actorName || "") })}</Text>
+                    </Pressable>
+                  );
+                }
+                if (item.kind === "live_start") {
+                  return (
+                    <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
+                      <Ionicons name="radio" size={16} color="#ef4444" />
+                      <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
                     </Pressable>
                   );
                 }
