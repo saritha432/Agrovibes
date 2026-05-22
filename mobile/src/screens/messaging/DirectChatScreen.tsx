@@ -23,6 +23,7 @@ import { UserAvatar } from "../../components/UserAvatar";
 import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
+import { useDynamicTranslations } from "../../localization/dynamicTranslation";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
@@ -179,8 +180,9 @@ export function DirectChatScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
   const { peerUserId, peerName, peerAvatarUrl } = route.params;
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { token, user } = useAuth();
+  const { getTranslation, requestTranslations } = useDynamicTranslations(token, language);
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
@@ -213,6 +215,19 @@ export function DirectChatScreen() {
     }, 2500);
     return () => clearInterval(timer);
   }, [reload]);
+
+  useEffect(() => {
+    requestTranslations(
+      messages.map((message) => {
+        const sharedPost = parseSharedCropvibeContent(message.body);
+        const sharedProfile = parseSharedProfileContent(message.body);
+        return {
+          text: sharedPost?.caption || sharedProfile?.bio || message.body,
+          contentType: "chat" as const
+        };
+      })
+    );
+  }, [messages, requestTranslations]);
 
   const send = async () => {
     const text = draft.trim();
@@ -296,6 +311,9 @@ export function DirectChatScreen() {
           const sharedPost = parseSharedCropvibeContent(item.body);
           const sharedProfile = parseSharedProfileContent(item.body);
           const thumb = sharedPost ? sharedChatCardThumb(sharedPost) : { uri: null as string | null, showPlayBadge: false };
+          const translatedBody = getTranslation(item.body, item.body);
+          const translatedSharedCaption = sharedPost?.caption ? getTranslation(sharedPost.caption, sharedPost.caption) : "";
+          const translatedProfileBio = sharedProfile?.bio ? getTranslation(sharedProfile.bio, sharedProfile.bio) : "";
           return (
             <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
               <View style={sharedPost || sharedProfile ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer]}>
@@ -320,7 +338,7 @@ export function DirectChatScreen() {
                         </Text>
                         {sharedPost.caption ? (
                           <Text style={styles.sharedReelCaption} numberOfLines={1}>
-                            {sharedPost.caption}
+                            {translatedSharedCaption}
                           </Text>
                         ) : null}
                       </View>
@@ -349,11 +367,11 @@ export function DirectChatScreen() {
                     <View style={styles.sharedProfileMeta}>
                       <Text style={styles.sharedProfileName} numberOfLines={1}>{sharedProfile.userName}</Text>
                       {sharedProfile.handle ? <Text style={styles.sharedProfileHandle} numberOfLines={1}>{sharedProfile.handle}</Text> : null}
-                      {sharedProfile.bio ? <Text style={styles.sharedProfileBio} numberOfLines={1}>{sharedProfile.bio}</Text> : null}
+                      {sharedProfile.bio ? <Text style={styles.sharedProfileBio} numberOfLines={1}>{translatedProfileBio}</Text> : null}
                     </View>
                   </Pressable>
                 ) : (
-                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{item.body}</Text>
+                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{translatedBody}</Text>
                 )}
                 <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, sharedPost || sharedProfile ? styles.reelMeta : null]}>
                   {formatMsgTime(new Date(item.createdAt).getTime())}

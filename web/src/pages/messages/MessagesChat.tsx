@@ -7,6 +7,8 @@ import {
 } from "../../api/messages";
 import { UserAvatar } from "../../components/messages/UserAvatar";
 import { useAuth } from "../../auth/AuthContext";
+import { useDynamicTranslations } from "../../localization/dynamicTranslation";
+import { useLanguage } from "../../localization/LanguageContext";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { formatMsgTime, parseSharedReel } from "./messagesUtils";
 
@@ -15,6 +17,8 @@ export function MessagesChat() {
   const { peerUserId: peerParam } = useParams();
   const peerUserId = Number(peerParam);
   const { token, user } = useAuth();
+  const { language } = useLanguage();
+  const { getTranslation, requestTranslation } = useDynamicTranslations(token, language);
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [peerName, setPeerName] = useState("Chat");
   const [peerAvatar, setPeerAvatar] = useState<string | null>(null);
@@ -62,6 +66,14 @@ export function MessagesChat() {
     scrollToEnd();
   }, [messages.length]);
 
+  useEffect(() => {
+    for (const item of messages) {
+      const sharedReel = parseSharedReel(item.body);
+      const text = sharedReel?.caption || item.body;
+      if (text) void requestTranslation(text, "chat");
+    }
+  }, [messages, requestTranslation]);
+
   const send = async () => {
     const text = draft.trim();
     if (!text || !token || sending || !Number.isFinite(peerUserId)) return;
@@ -107,6 +119,8 @@ export function MessagesChat() {
           const isSelf = Number(item.senderId) === Number(user?.id);
           const sharedReel = parseSharedReel(item.body);
           const videoSrc = sharedReel?.videoUrl ? resolveWebVideoUrl(sharedReel.videoUrl) : null;
+          const translatedBody = getTranslation(item.body, item.body);
+          const translatedSharedCaption = sharedReel?.caption ? getTranslation(sharedReel.caption, sharedReel.caption) : "";
 
           return (
             <div
@@ -127,11 +141,11 @@ export function MessagesChat() {
                     )}
                     <div className="messages-chat__reel-meta">
                       <strong>{sharedReel.author}</strong>
-                      {sharedReel.caption ? <p>{sharedReel.caption}</p> : null}
+                      {translatedSharedCaption ? <p>{translatedSharedCaption}</p> : null}
                     </div>
                   </div>
                 ) : (
-                  <p>{item.body}</p>
+                  <p>{translatedBody}</p>
                 )}
                 <time dateTime={item.createdAt}>{formatMsgTime(item.createdAt)}</time>
               </div>
