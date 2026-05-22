@@ -307,6 +307,12 @@ export interface HomePost {
   authorAvatarUrl?: string | null;
   /** Users who liked this post (from feed API — used for likes list without a separate request). */
   recentLikers?: HomePostLiker[];
+  /** Client-side live state used while a live recording is in progress. */
+  liveStatus?: "active" | "ended";
+  /** Optional live viewer count seed from realtime/live clients. */
+  liveViewerCount?: number;
+  /** Client-side timestamp for active live sessions. */
+  liveStartedAt?: string;
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -671,16 +677,52 @@ export async function createHomePost(payload: {
     textBackground?: boolean;
     font?: string;
   };
-}) {
+}, token?: string | null) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
     throw new Error("Failed to create post");
   }
   return (await response.json()) as { post: HomePost };
+}
+
+export async function updateHomePostLiveVideo(
+  token: string,
+  postId: number,
+  payload: { videoUrl: string; thumbnailUrl?: string }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/live-video`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { post: HomePost };
+}
+
+export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
+  const init = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  };
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/live/schedule`, token, init)) as {
+      ok: boolean;
+      topic: string;
+      scheduledAt: string;
+    };
+  } catch (error: any) {
+    if (Number(error?.status) !== 404) throw error;
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/social/live/schedule`, token, init)) as {
+      ok: boolean;
+      topic: string;
+      scheduledAt: string;
+    };
+  }
 }
 
 export async function sendFollowRequest(token: string, targetUserId: number) {
@@ -795,6 +837,7 @@ export async function fetchSocialNotifications(token: string) {
     followAccepted: SocialNotificationItem[];
     postLikes?: SocialPostActivityNotification[];
     postComments?: SocialPostActivityNotification[];
+    liveStarts?: SocialPostActivityNotification[];
     unreadCount: number;
   };
 }
