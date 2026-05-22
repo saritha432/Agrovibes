@@ -1064,10 +1064,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
     if (activeHomeTab === "Feed") return sortPostsNewestFirst(strip(posts));
-    if (activeHomeTab === "Reels") {
-      const reels = strip(posts).filter((p) => isFullScreenReelItem(p));
-      return sortPostsNewestFirst(reels);
-    }
     if (activeHomeTab === "Friends") {
       return sortPostsNewestFirst(
         strip(
@@ -1133,8 +1129,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [activeHomeTab, showFriendsTab]);
 
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
-  const isReelSurfaceTab =
-    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
+  const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends";
   const isLiveTab = activeHomeTab === "live";
 
   const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
@@ -3202,27 +3197,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const emptyTabTitle =
     activeHomeTab === "Friends"
       ? t("emptyFriendsTitle")
-      : activeHomeTab === "Reels"
-        ? t("emptyReelsTitle")
-        : activeHomeTab === "live"
-          ? t("emptyLiveTitle")
-          : activeHomeTab === "Feed"
-            ? t("emptyFeedTitle")
-            : t("emptyNothingTitle");
+      : activeHomeTab === "live"
+        ? t("emptyLiveTitle")
+        : activeHomeTab === "Feed"
+          ? t("emptyFeedTitle")
+          : t("emptyNothingTitle");
   const emptyTabSubtitle =
     activeHomeTab === "Friends"
       ? t("emptyFriendsSub")
-      : activeHomeTab === "Reels"
-        ? t("emptyReelsSub")
-        : activeHomeTab === "live"
-          ? t("emptyLiveSub")
-          : t("emptyDefaultSub");
+      : activeHomeTab === "live"
+        ? t("emptyLiveSub")
+        : t("emptyDefaultSub");
 
-  const useFullScreenReelLayout =
-    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
+  const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
 
   return (
-    <View style={[styles.screen, isReelSurfaceTab || isLiveTab ? styles.screenDark : null]}>
+    <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
       {isLiveTab ? (
         <View style={styles.reelsColumn}>
           {listHeader}
