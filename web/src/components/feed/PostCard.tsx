@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { likeHomePost, unlikeHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
-import { useDynamicTranslations } from "../../localization/dynamicTranslation";
-import { useLanguage } from "../../localization/LanguageContext";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import "./PostCard.css";
 
@@ -17,8 +15,6 @@ function mediaUrl(post: HomePost) {
 
 export function PostCard({ post }: { post: HomePost }) {
   const { token } = useAuth();
-  const { language } = useLanguage();
-  const { getTranslation, requestTranslation } = useDynamicTranslations(token, language);
   const [liked, setLiked] = useState(!!post.viewerHasLiked);
   const [likes, setLikes] = useState(post.likesCount);
   const [busy, setBusy] = useState(false);
@@ -46,12 +42,7 @@ export function PostCard({ post }: { post: HomePost }) {
   const img = mediaUrl(post);
   const videoSrc = resolveWebVideoUrl(post.videoUrl);
   const reel = isReel(post);
-  const rawCaption = post.caption?.replace(/^\[(?:POST|REEL|LIVE|STORY)\]\s*/i, "").trim() || "";
-  const caption = getTranslation(rawCaption, rawCaption);
-
-  useEffect(() => {
-    if (rawCaption) void requestTranslation(rawCaption, "caption");
-  }, [rawCaption, requestTranslation]);
+  const caption = post.caption?.replace(/^\[(?:POST|REEL|LIVE|STORY)\]\s*/i, "").trim() || "";
 
   return (
     <article className={`post-card${reel ? " post-card--reel" : ""}`}>
