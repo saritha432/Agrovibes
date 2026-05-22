@@ -42,6 +42,7 @@ import { WebCameraCapture } from "./WebCameraCapture";
 import { StoryCameraPreview } from "./StoryCameraPreview";
 import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
 import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
+import { LiveKitRoomView } from "../screens/live/LiveKitRoomView";
 import {
   fetchGalleryAlbums,
   fetchGalleryAssets,
@@ -384,6 +385,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [entryIsRecording, setEntryIsRecording] = useState(false);
   const [entryRecordSecondsLeft, setEntryRecordSecondsLeft] = useState(REEL_MAX_RECORD_SECONDS);
   const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(0);
+  const [liveKitHostRoomName, setLiveKitHostRoomName] = useState("");
+  const [liveKitHostTitle, setLiveKitHostTitle] = useState("");
+  const [liveKitHostOpen, setLiveKitHostOpen] = useState(false);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   /** Instagram-style: post flow allows multiple photos by default (up to 10). */
   const [entryMultiSelect, setEntryMultiSelect] = useState(true);
@@ -516,6 +520,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     liveDraftPostIdRef.current = null;
     liveServerPostIdRef.current = null;
     setLiveElapsedSeconds(0);
+    setLiveKitHostRoomName("");
+    setLiveKitHostTitle("");
+    setLiveKitHostOpen(false);
     setCreativeFilter("none");
     setCreativeText("");
     setCreativeFont("classic");
@@ -672,6 +679,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setFullScreenCameraOpen(false);
     liveDraftPostIdRef.current = null;
     liveServerPostIdRef.current = null;
+    setLiveKitHostOpen(false);
     setCreateType(null);
     setErrorText("");
     setShowCreativeTextPanel(false);
@@ -840,6 +848,10 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const openFullScreenCamera = () => {
     setErrorText("");
     if (entryType === "live") {
+      if (Platform.OS === "web") {
+        setFullScreenCameraOpen(true);
+        return;
+      }
       setCaptureEntryView("camera");
       setCreateType(null);
       return;
@@ -1065,11 +1077,56 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const startLiveRecordingFromSheet = () => {
     setErrorText("");
+    if (Platform.OS === "web") {
+      void startLiveKitHostFromSheet();
+      return;
+    }
     setCreateType(null);
     setCaptureEntryView("camera");
     setTimeout(() => {
       void startEntryVideoRecording();
     }, 120);
+  };
+
+  const startLiveKitHostFromSheet = async () => {
+    if (!token) {
+      setErrorText("Please log in to start live.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const liveCaption = caption.trim() || liveScheduleTopic.trim() || "Live stream";
+      const { post } = await createHomePost(
+        {
+          userId: user?.id,
+          userName: user?.fullName?.trim() || "Farmer",
+          location: user?.locationLabel?.trim() || "Unknown",
+          caption: `[LIVE] ${liveCaption}`
+        },
+        token
+      );
+      const activePost: HomePost = {
+        ...post,
+        liveStatus: "active",
+        liveStartedAt: post.createdAt,
+        liveViewerCount: 1,
+        liveRoomName: post.liveRoomName || `agrovibes-live-${post.id}`
+      };
+      liveServerPostIdRef.current = post.id;
+      liveDraftPostIdRef.current = post.id;
+      onVideoPosted?.(activePost);
+      setLiveKitHostRoomName(activePost.liveRoomName || `agrovibes-live-${post.id}`);
+      setLiveKitHostTitle(liveCaption);
+      setLiveKitHostOpen(true);
+      setCreateType(null);
+      setLiveMode(null);
+      setCaption("");
+      setLiveScheduleTopic("");
+    } catch (e) {
+      setErrorText(e instanceof Error ? e.message : "Could not start live.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleEntryShutterPress = () => {
@@ -2178,6 +2235,19 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       )}
     </Modal>
 
+    <Modal visible={liveKitHostOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setLiveKitHostOpen(false)}>
+      <LiveKitRoomView
+        visible={liveKitHostOpen}
+        roomName={liveKitHostRoomName}
+        isHost
+        title={liveKitHostTitle || "Live stream"}
+        onClose={() => {
+          setLiveKitHostOpen(false);
+          onClose();
+        }}
+      />
+    </Modal>
+
     <Modal visible={showLiveDatePicker} transparent animationType="fade" onRequestClose={() => setShowLiveDatePicker(false)}>
       <Pressable style={styles.livePickerBackdrop} onPress={() => setShowLiveDatePicker(false)}>
         <Pressable style={styles.livePickerCard} onPress={(e) => e.stopPropagation?.()}>
@@ -2629,6 +2699,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         }}
         initialFacing={entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back"}
         allowVideo={entryType !== "post"}
+        mode={entryType === "live" ? "video" : "any"}
+        autoStartVideo={entryType === "live"}
       />
     ) : fullScreenCameraOpen ? (
       <InAppCameraCapture

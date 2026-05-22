@@ -337,6 +337,8 @@ export interface HomePost {
   liveViewerCount?: number;
   /** Client-side timestamp for active live sessions. */
   liveStartedAt?: string;
+  /** LiveKit room name for active live sessions. */
+  liveRoomName?: string;
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -747,6 +749,14 @@ export async function scheduleLiveSession(token: string, payload: { topic: strin
       scheduledAt: string;
     };
   }
+}
+
+export async function createLiveKitToken(token: string, payload: { roomName: string; canPublish: boolean }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/token`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { token: string; url: string; roomName: string; identity: string; name: string };
 }
 
 export async function sendFollowRequest(token: string, targetUserId: number) {

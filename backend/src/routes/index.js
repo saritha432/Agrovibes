@@ -14,6 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const multer = require("multer");
+const { AccessToken } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 
 const router = express.Router();
@@ -1099,6 +1100,7 @@ function normalizeHomePostRow(row) {
     base.recentLikers = [];
   }
   if (/^\[LIVE\]/i.test(String(base.caption || "").trim())) {
+    base.liveRoomName = `agrovibes-live-${base.id}`;
     const hasLiveMedia = !!(
       (typeof base.videoUrl === "string" && base.videoUrl.trim()) ||
       (typeof base.imageUrl === "string" && base.imageUrl.trim()) ||
@@ -3246,6 +3248,42 @@ async function handleScheduleLive(req, res) {
 
 router.post("/v1/live/schedule", authRequired, handleScheduleLive);
 router.post("/v1/social/live/schedule", authRequired, handleScheduleLive);
+
+router.post("/v1/live/token", authRequired, async (req, res) => {
+  try {
+    const livekitUrl = String(process.env.LIVEKIT_URL || "").trim();
+    const apiKey = String(process.env.LIVEKIT_API_KEY || "").trim();
+    const apiSecret = String(process.env.LIVEKIT_API_SECRET || "").trim();
+    if (!livekitUrl || !apiKey || !apiSecret) {
+      res.status(503).json({ message: "LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET." });
+      return;
+    }
+    const roomName = String(req.body?.roomName || "").trim().slice(0, 120);
+    if (!roomName || !/^[a-zA-Z0-9_-]+$/.test(roomName)) {
+      res.status(400).json({ message: "Valid roomName is required" });
+      return;
+    }
+    const canPublish = !!req.body?.canPublish;
+    const userId = Number(req.user.userId);
+    const userRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
+    const displayName = String(userRes.rows[0]?.full_name || `User ${userId}`).trim();
+    const token = new AccessToken(apiKey, apiSecret, {
+      identity: String(userId),
+      name: displayName
+    });
+    token.addGrant({
+      room: roomName,
+      roomJoin: true,
+      canPublish,
+      canSubscribe: true,
+      canPublishData: true
+    });
+    const jwt = await token.toJwt();
+    res.json({ token: jwt, url: livekitUrl, roomName, identity: String(userId), name: displayName });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to create live token", error: error.message });
+  }
+});
 
 router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
   try {
