@@ -31,6 +31,7 @@ eas-inspect-out/
 
 # Legacy duplicate asset name (conflicts with cropvibe.gif on Android)
 assets/cropvibe.png
+assets/cropvibe-intro.png
 
 # Large unused media — not referenced in app code
 assets/splash.mp4

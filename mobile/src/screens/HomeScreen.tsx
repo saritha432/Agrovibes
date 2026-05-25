@@ -174,21 +174,36 @@ function seededPostScore(post: HomePost, seed: number): number {
 }
 
 /**
- * Fresh posts/reels stay first so newly published content is immediately visible.
+ * The viewer's own most-recent post is always pinned first.
+ * Other fresh posts/reels stay next so newly published content is immediately visible.
  * Older content is shuffled per session/refresh so the feed does not feel stuck.
  */
-function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number): HomePost[] {
+function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number, viewerUserId?: number): HomePost[] {
+  let pinned: HomePost | undefined;
   const fresh: HomePost[] = [];
   const rest: HomePost[] = [];
+
   for (const post of list) {
     const created = postCreatedMs(post);
-    if (created > 0 && nowMs - created <= FRESH_POST_PRIORITY_MS) fresh.push(post);
-    else rest.push(post);
+    if (
+      viewerUserId &&
+      Number(post.userId) === viewerUserId &&
+      (!pinned || postCreatedMs(post) > postCreatedMs(pinned))
+    ) {
+      if (pinned) {
+        (postCreatedMs(pinned) > 0 && nowMs - postCreatedMs(pinned) <= FRESH_POST_PRIORITY_MS ? fresh : rest).push(pinned);
+      }
+      pinned = post;
+    } else if (created > 0 && nowMs - created <= FRESH_POST_PRIORITY_MS) {
+      fresh.push(post);
+    } else {
+      rest.push(post);
+    }
   }
 
   fresh.sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
   rest.sort((a, b) => seededPostScore(a, seed) - seededPostScore(b, seed) || postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
-  return [...fresh, ...rest];
+  return [...(pinned ? [pinned] : []), ...fresh, ...rest];
 }
 
 const REPORT_REASON_KEYS = [
@@ -1086,11 +1101,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     }
   );
 
+  const viewerUserId = Number(user?.id) || undefined;
+
   const tabPosts = useMemo(() => {
     const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
+    if (activeHomeTab === "Feed") return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
     if (activeHomeTab === "Friends") {
       return orderPostsForFeed(
         strip(
@@ -1101,14 +1118,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           })
         ),
         feedShuffleSeed,
-        nowMs
+        nowMs,
+        viewerUserId
       );
     }
     if (activeHomeTab === "live") {
-      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs);
+      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs, viewerUserId);
     }
-    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed]);
+    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2507,7 +2525,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
-          style={[isReelSurfaceTab ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
+          style={[(isReelSurfaceTab || isLiveTab) ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
           contentContainerStyle={styles.storyRow}
         >
           <Pressable
@@ -2535,7 +2553,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   ? ownPlayableStories.some((s) => !s.viewed)
                     ? styles.storyRingNew
                     : styles.storyRingViewed
-                  : isReelSurfaceTab
+                  : (isReelSurfaceTab || isLiveTab)
                     ? styles.storyRingEmptyDark
                     : styles.storyRingEmptyLight
               ]}
@@ -2566,7 +2584,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </Pressable>
                 </View>
               </View>
-            <Text style={isReelSurfaceTab ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
+            <Text style={(isReelSurfaceTab || isLiveTab) ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
               {t("yourStory")}
             </Text>
           </Pressable>
@@ -3247,7 +3265,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
 
   return (
-    <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
+    <View style={[styles.screen, (isReelSurfaceTab || isLiveTab) ? styles.screenDark : null]}>
       {isLiveTab ? (
         <View style={styles.reelsColumn}>
           {listHeader}
