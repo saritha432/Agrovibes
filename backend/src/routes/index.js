@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const multer = require("multer");
-const { AccessToken } = require("livekit-server-sdk");
+const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 
 const router = express.Router();
@@ -878,6 +878,8 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_label TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS music_audio_url TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS creative_meta JSONB NOT NULL DEFAULT '{}'::jsonb`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_status TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_ended_at TIMESTAMPTZ`);
   homePostsTableReady = true;
 }
 
@@ -993,12 +995,108 @@ function normalizeHomePostRow(row) {
       (typeof base.imageUrl === "string" && base.imageUrl.trim()) ||
       (Array.isArray(base.imageUrls) && base.imageUrls.length)
     );
-    if (!hasLiveMedia) {
+    const dbStatus = String(base.liveStatus || base.live_status || "")
+      .trim()
+      .toLowerCase();
+    delete base.live_status;
+    if (base.live_ended_at) {
+      base.liveEndedAt = base.live_ended_at;
+      delete base.live_ended_at;
+    }
+    if (hasLiveMedia) {
+      if (dbStatus === "ended") base.liveStatus = "ended";
+    } else if (dbStatus === "ended") {
+      base.liveStatus = "ended";
+      base.liveViewerCount = 0;
+    } else if (dbStatus === "active") {
       base.liveStatus = "active";
-      base.liveStartedAt = base.createdAt;
+      base.liveStartedAt = base.liveStartedAt || base.createdAt;
     }
   }
   return base;
+}
+
+function liveKitHttpUrl(wssUrl) {
+  return String(wssUrl || "").replace(/^wss:\/\//i, "https://");
+}
+
+function isLiveKitRoomMissingError(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  return msg.includes("not found") || msg.includes("does not exist") || msg.includes("requested room");
+}
+
+async function fetchLiveRoomInfo(roomName) {
+  const cfg = readLiveKitConfig();
+  if (!cfg.ok) return null;
+  try {
+    const client = new RoomServiceClient(liveKitHttpUrl(cfg.livekitUrl), cfg.apiKey, cfg.apiSecret);
+    const participants = await client.listParticipants(roomName);
+    return { ended: false, viewerCount: Math.max(0, participants.length - 1) };
+  } catch (error) {
+    if (isLiveKitRoomMissingError(error)) {
+      return { ended: true, viewerCount: 0 };
+    }
+    return null;
+  }
+}
+
+async function deleteLiveKitRoom(roomName) {
+  const cfg = readLiveKitConfig();
+  if (!cfg.ok) return;
+  try {
+    const client = new RoomServiceClient(liveKitHttpUrl(cfg.livekitUrl), cfg.apiKey, cfg.apiSecret);
+    await client.deleteRoom(roomName);
+  } catch (_error) {
+    // Room may already be closed.
+  }
+}
+
+async function enrichHomePostsLiveState(posts) {
+  const out = [];
+  for (const post of posts) {
+    if (!/^\[LIVE\]/i.test(String(post.caption || "").trim())) {
+      out.push(post);
+      continue;
+    }
+    const hasLiveMedia = !!(
+      (typeof post.videoUrl === "string" && post.videoUrl.trim()) ||
+      (typeof post.imageUrl === "string" && post.imageUrl.trim()) ||
+      (Array.isArray(post.imageUrls) && post.imageUrls.length)
+    );
+    if (hasLiveMedia || post.liveStatus === "ended") {
+      if (post.liveStatus === "ended") post.liveViewerCount = 0;
+      out.push(post);
+      continue;
+    }
+    const roomName = post.liveRoomName || `agrovibes-live-${post.id}`;
+    const info = await fetchLiveRoomInfo(roomName);
+    if (info === null) {
+      post.liveStatus = post.liveStatus || "active";
+      post.liveViewerCount = Number(post.liveViewerCount || 0);
+      out.push(post);
+      continue;
+    }
+    if (info.ended) {
+      post.liveStatus = "ended";
+      post.liveViewerCount = 0;
+      if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
+        await query(
+          `
+          UPDATE home_posts
+          SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+          WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
+          `,
+          [post.id]
+        );
+      }
+    } else {
+      post.liveStatus = "active";
+      post.liveViewerCount = info.viewerCount;
+      post.liveStartedAt = post.liveStartedAt || post.createdAt;
+    }
+    out.push(post);
+  }
+  return out;
 }
 
 function dedupeHomePostRows(rows) {
@@ -2807,6 +2905,8 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
         p.creative_meta AS "creativeMeta",
+        p.live_status AS "liveStatus",
+        p.live_ended_at AS "liveEndedAt",
         COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
         CASE
           WHEN $1::integer IS NULL THEN false
@@ -2852,7 +2952,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       [viewerId]
     );
 
-    const body = { posts: dedupeHomePostRows(result.rows) };
+    const body = { posts: await enrichHomePostsLiveState(dedupeHomePostRows(result.rows)) };
     res.json(body);
     await cacheSetJson(cacheKey, body, 30);
   } catch (error) {
@@ -2975,6 +3075,10 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     const normalizedPost = normalizeHomePostRow(result.rows[0]);
     const actorId = ownerId || Number(userId || 0);
     if (isLivePost && Number.isFinite(actorId) && actorId > 0) {
+      await query(`UPDATE home_posts SET live_status = 'active' WHERE id = $1`, [normalizedPost.id]);
+      normalizedPost.liveStatus = "active";
+      normalizedPost.liveStartedAt = normalizedPost.createdAt;
+      normalizedPost.liveViewerCount = 0;
       await ensureSocialNotificationsTable();
       await query(
         `
@@ -3042,6 +3146,77 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
     res.json({ post: normalizeHomePostRow(updated.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to update live video", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    const postId = Number(req.params.postId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const existing = await query(
+      `
+      SELECT id, user_id, caption
+      FROM home_posts
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [postId]
+    );
+    const row = existing.rows[0];
+    if (!row) {
+      res.status(404).json({ message: "Live post not found" });
+      return;
+    }
+    if (Number(row.user_id) !== me) {
+      res.status(403).json({ message: "Only the host can end this live" });
+      return;
+    }
+    if (!/^\[LIVE\]/i.test(String(row.caption || "").trim())) {
+      res.status(400).json({ message: "Post is not a live stream" });
+      return;
+    }
+    const roomName = `agrovibes-live-${postId}`;
+    await deleteLiveKitRoom(roomName);
+    const updated = await query(
+      `
+      UPDATE home_posts
+      SET live_status = 'ended', live_ended_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        user_id AS "userId",
+        user_name AS "userName",
+        location,
+        caption,
+        likes_count AS "likesCount",
+        comments_count AS "commentsCount",
+        video_url AS "videoUrl",
+        image_url AS "imageUrl",
+        image_urls AS "image_urls",
+        thumbnail_url AS "thumbnailUrl",
+        tagged_user_ids AS "tagged_user_ids",
+        music_label AS "musicLabel",
+        music_audio_url AS "musicAudioUrl",
+        creative_meta AS "creativeMeta",
+        live_status AS "liveStatus",
+        live_ended_at AS "liveEndedAt",
+        created_at AS "createdAt"
+      `,
+      [postId]
+    );
+    await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
+    const post = normalizeHomePostRow(updated.rows[0]);
+    post.liveStatus = "ended";
+    post.liveViewerCount = 0;
+    res.json({ post });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to end live", error: error.message });
   }
 });
 

@@ -612,6 +612,18 @@ function dedupeHomePosts(rows: HomePost[]): HomePost[] {
   return out;
 }
 
+function applyPendingHomePost(rows: HomePost[], pending?: HomePost): HomePost[] {
+  if (!pending) return dedupeHomePosts(rows);
+  const deduped = dedupeHomePosts(rows);
+  const idx = deduped.findIndex((p) => p.id === pending.id);
+  if (idx >= 0) {
+    const next = [...deduped];
+    next[idx] = { ...next[idx], ...pending };
+    return next;
+  }
+  return dedupeHomePosts([pending, ...rows]);
+}
+
 function formatCommentRelativeTime(iso?: string): string {
   if (!iso) return "";
   const t = Date.parse(iso);
@@ -1508,12 +1520,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useEffect(() => {
     let mounted = true;
     (async () => {
+      const pending = takePendingFeedPost?.();
+      if (pending?.liveStatus === "ended") {
+        setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending } : p)));
+      }
       try {
         const data = await fetchHomePosts(token ?? null);
         if (!mounted) return;
-        const pending = takePendingFeedPost?.();
-        const rows = dedupeHomePosts(data.posts);
-        const merged = pending ? dedupeHomePosts([pending, ...rows]) : rows;
+        const merged = applyPendingHomePost(data.posts, pending);
         const localLikes = await getLocalLikeStateForPosts(
           localLikeViewerIdentity(user || {}),
           merged.map((p) => p.id)

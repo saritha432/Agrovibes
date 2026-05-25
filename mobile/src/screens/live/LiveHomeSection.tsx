@@ -55,13 +55,15 @@ function liveTitle(post: HomePost, language: import("../../localization/translat
   return music ? formatFeedText(music, language, t) : t("liveStream");
 }
 
-function liveViewerCount(post: HomePost, tick: number) {
-  const seed = Math.abs(post.id) || 1;
-  const startedAt = Date.parse(post.liveStartedAt || post.createdAt || "");
-  const elapsedBucket = Number.isFinite(startedAt) ? Math.max(0, Math.floor((Date.now() - startedAt) / 5000)) : tick;
-  const base = post.liveViewerCount ?? (post.liveStatus === "active" ? 1 + (seed % 9) : 180 + ((seed * 97) % 4200));
-  const wave = post.liveStatus === "active" ? (elapsedBucket * 3 + seed) % 18 : 0;
-  return base + wave + Math.max(0, post.likesCount) * 4;
+/** Prefer explicit [LIVE] posts that are still broadcasting. */
+export function buildLiveFeed(posts: HomePost[]): HomePost[] {
+  return posts.filter((p) => isLivePost(p) && isActiveLiveStream(p));
+}
+
+function liveViewerCountForCard(post: HomePost) {
+  if (post.liveStatus !== "active") return 0;
+  const count = Number(post.liveViewerCount);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
 }
 
 function formatViewers(n: number) {
@@ -72,13 +74,6 @@ function formatViewers(n: number) {
 
 function liveRoomName(post: HomePost) {
   return post.liveRoomName || `agrovibes-live-${post.id}`;
-}
-
-/** Prefer explicit [LIVE] posts; otherwise surface recent video posts for discovery. */
-export function buildLiveFeed(posts: HomePost[]): HomePost[] {
-  const liveTagged = posts.filter((p) => isLivePost(p) && (isActiveLiveStream(p) || p.videoUrl || livePosterUri(p)));
-  if (liveTagged.length) return liveTagged;
-  return posts.filter((p) => p.videoUrl && !isReelPost(p)).slice(0, 12);
 }
 
 type LiveHomeSectionProps = {
@@ -95,7 +90,6 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [watching, setWatching] = React.useState<HomePost | null>(null);
-  const [viewerTick, setViewerTick] = React.useState(0);
 
   const livePosts = React.useMemo(() => buildLiveFeed(posts), [posts]);
   const watchingPost = React.useMemo(
@@ -108,13 +102,8 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
   const cardWidth = (width - gridPad * 2 - gridGap) / 2;
 
   React.useEffect(() => {
-    const timer = setInterval(() => setViewerTick((v) => v + 1), 5000);
-    return () => clearInterval(timer);
-  }, []);
-
-  React.useEffect(() => {
     if (!joinPostId) return;
-    const target = posts.find((p) => p.id === joinPostId);
+    const target = posts.find((p) => p.id === joinPostId && isActiveLiveStream(p));
     if (target) {
       setWatching(target);
       onJoinConsumed?.();
@@ -192,7 +181,7 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
                     </View>
                     <View style={styles.gridViewersPill}>
                       <Ionicons name="eye-outline" size={12} color="#fff" />
-                      <Text style={styles.gridViewersText}>{formatViewers(liveViewerCount(post, viewerTick))}</Text>
+                      <Text style={styles.gridViewersText}>{formatViewers(liveViewerCountForCard(post))}</Text>
                     </View>
                   </View>
                   <Text style={styles.gridTitle} numberOfLines={2}>
@@ -275,7 +264,7 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
                     <View style={styles.gridLiveDot} />
                     <Text style={styles.viewerLiveText}>LIVE</Text>
                   </View>
-                  <Text style={styles.viewerViewers}>{formatViewers(liveViewerCount(watchingPost, viewerTick))} watching</Text>
+                  <Text style={styles.viewerViewers}>{formatViewers(liveViewerCountForCard(watchingPost))} watching</Text>
                 </View>
                 <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
                   <View style={styles.viewerHostRow}>

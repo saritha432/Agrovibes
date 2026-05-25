@@ -387,6 +387,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [liveElapsedSeconds, setLiveElapsedSeconds] = useState(0);
   const [liveKitHostRoomName, setLiveKitHostRoomName] = useState("");
   const [liveKitHostTitle, setLiveKitHostTitle] = useState("");
+  const [liveKitHostPostId, setLiveKitHostPostId] = useState<number | null>(null);
   const [liveKitHostOpen, setLiveKitHostOpen] = useState(false);
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   /** Instagram-style: post flow allows multiple photos by default (up to 10). */
@@ -522,6 +523,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setLiveElapsedSeconds(0);
     setLiveKitHostRoomName("");
     setLiveKitHostTitle("");
+    setLiveKitHostPostId(null);
     setLiveKitHostOpen(false);
     setCreativeFilter("none");
     setCreativeText("");
@@ -984,7 +986,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       createdAt: now,
       authorAvatarUrl: user?.avatarUrl ?? null,
       liveStatus: "active",
-      liveViewerCount: 1,
+      liveViewerCount: 0,
       liveStartedAt: now
     };
     onVideoPosted?.(draft);
@@ -1000,7 +1002,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         token
       );
       liveServerPostIdRef.current = post.id;
-      onVideoPosted?.({ ...post, liveStatus: "active", liveViewerCount: 1, liveStartedAt: post.createdAt });
+      onVideoPosted?.({ ...post, liveStatus: "active", liveViewerCount: 0, liveStartedAt: post.createdAt });
     } catch {
       // Keep the local live session running even if follower notification fails.
     }
@@ -1101,11 +1103,12 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         ...post,
         liveStatus: "active",
         liveStartedAt: post.createdAt,
-        liveViewerCount: 1,
+        liveViewerCount: 0,
         liveRoomName: post.liveRoomName || `agrovibes-live-${post.id}`
       };
       liveServerPostIdRef.current = post.id;
       liveDraftPostIdRef.current = post.id;
+      setLiveKitHostPostId(post.id);
       onVideoPosted?.(activePost);
       setLiveKitHostRoomName(activePost.liveRoomName || `agrovibes-live-${post.id}`);
       setLiveKitHostTitle(liveCaption);
@@ -2232,9 +2235,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         visible={liveKitHostOpen}
         roomName={liveKitHostRoomName}
         isHost
+        postId={liveKitHostPostId ?? undefined}
         title={liveKitHostTitle || "Live stream"}
+        onLiveEnded={(postId: number) => {
+          onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0 } as HomePost);
+        }}
         onClose={() => {
           setLiveKitHostOpen(false);
+          setLiveKitHostPostId(null);
           onClose();
         }}
       />
