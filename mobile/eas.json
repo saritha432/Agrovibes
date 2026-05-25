@@ -9,9 +9,6 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "env": {
-        "NODE_ENV": "production"
-      },
       "android": { "buildType": "apk" },
       "ios": { "simulator": false }
     },
@@ -21,9 +18,6 @@
     },
     "production": {
       "channel": "production",
-      "env": {
-        "NODE_ENV": "production"
-      },
       "android": { "buildType": "app-bundle" },
       "ios": { "autoIncrement": true }
     }
