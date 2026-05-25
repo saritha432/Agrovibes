@@ -140,7 +140,7 @@ export function formatLiveStreamError(error: unknown): string {
     return "LiveKit is not configured on the server. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in Render env vars.";
   }
   if (/invalid token/i.test(message)) {
-    return "LiveKit rejected the token. On Render, LIVEKIT_URL + API key + secret must all come from the same LiveKit Cloud project (wss:// URL). Redeploy after saving env vars.";
+    return "LiveKit rejected the token. Camera may turn on, but video won't show until Render LIVEKIT_URL, API key and secret all match the same LiveKit Cloud project. Redeploy after saving env vars.";
   }
   return message;
 }

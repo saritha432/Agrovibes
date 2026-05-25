@@ -30,7 +30,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
 import { takePendingSharedPostViewer } from "../navigation/sharedPostViewerBridge";
-import { takePendingJoinLive } from "../navigation/liveJoinBridge";
+import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -70,7 +70,7 @@ import {
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
-import { LiveHomeSection } from "./live/LiveHomeSection";
+import { LiveHomeSection, isActiveLiveStream } from "./live/LiveHomeSection";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
@@ -1092,7 +1092,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
+    if (activeHomeTab === "Feed") {
+      return orderPostsForFeed(
+        strip(posts).filter((p) => !isActiveLiveStream(p)),
+        feedShuffleSeed,
+        nowMs
+      );
+    }
     if (activeHomeTab === "Friends") {
       return orderPostsForFeed(
         strip(
@@ -1180,26 +1186,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setReelViewerOpen({ posts: ordered, initialIndex });
   }, [tabPosts]);
 
+  const handleJoinLivePost = useCallback(
+    (postId: number) => {
+      setActiveHomeTab("live");
+      setLiveJoinPostId(postId);
+      void (async () => {
+        try {
+          const fresh = await fetchHomePosts(token ?? null);
+          setPosts(fresh.posts);
+        } catch {
+          // Keep current feed if refresh fails.
+        }
+      })();
+    },
+    [token]
+  );
+
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
   useFocusEffect(
     useCallback(() => {
       const pending = takePendingSharedPostViewer();
       if (pending) openPostFromFeed(pending.post, { isolated: pending.isolated });
       const pendingLive = takePendingJoinLive();
-      if (pendingLive?.postId) {
-        setActiveHomeTab("live");
-        setLiveJoinPostId(pendingLive.postId);
-        void (async () => {
-          try {
-            const fresh = await fetchHomePosts(token ?? null);
-            setPosts(fresh.posts);
-          } catch {
-            // Keep current feed if refresh fails.
-          }
-        })();
-      }
-    }, [openPostFromFeed, token])
+      if (pendingLive?.postId) handleJoinLivePost(pendingLive.postId);
+    }, [handleJoinLivePost, openPostFromFeed])
   );
+
+  useEffect(() => subscribeJoinLive(handleJoinLivePost), [handleJoinLivePost]);
 
   const resolveLikerProfile = useCallback(
     (liker: PostLiker): PostLiker => {
