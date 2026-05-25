@@ -32,3 +32,9 @@ export function navigateToPublicProfile(params: RootStackParamList["PublicProfil
     navigationRef.navigate("PublicProfile", params);
   }
 }
+
+export function navigateToJoinLive() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("Main", { screen: "Home" });
+  }
+}

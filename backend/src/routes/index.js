@@ -3092,13 +3092,76 @@ async function handleScheduleLive(req, res) {
 router.post("/v1/live/schedule", authRequired, handleScheduleLive);
 router.post("/v1/social/live/schedule", authRequired, handleScheduleLive);
 
+function stripEnvValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+}
+
+function readLiveKitConfig() {
+  const livekitUrl = stripEnvValue(process.env.LIVEKIT_URL).replace(/\/+$/, "");
+  const apiKey = stripEnvValue(process.env.LIVEKIT_API_KEY);
+  const apiSecret = stripEnvValue(process.env.LIVEKIT_API_SECRET);
+  const issues = [];
+
+  if (!livekitUrl || !apiKey || !apiSecret) {
+    issues.push("Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET on the server.");
+    return { livekitUrl, apiKey, apiSecret, issues, ok: false, isCloud: false };
+  }
+
+  const isCloud = /livekit\.cloud/i.test(livekitUrl);
+  const isDevPair = apiKey === "devkey" && apiSecret === "secret";
+
+  if (isCloud && !livekitUrl.startsWith("wss://")) {
+    issues.push("LiveKit Cloud LIVEKIT_URL must start with wss:// (copy the WebSocket URL from cloud.livekit.io).");
+  }
+  if (isCloud && isDevPair) {
+    issues.push("devkey/secret only work with local Docker LiveKit. Create API keys in LiveKit Cloud for wss://*.livekit.cloud.");
+  }
+  if (!isCloud && isDevPair && livekitUrl.startsWith("wss://")) {
+    issues.push("LIVEKIT_URL points to LiveKit Cloud but keys are devkey/secret. Use LiveKit Cloud API key + secret.");
+  }
+  if (livekitUrl.startsWith("https://")) {
+    issues.push("LIVEKIT_URL must be a WebSocket URL (wss://...), not https://.");
+  }
+
+  let urlHost = "";
+  try {
+    urlHost = new URL(livekitUrl).host;
+  } catch {
+    issues.push("LIVEKIT_URL is not a valid URL.");
+  }
+
+  return { livekitUrl, apiKey, apiSecret, issues, ok: issues.length === 0, isCloud, urlHost };
+}
+
+router.get("/v1/live/setup-check", authRequired, async (_req, res) => {
+  const cfg = readLiveKitConfig();
+  res.json({
+    configured: !!(cfg.livekitUrl && cfg.apiKey && cfg.apiSecret),
+    ok: cfg.ok,
+    urlHost: cfg.urlHost || null,
+    isCloud: cfg.isCloud,
+    apiKeyPrefix: cfg.apiKey ? `${cfg.apiKey.slice(0, 6)}...` : null,
+    issues: cfg.issues
+  });
+});
+
 router.post("/v1/live/token", authRequired, async (req, res) => {
   try {
-    const livekitUrl = String(process.env.LIVEKIT_URL || "").trim();
-    const apiKey = String(process.env.LIVEKIT_API_KEY || "").trim();
-    const apiSecret = String(process.env.LIVEKIT_API_SECRET || "").trim();
-    if (!livekitUrl || !apiKey || !apiSecret) {
-      res.status(503).json({ message: "LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET." });
+    const cfg = readLiveKitConfig();
+    if (!cfg.livekitUrl || !cfg.apiKey || !cfg.apiSecret) {
+      res.status(503).json({
+        message: "LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.",
+        issues: cfg.issues
+      });
+      return;
+    }
+    if (!cfg.ok) {
+      res.status(503).json({
+        message: cfg.issues[0] || "LiveKit configuration looks invalid.",
+        issues: cfg.issues
+      });
       return;
     }
     const roomName = String(req.body?.roomName || "").trim().slice(0, 120);
@@ -3110,19 +3173,28 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
     const userId = Number(req.user.userId);
     const userRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
     const displayName = String(userRes.rows[0]?.full_name || `User ${userId}`).trim();
-    const token = new AccessToken(apiKey, apiSecret, {
+    const token = new AccessToken(cfg.apiKey, cfg.apiSecret, {
       identity: String(userId),
-      name: displayName
+      name: displayName,
+      ttl: "6h"
     });
     token.addGrant({
       room: roomName,
       roomJoin: true,
+      roomCreate: canPublish,
       canPublish,
       canSubscribe: true,
       canPublishData: true
     });
     const jwt = await token.toJwt();
-    res.json({ token: jwt, url: livekitUrl, roomName, identity: String(userId), name: displayName });
+    res.json({
+      token: jwt,
+      url: cfg.livekitUrl,
+      roomName,
+      identity: String(userId),
+      name: displayName,
+      livekitHost: cfg.urlHost || null
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to create live token", error: error.message });
   }

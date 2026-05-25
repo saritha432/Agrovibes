@@ -79,12 +79,14 @@ export function buildLiveFeed(posts: HomePost[]): HomePost[] {
 
 type LiveHomeSectionProps = {
   posts: HomePost[];
+  joinPostId?: number | null;
+  onJoinConsumed?: () => void;
   onOpenCreate?: () => void;
   canDeletePost?: (post: HomePost) => boolean;
   onDeletePost?: (post: HomePost) => void;
 };
 
-export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePost }: LiveHomeSectionProps) {
+export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreate, canDeletePost, onDeletePost }: LiveHomeSectionProps) {
   const { t, language } = useLanguage();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -105,6 +107,15 @@ export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePo
     const timer = setInterval(() => setViewerTick((v) => v + 1), 5000);
     return () => clearInterval(timer);
   }, []);
+
+  React.useEffect(() => {
+    if (!joinPostId) return;
+    const target = posts.find((p) => p.id === joinPostId);
+    if (target) {
+      setWatching(target);
+      onJoinConsumed?.();
+    }
+  }, [joinPostId, onJoinConsumed, posts]);
 
   return (
     <View style={styles.root}>

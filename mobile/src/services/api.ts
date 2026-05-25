@@ -127,13 +127,20 @@ async function parseJsonOrThrow(response: Response) {
 }
 
 export function formatLiveStreamError(error: unknown): string {
+  const err = error as { message?: string; status?: number; payload?: { issues?: string[]; message?: string } };
   const message = error instanceof Error ? error.message : "Could not join live.";
-  const status = typeof (error as { status?: number })?.status === "number" ? (error as { status: number }).status : null;
+  const status = typeof err?.status === "number" ? err.status : null;
+  if (Array.isArray(err?.payload?.issues) && err.payload.issues.length) {
+    return err.payload.issues.join(" ");
+  }
   if (status === 404 || message.includes("(404)")) {
     return "Live streaming API is not deployed on Render yet. Redeploy the latest backend, then add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.";
   }
   if (status === 503 || message.includes("(503)")) {
     return "LiveKit is not configured on the server. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in Render env vars.";
+  }
+  if (/invalid token/i.test(message)) {
+    return "LiveKit rejected the token. On Render, LIVEKIT_URL + API key + secret must all come from the same LiveKit Cloud project (wss:// URL). Redeploy after saving env vars.";
   }
   return message;
 }
