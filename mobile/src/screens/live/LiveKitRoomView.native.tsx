@@ -144,6 +144,11 @@ function LiveRoomContent({
             <Text style={styles.sendText}>Send</Text>
           </Pressable>
         </View>
+        {isHost && onClose ? (
+          <Pressable style={styles.endLiveBtn} onPress={onClose}>
+            <Text style={styles.endLiveText}>End Live</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -313,5 +318,14 @@ const styles = StyleSheet.create({
   },
   sendBtn: { backgroundColor: APP_LIME, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
   sendText: { color: "#111", fontSize: 12, fontWeight: "900" },
-  retryCloseBtn: { marginTop: 16, backgroundColor: APP_LIME, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 10 }
+  retryCloseBtn: { marginTop: 16, backgroundColor: APP_LIME, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 10 },
+  endLiveBtn: {
+    marginTop: 12,
+    alignSelf: "center",
+    backgroundColor: "#FF3040",
+    borderRadius: 999,
+    paddingHorizontal: 22,
+    paddingVertical: 11
+  },
+  endLiveText: { color: "#fff", fontSize: 14, fontWeight: "900" }
 });

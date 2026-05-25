@@ -20,7 +20,7 @@ type LiveKitRoomViewProps = {
   onClose?: () => void;
 };
 
-function attachTrack(track: any, host: HTMLElement | null) {
+function attachTrack(track: any, host: HTMLDivElement | null) {
   if (!host || !track?.attach) return;
   const element = track.attach();
   element.style.width = "100%";
@@ -34,7 +34,7 @@ function attachTrack(track: any, host: HTMLElement | null) {
 
 export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: LiveKitRoomViewProps) {
   const { token, user } = useAuth();
-  const videoHostRef = React.useRef<View>(null);
+  const videoHostRef = React.useRef<HTMLDivElement | null>(null);
   const roomRef = React.useRef<Room | null>(null);
   const localTracksRef = React.useRef<any[]>([]);
   const [status, setStatus] = React.useState("Connecting live...");
@@ -75,12 +75,16 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
     room
       .on(RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === Track.Kind.Video) {
-          attachTrack(track, videoHostRef.current as unknown as HTMLElement | null);
+          attachTrack(track, videoHostRef.current);
         }
       })
       .on(RoomEvent.ParticipantConnected, () => refreshViewers(room))
       .on(RoomEvent.ParticipantDisconnected, () => refreshViewers(room))
-      .on(RoomEvent.DataReceived, onData);
+      .on(RoomEvent.DataReceived, onData)
+      .on(RoomEvent.Disconnected, (reason) => {
+        if (cancelled) return;
+        if (reason) setErrorText(formatLiveStreamError(new Error(String(reason))));
+      });
 
     (async () => {
       if (!token) {
@@ -89,6 +93,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
       }
       try {
         const lk = await createLiveKitToken(token, { roomName, canPublish: isHost });
+        if (cancelled) return;
         await room.connect(lk.url, lk.token);
         if (cancelled) return;
         refreshViewers(room);
@@ -98,7 +103,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
           for (const track of tracks) {
             await room.localParticipant.publishTrack(track);
             if (track.kind === Track.Kind.Video) {
-              attachTrack(track, videoHostRef.current as unknown as HTMLElement | null);
+              attachTrack(track, videoHostRef.current);
             }
           }
           setStatus("You are live now");
@@ -107,7 +112,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
             participant.trackPublications.forEach((publication: any) => {
               const track = publication.track;
               if (track?.kind === Track.Kind.Video) {
-                attachTrack(track, videoHostRef.current as unknown as HTMLElement | null);
+                attachTrack(track, videoHostRef.current);
               }
             });
           });
@@ -130,8 +135,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
       localTracksRef.current = [];
       room.disconnect();
       roomRef.current = null;
-      const host = videoHostRef.current as unknown as HTMLElement | null;
-      if (host) host.innerHTML = "";
+      if (videoHostRef.current) videoHostRef.current.innerHTML = "";
     };
   }, [isHost, refreshViewers, roomName, token, visible]);
 
@@ -150,7 +154,19 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
 
   return (
     <View style={styles.root}>
-      <View ref={videoHostRef} style={styles.videoHost} />
+      <div
+        ref={videoHostRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#000"
+        }}
+      />
       <View style={styles.topBar}>
         <View style={styles.livePill}>
           <View style={styles.liveDot} />
@@ -193,6 +209,11 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
             <Text style={styles.sendText}>Send</Text>
           </Pressable>
         </View>
+        {isHost && onClose ? (
+          <Pressable style={styles.endLiveBtn} onPress={onClose}>
+            <Text style={styles.endLiveText}>End Live</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -200,7 +221,6 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  videoHost: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000" },
   topBar: {
     position: "absolute",
     top: 42,
@@ -249,5 +269,14 @@ const styles = StyleSheet.create({
     outlineStyle: "none" as any
   },
   sendBtn: { backgroundColor: APP_LIME, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
-  sendText: { color: "#111", fontSize: 12, fontWeight: "900" }
+  sendText: { color: "#111", fontSize: 12, fontWeight: "900" },
+  endLiveBtn: {
+    marginTop: 12,
+    alignSelf: "center",
+    backgroundColor: "#FF3040",
+    borderRadius: 999,
+    paddingHorizontal: 22,
+    paddingVertical: 11
+  },
+  endLiveText: { color: "#fff", fontSize: 14, fontWeight: "900" }
 });

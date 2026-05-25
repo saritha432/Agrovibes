@@ -30,6 +30,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
 import { takePendingSharedPostViewer } from "../navigation/sharedPostViewerBridge";
+import { takePendingJoinLive } from "../navigation/liveJoinBridge";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -1003,6 +1004,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
   const [activeHomeTab, setActiveHomeTab] = useState<HomeTopTab>("Feed");
+  const [liveJoinPostId, setLiveJoinPostId] = useState<number | null>(null);
   const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
   const [socialAvatarsByUserId, setSocialAvatarsByUserId] = useState<Map<number, string>>(() => new Map());
   const [followerUserIds, setFollowerUserIds] = useState<Set<number>>(new Set());
@@ -1183,7 +1185,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     useCallback(() => {
       const pending = takePendingSharedPostViewer();
       if (pending) openPostFromFeed(pending.post, { isolated: pending.isolated });
-    }, [openPostFromFeed])
+      const pendingLive = takePendingJoinLive();
+      if (pendingLive?.postId) {
+        setActiveHomeTab("live");
+        setLiveJoinPostId(pendingLive.postId);
+        void (async () => {
+          try {
+            const fresh = await fetchHomePosts(token ?? null);
+            setPosts(fresh.posts);
+          } catch {
+            // Keep current feed if refresh fails.
+          }
+        })();
+      }
+    }, [openPostFromFeed, token])
   );
 
   const resolveLikerProfile = useCallback(
@@ -3253,6 +3268,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           {listHeader}
           <LiveHomeSection
             posts={posts}
+            joinPostId={liveJoinPostId}
+            onJoinConsumed={() => setLiveJoinPostId(null)}
             onOpenCreate={() => onOpenCreate?.("live")}
             canDeletePost={(post) => viewerOwnsPost(post, user)}
             onDeletePost={confirmDeleteOwnPost}
