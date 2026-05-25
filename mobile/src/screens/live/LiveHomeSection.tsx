@@ -29,6 +29,10 @@ export function isLivePost(post: HomePost) {
   return /^\[LIVE\]/i.test(String(post.caption || "").trim());
 }
 
+export function isActiveLiveStream(post: HomePost) {
+  return isLivePost(post) && post.liveStatus === "active" && !String(post.videoUrl || "").trim();
+}
+
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
 }
@@ -72,7 +76,7 @@ function liveRoomName(post: HomePost) {
 
 /** Prefer explicit [LIVE] posts; otherwise surface recent video posts for discovery. */
 export function buildLiveFeed(posts: HomePost[]): HomePost[] {
-  const liveTagged = posts.filter((p) => isLivePost(p) && (p.liveStatus === "active" || p.videoUrl || livePosterUri(p)));
+  const liveTagged = posts.filter((p) => isLivePost(p) && (isActiveLiveStream(p) || p.videoUrl || livePosterUri(p)));
   if (liveTagged.length) return liveTagged;
   return posts.filter((p) => p.videoUrl && !isReelPost(p)).slice(0, 12);
 }
@@ -221,77 +225,82 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
       <Modal visible={watchingPost != null} animationType="slide" onRequestClose={() => setWatching(null)}>
         {watchingPost ? (
           <View style={styles.viewerRoot}>
-            <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={() => setWatching(null)} hitSlop={12}>
-              <Ionicons name="close" size={28} color="#fff" />
-            </Pressable>
-            {canDeleteWatching ? (
-              <Pressable
-                style={[styles.viewerDelete, { top: insets.top + 8 }]}
-                onPress={() => {
-                  const post = watchingPost;
-                  setWatching(null);
-                  onDeletePost?.(post);
-                }}
-                hitSlop={12}
-              >
-                <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
-              </Pressable>
-            ) : null}
-            {watchingPost.liveStatus === "active" && !watchingPost.videoUrl ? (
+            {isActiveLiveStream(watchingPost) ? (
               <LiveKitRoomView
                 visible
                 roomName={liveRoomName(watchingPost)}
                 isHost={false}
                 title={liveTitle(watchingPost, language, t)}
+                onClose={() => setWatching(null)}
               />
-            ) : watchingPost.videoUrl ? (
-              <Video
-                source={{ uri: watchingPost.videoUrl }}
-                style={styles.viewerVideo}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay
-                isLooping
-                isMuted={false}
-                useNativeControls={false}
-              />
-            ) : livePosterUri(watchingPost) ? (
-              <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="cover" />
             ) : (
-              <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
-                <Ionicons name="videocam-outline" size={48} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.viewerVideoPlaceholderText}>Live video is starting...</Text>
-              </View>
-            )}
-            <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
-            <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
-              <View style={styles.viewerLivePill}>
-                <View style={styles.gridLiveDot} />
-                <Text style={styles.viewerLiveText}>LIVE</Text>
-              </View>
-              <Text style={styles.viewerViewers}>{formatViewers(liveViewerCount(watchingPost, viewerTick))} watching</Text>
-            </View>
-            <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
-              <View style={styles.viewerHostRow}>
-                <UserAvatar uri={watchingPost.authorAvatarUrl} name={watchingPost.userName} size={40} borderRadius={20} />
-                <View style={styles.viewerHostText}>
-                  <Text style={styles.viewerHostName}>{watchingPost.userName}</Text>
-                  <Text style={styles.viewerHostTitle} numberOfLines={2}>
-                    {liveTitle(watchingPost, language, t)}
-                  </Text>
+              <>
+                <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={() => setWatching(null)} hitSlop={12}>
+                  <Ionicons name="close" size={28} color="#fff" />
+                </Pressable>
+                {canDeleteWatching ? (
+                  <Pressable
+                    style={[styles.viewerDelete, { top: insets.top + 8 }]}
+                    onPress={() => {
+                      const post = watchingPost;
+                      setWatching(null);
+                      onDeletePost?.(post);
+                    }}
+                    hitSlop={12}
+                  >
+                    <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
+                  </Pressable>
+                ) : null}
+                {watchingPost.videoUrl ? (
+                  <Video
+                    source={{ uri: watchingPost.videoUrl }}
+                    style={styles.viewerVideo}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay
+                    isLooping
+                    isMuted={false}
+                    useNativeControls={false}
+                  />
+                ) : livePosterUri(watchingPost) ? (
+                  <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
+                    <Ionicons name="videocam-outline" size={48} color="rgba(255,255,255,0.4)" />
+                    <Text style={styles.viewerVideoPlaceholderText}>Live video is starting...</Text>
+                  </View>
+                )}
+                <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
+                <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
+                  <View style={styles.viewerLivePill}>
+                    <View style={styles.gridLiveDot} />
+                    <Text style={styles.viewerLiveText}>LIVE</Text>
+                  </View>
+                  <Text style={styles.viewerViewers}>{formatViewers(liveViewerCount(watchingPost, viewerTick))} watching</Text>
                 </View>
-              </View>
-              <View style={styles.viewerActions}>
-                <Pressable style={styles.viewerActionBtn}>
-                  <Ionicons name="heart-outline" size={26} color="#fff" />
-                </Pressable>
-                <Pressable style={styles.viewerActionBtn}>
-                  <Ionicons name="chatbubble-outline" size={24} color="#fff" />
-                </Pressable>
-                <Pressable style={styles.viewerActionBtn}>
-                  <Ionicons name="share-social-outline" size={24} color="#fff" />
-                </Pressable>
-              </View>
-            </View>
+                <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
+                  <View style={styles.viewerHostRow}>
+                    <UserAvatar uri={watchingPost.authorAvatarUrl} name={watchingPost.userName} size={40} borderRadius={20} />
+                    <View style={styles.viewerHostText}>
+                      <Text style={styles.viewerHostName}>{watchingPost.userName}</Text>
+                      <Text style={styles.viewerHostTitle} numberOfLines={2}>
+                        {liveTitle(watchingPost, language, t)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.viewerActions}>
+                    <Pressable style={styles.viewerActionBtn}>
+                      <Ionicons name="heart-outline" size={26} color="#fff" />
+                    </Pressable>
+                    <Pressable style={styles.viewerActionBtn}>
+                      <Ionicons name="chatbubble-outline" size={24} color="#fff" />
+                    </Pressable>
+                    <Pressable style={styles.viewerActionBtn}>
+                      <Ionicons name="share-social-outline" size={24} color="#fff" />
+                    </Pressable>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         ) : null}
       </Modal>
