@@ -9,7 +9,7 @@ const path = require("path");
 async function main() {
   const sharp = require("sharp");
   const root = path.join(__dirname, "..");
-  const wordmark = path.join(root, "assets", "cropvibe.png");
+  const wordmark = path.join(root, "assets", "cropvibe-wordmark.png");
   const input = fs.existsSync(wordmark) ? wordmark : path.join(root, "assets", "logo.png");
   const output = path.join(root, "assets", "logo-adaptive-foreground.png");
   if (!fs.existsSync(input)) {
