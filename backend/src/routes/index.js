@@ -87,119 +87,6 @@ function toCloudinaryHlsUrl(rawUrl) {
   return out;
 }
 
-const APP_LANGUAGE_TO_GOOGLE_CODE = {
-  English: "en",
-  Hindi: "hi",
-  Telugu: "te",
-  en: "en",
-  hi: "hi",
-  te: "te"
-};
-const TRANSLATION_CACHE_TTL_SECONDS = 60 * 60 * 24 * 30;
-const TRANSLATION_MAX_CHARS = 5000;
-const translationMemoryCache = new Map();
-
-function normalizeTranslationLanguage(value) {
-  const raw = String(value || "").trim();
-  return APP_LANGUAGE_TO_GOOGLE_CODE[raw] || APP_LANGUAGE_TO_GOOGLE_CODE[raw.toLowerCase()] || "";
-}
-
-function normalizeTranslationText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function isStructuredSharePayload(text) {
-  const trimmed = String(text || "").trim();
-  return /^\[(?:Cropvibe|AgroVibe)\s+(?:Reel|Profile)\]\s*\{/i.test(trimmed);
-}
-
-function translationCacheKey(text, targetLanguage, sourceLanguage) {
-  const hash = crypto
-    .createHash("sha256")
-    .update(`${sourceLanguage || "auto"}:${targetLanguage}:${normalizeTranslationText(text)}`)
-    .digest("hex");
-  return `v1:translate:${targetLanguage}:${sourceLanguage || "auto"}:${hash}`;
-}
-
-function decodeBasicHtmlEntities(text) {
-  return String(text || "")
-    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_m, code) => String.fromCharCode(parseInt(code, 16)))
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
-}
-
-async function getTranslationCache(key) {
-  const cached = await cacheGetJson(key);
-  if (cached && typeof cached.translatedText === "string") return cached;
-  const memoryHit = translationMemoryCache.get(key);
-  if (memoryHit && memoryHit.expiresAt > Date.now()) return memoryHit.value;
-  if (memoryHit) translationMemoryCache.delete(key);
-  return null;
-}
-
-async function setTranslationCache(key, value) {
-  await cacheSetJson(key, value, TRANSLATION_CACHE_TTL_SECONDS);
-  if (!isRedisConfigured()) {
-    translationMemoryCache.set(key, {
-      value,
-      expiresAt: Date.now() + TRANSLATION_CACHE_TTL_SECONDS * 1000
-    });
-    if (translationMemoryCache.size > 1000) {
-      const firstKey = translationMemoryCache.keys().next().value;
-      if (firstKey) translationMemoryCache.delete(firstKey);
-    }
-  }
-}
-
-async function translateWithGoogle(text, targetLanguage, sourceLanguage) {
-  const apiKey = String(process.env.GOOGLE_TRANSLATE_API_KEY || "").trim();
-  if (!apiKey) {
-    const err = new Error("GOOGLE_TRANSLATE_API_KEY is not configured");
-    err.statusCode = 503;
-    throw err;
-  }
-
-  const body = {
-    q: text,
-    target: targetLanguage,
-    format: "text"
-  };
-  if (sourceLanguage) body.source = sourceLanguage;
-
-  const response = await fetch(
-    `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }
-  );
-  const raw = await response.text();
-  let parsed = null;
-  try {
-    parsed = raw ? JSON.parse(raw) : null;
-  } catch {
-    parsed = null;
-  }
-  if (!response.ok) {
-    const err = new Error(parsed?.error?.message || `Translation failed (${response.status})`);
-    err.statusCode = response.status;
-    throw err;
-  }
-
-  const row = parsed?.data?.translations?.[0] || {};
-  return {
-    translatedText: decodeBasicHtmlEntities(row.translatedText || text),
-    sourceLanguage: String(row.detectedSourceLanguage || sourceLanguage || ""),
-    targetLanguage,
-    provider: "google"
-  };
-}
-
 async function ensureLearnUsersTable() {
   if (learnUsersTableReady) return;
   await query(
@@ -1127,6 +1014,12 @@ function dedupeHomePostRows(rows) {
     out.push(post);
   }
   return out;
+}
+
+async function invalidateProfilePostsCache(userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  await cacheDel(`v1:home:posts:mine:${id}`);
 }
 
 async function ensureHomeStoriesTable() {
@@ -2668,64 +2561,6 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
   }
 });
 
-router.post("/v1/translate", authRequired, async (req, res) => {
-  try {
-    const originalText = String(req.body?.text || "").trim();
-    const targetLanguage = normalizeTranslationLanguage(req.body?.targetLanguage);
-    const sourceLanguage = normalizeTranslationLanguage(req.body?.sourceLanguage);
-    if (!targetLanguage) {
-      res.status(400).json({ message: "targetLanguage must be English, Hindi, Telugu, en, hi, or te" });
-      return;
-    }
-    if (!originalText) {
-      res.json({
-        translatedText: "",
-        sourceLanguage: sourceLanguage || "",
-        targetLanguage,
-        provider: "none",
-        cached: false
-      });
-      return;
-    }
-    if (originalText.length > TRANSLATION_MAX_CHARS) {
-      res.status(400).json({ message: `Text must be ${TRANSLATION_MAX_CHARS} characters or less` });
-      return;
-    }
-    if (targetLanguage === "en" || sourceLanguage === targetLanguage || isStructuredSharePayload(originalText)) {
-      res.json({
-        translatedText: originalText,
-        sourceLanguage: sourceLanguage || "",
-        targetLanguage,
-        provider: "none",
-        cached: false
-      });
-      return;
-    }
-
-    const cacheKey = translationCacheKey(originalText, targetLanguage, sourceLanguage);
-    const cached = await getTranslationCache(cacheKey);
-    if (cached) {
-      res.json({ ...cached, cached: true });
-      return;
-    }
-
-    const translated = await translateWithGoogle(originalText, targetLanguage, sourceLanguage);
-    const payload = {
-      translatedText: translated.translatedText,
-      sourceLanguage: translated.sourceLanguage,
-      targetLanguage: translated.targetLanguage,
-      provider: translated.provider
-    };
-    await setTranslationCache(cacheKey, payload);
-    res.json({ ...payload, cached: false });
-  } catch (error) {
-    const statusCode = Number(error.statusCode) || 500;
-    res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
-      message: error.message || "Failed to translate text"
-    });
-  }
-});
-
 router.get("/v1/marketplace/listings", async (_req, res) => {
   try {
     const cacheKey = "v1:marketplace:listings";
@@ -3058,13 +2893,19 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     const isLivePost = /^\[LIVE\]/i.test(String(caption || "").trim());
 
     if (!userName || !location || !caption || (!hasVideo && !hasImage && !isLivePost)) {
-      res.status(400).json({ message: "userName, location, caption and one of videoUrl/imageUrl/imageUrls are required" });
+      res.status(400).json({
+        message:
+          "userName, location, caption and one of videoUrl, imageUrl, imageUrls, or a [LIVE] caption are required"
+      });
       return;
     }
     if (hasVideo && hasImage) {
       res.status(400).json({ message: "Send either a video or images for one post, not both" });
       return;
     }
+
+    const ownerIdRaw = req.user?.userId != null ? Number(req.user.userId) : Number(userId);
+    const ownerId = Number.isFinite(ownerIdRaw) && ownerIdRaw > 0 ? ownerIdRaw : null;
 
     const cleanTagged = Array.isArray(taggedUserIds)
       ? [...new Set(taggedUserIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))]
@@ -3116,7 +2957,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         created_at AS "createdAt"
       `,
       [
-        userId || null,
+        ownerId,
         userName,
         location,
         caption,
@@ -3132,7 +2973,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     );
 
     const normalizedPost = normalizeHomePostRow(result.rows[0]);
-    const actorId = Number(req.user?.userId || userId || 0);
+    const actorId = ownerId || Number(userId || 0);
     if (isLivePost && Number.isFinite(actorId) && actorId > 0) {
       await ensureSocialNotificationsTable();
       await query(
@@ -3149,6 +2990,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     }
 
     await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(actorId);
     res.status(201).json({ post: normalizedPost });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
@@ -3196,6 +3038,7 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
       return;
     }
     await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
     res.json({ post: normalizeHomePostRow(updated.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to update live video", error: error.message });
@@ -3343,6 +3186,7 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
 
     await query(`DELETE FROM home_posts WHERE id = $1`, [postId]);
     await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete post", error: error.message });
@@ -3378,6 +3222,85 @@ router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to submit report", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
+  try {
+    await backfillHomePostUserIds();
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const viewerId = Number(req.user.userId);
+    const cacheKey = `v1:home:posts:mine:${viewerId}`;
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.posts)) {
+      res.json(cached);
+      return;
+    }
+
+    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [viewerId]);
+    const fullName = String(userRes.rows[0]?.full_name || "").trim();
+    const username = String(userRes.rows[0]?.username || "").trim();
+    const emailLocal = String(userRes.rows[0]?.email || "")
+      .split("@")[0]
+      .trim();
+
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE
+        p.user_id = $1
+        OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($2))
+        OR ($3::text IS NOT NULL AND $3 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($3)))
+        OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+      ORDER BY p.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId, fullName, username || null, emailLocal || null]
+    );
+
+    const body = { posts: dedupeHomePostRows(result.rows) };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 30);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load profile posts", error: error.message });
   }
 });
 

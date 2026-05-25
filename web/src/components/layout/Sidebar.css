@@ -97,7 +97,6 @@
 
 .sidebar__link,
 .sidebar__create,
-.sidebar__language,
 .sidebar__profile,
 .sidebar__more-btn {
   display: flex;
@@ -119,7 +118,6 @@
 
 .sidebar__link:hover,
 .sidebar__create:hover,
-.sidebar__language:hover,
 .sidebar__profile:hover,
 .sidebar__more-btn:hover {
   background: var(--surface-hover);
@@ -172,30 +170,6 @@
 .sidebar__create {
   margin-top: 2px;
   flex-shrink: 0;
-}
-
-.sidebar__language {
-  margin-top: 2px;
-}
-
-.sidebar__language-select {
-  color: var(--text);
-  background: transparent;
-  border: none;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  opacity: 0;
-  max-width: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition: opacity 0.15s ease, max-width 0.2s ease;
-}
-
-.sidebar:hover .sidebar__language-select {
-  opacity: 1;
-  max-width: 160px;
-  pointer-events: auto;
 }
 
 .sidebar__footer {

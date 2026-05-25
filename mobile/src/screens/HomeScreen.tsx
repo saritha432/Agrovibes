@@ -77,7 +77,6 @@ import {
   formatReelCaption,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
-import { useDynamicTranslations } from "../localization/dynamicTranslation";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 interface HomeScreenProps {
@@ -88,7 +87,7 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", APP_LIME, "#8b3a62", "#105f75"];
-const HOME_TOP_TABS_ALL = ["Feed", "Friends", "Reels", "live"] as const;
+const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
 type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
 const likeActiveColor = APP_LIME;
 const REEL_LIKE_COLOR = "#ffffff";
@@ -162,9 +161,34 @@ function postCreatedMs(post: HomePost): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Newest posts/reels first (Instagram-style feed order). */
-function sortPostsNewestFirst(list: HomePost[]): HomePost[] {
-  return [...list].sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
+const FRESH_POST_PRIORITY_MS = 30 * 60 * 1000;
+
+function seededPostScore(post: HomePost, seed: number): number {
+  const input = `${seed}:${post.id}:${postCreatedMs(post)}`;
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Fresh posts/reels stay first so newly published content is immediately visible.
+ * Older content is shuffled per session/refresh so the feed does not feel stuck.
+ */
+function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number): HomePost[] {
+  const fresh: HomePost[] = [];
+  const rest: HomePost[] = [];
+  for (const post of list) {
+    const created = postCreatedMs(post);
+    if (created > 0 && nowMs - created <= FRESH_POST_PRIORITY_MS) fresh.push(post);
+    else rest.push(post);
+  }
+
+  fresh.sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
+  rest.sort((a, b) => seededPostScore(a, seed) - seededPostScore(b, seed) || postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
+  return [...fresh, ...rest];
 }
 
 const REPORT_REASON_KEYS = [
@@ -901,7 +925,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [language, t]
   );
   const { token, user } = useAuth();
-  const { getTranslation, requestTranslations } = useDynamicTranslations(token, language);
   const insets = useSafeAreaInsets();
   /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
   const reelTopInset = useMemo(() => {
@@ -947,6 +970,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [feedShuffleSeed, setFeedShuffleSeed] = useState(() => Date.now());
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
   const [reportModalPost, setReportModalPost] = useState<HomePost | null>(null);
@@ -1063,38 +1087,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const tabPosts = useMemo(() => {
+    const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return sortPostsNewestFirst(strip(posts));
-    if (activeHomeTab === "Reels") {
-      const reels = strip(posts).filter((p) => isFullScreenReelItem(p));
-      return sortPostsNewestFirst(reels);
-    }
+    if (activeHomeTab === "Feed") return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
     if (activeHomeTab === "Friends") {
-      return sortPostsNewestFirst(
+      return orderPostsForFeed(
         strip(
           posts.filter((p) => {
             if (!p.videoUrl) return false;
             const uid = Number(p.userId);
             return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
           })
-        )
+        ),
+        feedShuffleSeed,
+        nowMs
       );
     }
     if (activeHomeTab === "live") {
-      return sortPostsNewestFirst(strip(posts.filter((p) => !!p.videoUrl)));
+      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs);
     }
-    return sortPostsNewestFirst(strip(posts));
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds]);
-
-  useEffect(() => {
-    requestTranslations(
-      tabPosts.flatMap((post) => [
-        { text: stripInternalCaptionPrefix(post.caption), contentType: "caption" as const },
-        { text: post.creativeMeta?.overlayText, contentType: "caption" as const }
-      ])
-    );
-  }, [requestTranslations, tabPosts]);
+    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1144,8 +1158,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [activeHomeTab, showFriendsTab]);
 
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
-  const isReelSurfaceTab =
-    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
+  const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends";
   const isLiveTab = activeHomeTab === "live";
 
   const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
@@ -1478,6 +1491,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           merged.map((p) => p.id)
         );
         if (!mounted) return;
+        setFeedShuffleSeed(Date.now());
         setPosts(
           merged.map((p) => ({
             ...p,
@@ -1692,16 +1706,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useEffect(() => {
     if (!activeCommentsPost) setReplyingTo(null);
   }, [activeCommentsPost]);
-
-  useEffect(() => {
-    if (!activeCommentsPost) return;
-    requestTranslations(
-      (commentsByPost[activeCommentsPost.id] ?? []).map((comment) => ({
-        text: comment.text,
-        contentType: "comment" as const
-      }))
-    );
-  }, [activeCommentsPost, commentsByPost, requestTranslations]);
 
   const openCommentsForPost = useCallback(
     (post: HomePost) => {
@@ -2710,12 +2714,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         stripInternalCaptionPrefix(post.caption).slice(0, 36) ||
         "";
       const musicLabel = musicSource ? displayFeedCopy(musicSource) : t("originalAudio");
-      const reelCaptionRaw = stripInternalCaptionPrefix(post.caption);
-      const reelCaptionText = getTranslation(reelCaptionRaw, displayPostCaption(post.caption));
+      const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
-      const reelOverlayText = creativeOverlayTextRaw
-        ? getTranslation(creativeOverlayTextRaw, displayFeedCopy(creativeOverlayTextRaw))
-        : "";
+      const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
       const hasMusicTrack = !!post.musicAudioUrl?.trim();
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
@@ -2998,7 +2999,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayFeedCopy,
       displayPersonName,
       displayPostCaption,
-      getTranslation,
       t,
       labelForFollowStatus
     ]
@@ -3007,8 +3007,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const feedDisplayName = displayPersonName(post.userName);
-      const feedCaptionRaw = stripInternalCaptionPrefix(post.caption);
-      const feedCaption = getTranslation(feedCaptionRaw, displayPostCaption(post.caption));
+      const feedCaption = displayPostCaption(post.caption);
       const isActive = playingPostId === post.id && !!post.videoUrl;
       const gallery = postImageGallery(post);
       const isCarousel = !post.videoUrl && gallery.length > 1;
@@ -3222,7 +3221,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       togglePostLike,
       displayPersonName,
       displayPostCaption,
-      getTranslation,
       t,
       labelForFollowStatus,
       user?.avatarUrl,
@@ -3234,27 +3232,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const emptyTabTitle =
     activeHomeTab === "Friends"
       ? t("emptyFriendsTitle")
-      : activeHomeTab === "Reels"
-        ? t("emptyReelsTitle")
-        : activeHomeTab === "live"
-          ? t("emptyLiveTitle")
-          : activeHomeTab === "Feed"
-            ? t("emptyFeedTitle")
-            : t("emptyNothingTitle");
+      : activeHomeTab === "live"
+        ? t("emptyLiveTitle")
+        : activeHomeTab === "Feed"
+          ? t("emptyFeedTitle")
+          : t("emptyNothingTitle");
   const emptyTabSubtitle =
     activeHomeTab === "Friends"
       ? t("emptyFriendsSub")
-      : activeHomeTab === "Reels"
-        ? t("emptyReelsSub")
-        : activeHomeTab === "live"
-          ? t("emptyLiveSub")
-          : t("emptyDefaultSub");
+      : activeHomeTab === "live"
+        ? t("emptyLiveSub")
+        : t("emptyDefaultSub");
 
-  const useFullScreenReelLayout =
-    activeHomeTab === "Feed" || activeHomeTab === "Reels" || activeHomeTab === "Friends";
+  const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
 
   return (
-    <View style={[styles.screen, isReelSurfaceTab || isLiveTab ? styles.screenDark : null]}>
+    <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
       {isLiveTab ? (
         <View style={styles.reelsColumn}>
           {listHeader}
@@ -3676,7 +3669,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                               </Text>
                               {rel ? <Text style={styles.commentTime}>{rel}</Text> : null}
                       </View>
-                            <Text style={styles.commentBodyText}>{getTranslation(c.text, displayFeedCopy(c.text))}</Text>
+                            <Text style={styles.commentBodyText}>{displayFeedCopy(c.text)}</Text>
                             <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
                               <Text style={styles.commentReplyText}>Reply</Text>
                             </Pressable>

@@ -243,30 +243,6 @@ export async function fetchWithAuth(url: string, token: string | null, init: Req
   return await parseJsonOrThrow(response);
 }
 
-export type TranslationTargetLanguage = "English" | "Hindi" | "Telugu" | "en" | "hi" | "te";
-
-export async function translateText(
-  token: string,
-  payload: {
-    text: string;
-    targetLanguage: TranslationTargetLanguage;
-    sourceLanguage?: TranslationTargetLanguage;
-    contentType?: "post" | "caption" | "comment" | "chat";
-  }
-) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/translate`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })) as {
-    translatedText: string;
-    sourceLanguage?: string;
-    targetLanguage: string;
-    provider: string;
-    cached: boolean;
-  };
-}
-
 export type MarketplaceListingType = "produce" | "machinery" | "knowledge" | "services";
 
 export interface MarketplaceListing {
@@ -500,6 +476,11 @@ export async function fetchHomePosts(token?: string | null) {
     throw new Error("Failed to load home posts");
   }
   return (await response.json()) as { posts: HomePost[] };
+}
+
+/** Current user's posts only — lighter than loading the full home feed for profile. */
+export async function fetchMyHomePosts(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
 }
 
 export type HomePostLiker = {

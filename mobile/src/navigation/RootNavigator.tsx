@@ -130,7 +130,19 @@ export function RootNavigator() {
           contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
         }}
       />
-      <Stack.Screen name="DirectInbox" component={DirectInboxScreen} options={{ headerShown: true, title: "Messages" }} />
+      <Stack.Screen
+        name="DirectInbox"
+        component={DirectInboxScreen}
+        options={{
+          headerShown: true,
+          title: "Messages",
+          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
+          headerTintColor: socialDiscoveryTheme.accent,
+          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.accent },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );

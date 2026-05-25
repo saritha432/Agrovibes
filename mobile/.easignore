@@ -29,6 +29,12 @@ ios/
 # Local inspect/export trees (backend uploads, videos) — not used by the app build
 eas-inspect-out/
 
+# Legacy duplicate asset name (conflicts with cropvibe.gif on Android)
+assets/cropvibe.png
+
+# Large unused media — not referenced in app code
+assets/splash.mp4
+
 # OS / editor junk
 .DS_Store
 Thumbs.db

@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   FlatList,
   Image,
   Linking,
@@ -28,7 +29,7 @@ import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   fetchSavedHomePosts,
-  fetchHomePosts,
+  fetchMyHomePosts,
   fetchProfileStats,
   fetchSocialNetwork,
   fetchTaggedHomePosts,
@@ -48,6 +49,7 @@ import {
   removeLocalFollowRecordsByIds,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
+import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
 import { navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
 
@@ -87,9 +89,14 @@ export function ProfileScreen() {
   const { user, token, signOut } = useAuth();
   const { t } = useLanguage();
   const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
-  const [allPosts, setAllPosts] = useState<HomePost[]>([]);
+  const [userPosts, setUserPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [savedLoading, setSavedLoading] = useState(false);
+  const [taggedLoading, setTaggedLoading] = useState(false);
+  const savedLoadedRef = useRef(false);
+  const taggedLoadedRef = useRef(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [followersList, setFollowersList] = useState<
@@ -131,34 +138,110 @@ export function ProfileScreen() {
     return /^\d+$/.test(raw) ? Number(raw) : null;
   };
 
-  const loadPosts = useCallback(async () => {
+  const loadUserPosts = useCallback(async () => {
+    if (!token || !user?.id) {
+      setUserPosts([]);
+      return;
+    }
+    setPostsLoading(true);
     try {
-      const [homeData, savedData, taggedData] = await Promise.all([
-        fetchHomePosts(token || null),
-        token ? fetchSavedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] }),
-        token ? fetchTaggedHomePosts(token) : Promise.resolve({ posts: [] as HomePost[] })
-      ]);
+      const data = await fetchMyHomePosts(token);
       if (!isMountedRef.current) return;
-      setAllPosts(homeData.posts);
-      setSavedPosts(savedData.posts);
-      setTaggedPosts(taggedData.posts);
+      const posts = data.posts || [];
+      setUserPosts(posts);
+      writeProfilePostsCache({ userId: Number(user.id), userPosts: posts, fetchedAt: Date.now() });
     } catch {
       if (!isMountedRef.current) return;
-      setAllPosts([]);
-      setSavedPosts([]);
-      setTaggedPosts([]);
+      setUserPosts([]);
+    } finally {
+      if (isMountedRef.current) setPostsLoading(false);
     }
-  }, [token]);
+  }, [token, user?.id]);
 
-  useEffect(() => {
-    void loadPosts();
-  }, [loadPosts]);
+  const loadSavedPosts = useCallback(async () => {
+    if (!token || !user?.id) {
+      setSavedPosts([]);
+      savedLoadedRef.current = false;
+      return;
+    }
+    setSavedLoading(true);
+    try {
+      const data = await fetchSavedHomePosts(token);
+      if (!isMountedRef.current) return;
+      const posts = data.posts || [];
+      setSavedPosts(posts);
+      savedLoadedRef.current = true;
+      writeProfilePostsCache({ userId: Number(user.id), savedPosts: posts, savedLoaded: true, fetchedAt: Date.now() });
+    } catch {
+      if (!isMountedRef.current) return;
+      setSavedPosts([]);
+      savedLoadedRef.current = false;
+    } finally {
+      if (isMountedRef.current) setSavedLoading(false);
+    }
+  }, [token, user?.id]);
+
+  const loadTaggedPosts = useCallback(async () => {
+    if (!token || !user?.id) {
+      setTaggedPosts([]);
+      taggedLoadedRef.current = false;
+      return;
+    }
+    setTaggedLoading(true);
+    try {
+      const data = await fetchTaggedHomePosts(token);
+      if (!isMountedRef.current) return;
+      const posts = data.posts || [];
+      setTaggedPosts(posts);
+      taggedLoadedRef.current = true;
+      writeProfilePostsCache({ userId: Number(user.id), taggedPosts: posts, taggedLoaded: true, fetchedAt: Date.now() });
+    } catch {
+      if (!isMountedRef.current) return;
+      setTaggedPosts([]);
+      taggedLoadedRef.current = false;
+    } finally {
+      if (isMountedRef.current) setTaggedLoading(false);
+    }
+  }, [token, user?.id]);
+
+  const hydrateProfilePostsFromCache = useCallback(() => {
+    if (!user?.id) return false;
+    const cached = readProfilePostsCache(Number(user.id));
+    if (!cached) return false;
+    setUserPosts(cached.userPosts);
+    if (cached.savedLoaded) {
+      setSavedPosts(cached.savedPosts);
+      savedLoadedRef.current = true;
+    }
+    if (cached.taggedLoaded) {
+      setTaggedPosts(cached.taggedPosts);
+      taggedLoadedRef.current = true;
+    }
+    return true;
+  }, [user?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadPosts();
-    }, [loadPosts])
+      if (!user?.id) return;
+      const hadCache = hydrateProfilePostsFromCache();
+      void loadUserPosts();
+      if (savedLoadedRef.current) void loadSavedPosts();
+      if (taggedLoadedRef.current) void loadTaggedPosts();
+      if (!hadCache && !savedLoadedRef.current && !taggedLoadedRef.current) {
+        // Preload saved in background — common profile tab after reels.
+        void loadSavedPosts();
+      }
+    }, [hydrateProfilePostsFromCache, loadSavedPosts, loadTaggedPosts, loadUserPosts, user?.id])
   );
+
+  useEffect(() => {
+    if (activeGalleryTab === "Saved" && token && !savedLoadedRef.current) {
+      void loadSavedPosts();
+    }
+    if (activeGalleryTab === "Tagged" && token && !taggedLoadedRef.current) {
+      void loadTaggedPosts();
+    }
+  }, [activeGalleryTab, loadSavedPosts, loadTaggedPosts, token]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -166,6 +249,12 @@ export function ProfileScreen() {
       isMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    savedLoadedRef.current = false;
+    taggedLoadedRef.current = false;
+    clearProfilePostsCache();
+  }, [user?.id]);
 
   const refreshMergedFollowStats = useCallback(async () => {
     if (!user?.fullName) {
@@ -233,25 +322,18 @@ export function ProfileScreen() {
     void refreshMergedFollowStats();
   }, [refreshMergedFollowStats]);
 
-  const userPosts = useMemo(() => {
-    if (!user) return [];
-    const myId = Number(user.id);
-    const nameA = normalizeName(user.fullName || "");
-    const nameB = normalizeName(String(user.email || "").split("@")[0] || "");
-    const nameC = normalizeName(user.username || "");
-    return allPosts.filter((p) => {
-      if (Number.isFinite(myId) && myId > 0 && Number(p.userId) === myId) return true;
-      const postName = normalizeName(p.userName || "");
-      return postName === nameA || postName === nameB || postName === nameC;
-    });
-  }, [allPosts, user]);
-
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
     if (activeGalleryTab === "Saved") return savedPosts.filter((p) => !!p.videoUrl);
     if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => !!p.videoUrl);
     return userPosts.filter((p) => !p.videoUrl);
   }, [activeGalleryTab, savedPosts, taggedPosts, userPosts]);
+
+  const galleryLoading = useMemo(() => {
+    if (activeGalleryTab === "Saved") return savedLoading && savedPosts.length === 0;
+    if (activeGalleryTab === "Tagged") return taggedLoading && taggedPosts.length === 0;
+    return postsLoading && userPosts.length === 0;
+  }, [activeGalleryTab, postsLoading, savedLoading, savedPosts.length, taggedLoading, taggedPosts.length, userPosts.length]);
 
   /** Web only: at most one live grid preview when a reel has no still image. */
   const singleGridVideoPreviewId = useMemo(() => {
@@ -580,15 +662,21 @@ export function ProfileScreen() {
                 <View style={styles.statsRow}>
                   <View style={styles.statItem}>
                     <Text style={styles.statValue}>{profileModel?.posts}</Text>
-                    <Text style={styles.statLabel}>{t("posts")}</Text>
+                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {t("posts")}
+                    </Text>
                   </View>
                   <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
                     <Text style={styles.statValue}>{profileModel?.followers}</Text>
-                    <Text style={styles.statLabel}>{t("followers")}</Text>
+                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {t("followers")}
+                    </Text>
                   </Pressable>
                   <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
                     <Text style={styles.statValue}>{profileModel?.following}</Text>
-                    <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
+                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
+                      {t("profileFollowing")}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -663,7 +751,11 @@ export function ProfileScreen() {
               </View>
 
               <View style={[styles.grid, { gap: gridGap }]}>
-                {visiblePosts.length ? (
+                {galleryLoading ? (
+                  <View style={styles.galleryLoadingWrap}>
+                    <ActivityIndicator size="small" color={LIME} />
+                  </View>
+                ) : visiblePosts.length ? (
                   visiblePosts.map((post) => {
                     const tileHeight = isReelTab ? reelTileHeight : gridTileSize;
                     const tileStyle = [styles.gridTile, { width: gridTileSize, height: tileHeight }];
@@ -1254,10 +1346,18 @@ const styles = StyleSheet.create({
     borderColor: CARD
   },
 
-  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-around", paddingLeft: 4 },
-  statItem: { alignItems: "center" },
-  statValue: { fontWeight: "900", color: TEXT, fontSize: 17 },
-  statLabel: { marginTop: 2, color: MUTED, fontWeight: "700", fontSize: 12 },
+  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, gap: 0 },
+  statItem: { flex: 1, alignItems: "center", minWidth: 0, paddingHorizontal: 1 },
+  statValue: { fontWeight: "900", color: TEXT, fontSize: 17, textAlign: "center" },
+  statLabel: {
+    marginTop: 1,
+    color: MUTED,
+    fontWeight: "700",
+    fontSize: 10,
+    lineHeight: 12,
+    textAlign: "center",
+    width: "100%"
+  },
 
   nameRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 14 },
   fullName: { fontSize: 17, fontWeight: "900", color: TEXT },
@@ -1334,6 +1434,7 @@ const styles = StyleSheet.create({
   logoutLinkText: { color: MUTED, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
 
   gallerySection: { marginHorizontal: 12, marginBottom: 16 },
+  galleryLoadingWrap: { width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 48 },
   iconTabsRow: { flexDirection: "row", justifyContent: "space-around", borderBottomWidth: 1, borderColor: "#303842", paddingBottom: 4 },
   iconTab: { alignItems: "center", minWidth: 56, paddingVertical: 6 },
   iconTabUnderline: { marginTop: 6, height: 2, width: 28, backgroundColor: LIME, borderRadius: 2 },
