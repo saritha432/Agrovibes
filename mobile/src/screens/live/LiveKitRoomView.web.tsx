@@ -1,16 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { createLocalTracks, Room, RoomEvent, Track } from "livekit-client";
 import { useAuth } from "../../auth/AuthContext";
 import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
-
-type LiveComment = {
-  id: string;
-  name: string;
-  text: string;
-};
+import {
+  encodeLiveDataMessage,
+  liveViewerCount,
+  parseLiveDataMessage,
+  type LiveComment,
+  type LiveViewer
+} from "./liveRoomData";
 
 type LiveKitRoomViewProps = {
   visible: boolean;
@@ -32,22 +33,59 @@ function attachTrack(track: any, host: HTMLDivElement | null) {
   host.appendChild(element);
 }
 
+function collectViewers(room: Room, isHost: boolean, localName: string): LiveViewer[] {
+  const rows: LiveViewer[] = [];
+  if (isHost) {
+    rows.push({ id: room.localParticipant.identity, name: localName || "You", role: "Host" });
+    room.remoteParticipants.forEach((p) => {
+      rows.push({ id: p.identity, name: p.name || p.identity, role: "Viewer" });
+    });
+    return rows;
+  }
+  room.remoteParticipants.forEach((p) => {
+    rows.push({ id: p.identity, name: p.name || p.identity, role: "Host" });
+  });
+  rows.push({ id: room.localParticipant.identity, name: localName || "You", role: "Viewer" });
+  return rows;
+}
+
 export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: LiveKitRoomViewProps) {
   const { token, user } = useAuth();
   const videoHostRef = React.useRef<HTMLDivElement | null>(null);
   const roomRef = React.useRef<Room | null>(null);
   const localTracksRef = React.useRef<any[]>([]);
+  const commentsRef = React.useRef<ScrollView | null>(null);
   const [status, setStatus] = React.useState("Connecting live...");
   const [errorText, setErrorText] = React.useState("");
-  const [viewerNames, setViewerNames] = React.useState<string[]>([]);
+  const [liveEnded, setLiveEnded] = React.useState(false);
+  const [viewers, setViewers] = React.useState<LiveViewer[]>([]);
+  const [showViewerList, setShowViewerList] = React.useState(false);
   const [comments, setComments] = React.useState<LiveComment[]>([]);
   const [commentDraft, setCommentDraft] = React.useState("");
 
-  const refreshViewers = React.useCallback((room: Room) => {
-    const names = [room.localParticipant.name || user?.fullName || "You"];
-    room.remoteParticipants.forEach((p) => names.push(p.name || p.identity));
-    setViewerNames([...new Set(names)]);
-  }, [user?.fullName]);
+  const localName = user?.fullName || "You";
+
+  const refreshViewers = React.useCallback(
+    (room: Room) => {
+      setViewers(collectViewers(room, isHost, localName));
+    },
+    [isHost, localName]
+  );
+
+  const handleLiveEnded = React.useCallback(() => {
+    if (liveEnded) return;
+    setLiveEnded(true);
+    setStatus("Live ended");
+    const room = roomRef.current;
+    if (room) {
+      try {
+        room.disconnect();
+      } catch {
+        // no-op
+      }
+    }
+    window.setTimeout(() => onClose?.(), 1200);
+  }, [liveEnded, onClose]);
 
   React.useEffect(() => {
     if (!visible || !roomName) return;
@@ -55,21 +93,21 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
     const room = new Room();
     roomRef.current = room;
 
-    const onData = (payload: Uint8Array, participant?: any) => {
-      try {
-        const parsed = JSON.parse(new TextDecoder().decode(payload));
-        if (parsed?.type !== "comment" || !parsed.text) return;
-        setComments((prev) => [
-          ...prev.slice(-60),
-          {
-            id: `${Date.now()}-${Math.random()}`,
-            name: parsed.name || participant?.name || "Viewer",
-            text: String(parsed.text).slice(0, 240)
-          }
-        ]);
-      } catch {
-        // Ignore malformed data packets.
+    const onData = (payload: Uint8Array, participant?: { name?: string; identity?: string }) => {
+      const parsed = parseLiveDataMessage(payload);
+      if (!parsed) return;
+      if (parsed.type === "live_ended") {
+        handleLiveEnded();
+        return;
       }
+      setComments((prev) => [
+        ...prev.slice(-60),
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          name: parsed.name || participant?.name || "Viewer",
+          text: parsed.text
+        }
+      ]);
     };
 
     room
@@ -78,12 +116,22 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
           attachTrack(track, videoHostRef.current);
         }
       })
+      .on(RoomEvent.TrackUnsubscribed, (track) => {
+        if (!isHost && track.kind === Track.Kind.Video) {
+          handleLiveEnded();
+        }
+      })
       .on(RoomEvent.ParticipantConnected, () => refreshViewers(room))
-      .on(RoomEvent.ParticipantDisconnected, () => refreshViewers(room))
+      .on(RoomEvent.ParticipantDisconnected, () => {
+        refreshViewers(room);
+        if (!isHost && room.remoteParticipants.size === 0) {
+          handleLiveEnded();
+        }
+      })
       .on(RoomEvent.DataReceived, onData)
-      .on(RoomEvent.Disconnected, (reason) => {
-        if (cancelled) return;
-        if (reason) setErrorText(formatLiveStreamError(new Error(String(reason))));
+      .on(RoomEvent.Disconnected, () => {
+        if (cancelled || liveEnded) return;
+        if (!isHost) handleLiveEnded();
       });
 
     (async () => {
@@ -137,18 +185,49 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
       roomRef.current = null;
       if (videoHostRef.current) videoHostRef.current.innerHTML = "";
     };
-  }, [isHost, refreshViewers, roomName, token, visible]);
+  }, [handleLiveEnded, isHost, liveEnded, localName, refreshViewers, roomName, token, visible]);
 
-  const sendComment = React.useCallback(() => {
+  React.useEffect(() => {
+    commentsRef.current?.scrollToEnd?.({ animated: true });
+  }, [comments.length]);
+
+  const sendComment = React.useCallback(async () => {
     const text = commentDraft.trim();
-    if (!text || !roomRef.current) return;
-    const payload = new TextEncoder().encode(
-      JSON.stringify({ type: "comment", name: user?.fullName || "Viewer", text })
-    );
-    roomRef.current.localParticipant.publishData(payload, { reliable: true });
-    setComments((prev) => [...prev.slice(-60), { id: `${Date.now()}-me`, name: user?.fullName || "You", text }]);
+    const room = roomRef.current;
+    if (!text || !room || liveEnded) return;
+    try {
+      await room.localParticipant.publishData(
+        encodeLiveDataMessage({ type: "comment", name: localName, text }),
+        { reliable: true, topic: "live-chat" }
+      );
+    } catch {
+      // Show locally even if broadcast fails.
+    }
+    setComments((prev) => [...prev.slice(-60), { id: `${Date.now()}-me`, name: localName, text }]);
     setCommentDraft("");
-  }, [commentDraft, user?.fullName]);
+  }, [commentDraft, liveEnded, localName]);
+
+  const handleEndLive = React.useCallback(async () => {
+    const room = roomRef.current;
+    if (isHost && room) {
+      try {
+        await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
+          reliable: true,
+          topic: "live-chat"
+        });
+      } catch {
+        // Still disconnect even if broadcast fails.
+      }
+      try {
+        room.disconnect();
+      } catch {
+        // no-op
+      }
+    }
+    onClose?.();
+  }, [isHost, onClose]);
+
+  const watchingCount = liveViewerCount(viewers, isHost);
 
   if (!visible) return null;
 
@@ -167,60 +246,110 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
           backgroundColor: "#000"
         }}
       />
+      {liveEnded ? (
+        <View style={styles.endedOverlay}>
+          <Text style={styles.endedTitle}>Live ended</Text>
+          <Text style={styles.endedSub}>Thanks for watching</Text>
+        </View>
+      ) : null}
       <View style={styles.topBar}>
         <View style={styles.livePill}>
           <View style={styles.liveDot} />
-          <Text style={styles.liveText}>LIVE</Text>
+          <Text style={styles.liveText}>{liveEnded ? "ENDED" : "LIVE"}</Text>
         </View>
         <Text style={styles.statusText}>{errorText || status}</Text>
         {onClose ? (
-          <Pressable style={styles.closeBtn} onPress={onClose}>
+          <Pressable style={styles.closeBtn} onPress={() => (isHost ? void handleEndLive() : onClose())}>
             <Ionicons name="close" size={22} color="#fff" />
           </Pressable>
         ) : null}
       </View>
-      <View style={styles.viewerPill}>
+      <Pressable style={styles.viewerPill} onPress={() => setShowViewerList(true)}>
         <Ionicons name="eye-outline" size={14} color="#fff" />
-        <Text style={styles.viewerText}>{viewerNames.length} watching</Text>
-      </View>
+        <Text style={styles.viewerText}>{watchingCount} watching</Text>
+      </Pressable>
       <View style={styles.bottomPanel}>
-        <Text style={styles.title} numberOfLines={1}>{title}</Text>
-        <Text style={styles.names} numberOfLines={1}>
-          Joined: {viewerNames.length ? viewerNames.join(", ") : "Waiting..."}
+        <Text style={styles.title} numberOfLines={1}>
+          {title}
         </Text>
-        <ScrollView style={styles.comments} contentContainerStyle={styles.commentsInner}>
-          {comments.map((c) => (
-            <Text key={c.id} style={styles.commentText}>
-              <Text style={styles.commentName}>{c.name}: </Text>
-              {c.text}
-            </Text>
-          ))}
+        <Text style={styles.names} numberOfLines={1}>
+          Joined: {viewers.length ? viewers.map((v) => v.name).join(", ") : "Waiting..."}
+        </Text>
+        <ScrollView ref={commentsRef} style={styles.comments} contentContainerStyle={styles.commentsInner}>
+          {comments.length ? (
+            comments.map((c) => (
+              <Text key={c.id} style={styles.commentText}>
+                <Text style={styles.commentName}>{c.name}: </Text>
+                {c.text}
+              </Text>
+            ))
+          ) : (
+            <Text style={styles.commentEmpty}>Be the first to comment...</Text>
+          )}
         </ScrollView>
-        <View style={styles.commentRow}>
-          <TextInput
-            value={commentDraft}
-            onChangeText={setCommentDraft}
-            placeholder="Comment on live..."
-            placeholderTextColor="rgba(255,255,255,0.5)"
-            style={styles.commentInput}
-            onSubmitEditing={sendComment}
-          />
-          <Pressable style={styles.sendBtn} onPress={sendComment}>
-            <Text style={styles.sendText}>Send</Text>
-          </Pressable>
-        </View>
-        {isHost && onClose ? (
-          <Pressable style={styles.endLiveBtn} onPress={onClose}>
+        {!liveEnded ? (
+          <View style={styles.commentRow}>
+            <TextInput
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              placeholder="Comment on live..."
+              placeholderTextColor="rgba(255,255,255,0.5)"
+              style={styles.commentInput}
+              onSubmitEditing={() => void sendComment()}
+              returnKeyType="send"
+            />
+            <Pressable style={styles.sendBtn} onPress={() => void sendComment()}>
+              <Text style={styles.sendText}>Send</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {isHost && !liveEnded ? (
+          <Pressable style={styles.endLiveBtn} onPress={() => void handleEndLive()}>
             <Text style={styles.endLiveText}>End Live</Text>
           </Pressable>
         ) : null}
       </View>
+
+      <Modal visible={showViewerList} transparent animationType="fade" onRequestClose={() => setShowViewerList(false)}>
+        <Pressable style={styles.viewerSheetBackdrop} onPress={() => setShowViewerList(false)}>
+          <Pressable style={styles.viewerSheetCard} onPress={(e) => e.stopPropagation?.()}>
+            <View style={styles.viewerSheetHeader}>
+              <Text style={styles.viewerSheetTitle}>Watching now ({viewers.length})</Text>
+              <Pressable onPress={() => setShowViewerList(false)}>
+                <Ionicons name="close" size={20} color="#fff" />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.viewerSheetList}>
+              {viewers.map((viewer) => (
+                <View key={viewer.id} style={styles.viewerSheetRow}>
+                  <View style={styles.viewerSheetAvatar}>
+                    <Text style={styles.viewerSheetAvatarText}>{viewer.name.slice(0, 1).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.viewerSheetTextWrap}>
+                    <Text style={styles.viewerSheetName}>{viewer.name}</Text>
+                    <Text style={styles.viewerSheetRole}>{viewer.role}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
+  endedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.72)",
+    zIndex: 3
+  },
+  endedTitle: { color: "#fff", fontSize: 24, fontWeight: "900" },
+  endedSub: { marginTop: 8, color: "rgba(255,255,255,0.75)", fontSize: 14, fontWeight: "700" },
   topBar: {
     position: "absolute",
     top: 42,
@@ -231,11 +360,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8
   },
-  livePill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#FF3040", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 5 },
+  livePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#FF3040",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 5
+  },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#fff" },
   liveText: { color: "#fff", fontSize: 11, fontWeight: "900" },
   statusText: { flex: 1, color: "#fff", fontSize: 12, fontWeight: "800" },
-  closeBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.45)" },
+  closeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.45)"
+  },
   viewerPill: {
     position: "absolute",
     top: 84,
@@ -250,11 +394,20 @@ const styles = StyleSheet.create({
     borderRadius: 999
   },
   viewerText: { color: "#fff", fontSize: 12, fontWeight: "800" },
-  bottomPanel: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 4, padding: 14, backgroundColor: "rgba(0,0,0,0.48)" },
+  bottomPanel: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 4,
+    padding: 14,
+    backgroundColor: "rgba(0,0,0,0.48)"
+  },
   title: { color: "#fff", fontSize: 15, fontWeight: "900" },
   names: { marginTop: 4, color: "rgba(255,255,255,0.75)", fontSize: 12, fontWeight: "700" },
   comments: { maxHeight: 120, marginTop: 8 },
-  commentsInner: { gap: 4 },
+  commentsInner: { gap: 4, paddingBottom: 4 },
+  commentEmpty: { color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: "700" },
   commentText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   commentName: { color: APP_LIME, fontWeight: "900" },
   commentRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
@@ -278,5 +431,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 11
   },
-  endLiveText: { color: "#fff", fontSize: 14, fontWeight: "900" }
+  endLiveText: { color: "#fff", fontSize: 14, fontWeight: "900" },
+  viewerSheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end"
+  },
+  viewerSheetCard: {
+    backgroundColor: "#1b1f23",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    padding: 16,
+    maxHeight: "55%"
+  },
+  viewerSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12
+  },
+  viewerSheetTitle: { color: "#fff", fontSize: 16, fontWeight: "900" },
+  viewerSheetList: { gap: 10, paddingBottom: 8 },
+  viewerSheetRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  viewerSheetAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  viewerSheetAvatarText: { color: "#111", fontWeight: "900" },
+  viewerSheetTextWrap: { flex: 1 },
+  viewerSheetName: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  viewerSheetRole: { color: "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: "700", marginTop: 2 }
 });
