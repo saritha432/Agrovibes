@@ -1077,15 +1077,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
 
   const startLiveRecordingFromSheet = () => {
     setErrorText("");
-    if (Platform.OS === "web") {
-      void startLiveKitHostFromSheet();
-      return;
-    }
-    setCreateType(null);
-    setCaptureEntryView("camera");
-    setTimeout(() => {
-      void startEntryVideoRecording();
-    }, 120);
+    void startLiveKitHostFromSheet();
   };
 
   const startLiveKitHostFromSheet = async () => {
@@ -2213,7 +2205,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <Text style={styles.liveScheduleHint}>Followers get a schedule notification now and a reminder 10 minutes before.</Text>
                 </View>
               ) : liveMode === "now" ? (
-                <Text style={styles.liveScheduleHint}>Tap Continue to start recording live now and notify followers.</Text>
+                <Text style={styles.liveScheduleHint}>Tap Continue to go live now and notify followers.</Text>
               ) : null}
               {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
               <View style={styles.actionsRow}>

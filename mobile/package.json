@@ -27,8 +27,12 @@
     "preview:adaptive-icon": "node scripts/preview-adaptive-icon.cjs"
   },
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "^9.0.0",
     "@expo-google-fonts/poppins": "^0.4.1",
     "@expo/metro-runtime": "~3.2.3",
+    "@livekit/react-native": "^2.10.3",
+    "@livekit/react-native-expo-plugin": "^1.0.2",
+    "@livekit/react-native-webrtc": "^144.0.0",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/native": "^6.1.18",

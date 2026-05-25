@@ -3,7 +3,7 @@ import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { createLocalTracks, Room, RoomEvent, Track } from "livekit-client";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken } from "../../services/api";
+import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 
 type LiveComment = {
@@ -114,7 +114,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
           setStatus("Joined live");
         }
       } catch (error) {
-        setErrorText(error instanceof Error ? error.message : "Could not join live.");
+        setErrorText(formatLiveStreamError(error));
       }
     })();
 
