@@ -161,9 +161,34 @@ function postCreatedMs(post: HomePost): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Newest posts/reels first (Instagram-style feed order). */
-function sortPostsNewestFirst(list: HomePost[]): HomePost[] {
-  return [...list].sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
+const FRESH_POST_PRIORITY_MS = 30 * 60 * 1000;
+
+function seededPostScore(post: HomePost, seed: number): number {
+  const input = `${seed}:${post.id}:${postCreatedMs(post)}`;
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Fresh posts/reels stay first so newly published content is immediately visible.
+ * Older content is shuffled per session/refresh so the feed does not feel stuck.
+ */
+function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number): HomePost[] {
+  const fresh: HomePost[] = [];
+  const rest: HomePost[] = [];
+  for (const post of list) {
+    const created = postCreatedMs(post);
+    if (created > 0 && nowMs - created <= FRESH_POST_PRIORITY_MS) fresh.push(post);
+    else rest.push(post);
+  }
+
+  fresh.sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
+  rest.sort((a, b) => seededPostScore(a, seed) - seededPostScore(b, seed) || postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
+  return [...fresh, ...rest];
 }
 
 const REPORT_REASON_KEYS = [
@@ -945,6 +970,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [feedShuffleSeed, setFeedShuffleSeed] = useState(() => Date.now());
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
   const [reportModalPost, setReportModalPost] = useState<HomePost | null>(null);
@@ -1061,25 +1087,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const tabPosts = useMemo(() => {
+    const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
-    if (activeHomeTab === "Feed") return sortPostsNewestFirst(strip(posts));
+    if (activeHomeTab === "Feed") return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
     if (activeHomeTab === "Friends") {
-      return sortPostsNewestFirst(
+      return orderPostsForFeed(
         strip(
           posts.filter((p) => {
             if (!p.videoUrl) return false;
             const uid = Number(p.userId);
             return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
           })
-        )
+        ),
+        feedShuffleSeed,
+        nowMs
       );
     }
     if (activeHomeTab === "live") {
-      return sortPostsNewestFirst(strip(posts.filter((p) => !!p.videoUrl)));
+      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs);
     }
-    return sortPostsNewestFirst(strip(posts));
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds]);
+    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1462,6 +1491,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           merged.map((p) => p.id)
         );
         if (!mounted) return;
+        setFeedShuffleSeed(Date.now());
         setPosts(
           merged.map((p) => ({
             ...p,
