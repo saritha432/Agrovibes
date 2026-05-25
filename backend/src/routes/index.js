@@ -179,6 +179,13 @@ async function ensureSocialNotificationsTable() {
   socialNotificationsTableReady = true;
 }
 
+function liveScheduleExcerpt(topic, scheduledAt) {
+  return JSON.stringify({
+    topic: String(topic || "").trim().slice(0, 160),
+    scheduledAt: String(scheduledAt || "")
+  });
+}
+
 async function ensureHomePostLikesTable() {
   if (homePostLikesTableReady) return;
   await ensureHomePostsTable();
@@ -977,6 +984,17 @@ function normalizeHomePostRow(row) {
     }
   } else if (!Array.isArray(rawLikers)) {
     base.recentLikers = [];
+  }
+  if (/^\[LIVE\]/i.test(String(base.caption || "").trim())) {
+    const hasLiveMedia = !!(
+      (typeof base.videoUrl === "string" && base.videoUrl.trim()) ||
+      (typeof base.imageUrl === "string" && base.imageUrl.trim()) ||
+      (Array.isArray(base.imageUrls) && base.imageUrls.length)
+    );
+    if (!hasLiveMedia) {
+      base.liveStatus = "active";
+      base.liveStartedAt = base.createdAt;
+    }
   }
   return base;
 }
@@ -2341,6 +2359,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       LEFT JOIN social_follows f ON f.id = n.follow_id
       LEFT JOIN home_posts p ON p.id = n.post_id
       WHERE n.user_id = $1
+        AND n.created_at <= NOW()
       ORDER BY n.created_at DESC
       LIMIT 100
       `,
@@ -2353,12 +2372,16 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     const postComments = result.rows.filter(
       (r) => (r.type === "post_comment" || r.type === "comment_reply") && !r.isRead
     );
+    const liveStarts = result.rows.filter(
+      (r) => (r.type === "live_start" || r.type === "live_scheduled" || r.type === "live_reminder") && !r.isRead
+    );
     res.json({
       followRequests,
       followAccepted,
       postLikes,
       postComments,
-      unreadCount: followRequests.length + followAccepted.length + postLikes.length + postComments.length
+      liveStarts,
+      unreadCount: followRequests.length + followAccepted.length + postLikes.length + postComments.length + liveStarts.length
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load notifications", error: error.message });
@@ -2839,7 +2862,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
   }
 });
 
-router.post("/v1/home/posts", async (req, res) => {
+router.post("/v1/home/posts", authOptional, async (req, res) => {
   try {
     await ensureHomePostsTable();
     const {
@@ -2865,15 +2888,22 @@ router.post("/v1/home/posts", async (req, res) => {
     const imageUrlsJson = urlList.length > 1 ? JSON.stringify(urlList) : null;
     const hasVideo = !!(videoUrl && String(videoUrl).trim());
     const hasImage = !!primaryImage;
+    const isLivePost = /^\[LIVE\]/i.test(String(caption || "").trim());
 
-    if (!userName || !location || !caption || (!hasVideo && !hasImage)) {
-      res.status(400).json({ message: "userName, location, caption and one of videoUrl/imageUrl/imageUrls are required" });
+    if (!userName || !location || !caption || (!hasVideo && !hasImage && !isLivePost)) {
+      res.status(400).json({
+        message:
+          "userName, location, caption and one of videoUrl, imageUrl, imageUrls, or a [LIVE] caption are required"
+      });
       return;
     }
     if (hasVideo && hasImage) {
       res.status(400).json({ message: "Send either a video or images for one post, not both" });
       return;
     }
+
+    const ownerIdRaw = req.user?.userId != null ? Number(req.user.userId) : Number(userId);
+    const ownerId = Number.isFinite(ownerIdRaw) && ownerIdRaw > 0 ? ownerIdRaw : null;
 
     const cleanTagged = Array.isArray(taggedUserIds)
       ? [...new Set(taggedUserIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))]
@@ -2925,7 +2955,7 @@ router.post("/v1/home/posts", async (req, res) => {
         created_at AS "createdAt"
       `,
       [
-        userId || null,
+        ownerId,
         userName,
         location,
         caption,
@@ -2940,13 +2970,125 @@ router.post("/v1/home/posts", async (req, res) => {
       ]
     );
 
+    const normalizedPost = normalizeHomePostRow(result.rows[0]);
+    const actorId = ownerId || Number(userId || 0);
+    if (isLivePost && Number.isFinite(actorId) && actorId > 0) {
+      await ensureSocialNotificationsTable();
+      await query(
+        `
+        INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+        SELECT f.follower_id, $1, f.id, 'live_start', false, $2, $3
+        FROM social_follows f
+        WHERE f.following_id = $1
+          AND f.status = 'accepted'
+          AND f.follower_id <> $1
+        `,
+        [actorId, normalizedPost.id, "started live"]
+      );
+    }
+
     await cacheIncr("home:posts:gen");
-    await invalidateProfilePostsCache(userId);
-    res.status(201).json({ post: normalizeHomePostRow(result.rows[0]) });
+    await invalidateProfilePostsCache(actorId);
+    res.status(201).json({ post: normalizedPost });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
   }
 });
+
+router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    const postId = Number(req.params.postId);
+    const me = Number(req.user.userId);
+    const { videoUrl, thumbnailUrl } = req.body || {};
+    const cleanVideoUrl = typeof videoUrl === "string" ? videoUrl.trim() : "";
+    if (!Number.isFinite(postId) || postId <= 0 || !cleanVideoUrl) {
+      res.status(400).json({ message: "Valid postId and videoUrl are required" });
+      return;
+    }
+    const updated = await query(
+      `
+      UPDATE home_posts
+      SET video_url = $1, thumbnail_url = $2
+      WHERE id = $3 AND user_id = $4 AND caption ~* '^\\[LIVE\\]'
+      RETURNING
+        id,
+        user_id AS "userId",
+        user_name AS "userName",
+        location,
+        caption,
+        likes_count AS "likesCount",
+        comments_count AS "commentsCount",
+        video_url AS "videoUrl",
+        image_url AS "imageUrl",
+        image_urls AS "image_urls",
+        thumbnail_url AS "thumbnailUrl",
+        tagged_user_ids AS "tagged_user_ids",
+        music_label AS "musicLabel",
+        music_audio_url AS "musicAudioUrl",
+        creative_meta AS "creativeMeta",
+        created_at AS "createdAt"
+      `,
+      [cleanVideoUrl, typeof thumbnailUrl === "string" && thumbnailUrl.trim() ? thumbnailUrl.trim() : null, postId, me]
+    );
+    if (!updated.rows[0]) {
+      res.status(404).json({ message: "Live post not found" });
+      return;
+    }
+    await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
+    res.json({ post: normalizeHomePostRow(updated.rows[0]) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update live video", error: error.message });
+  }
+});
+
+async function handleScheduleLive(req, res) {
+  try {
+    await ensureSocialNotificationsTable();
+    const actorId = Number(req.user.userId);
+    const topic = String(req.body?.topic || "").trim();
+    const scheduledAtRaw = String(req.body?.scheduledAt || "").trim();
+    const scheduledAtMs = Date.parse(scheduledAtRaw);
+    if (!topic || !Number.isFinite(scheduledAtMs)) {
+      res.status(400).json({ message: "Topic and valid scheduledAt are required" });
+      return;
+    }
+    if (scheduledAtMs <= Date.now()) {
+      res.status(400).json({ message: "Scheduled time must be in the future" });
+      return;
+    }
+    const excerpt = liveScheduleExcerpt(topic, new Date(scheduledAtMs).toISOString());
+    await query(
+      `
+      INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+      SELECT f.follower_id, $1, f.id, 'live_scheduled', false, NULL, $2
+      FROM social_follows f
+      WHERE f.following_id = $1
+        AND f.status = 'accepted'
+        AND f.follower_id <> $1
+      `,
+      [actorId, excerpt]
+    );
+    await query(
+      `
+      INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt, created_at)
+      SELECT f.follower_id, $1, f.id, 'live_reminder', false, NULL, $2, GREATEST($3::timestamptz - INTERVAL '10 minutes', NOW())
+      FROM social_follows f
+      WHERE f.following_id = $1
+        AND f.status = 'accepted'
+        AND f.follower_id <> $1
+      `,
+      [actorId, excerpt, new Date(scheduledAtMs).toISOString()]
+    );
+    res.status(201).json({ ok: true, topic, scheduledAt: new Date(scheduledAtMs).toISOString() });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to schedule live", error: error.message });
+  }
+}
+
+router.post("/v1/live/schedule", authRequired, handleScheduleLive);
+router.post("/v1/social/live/schedule", authRequired, handleScheduleLive);
 
 router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
   try {

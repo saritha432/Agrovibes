@@ -50,9 +50,13 @@ function liveTitle(post: HomePost, language: import("../../localization/translat
   return music ? formatFeedText(music, language, t) : t("liveStream");
 }
 
-function viewerCount(post: HomePost) {
-  const base = 180 + ((post.id * 97) % 4200);
-  return base + Math.max(0, post.likesCount) * 4;
+function liveViewerCount(post: HomePost, tick: number) {
+  const seed = Math.abs(post.id) || 1;
+  const startedAt = Date.parse(post.liveStartedAt || post.createdAt || "");
+  const elapsedBucket = Number.isFinite(startedAt) ? Math.max(0, Math.floor((Date.now() - startedAt) / 5000)) : tick;
+  const base = post.liveViewerCount ?? (post.liveStatus === "active" ? 1 + (seed % 9) : 180 + ((seed * 97) % 4200));
+  const wave = post.liveStatus === "active" ? (elapsedBucket * 3 + seed) % 18 : 0;
+  return base + wave + Math.max(0, post.likesCount) * 4;
 }
 
 function formatViewers(n: number) {
@@ -63,8 +67,7 @@ function formatViewers(n: number) {
 
 /** Prefer explicit [LIVE] posts; otherwise surface recent video posts for discovery. */
 export function buildLiveFeed(posts: HomePost[]): HomePost[] {
-  const dismissed = new Set<number>();
-  const liveTagged = posts.filter((p) => isLivePost(p) && (p.videoUrl || livePosterUri(p)));
+  const liveTagged = posts.filter((p) => isLivePost(p) && (p.liveStatus === "active" || p.videoUrl || livePosterUri(p)));
   if (liveTagged.length) return liveTagged;
   return posts.filter((p) => p.videoUrl && !isReelPost(p)).slice(0, 12);
 }
@@ -72,18 +75,31 @@ export function buildLiveFeed(posts: HomePost[]): HomePost[] {
 type LiveHomeSectionProps = {
   posts: HomePost[];
   onOpenCreate?: () => void;
+  canDeletePost?: (post: HomePost) => boolean;
+  onDeletePost?: (post: HomePost) => void;
 };
 
-export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
+export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePost }: LiveHomeSectionProps) {
   const { t, language } = useLanguage();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [watching, setWatching] = React.useState<HomePost | null>(null);
+  const [viewerTick, setViewerTick] = React.useState(0);
 
   const livePosts = React.useMemo(() => buildLiveFeed(posts), [posts]);
+  const watchingPost = React.useMemo(
+    () => (watching ? livePosts.find((p) => p.id === watching.id) ?? watching : null),
+    [livePosts, watching]
+  );
+  const canDeleteWatching = !!watchingPost && !!canDeletePost?.(watchingPost);
   const gridGap = 10;
   const gridPad = 12;
   const cardWidth = (width - gridPad * 2 - gridGap) / 2;
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setViewerTick((v) => v + 1), 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <View style={styles.root}>
@@ -156,7 +172,7 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
                     </View>
                     <View style={styles.gridViewersPill}>
                       <Ionicons name="eye-outline" size={12} color="#fff" />
-                      <Text style={styles.gridViewersText}>{formatViewers(viewerCount(post))}</Text>
+                      <Text style={styles.gridViewersText}>{formatViewers(liveViewerCount(post, viewerTick))}</Text>
                     </View>
                   </View>
                   <Text style={styles.gridTitle} numberOfLines={2}>
@@ -186,15 +202,28 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
         )}
       </ScrollView>
 
-      <Modal visible={watching != null} animationType="slide" onRequestClose={() => setWatching(null)}>
-        {watching ? (
+      <Modal visible={watchingPost != null} animationType="slide" onRequestClose={() => setWatching(null)}>
+        {watchingPost ? (
           <View style={styles.viewerRoot}>
             <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={() => setWatching(null)} hitSlop={12}>
               <Ionicons name="close" size={28} color="#fff" />
             </Pressable>
-            {watching.videoUrl ? (
+            {canDeleteWatching ? (
+              <Pressable
+                style={[styles.viewerDelete, { top: insets.top + 8 }]}
+                onPress={() => {
+                  const post = watchingPost;
+                  setWatching(null);
+                  onDeletePost?.(post);
+                }}
+                hitSlop={12}
+              >
+                <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
+              </Pressable>
+            ) : null}
+            {watchingPost.videoUrl ? (
               <Video
-                source={{ uri: watching.videoUrl }}
+                source={{ uri: watchingPost.videoUrl }}
                 style={styles.viewerVideo}
                 resizeMode={ResizeMode.COVER}
                 shouldPlay
@@ -202,11 +231,12 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
                 isMuted={false}
                 useNativeControls={false}
               />
-            ) : livePosterUri(watching) ? (
-              <Image source={{ uri: livePosterUri(watching)! }} style={styles.viewerVideo} resizeMode="cover" />
+            ) : livePosterUri(watchingPost) ? (
+              <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="cover" />
             ) : (
               <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
                 <Ionicons name="videocam-outline" size={48} color="rgba(255,255,255,0.4)" />
+                <Text style={styles.viewerVideoPlaceholderText}>Live video is starting...</Text>
               </View>
             )}
             <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
@@ -215,15 +245,15 @@ export function LiveHomeSection({ posts, onOpenCreate }: LiveHomeSectionProps) {
                 <View style={styles.gridLiveDot} />
                 <Text style={styles.viewerLiveText}>LIVE</Text>
               </View>
-              <Text style={styles.viewerViewers}>{formatViewers(viewerCount(watching))} watching</Text>
+              <Text style={styles.viewerViewers}>{formatViewers(liveViewerCount(watchingPost, viewerTick))} watching</Text>
             </View>
             <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
               <View style={styles.viewerHostRow}>
-                <UserAvatar uri={watching.authorAvatarUrl} name={watching.userName} size={40} borderRadius={20} />
+                <UserAvatar uri={watchingPost.authorAvatarUrl} name={watchingPost.userName} size={40} borderRadius={20} />
                 <View style={styles.viewerHostText}>
-                  <Text style={styles.viewerHostName}>{watching.userName}</Text>
+                  <Text style={styles.viewerHostName}>{watchingPost.userName}</Text>
                   <Text style={styles.viewerHostTitle} numberOfLines={2}>
-                    {liveTitle(watching, language, t)}
+                    {liveTitle(watchingPost, language, t)}
                   </Text>
                 </View>
               </View>
@@ -350,8 +380,10 @@ const styles = StyleSheet.create({
   viewerRoot: { flex: 1, backgroundColor: "#000" },
   viewerVideo: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   viewerVideoPlaceholder: { alignItems: "center", justifyContent: "center", backgroundColor: "#111" },
+  viewerVideoPlaceholderText: { marginTop: 10, color: "rgba(255,255,255,0.65)", fontSize: 13, fontWeight: "700" },
   viewerGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: "42%" },
   viewerClose: { position: "absolute", left: 12, zIndex: 4 },
+  viewerDelete: { position: "absolute", right: 12, zIndex: 4, padding: 4 },
   viewerTopMeta: { position: "absolute", left: 14, right: 14, flexDirection: "row", alignItems: "center", gap: 10, zIndex: 3 },
   viewerLivePill: {
     flexDirection: "row",

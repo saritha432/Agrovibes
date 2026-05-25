@@ -2299,6 +2299,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const confirmDeleteOwnPost = useCallback(
     (post: HomePost) => {
+      if (post.id < 0) {
+        setPosts((prev) => prev.filter((p) => p.id !== post.id));
+        setPlayingPostId((cur) => (cur === post.id ? null : cur));
+        return;
+      }
       if (!token) {
         if (Platform.OS === "web" && typeof window !== "undefined") {
           window.alert("Please log in to delete posts.");
@@ -3246,7 +3251,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       {isLiveTab ? (
         <View style={styles.reelsColumn}>
           {listHeader}
-          <LiveHomeSection posts={posts} onOpenCreate={() => onOpenCreate?.("live")} />
+          <LiveHomeSection
+            posts={posts}
+            onOpenCreate={() => onOpenCreate?.("live")}
+            canDeletePost={(post) => viewerOwnsPost(post, user)}
+            onDeletePost={confirmDeleteOwnPost}
+          />
         </View>
       ) : useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
