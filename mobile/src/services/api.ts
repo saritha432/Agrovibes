@@ -729,6 +729,13 @@ export async function updateHomePostLiveVideo(
   })) as { post: HomePost };
 }
 
+export async function endHomeLivePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  })) as { post: HomePost };
+}
+
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
   const init = {
     method: "POST",

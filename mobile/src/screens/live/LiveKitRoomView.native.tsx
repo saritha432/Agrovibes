@@ -12,7 +12,7 @@ import { RoomEvent, Track } from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
+import { createLiveKitToken, endHomeLivePost, formatLiveStreamError } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import {
   encodeLiveDataMessage,
@@ -27,23 +27,29 @@ type LiveKitRoomViewProps = {
   roomName: string;
   isHost: boolean;
   title: string;
+  postId?: number;
   onClose?: () => void;
+  onLiveEnded?: (postId: number) => void;
 };
 
 function LiveRoomContent({
   isHost,
   title,
+  postId,
   onClose,
+  onLiveEnded,
   errorText,
   status
 }: {
   isHost: boolean;
   title: string;
+  postId?: number;
   onClose?: () => void;
+  onLiveEnded?: (postId: number) => void;
   errorText: string;
   status: string;
 }) {
-  const { user } = useAuth();
+  const { token, user } = useAuth();
   const room = useRoomContext();
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: !isHost });
@@ -135,6 +141,14 @@ function LiveRoomContent({
   }, [commentDraft, liveEnded, localName, room]);
 
   const handleEndLive = React.useCallback(async () => {
+    if (isHost && postId && token) {
+      try {
+        await endHomeLivePost(token, postId);
+      } catch {
+        // Still end the session locally even if the server call fails.
+      }
+      onLiveEnded?.(postId);
+    }
     if (isHost) {
       try {
         await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
@@ -151,7 +165,7 @@ function LiveRoomContent({
       }
     }
     onClose?.();
-  }, [isHost, onClose, room]);
+  }, [isHost, onClose, onLiveEnded, postId, room, token]);
 
   const cameraTrack = tracks.find((track) => isTrackReference(track));
   const watchingCount = liveViewerCount(viewers, isHost);
@@ -259,7 +273,7 @@ function LiveRoomContent({
   );
 }
 
-export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: LiveKitRoomViewProps) {
+export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onClose, onLiveEnded }: LiveKitRoomViewProps) {
   const { token } = useAuth();
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [status, setStatus] = React.useState("Connecting live...");
@@ -342,7 +356,15 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
       onDisconnected={onClose}
       onError={(error) => setErrorText(error.message)}
     >
-      <LiveRoomContent isHost={isHost} title={title} onClose={onClose} errorText={errorText} status={status} />
+      <LiveRoomContent
+        isHost={isHost}
+        title={title}
+        postId={postId}
+        onClose={onClose}
+        onLiveEnded={onLiveEnded}
+        errorText={errorText}
+        status={status}
+      />
     </LiveKitRoom>
   );
 }

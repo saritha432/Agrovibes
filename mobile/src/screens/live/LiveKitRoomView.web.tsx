@@ -3,7 +3,7 @@ import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { createLocalTracks, Room, RoomEvent, Track } from "livekit-client";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
+import { createLiveKitToken, endHomeLivePost, formatLiveStreamError } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import {
   encodeLiveDataMessage,
@@ -18,7 +18,9 @@ type LiveKitRoomViewProps = {
   roomName: string;
   isHost: boolean;
   title: string;
+  postId?: number;
   onClose?: () => void;
+  onLiveEnded?: (postId: number) => void;
 };
 
 function attachTrack(track: any, host: HTMLDivElement | null) {
@@ -49,7 +51,7 @@ function collectViewers(room: Room, isHost: boolean, localName: string): LiveVie
   return rows;
 }
 
-export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: LiveKitRoomViewProps) {
+export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onClose, onLiveEnded }: LiveKitRoomViewProps) {
   const { token, user } = useAuth();
   const videoHostRef = React.useRef<HTMLDivElement | null>(null);
   const roomRef = React.useRef<Room | null>(null);
@@ -209,6 +211,14 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
 
   const handleEndLive = React.useCallback(async () => {
     const room = roomRef.current;
+    if (isHost && postId && token) {
+      try {
+        await endHomeLivePost(token, postId);
+      } catch {
+        // Still end the session locally even if the server call fails.
+      }
+      onLiveEnded?.(postId);
+    }
     if (isHost && room) {
       try {
         await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
@@ -225,7 +235,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, onClose }: L
       }
     }
     onClose?.();
-  }, [isHost, onClose]);
+  }, [isHost, onClose, onLiveEnded, postId, token]);
 
   const watchingCount = liveViewerCount(viewers, isHost);
 
