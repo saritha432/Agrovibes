@@ -49,7 +49,11 @@ export function DirectInboxScreen() {
   const { user, token } = useAuth();
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: t("messagesTitle") });
+    navigation.setOptions({
+      title: t("messagesTitle"),
+      headerTintColor: APP_LIME,
+      headerTitleStyle: { fontWeight: "800", color: APP_LIME }
+    });
   }, [navigation, t]);
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
