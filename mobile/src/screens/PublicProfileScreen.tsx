@@ -170,15 +170,21 @@ export function PublicProfileScreen() {
         <View style={styles.statsRow}>
           <View style={styles.stat}>
             <Text style={styles.statValue}>{visible.length}</Text>
-            <Text style={styles.statLabel}>Posts</Text>
+            <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
+              {t("posts")}
+            </Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statValue}>{followersCount}</Text>
-            <Text style={styles.statLabel}>Followers</Text>
+            <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
+              {t("followers")}
+            </Text>
           </View>
           <View style={styles.stat}>
             <Text style={styles.statValue}>{followingCount}</Text>
-            <Text style={styles.statLabel}>Following</Text>
+            <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
+              {t("profileFollowing")}
+            </Text>
           </View>
         </View>
       </View>
@@ -284,10 +290,18 @@ const styles = StyleSheet.create({
   },
   avatarImage: { width: "100%", height: "100%" },
   avatarText: { fontSize: 30, fontWeight: "800", color: T.accent },
-  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingRight: 6 },
-  stat: { alignItems: "center" },
-  statValue: { fontSize: 20, fontWeight: "900", color: T.text },
-  statLabel: { marginTop: 2, fontSize: 12, color: T.statLabel, fontWeight: "700" },
+  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingRight: 2, gap: 0 },
+  stat: { flex: 1, alignItems: "center", minWidth: 0, paddingHorizontal: 1 },
+  statValue: { fontSize: 20, fontWeight: "900", color: T.text, textAlign: "center" },
+  statLabel: {
+    marginTop: 1,
+    fontSize: 10,
+    lineHeight: 12,
+    color: T.statLabel,
+    fontWeight: "700",
+    textAlign: "center",
+    width: "100%"
+  },
   name: { marginTop: 14, paddingHorizontal: 16, fontSize: 16, color: T.text, fontWeight: "800" },
   sub: { marginTop: 4, paddingHorizontal: 16, fontSize: 13, color: T.muted, fontWeight: "600" },
   actionsRow: { marginTop: 12, paddingHorizontal: 16, flexDirection: "row", gap: 8 },

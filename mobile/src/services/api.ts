@@ -464,6 +464,11 @@ export async function fetchHomePosts(token?: string | null) {
   return (await response.json()) as { posts: HomePost[] };
 }
 
+/** Current user's posts only — lighter than loading the full home feed for profile. */
+export async function fetchMyHomePosts(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+}
+
 export type HomePostLiker = {
   userId: number;
   fullName: string;

@@ -1014,6 +1014,12 @@ function dedupeHomePostRows(rows) {
   return out;
 }
 
+async function invalidateProfilePostsCache(userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  await cacheDel(`v1:home:posts:mine:${id}`);
+}
+
 async function ensureHomeStoriesTable() {
   if (homeStoriesTableReady) return;
   await ensureLearnUsersTable();
@@ -2885,13 +2891,19 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     const isLivePost = /^\[LIVE\]/i.test(String(caption || "").trim());
 
     if (!userName || !location || !caption || (!hasVideo && !hasImage && !isLivePost)) {
-      res.status(400).json({ message: "userName, location, caption and one of videoUrl/imageUrl/imageUrls are required" });
+      res.status(400).json({
+        message:
+          "userName, location, caption and one of videoUrl, imageUrl, imageUrls, or a [LIVE] caption are required"
+      });
       return;
     }
     if (hasVideo && hasImage) {
       res.status(400).json({ message: "Send either a video or images for one post, not both" });
       return;
     }
+
+    const ownerIdRaw = req.user?.userId != null ? Number(req.user.userId) : Number(userId);
+    const ownerId = Number.isFinite(ownerIdRaw) && ownerIdRaw > 0 ? ownerIdRaw : null;
 
     const cleanTagged = Array.isArray(taggedUserIds)
       ? [...new Set(taggedUserIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))]
@@ -2943,7 +2955,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         created_at AS "createdAt"
       `,
       [
-        userId || null,
+        ownerId,
         userName,
         location,
         caption,
@@ -2959,7 +2971,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     );
 
     const normalizedPost = normalizeHomePostRow(result.rows[0]);
-    const actorId = Number(req.user?.userId || userId || 0);
+    const actorId = ownerId || Number(userId || 0);
     if (isLivePost && Number.isFinite(actorId) && actorId > 0) {
       await ensureSocialNotificationsTable();
       await query(
@@ -2976,6 +2988,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     }
 
     await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(actorId);
     res.status(201).json({ post: normalizedPost });
   } catch (error) {
     res.status(500).json({ message: "Failed to create home post", error: error.message });
@@ -3023,6 +3036,7 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
       return;
     }
     await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
     res.json({ post: normalizeHomePostRow(updated.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to update live video", error: error.message });
@@ -3134,6 +3148,7 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
 
     await query(`DELETE FROM home_posts WHERE id = $1`, [postId]);
     await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete post", error: error.message });
@@ -3169,6 +3184,85 @@ router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to submit report", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
+  try {
+    await backfillHomePostUserIds();
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const viewerId = Number(req.user.userId);
+    const cacheKey = `v1:home:posts:mine:${viewerId}`;
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.posts)) {
+      res.json(cached);
+      return;
+    }
+
+    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [viewerId]);
+    const fullName = String(userRes.rows[0]?.full_name || "").trim();
+    const username = String(userRes.rows[0]?.username || "").trim();
+    const emailLocal = String(userRes.rows[0]?.email || "")
+      .split("@")[0]
+      .trim();
+
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE
+        p.user_id = $1
+        OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($2))
+        OR ($3::text IS NOT NULL AND $3 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($3)))
+        OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+      ORDER BY p.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId, fullName, username || null, emailLocal || null]
+    );
+
+    const body = { posts: dedupeHomePostRows(result.rows) };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 30);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load profile posts", error: error.message });
   }
 });
 
