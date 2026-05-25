@@ -18,6 +18,7 @@ import type { HomePost } from "../../services/api";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
+import { LiveKitRoomView } from "./LiveKitRoomView";
 
 const LIME = APP_LIME;
 const RED_LIVE = "#FF3040";
@@ -63,6 +64,10 @@ function formatViewers(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return String(n);
+}
+
+function liveRoomName(post: HomePost) {
+  return post.liveRoomName || `agrovibes-live-${post.id}`;
 }
 
 /** Prefer explicit [LIVE] posts; otherwise surface recent video posts for discovery. */
@@ -221,7 +226,14 @@ export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePo
                 <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
               </Pressable>
             ) : null}
-            {watchingPost.videoUrl ? (
+            {watchingPost.liveStatus === "active" && !watchingPost.videoUrl ? (
+              <LiveKitRoomView
+                visible
+                roomName={liveRoomName(watchingPost)}
+                isHost={false}
+                title={liveTitle(watchingPost, language, t)}
+              />
+            ) : watchingPost.videoUrl ? (
               <Video
                 source={{ uri: watchingPost.videoUrl }}
                 style={styles.viewerVideo}

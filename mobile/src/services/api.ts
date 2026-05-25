@@ -126,6 +126,18 @@ async function parseJsonOrThrow(response: Response) {
   return parsed;
 }
 
+export function formatLiveStreamError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Could not join live.";
+  const status = typeof (error as { status?: number })?.status === "number" ? (error as { status: number }).status : null;
+  if (status === 404 || message.includes("(404)")) {
+    return "Live streaming API is not deployed on Render yet. Redeploy the latest backend, then add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.";
+  }
+  if (status === 503 || message.includes("(503)")) {
+    return "LiveKit is not configured on the server. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in Render env vars.";
+  }
+  return message;
+}
+
 export async function authRegister(payload: {
   email: string;
   password: string;
@@ -313,6 +325,8 @@ export interface HomePost {
   liveViewerCount?: number;
   /** Client-side timestamp for active live sessions. */
   liveStartedAt?: string;
+  /** LiveKit room name for active live sessions. */
+  liveRoomName?: string;
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -728,6 +742,14 @@ export async function scheduleLiveSession(token: string, payload: { topic: strin
       scheduledAt: string;
     };
   }
+}
+
+export async function createLiveKitToken(token: string, payload: { roomName: string; canPublish: boolean }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/token`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { token: string; url: string; roomName: string; identity: string; name: string };
 }
 
 export async function sendFollowRequest(token: string, targetUserId: number) {
