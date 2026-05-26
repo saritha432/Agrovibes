@@ -29,7 +29,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
-import { takePendingSharedPostViewer } from "../navigation/sharedPostViewerBridge";
+import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
@@ -70,7 +70,7 @@ import {
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
-import { LiveHomeSection, isActiveLiveStream } from "./live/LiveHomeSection";
+import { LiveHomeSection, isActiveLiveStream, isLivePost } from "./live/LiveHomeSection";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
@@ -1106,7 +1106,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
     if (activeHomeTab === "Feed") {
       return orderPostsForFeed(
-        strip(posts).filter((p) => !isActiveLiveStream(p)),
+        strip(posts).filter((p) => !isLivePost(p) || isActiveLiveStream(p)),
         feedShuffleSeed,
         nowMs
       );
@@ -1116,6 +1116,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         strip(
           posts.filter((p) => {
             if (!p.videoUrl) return false;
+            if (isLivePost(p)) return false;
             const uid = Number(p.userId);
             return Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid);
           })
@@ -1198,6 +1199,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setReelViewerOpen({ posts: ordered, initialIndex });
   }, [tabPosts]);
 
+  const openQueuedSharedPosts = useCallback((queued: { posts: HomePost[]; initialIndex: number }) => {
+    if (!queued.posts.length) return;
+    const initialIndex = queued.initialIndex;
+    const post = queued.posts[initialIndex] ?? queued.posts[0];
+    if (!post) return;
+    setPlayingPostId(post.id);
+    setReelViewerOpen({ posts: queued.posts, initialIndex });
+  }, []);
+
   const handleJoinLivePost = useCallback(
     (postId: number) => {
       setActiveHomeTab("live");
@@ -1218,11 +1228,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useFocusEffect(
     useCallback(() => {
       const pending = takePendingSharedPostViewer();
-      if (pending) openPostFromFeed(pending.post, { isolated: pending.isolated });
+      if (pending) openQueuedSharedPosts(pending);
       const pendingLive = takePendingJoinLive();
       if (pendingLive?.postId) handleJoinLivePost(pendingLive.postId);
-    }, [handleJoinLivePost, openPostFromFeed])
+    }, [handleJoinLivePost, openQueuedSharedPosts])
   );
+
+  useEffect(() => {
+    const unsubscribe = subscribeOpenSharedPostsViewer(openQueuedSharedPosts);
+    return () => {
+      unsubscribe();
+    };
+  }, [openQueuedSharedPosts]);
 
   useEffect(() => subscribeJoinLive(handleJoinLivePost), [handleJoinLivePost]);
 
@@ -1521,8 +1538,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     let mounted = true;
     (async () => {
       const pending = takePendingFeedPost?.();
-      if (pending?.liveStatus === "ended") {
-        setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending } : p)));
+      if (pending && isLivePost(pending) && (pending.liveStatus === "ended" || pending.videoUrl)) {
+        setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending, liveStatus: "ended" as const } : p)));
       }
       try {
         const data = await fetchHomePosts(token ?? null);
