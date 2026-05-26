@@ -25,6 +25,8 @@ import {
 } from "../social/notificationFeedSnapshot";
 import { APP_LIME } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
+import { navigateToJoinLive } from "../navigation/navigationRef";
+import { queueJoinLive } from "../navigation/liveJoinBridge";
 
 type NotificationPanelContextValue = {
   sheetOpen: boolean;
@@ -284,6 +286,15 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
   };
 
+  const onJoinLive = async (entry: any) => {
+    const postId = Number(entry?.postId);
+    if (!Number.isFinite(postId) || postId <= 0) return;
+    await onMarkPostActivityRead(entry);
+    queueJoinLive(postId);
+    setSheetOpen(false);
+    navigateToJoinLive();
+  };
+
   const postActivityLabel = (n: any) => {
     const kind = n.postIsReel ? t("postKindReel") : t("postKindPost");
     const ex = String(n.commentExcerpt || "").trim();
@@ -464,11 +475,20 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   );
                 }
                 if (item.kind === "live_start") {
+                  const postId = Number(n.postId);
+                  const canJoin = Number.isFinite(postId) && postId > 0;
                   return (
-                    <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
-                      <Ionicons name="radio" size={16} color="#ef4444" />
-                      <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
-                    </Pressable>
+                    <View key={item.key} style={styles.liveStartRow}>
+                      <Pressable style={styles.liveStartMain} onPress={() => (canJoin ? void onJoinLive(n) : void onMarkPostActivityRead(n))}>
+                        <Ionicons name="radio" size={16} color="#ef4444" />
+                        <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
+                      </Pressable>
+                      {canJoin ? (
+                        <Pressable style={styles.joinLiveBtn} onPress={() => void onJoinLive(n)}>
+                          <Text style={styles.joinLiveText}>Join live</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
                   );
                 }
                 if (item.kind === "post_like") {
@@ -551,5 +571,18 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "#252a30",
     padding: 10
-  }
+  },
+  liveStartRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#3a424c",
+    borderRadius: 10,
+    backgroundColor: "#252a30",
+    padding: 10
+  },
+  liveStartMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  joinLiveBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
+  joinLiveText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 }
 });

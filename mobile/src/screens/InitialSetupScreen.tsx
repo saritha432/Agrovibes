@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -197,7 +198,12 @@ const ONBOARDING_PROGRESS_STEP_COUNT = SLIDES.length - ONBOARDING_AUTOPLAY_START
 const LANGUAGE_OPTIONS: { value: AppLanguage; label: string; nativeLabel: string; helper: string }[] = [
   { value: "English", label: "English", nativeLabel: "English", helper: "App language" },
   { value: "Hindi", label: "Hindi", nativeLabel: "हिन्दी", helper: "ऐप की भाषा" },
-  { value: "Telugu", label: "Telugu", nativeLabel: "తెలుగు", helper: "యాప్ భాష" }
+  { value: "Telugu", label: "Telugu", nativeLabel: "తెలుగు", helper: "యాప్ భాష" },
+  { value: "Kannada", label: "Kannada", nativeLabel: "ಕನ್ನಡ", helper: "ಅಪ್ಲಿಕೇಶನ್ ಭಾಷೆ" },
+  { value: "Malayalam", label: "Malayalam", nativeLabel: "മലയാളം", helper: "ആപ്പ് ഭാഷ" },
+  { value: "Tamil", label: "Tamil", nativeLabel: "தமிழ்", helper: "செயலி மொழி" },
+  { value: "Marathi", label: "Marathi", nativeLabel: "मराठी", helper: "अॅप भाषा" },
+  { value: "Bengali", label: "Bengali", nativeLabel: "বাংলা", helper: "অ্যাপের ভাষা" }
 ];
 
 export function InitialSetupScreen() {
@@ -495,7 +501,7 @@ export function InitialSetupScreen() {
             <View style={styles.languageSheetHandle} />
             <Text style={styles.languageSheetTitle}>{t("chooseLanguageTitle").replace(/\n/g, " ")}</Text>
             <Text style={styles.languageSheetSubtitle}>{t("chooseLanguageSub")}</Text>
-            <View style={styles.languageList}>
+            <ScrollView style={styles.languageListScroll} contentContainerStyle={styles.languageList} showsVerticalScrollIndicator={false}>
               {LANGUAGE_OPTIONS.map((option) => {
                 const isActive = option.value === language;
                 return (
@@ -521,7 +527,7 @@ export function InitialSetupScreen() {
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -684,6 +690,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 10,
     paddingBottom: 26,
+    maxHeight: "80%",
     borderWidth: 1,
     borderColor: "rgba(201, 255, 53, 0.2)"
   },
@@ -703,7 +710,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 8
   },
-  languageList: { gap: 10, marginTop: 18 },
+  languageListScroll: { flex: 1, marginTop: 18 },
+  languageList: { gap: 10, paddingBottom: 12 },
   languageOption: {
     borderWidth: 1,
     borderColor: "rgba(242, 244, 239, 0.12)",

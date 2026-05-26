@@ -26,6 +26,9 @@ import { UserSearchScreen } from "../screens/UserSearchScreen";
 import { PublicProfileScreen } from "../screens/PublicProfileScreen";
 import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
+import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
+import { PrivacyScreen } from "../screens/PrivacyScreen";
+import { AboutScreen } from "../screens/AboutScreen";
 import type { MarketStackParamList } from "./MarketStackNavigator";
 import type { LearnStackParamList } from "./LearnStackNavigator";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
@@ -64,6 +67,9 @@ export type RootStackParamList = {
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
   DirectInbox: undefined;
   DirectChat: { peerUserId: number; peerName: string; peerKey?: string; peerAvatarUrl?: string | null };
+  SettingsMenu: undefined;
+  Privacy: undefined;
+  About: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -144,6 +150,9 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="SettingsMenu" component={SettingsMenuScreen} options={{ headerShown: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

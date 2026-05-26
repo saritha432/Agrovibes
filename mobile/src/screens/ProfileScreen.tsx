@@ -25,7 +25,6 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
-import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   fetchSavedHomePosts,
@@ -83,12 +82,11 @@ function reelGridStillUri(post: HomePost): string | null {
 
 type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
-export function ProfileScreen() {
+export function ProfileScreen({ route }: { route?: any }) {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width, height: windowHeight } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
   const { t } = useLanguage();
-  const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
   const [userPosts, setUserPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
@@ -109,7 +107,9 @@ export function ProfileScreen() {
   const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
   const [followerRemoveConfirm, setFollowerRemoveConfirm] = useState<{ name: string; key?: string } | null>(null);
   const [removeFollowerBusy, setRemoveFollowerBusy] = useState(false);
-  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Reels");
+  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>(
+    route?.params?.initialTab === "Saved" ? "Saved" : "Reels"
+  );
   const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
   const [playingReelId, setPlayingReelId] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
@@ -219,6 +219,14 @@ export function ProfileScreen() {
     }
     return true;
   }, [user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (route?.params?.initialTab === "Saved") {
+        setActiveGalleryTab("Saved");
+      }
+    }, [route?.params?.initialTab])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -616,15 +624,8 @@ export function ProfileScreen() {
             <Pressable hitSlop={8} onPress={navigateToUserSearch}>
               <Ionicons name="search-outline" size={18} color={LIME} />
             </Pressable>
-            <Pressable hitSlop={8} onPress={openNotificationSheet}>
-              <View style={styles.iconBadgeWrap}>
-                <Ionicons name="notifications-outline" size={18} color={LIME} />
-                {notificationUnreadCount > 0 ? (
-                  <View style={styles.notificationBadge}>
-                    <Text style={styles.notificationBadgeText}>{Math.min(99, notificationUnreadCount)}</Text>
-                  </View>
-                ) : null}
-              </View>
+            <Pressable hitSlop={8} onPress={() => navigation.navigate("SettingsMenu" as any)}>
+              <Ionicons name="menu-outline" size={22} color={LIME} />
             </Pressable>
           </View>
         </View>
@@ -728,9 +729,6 @@ export function ProfileScreen() {
                 </Pressable>
               ) : null}
 
-              <Pressable onPress={handleLogout} style={styles.logoutLink}>
-                <Text style={styles.logoutLinkText}>Log out</Text>
-              </Pressable>
             </View>
 
             <View style={styles.gallerySection}>
@@ -1246,6 +1244,7 @@ export function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
     </>
   );
 }

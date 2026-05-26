@@ -126,6 +126,25 @@ async function parseJsonOrThrow(response: Response) {
   return parsed;
 }
 
+export function formatLiveStreamError(error: unknown): string {
+  const err = error as { message?: string; status?: number; payload?: { issues?: string[]; message?: string } };
+  const message = error instanceof Error ? error.message : "Could not join live.";
+  const status = typeof err?.status === "number" ? err.status : null;
+  if (Array.isArray(err?.payload?.issues) && err.payload.issues.length) {
+    return err.payload.issues.join(" ");
+  }
+  if (status === 404 || message.includes("(404)")) {
+    return "Live streaming API is not deployed on Render yet. Redeploy the latest backend, then add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.";
+  }
+  if (status === 503 || message.includes("(503)")) {
+    return "LiveKit is not configured on the server. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in Render env vars.";
+  }
+  if (/invalid token/i.test(message)) {
+    return "LiveKit rejected the token. Camera may turn on, but video won't show until Render LIVEKIT_URL, API key and secret all match the same LiveKit Cloud project. Redeploy after saving env vars.";
+  }
+  return message;
+}
+
 export async function authRegister(payload: {
   email: string;
   password: string;
@@ -313,6 +332,8 @@ export interface HomePost {
   liveViewerCount?: number;
   /** Client-side timestamp for active live sessions. */
   liveStartedAt?: string;
+  /** LiveKit room name for active live sessions. */
+  liveRoomName?: string;
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -708,6 +729,13 @@ export async function updateHomePostLiveVideo(
   })) as { post: HomePost };
 }
 
+export async function endHomeLivePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  })) as { post: HomePost };
+}
+
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
   const init = {
     method: "POST",
@@ -728,6 +756,14 @@ export async function scheduleLiveSession(token: string, payload: { topic: strin
       scheduledAt: string;
     };
   }
+}
+
+export async function createLiveKitToken(token: string, payload: { roomName: string; canPublish: boolean }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/token`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { token: string; url: string; roomName: string; identity: string; name: string };
 }
 
 export async function sendFollowRequest(token: string, targetUserId: number) {

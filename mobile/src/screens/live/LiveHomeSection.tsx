@@ -18,6 +18,7 @@ import type { HomePost } from "../../services/api";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
+import { LiveKitRoomView } from "./LiveKitRoomView";
 
 const LIME = APP_LIME;
 const RED_LIVE = "#FF3040";
@@ -26,6 +27,10 @@ const CARD = APP_SURFACE;
 
 export function isLivePost(post: HomePost) {
   return /^\[LIVE\]/i.test(String(post.caption || "").trim());
+}
+
+export function isActiveLiveStream(post: HomePost) {
+  return isLivePost(post) && post.liveStatus === "active" && !String(post.videoUrl || "").trim();
 }
 
 function isReelPost(post: HomePost) {
@@ -50,13 +55,15 @@ function liveTitle(post: HomePost, language: import("../../localization/translat
   return music ? formatFeedText(music, language, t) : t("liveStream");
 }
 
-function liveViewerCount(post: HomePost, tick: number) {
-  const seed = Math.abs(post.id) || 1;
-  const startedAt = Date.parse(post.liveStartedAt || post.createdAt || "");
-  const elapsedBucket = Number.isFinite(startedAt) ? Math.max(0, Math.floor((Date.now() - startedAt) / 5000)) : tick;
-  const base = post.liveViewerCount ?? (post.liveStatus === "active" ? 1 + (seed % 9) : 180 + ((seed * 97) % 4200));
-  const wave = post.liveStatus === "active" ? (elapsedBucket * 3 + seed) % 18 : 0;
-  return base + wave + Math.max(0, post.likesCount) * 4;
+/** Prefer explicit [LIVE] posts that are still broadcasting. */
+export function buildLiveFeed(posts: HomePost[]): HomePost[] {
+  return posts.filter((p) => isLivePost(p) && isActiveLiveStream(p));
+}
+
+function liveViewerCountForCard(post: HomePost) {
+  if (post.liveStatus !== "active") return 0;
+  const count = Number(post.liveViewerCount);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
 }
 
 function formatViewers(n: number) {
@@ -65,26 +72,24 @@ function formatViewers(n: number) {
   return String(n);
 }
 
-/** Prefer explicit [LIVE] posts; otherwise surface recent video posts for discovery. */
-export function buildLiveFeed(posts: HomePost[]): HomePost[] {
-  const liveTagged = posts.filter((p) => isLivePost(p) && (p.liveStatus === "active" || p.videoUrl || livePosterUri(p)));
-  if (liveTagged.length) return liveTagged;
-  return posts.filter((p) => p.videoUrl && !isReelPost(p)).slice(0, 12);
+function liveRoomName(post: HomePost) {
+  return post.liveRoomName || `agrovibes-live-${post.id}`;
 }
 
 type LiveHomeSectionProps = {
   posts: HomePost[];
+  joinPostId?: number | null;
+  onJoinConsumed?: () => void;
   onOpenCreate?: () => void;
   canDeletePost?: (post: HomePost) => boolean;
   onDeletePost?: (post: HomePost) => void;
 };
 
-export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePost }: LiveHomeSectionProps) {
+export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreate, canDeletePost, onDeletePost }: LiveHomeSectionProps) {
   const { t, language } = useLanguage();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [watching, setWatching] = React.useState<HomePost | null>(null);
-  const [viewerTick, setViewerTick] = React.useState(0);
 
   const livePosts = React.useMemo(() => buildLiveFeed(posts), [posts]);
   const watchingPost = React.useMemo(
@@ -97,9 +102,13 @@ export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePo
   const cardWidth = (width - gridPad * 2 - gridGap) / 2;
 
   React.useEffect(() => {
-    const timer = setInterval(() => setViewerTick((v) => v + 1), 5000);
-    return () => clearInterval(timer);
-  }, []);
+    if (!joinPostId) return;
+    const target = posts.find((p) => p.id === joinPostId && isActiveLiveStream(p));
+    if (target) {
+      setWatching(target);
+      onJoinConsumed?.();
+    }
+  }, [joinPostId, onJoinConsumed, posts]);
 
   return (
     <View style={styles.root}>
@@ -172,7 +181,7 @@ export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePo
                     </View>
                     <View style={styles.gridViewersPill}>
                       <Ionicons name="eye-outline" size={12} color="#fff" />
-                      <Text style={styles.gridViewersText}>{formatViewers(liveViewerCount(post, viewerTick))}</Text>
+                      <Text style={styles.gridViewersText}>{formatViewers(liveViewerCountForCard(post))}</Text>
                     </View>
                   </View>
                   <Text style={styles.gridTitle} numberOfLines={2}>
@@ -205,70 +214,82 @@ export function LiveHomeSection({ posts, onOpenCreate, canDeletePost, onDeletePo
       <Modal visible={watchingPost != null} animationType="slide" onRequestClose={() => setWatching(null)}>
         {watchingPost ? (
           <View style={styles.viewerRoot}>
-            <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={() => setWatching(null)} hitSlop={12}>
-              <Ionicons name="close" size={28} color="#fff" />
-            </Pressable>
-            {canDeleteWatching ? (
-              <Pressable
-                style={[styles.viewerDelete, { top: insets.top + 8 }]}
-                onPress={() => {
-                  const post = watchingPost;
-                  setWatching(null);
-                  onDeletePost?.(post);
-                }}
-                hitSlop={12}
-              >
-                <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
-              </Pressable>
-            ) : null}
-            {watchingPost.videoUrl ? (
-              <Video
-                source={{ uri: watchingPost.videoUrl }}
-                style={styles.viewerVideo}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay
-                isLooping
-                isMuted={false}
-                useNativeControls={false}
+            {isActiveLiveStream(watchingPost) ? (
+              <LiveKitRoomView
+                visible
+                roomName={liveRoomName(watchingPost)}
+                isHost={false}
+                title={liveTitle(watchingPost, language, t)}
+                onClose={() => setWatching(null)}
               />
-            ) : livePosterUri(watchingPost) ? (
-              <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="cover" />
             ) : (
-              <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
-                <Ionicons name="videocam-outline" size={48} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.viewerVideoPlaceholderText}>Live video is starting...</Text>
-              </View>
-            )}
-            <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
-            <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
-              <View style={styles.viewerLivePill}>
-                <View style={styles.gridLiveDot} />
-                <Text style={styles.viewerLiveText}>LIVE</Text>
-              </View>
-              <Text style={styles.viewerViewers}>{formatViewers(liveViewerCount(watchingPost, viewerTick))} watching</Text>
-            </View>
-            <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
-              <View style={styles.viewerHostRow}>
-                <UserAvatar uri={watchingPost.authorAvatarUrl} name={watchingPost.userName} size={40} borderRadius={20} />
-                <View style={styles.viewerHostText}>
-                  <Text style={styles.viewerHostName}>{watchingPost.userName}</Text>
-                  <Text style={styles.viewerHostTitle} numberOfLines={2}>
-                    {liveTitle(watchingPost, language, t)}
-                  </Text>
+              <>
+                <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={() => setWatching(null)} hitSlop={12}>
+                  <Ionicons name="close" size={28} color="#fff" />
+                </Pressable>
+                {canDeleteWatching ? (
+                  <Pressable
+                    style={[styles.viewerDelete, { top: insets.top + 8 }]}
+                    onPress={() => {
+                      const post = watchingPost;
+                      setWatching(null);
+                      onDeletePost?.(post);
+                    }}
+                    hitSlop={12}
+                  >
+                    <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
+                  </Pressable>
+                ) : null}
+                {watchingPost.videoUrl ? (
+                  <Video
+                    source={{ uri: watchingPost.videoUrl }}
+                    style={styles.viewerVideo}
+                    resizeMode={ResizeMode.COVER}
+                    shouldPlay
+                    isLooping
+                    isMuted={false}
+                    useNativeControls={false}
+                  />
+                ) : livePosterUri(watchingPost) ? (
+                  <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
+                    <Ionicons name="videocam-outline" size={48} color="rgba(255,255,255,0.4)" />
+                    <Text style={styles.viewerVideoPlaceholderText}>Live video is starting...</Text>
+                  </View>
+                )}
+                <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
+                <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
+                  <View style={styles.viewerLivePill}>
+                    <View style={styles.gridLiveDot} />
+                    <Text style={styles.viewerLiveText}>LIVE</Text>
+                  </View>
+                  <Text style={styles.viewerViewers}>{formatViewers(liveViewerCountForCard(watchingPost))} watching</Text>
                 </View>
-              </View>
-              <View style={styles.viewerActions}>
-                <Pressable style={styles.viewerActionBtn}>
-                  <Ionicons name="heart-outline" size={26} color="#fff" />
-                </Pressable>
-                <Pressable style={styles.viewerActionBtn}>
-                  <Ionicons name="chatbubble-outline" size={24} color="#fff" />
-                </Pressable>
-                <Pressable style={styles.viewerActionBtn}>
-                  <Ionicons name="share-social-outline" size={24} color="#fff" />
-                </Pressable>
-              </View>
-            </View>
+                <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
+                  <View style={styles.viewerHostRow}>
+                    <UserAvatar uri={watchingPost.authorAvatarUrl} name={watchingPost.userName} size={40} borderRadius={20} />
+                    <View style={styles.viewerHostText}>
+                      <Text style={styles.viewerHostName}>{watchingPost.userName}</Text>
+                      <Text style={styles.viewerHostTitle} numberOfLines={2}>
+                        {liveTitle(watchingPost, language, t)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.viewerActions}>
+                    <Pressable style={styles.viewerActionBtn}>
+                      <Ionicons name="heart-outline" size={26} color="#fff" />
+                    </Pressable>
+                    <Pressable style={styles.viewerActionBtn}>
+                      <Ionicons name="chatbubble-outline" size={24} color="#fff" />
+                    </Pressable>
+                    <Pressable style={styles.viewerActionBtn}>
+                      <Ionicons name="share-social-outline" size={24} color="#fff" />
+                    </Pressable>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
         ) : null}
       </Modal>

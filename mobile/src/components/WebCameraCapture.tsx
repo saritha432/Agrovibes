@@ -12,6 +12,8 @@ type Props = {
   onCapture: (asset: ImagePickerAsset) => void;
   initialFacing?: WebCameraFacing;
   allowVideo?: boolean;
+  mode?: "any" | "video";
+  autoStartVideo?: boolean;
 };
 
 function stopStream(stream: MediaStream | null) {
@@ -19,7 +21,15 @@ function stopStream(stream: MediaStream | null) {
   for (const track of stream.getTracks()) track.stop();
 }
 
-export function WebCameraCapture({ visible, onClose, onCapture, initialFacing = "front", allowVideo = true }: Props) {
+export function WebCameraCapture({
+  visible,
+  onClose,
+  onCapture,
+  initialFacing = "front",
+  allowVideo = true,
+  mode = "any",
+  autoStartVideo = false
+}: Props) {
   const insets = useSafeAreaInsets();
   const hostRef = useRef<View>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -174,6 +184,12 @@ export function WebCameraCapture({ visible, onClose, onCapture, initialFacing = 
     }
   };
 
+  useEffect(() => {
+    if (!visible || !ready || !allowVideo || !autoStartVideo || recording || busy) return;
+    const timer = setTimeout(() => void toggleRecording(), 120);
+    return () => clearTimeout(timer);
+  }, [allowVideo, autoStartVideo, busy, ready, recording, visible]);
+
   if (!visible || typeof document === "undefined") return null;
 
   return (
@@ -208,12 +224,17 @@ export function WebCameraCapture({ visible, onClose, onCapture, initialFacing = 
 
         <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {allowVideo ? (
-            <Text style={styles.hint}>{recording ? "Tap to stop" : "Tap photo · long-press for video"}</Text>
+            <Text style={styles.hint}>
+              {recording ? "Live recording · tap to stop" : mode === "video" ? "Starting live video..." : "Tap photo · long-press for video"}
+            </Text>
           ) : null}
           <Pressable
             style={[styles.shutterOuter, recording ? styles.shutterOuterRec : null]}
-            onPress={() => void takePhoto()}
-            onLongPress={allowVideo ? () => void toggleRecording() : undefined}
+            onPress={() => {
+              if (mode === "video") void toggleRecording();
+              else void takePhoto();
+            }}
+            onLongPress={allowVideo && mode !== "video" ? () => void toggleRecording() : undefined}
             delayLongPress={300}
             disabled={!ready || busy}
           >
