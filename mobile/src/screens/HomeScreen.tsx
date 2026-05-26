@@ -72,7 +72,8 @@ import {
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
-import { LiveHomeSection, isActiveLiveStream, isLivePost } from "./live/LiveHomeSection";
+import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isActiveLiveStream, isLivePost } from "./live/LiveHomeSection";
+import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
@@ -1052,6 +1053,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     });
   }, [tabFadeAnim, tabSlideAnim, tabScaleAnim]);
   const [liveJoinPostId, setLiveJoinPostId] = useState<number | null>(null);
+  const [watchingLivePost, setWatchingLivePost] = useState<HomePost | null>(null);
   const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
   const [socialAvatarsByUserId, setSocialAvatarsByUserId] = useState<Map<number, string>>(() => new Map());
   const [followerUserIds, setFollowerUserIds] = useState<Set<number>>(new Set());
@@ -1255,16 +1257,43 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setActiveHomeTab("live");
       setLiveJoinPostId(postId);
       void (async () => {
-        try {
-          const fresh = await fetchHomePosts(token ?? null);
-          setPosts(fresh.posts);
-        } catch {
-          // Keep current feed if refresh fails.
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            const fresh = await fetchHomePosts(token ?? null);
+            setPosts(fresh.posts);
+            const target = findJoinableLivePost(fresh.posts, postId);
+            if (target) {
+              setWatchingLivePost(target);
+              setLiveJoinPostId(null);
+              return;
+            }
+          } catch {
+            // Keep retrying briefly so join works after host connects.
+          }
+          if (attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 700));
+          }
         }
       })();
     },
     [token]
   );
+
+  const openLiveStream = useCallback((post: HomePost) => {
+    setWatchingLivePost(post);
+  }, []);
+
+  const activeLivePosts = useMemo(() => buildLiveFeed(posts), [posts]);
+
+  useEffect(() => {
+    if (!token) return;
+    const timer = setInterval(() => {
+      void fetchHomePosts(token)
+        .then((data) => setPosts(data.posts))
+        .catch(() => {});
+    }, 20000);
+    return () => clearInterval(timer);
+  }, [token]);
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
   useFocusEffect(
@@ -1502,6 +1531,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     groups.sort((a, b) => storyTimeMs(b.stories[b.stories.length - 1]) - storyTimeMs(a.stories[a.stories.length - 1]));
     return groups;
   }, [avatarLookup, otherStories, posts, user]);
+
+  const storyGroupsWithoutLive = useMemo(() => {
+    const liveUserIds = new Set(
+      activeLivePosts.map((p) => Number(p.userId)).filter((id) => Number.isFinite(id) && id > 0)
+    );
+    const liveNames = new Set(activeLivePosts.map((p) => normalizeIdentity(p.userName)).filter(Boolean));
+    return otherStoryGroups.filter((group) => {
+      const storyUserId = Number(group.stories[0]?.userId);
+      if (Number.isFinite(storyUserId) && storyUserId > 0 && liveUserIds.has(storyUserId)) return false;
+      const groupName = normalizeIdentity(group.userName);
+      return !(groupName && liveNames.has(groupName));
+    });
+  }, [activeLivePosts, otherStoryGroups]);
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
   const activeStoryAvatarUri = activeStory ? storyAuthorAvatarUri(activeStory, user, avatarLookup, posts) : undefined;
@@ -2708,7 +2750,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Text>
           </Pressable>
 
-          {otherStoryGroups.map((group) => (
+          {activeLivePosts.map((post) => (
+            <LiveStoryRing
+              key={`live-story-${post.id}`}
+              post={post}
+              onPress={() => openLiveStream(post)}
+              nameStyle={(isReelSurfaceTab || isLiveTab) ? styles.storyNameDark : styles.storyName}
+            />
+          ))}
+
+          {storyGroupsWithoutLive.map((group) => (
             <Pressable
               key={group.key}
               style={styles.storyItem}
@@ -2788,14 +2839,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     ),
     [
       activeHomeTab,
+      activeLivePosts,
       avatarLookup,
       displayPersonName,
       homeTabLabel,
       isReelSurfaceTab,
       onOpenCreate,
-      otherStoryGroups,
+      openLiveStream,
       ownPlayableStories,
       posts,
+      storyGroupsWithoutLive,
       user,
       visibleHomeTopTabs
     ]
@@ -3437,6 +3490,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             onOpenCreate={() => onOpenCreate?.("live")}
             canDeletePost={(post) => viewerOwnsPost(post, user)}
             onDeletePost={confirmDeleteOwnPost}
+            watchingPost={watchingLivePost}
+            onWatchingChange={setWatchingLivePost}
           />
         </View>
       ) : useFullScreenReelLayout ? (
@@ -4192,6 +4247,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           </Pressable>
         </Pressable>
       </Modal>
+
+      <LiveStreamViewerModal
+        post={watchingLivePost}
+        onClose={() => setWatchingLivePost(null)}
+        canDeletePost={(post) => viewerOwnsPost(post, user)}
+        onDeletePost={confirmDeleteOwnPost}
+      />
     </View>
   );
 }
