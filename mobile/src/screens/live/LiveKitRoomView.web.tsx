@@ -71,15 +71,24 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
 
   const localName = user?.fullName || "You";
 
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+  const isHostRef = React.useRef(isHost);
+  isHostRef.current = isHost;
+  const localNameRef = React.useRef(localName);
+  localNameRef.current = localName;
+  const liveEndedRef = React.useRef(false);
+
   const refreshViewers = React.useCallback(
     (room: Room) => {
-      setViewers(collectViewers(room, isHost, localName));
+      setViewers(collectViewers(room, isHostRef.current, localNameRef.current));
     },
-    [isHost, localName]
+    []
   );
 
   const handleLiveEnded = React.useCallback(() => {
-    if (liveEnded) return;
+    if (liveEndedRef.current) return;
+    liveEndedRef.current = true;
     setLiveEnded(true);
     setStatus("Live ended");
     const room = roomRef.current;
@@ -90,12 +99,13 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         // no-op
       }
     }
-    window.setTimeout(() => onClose?.(), 1200);
-  }, [liveEnded, onClose]);
+    window.setTimeout(() => onCloseRef.current?.(), 1200);
+  }, []);
 
   React.useEffect(() => {
     if (!visible || !roomName) return;
     let cancelled = false;
+    liveEndedRef.current = false;
     const room = new Room();
     roomRef.current = room;
 
@@ -123,21 +133,21 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track) => {
-        if (!isHost && track.kind === Track.Kind.Video) {
+        if (!isHostRef.current && track.kind === Track.Kind.Video) {
           handleLiveEnded();
         }
       })
       .on(RoomEvent.ParticipantConnected, () => refreshViewers(room))
       .on(RoomEvent.ParticipantDisconnected, () => {
         refreshViewers(room);
-        if (!isHost && room.remoteParticipants.size === 0) {
+        if (!isHostRef.current && room.remoteParticipants.size === 0) {
           handleLiveEnded();
         }
       })
       .on(RoomEvent.DataReceived, onData)
       .on(RoomEvent.Disconnected, () => {
-        if (cancelled || liveEnded) return;
-        if (!isHost) handleLiveEnded();
+        if (cancelled || liveEndedRef.current) return;
+        if (!isHostRef.current) handleLiveEnded();
       });
 
     (async () => {
@@ -146,12 +156,12 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         return;
       }
       try {
-        const lk = await createLiveKitToken(token, { roomName, canPublish: isHost });
+        const lk = await createLiveKitToken(token, { roomName, canPublish: isHostRef.current });
         if (cancelled) return;
         await room.connect(lk.url, lk.token);
         if (cancelled) return;
         refreshViewers(room);
-        if (isHost) {
+        if (isHostRef.current) {
           const tracks = await createLocalTracks({ audio: true, video: true });
           localTracksRef.current = tracks;
           for (const track of tracks) {
@@ -193,7 +203,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       roomRef.current = null;
       if (videoHostRef.current) videoHostRef.current.innerHTML = "";
     };
-  }, [handleLiveEnded, isHost, liveEnded, localName, refreshViewers, roomName, token, visible]);
+  }, [roomName, token, visible]);
 
   React.useEffect(() => {
     commentsRef.current?.scrollToEnd?.({ animated: true });
@@ -215,9 +225,12 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
     setCommentDraft("");
   }, [commentDraft, liveEnded, localName]);
 
+  const onLiveEndedRef = React.useRef(onLiveEnded);
+  onLiveEndedRef.current = onLiveEnded;
+
   const handleEndLive = React.useCallback(async () => {
     const room = roomRef.current;
-    if (isHost && postId && token) {
+    if (isHostRef.current && postId && token) {
       setSavingRecording(true);
       setStatus("Saving recording...");
       let savedPost: HomePost | null = null;
@@ -236,10 +249,10 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       } catch {
         // Still end the session locally even if the server call fails.
       }
-      onLiveEnded?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
+      onLiveEndedRef.current?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
       setSavingRecording(false);
     }
-    if (isHost && room) {
+    if (isHostRef.current && room) {
       try {
         await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
           reliable: true,
@@ -254,8 +267,8 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         // no-op
       }
     }
-    onClose?.();
-  }, [isHost, onClose, onLiveEnded, postId, token]);
+    onCloseRef.current?.();
+  }, [postId, token]);
 
   const watchingCount = liveViewerCount(viewers, isHost);
 
