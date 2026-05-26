@@ -11,8 +11,8 @@ import { APP_LIME } from "../../theme/appColors";
 const GREEN = APP_LIME;
 const BG = "#262626";
 const BORDER = "#3a424c";
-/** Full list shown in onboarding; app UI uses English / Hindi / Telugu via i18n. */
-const LANGUAGES = ["English", "Hindi", "Telugu", "Punjabi", "Gujarati", "Bengali", "Marathi", "Tamil"];
+/** Full list shown in onboarding; app UI uses i18n for all supported languages. */
+const LANGUAGES = ["English", "Hindi", "Telugu", "Kannada", "Malayalam", "Tamil", "Marathi", "Bengali"];
 
 function toAppLanguage(selected: string): AppLanguage {
   return SUPPORTED_LANGUAGES.includes(selected as AppLanguage) ? (selected as AppLanguage) : "English";
