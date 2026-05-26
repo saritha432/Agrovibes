@@ -1012,6 +1012,10 @@ function normalizeHomePostRow(row) {
     } else if (dbStatus === "active") {
       base.liveStatus = "active";
       base.liveStartedAt = base.liveStartedAt || base.createdAt;
+    } else {
+      // Still broadcasting — no VOD yet and DB has not marked ended.
+      base.liveStatus = "active";
+      base.liveStartedAt = base.liveStartedAt || base.createdAt;
     }
   }
   return base;
@@ -1081,17 +1085,24 @@ async function enrichHomePostsLiveState(posts) {
       continue;
     }
     if (info.ended) {
-      post.liveStatus = "ended";
-      post.liveViewerCount = 0;
-      if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
-        await query(
-          `
-          UPDATE home_posts
-          SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
-          WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
-          `,
-          [post.id]
-        );
+      // Host may not have connected to LiveKit yet — trust DB "active" until explicitly ended.
+      const dbActive = String(post.liveStatus || "").toLowerCase() === "active";
+      if (dbActive) {
+        post.liveStatus = "active";
+        post.liveViewerCount = 0;
+      } else {
+        post.liveStatus = "ended";
+        post.liveViewerCount = 0;
+        if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
+          await query(
+            `
+            UPDATE home_posts
+            SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+            WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
+            `,
+            [post.id]
+          );
+        }
       }
     } else {
       post.liveStatus = "active";
