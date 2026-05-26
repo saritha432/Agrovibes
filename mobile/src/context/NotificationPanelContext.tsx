@@ -476,16 +476,23 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                 if (item.kind === "live_start") {
                   const postId = Number(n.postId);
                   const canJoin = Number.isFinite(postId) && postId > 0;
+                  const liveIsEnded = String(n.postLiveStatus || "").toLowerCase() === "ended";
                   return (
                     <View key={item.key} style={styles.liveStartRow}>
-                      <Pressable style={styles.liveStartMain} onPress={() => (canJoin ? void onJoinLive(n) : void onMarkPostActivityRead(n))}>
-                        <Ionicons name="radio" size={16} color="#ef4444" />
-                        <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
+                      <Pressable style={styles.liveStartMain} onPress={() => (canJoin && !liveIsEnded ? void onJoinLive(n) : void onMarkPostActivityRead(n))}>
+                        <Ionicons name="radio" size={16} color={liveIsEnded ? "rgba(255,255,255,0.4)" : "#ef4444"} />
+                        <Text style={[styles.rowText, liveIsEnded ? styles.rowTextMuted : null]}>
+                          {liveIsEnded ? `${String(n.actorName || "Someone")} — ${t("liveEndedBadge")}` : liveStartLabel(n)}
+                        </Text>
                       </Pressable>
-                      {canJoin ? (
+                      {canJoin && !liveIsEnded ? (
                         <Pressable style={styles.joinLiveBtn} onPress={() => void onJoinLive(n)}>
-                          <Text style={styles.joinLiveText}>Join live</Text>
+                          <Text style={styles.joinLiveText}>{t("joinLive") || "Join live"}</Text>
                         </Pressable>
+                      ) : liveIsEnded ? (
+                        <View style={styles.liveEndedBadge}>
+                          <Text style={styles.liveEndedBadgeText}>{t("liveEndedBadge")}</Text>
+                        </View>
                       ) : null}
                     </View>
                   );
@@ -583,5 +590,13 @@ const styles = StyleSheet.create({
   },
   liveStartMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   joinLiveBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
-  joinLiveText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 }
+  joinLiveText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
+  liveEndedBadge: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  liveEndedBadgeText: { color: "rgba(255,255,255,0.5)", fontWeight: "800", fontSize: 12 },
+  rowTextMuted: { color: "rgba(255,255,255,0.45)" }
 });

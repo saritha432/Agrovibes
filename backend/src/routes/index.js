@@ -2471,7 +2471,8 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         CASE
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
           ELSE false
-        END AS "postIsReel"
+        END AS "postIsReel",
+        p.live_status AS "postLiveStatus"
       FROM social_notifications n
       JOIN learn_users u ON u.id = n.actor_id
       LEFT JOIN social_follows f ON f.id = n.follow_id

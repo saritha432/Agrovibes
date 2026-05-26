@@ -16,7 +16,9 @@
       "backgroundColor": "#262626"
     },
     "assetBundlePatterns": [
-      "./assets/**"
+      "./assets/*.png",
+      "./assets/*.mp4",
+      "./assets/onboarding/**"
     ],
     "scheme": "agrovibes",
     "android": {
