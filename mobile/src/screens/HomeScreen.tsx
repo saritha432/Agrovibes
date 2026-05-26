@@ -47,6 +47,7 @@ import {
   fetchHomeStories,
   fetchRelationships,
   fetchSocialNetwork,
+  fetchUsers,
   getWebAppOrigin,
   HomePost,
   HomeStory,
@@ -56,7 +57,8 @@ import {
   sendFollowRequest,
   unfollowUser,
   unlikeHomePost,
-  unsaveHomePost
+  unsaveHomePost,
+  type UserSearchRecord
 } from "../services/api";
 import {
   addLocalCommentForPost,
@@ -175,21 +177,36 @@ function seededPostScore(post: HomePost, seed: number): number {
 }
 
 /**
- * Fresh posts/reels stay first so newly published content is immediately visible.
+ * The viewer's own most-recent post is always pinned first.
+ * Other fresh posts/reels stay next so newly published content is immediately visible.
  * Older content is shuffled per session/refresh so the feed does not feel stuck.
  */
-function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number): HomePost[] {
+function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number, viewerUserId?: number): HomePost[] {
+  let pinned: HomePost | undefined;
   const fresh: HomePost[] = [];
   const rest: HomePost[] = [];
+
   for (const post of list) {
     const created = postCreatedMs(post);
-    if (created > 0 && nowMs - created <= FRESH_POST_PRIORITY_MS) fresh.push(post);
-    else rest.push(post);
+    if (
+      viewerUserId &&
+      Number(post.userId) === viewerUserId &&
+      (!pinned || postCreatedMs(post) > postCreatedMs(pinned))
+    ) {
+      if (pinned) {
+        (postCreatedMs(pinned) > 0 && nowMs - postCreatedMs(pinned) <= FRESH_POST_PRIORITY_MS ? fresh : rest).push(pinned);
+      }
+      pinned = post;
+    } else if (created > 0 && nowMs - created <= FRESH_POST_PRIORITY_MS) {
+      fresh.push(post);
+    } else {
+      rest.push(post);
+    }
   }
 
   fresh.sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
   rest.sort((a, b) => seededPostScore(a, seed) - seededPostScore(b, seed) || postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
-  return [...fresh, ...rest];
+  return [...(pinned ? [pinned] : []), ...fresh, ...rest];
 }
 
 const REPORT_REASON_KEYS = [
@@ -1015,7 +1032,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
-  const [activeHomeTab, setActiveHomeTab] = useState<HomeTopTab>("Feed");
+  const [activeHomeTab, setActiveHomeTabRaw] = useState<HomeTopTab>("Feed");
+  const tabFadeAnim = useRef(new Animated.Value(1)).current;
+  const tabSlideAnim = useRef(new Animated.Value(0)).current;
+  const tabScaleAnim = useRef(new Animated.Value(1)).current;
+  const setActiveHomeTab = useCallback((tab: HomeTopTab) => {
+    Animated.parallel([
+      Animated.timing(tabFadeAnim, { toValue: 0, duration: 100, useNativeDriver: true }),
+      Animated.timing(tabSlideAnim, { toValue: 12, duration: 100, useNativeDriver: true }),
+      Animated.timing(tabScaleAnim, { toValue: 0.97, duration: 100, useNativeDriver: true }),
+    ]).start(() => {
+      setActiveHomeTabRaw(tab);
+      tabSlideAnim.setValue(-12);
+      Animated.parallel([
+        Animated.timing(tabFadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(tabSlideAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }),
+        Animated.spring(tabScaleAnim, { toValue: 1, useNativeDriver: true, tension: 65, friction: 8 }),
+      ]).start();
+    });
+  }, [tabFadeAnim, tabSlideAnim, tabScaleAnim]);
   const [liveJoinPostId, setLiveJoinPostId] = useState<number | null>(null);
   const [followingUserIds, setFollowingUserIds] = useState<Set<number>>(new Set());
   const [socialAvatarsByUserId, setSocialAvatarsByUserId] = useState<Map<number, string>>(() => new Map());
@@ -1027,6 +1062,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
+  const [suggestedUsers, setSuggestedUsers] = useState<UserSearchRecord[]>([]);
+  const [suggestedFollowBusy, setSuggestedFollowBusy] = useState<Record<number, boolean>>({});
+  const [suggestedFollowDone, setSuggestedFollowDone] = useState<Set<number>>(new Set());
+  const [suggestedDismissed, setSuggestedDismissed] = useState<Set<number>>(new Set());
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
   const [carouselPageByPostId, setCarouselPageByPostId] = useState<Record<number, number>>({});
@@ -1100,6 +1139,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     }
   );
 
+  const viewerUserId = Number(user?.id) || undefined;
+
   const tabPosts = useMemo(() => {
     const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
@@ -1121,14 +1162,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           })
         ),
         feedShuffleSeed,
-        nowMs
+        nowMs,
+        viewerUserId
       );
     }
     if (activeHomeTab === "live") {
-      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs);
+      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs, viewerUserId);
     }
-    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs);
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed]);
+    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
+  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1173,7 +1215,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     if (activeHomeTab === "Friends" && !showFriendsTab) {
-      setActiveHomeTab("Feed");
+      setActiveHomeTabRaw("Feed");
     }
   }, [activeHomeTab, showFriendsTab]);
 
@@ -1639,6 +1681,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [token, user?.id, refreshToken]);
 
   useEffect(() => {
+    if (!token || !socialNetworkHydrated) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await fetchUsers(token, { limit: 30 });
+        if (!mounted) return;
+        const myId = Number(user?.id) || 0;
+        const alreadyConnected = new Set([...followingUserIds, ...followerUserIds, myId]);
+        const candidates = (data.users || []).filter((u) => !alreadyConnected.has(u.id));
+        const followerIds = [...followerUserIds];
+        const mutualFirst = candidates.sort((a, b) => {
+          const aIsMutual = followerIds.includes(a.id) ? 1 : 0;
+          const bIsMutual = followerIds.includes(b.id) ? 1 : 0;
+          return bIsMutual - aIsMutual;
+        });
+        setSuggestedUsers(mutualFirst.slice(0, 15));
+      } catch {}
+    })();
+    return () => { mounted = false; };
+  }, [token, socialNetworkHydrated, followingUserIds, followerUserIds, user?.id]);
+
+  useEffect(() => {
     let mounted = true;
     (async () => {
       if (!user?.fullName) {
@@ -1740,6 +1804,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     },
     [followBusyByUserId, token, user?.email, user?.fullName, user?.id]
   );
+
+  const handleFollowSuggested = useCallback(async (targetUserId: number) => {
+    if (!token || suggestedFollowBusy[targetUserId]) return;
+    setSuggestedFollowBusy((prev) => ({ ...prev, [targetUserId]: true }));
+    try {
+      await sendFollowRequest(token, targetUserId);
+      setSuggestedFollowDone((prev) => new Set(prev).add(targetUserId));
+    } catch {}
+    setSuggestedFollowBusy((prev) => ({ ...prev, [targetUserId]: false }));
+  }, [token, suggestedFollowBusy]);
+
+  const handleDismissSuggested = useCallback((targetUserId: number) => {
+    setSuggestedDismissed((prev) => new Set(prev).add(targetUserId));
+  }, []);
 
   useEffect(() => {
     setExpandedReplyThreads({});
@@ -2549,7 +2627,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
-          style={[isReelSurfaceTab ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
+          style={[(isReelSurfaceTab || isLiveTab) ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
           contentContainerStyle={styles.storyRow}
         >
           <Pressable
@@ -2577,7 +2655,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   ? ownPlayableStories.some((s) => !s.viewed)
                     ? styles.storyRingNew
                     : styles.storyRingViewed
-                  : isReelSurfaceTab
+                  : (isReelSurfaceTab || isLiveTab)
                     ? styles.storyRingEmptyDark
                     : styles.storyRingEmptyLight
               ]}
@@ -2608,7 +2686,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </Pressable>
                 </View>
               </View>
-            <Text style={isReelSurfaceTab ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
+            <Text style={(isReelSurfaceTab || isLiveTab) ? styles.storyNameDark : styles.storyName} numberOfLines={1}>
               {t("yourStory")}
             </Text>
           </Pressable>
@@ -2663,6 +2741,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Pressable>
           ))}
         </ScrollView>
+
         <View style={styles.homeTopTabsBarDark}>
           <View style={styles.homeTopTabsRowDark}>
             {visibleHomeTopTabs.map((tab) => {
@@ -2673,14 +2752,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   onPress={() => setActiveHomeTab(tab)}
                   style={({ pressed }) => [
                     styles.homeTopTabPressable,
-                    pressed ? styles.homeTopTabPressablePressed : null
+                    pressed ? styles.homeTopTabPressablePressed : null,
+                    pressed ? { transform: [{ scale: 0.92 }] } : null
                   ]}
                 >
-                  <View style={[styles.homeTopTabPillDark, isActive ? styles.homeTopTabPillActiveDark : null]}>
+                  <Animated.View style={[styles.homeTopTabPillDark, isActive ? styles.homeTopTabPillActiveDark : null]}>
                     <Text style={[styles.homeTopTabTextDark, isActive ? styles.homeTopTabTextActivePillDark : null]}>
                       {homeTabLabel(tab)}
                     </Text>
-                  </View>
+                  </Animated.View>
                 </Pressable>
               );
             })}
@@ -3046,6 +3126,41 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     ]
   );
 
+  const suggestedInlineSection = useMemo(() => {
+    const visible = suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 10);
+    if (!visible.length || activeHomeTab !== "Feed") return null;
+    return (
+      <View style={styles.suggestedSection}>
+        <Text style={styles.suggestedTitle}>{t("peopleYouMayKnow") || "People You May Know"}</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
+          {visible.map((person) => {
+            const isDone = suggestedFollowDone.has(person.id);
+            const isBusy = suggestedFollowBusy[person.id];
+            return (
+              <View key={person.id} style={styles.suggestedCard}>
+                <Pressable style={styles.suggestedDismiss} onPress={() => handleDismissSuggested(person.id)}>
+                  <Ionicons name="close" size={14} color="#7a8690" />
+                </Pressable>
+                <UserAvatar uri={person.avatarUrl} name={person.fullName} size={56} borderRadius={28} />
+                <Text style={styles.suggestedName} numberOfLines={1}>{person.fullName}</Text>
+                {person.username ? <Text style={styles.suggestedUsername} numberOfLines={1}>@{person.username}</Text> : null}
+                <Pressable
+                  style={[styles.suggestedFollowBtn, isDone ? styles.suggestedFollowBtnDone : null]}
+                  onPress={() => !isDone && handleFollowSuggested(person.id)}
+                  disabled={isDone || isBusy}
+                >
+                  <Text style={[styles.suggestedFollowText, isDone ? styles.suggestedFollowTextDone : null]}>
+                    {isDone ? (t("requested") || "Requested") : isBusy ? "..." : (t("follow") || "Follow")}
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }, [suggestedUsers, suggestedDismissed, suggestedFollowDone, suggestedFollowBusy, activeHomeTab, handleDismissSuggested, handleFollowSuggested, t]);
+
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const feedDisplayName = displayPersonName(post.userName);
@@ -3075,6 +3190,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         !!(postUserId > 0 && followBusyByUserId[postUserId])
       );
       return (
+        <>
+        {index === 2 && suggestedInlineSection}
         <View style={styles.postCard}>
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
@@ -3242,6 +3359,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             <Text style={styles.comments}>{t("viewAllComments", { count: shownCommentsCount })}</Text>
           </Pressable>
         </View>
+        </>
       );
     },
     [
@@ -3259,6 +3377,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       openPostLikesSheet,
       playingPostId,
       relationships,
+      suggestedInlineSection,
       toggleFollow,
       togglePostLike,
       displayPersonName,
@@ -3289,7 +3408,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
 
   return (
-    <View style={[styles.screen, isReelSurfaceTab ? styles.screenDark : null]}>
+    <View style={[styles.screen, (isReelSurfaceTab || isLiveTab) ? styles.screenDark : null]}>
+      <Animated.View style={{ flex: 1, opacity: tabFadeAnim, transform: [{ translateY: tabSlideAnim }, { scale: tabScaleAnim }] }}>
       {isLiveTab ? (
         <View style={styles.reelsColumn}>
           {listHeader}
@@ -3377,6 +3497,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         viewabilityConfig={viewabilityConfig}
       />
       )}
+      </Animated.View>
 
       <Modal
         visible={isStoryOpen}
@@ -4305,6 +4426,32 @@ const styles = StyleSheet.create({
     backgroundColor: APP_DARK_BG
   },
   storyNameDark: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: 5, fontWeight: "600", textAlign: "center", width: "100%" },
+  suggestedSection: { paddingVertical: 10, backgroundColor: APP_DARK_BG },
+  suggestedTitle: { color: "#e0e6eb", fontSize: 13, fontWeight: "800", paddingHorizontal: 14, marginBottom: 10 },
+  suggestedRow: { paddingHorizontal: 10, gap: 10 },
+  suggestedCard: {
+    width: 140,
+    backgroundColor: "#1e2630",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#2e3842",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 10
+  },
+  suggestedDismiss: { position: "absolute", top: 8, right: 8, zIndex: 1 },
+  suggestedName: { color: "#eef3f8", fontSize: 12, fontWeight: "800", marginTop: 8, textAlign: "center" },
+  suggestedUsername: { color: "#7a8690", fontSize: 10, fontWeight: "600", marginTop: 2 },
+  suggestedFollowBtn: {
+    marginTop: 10,
+    backgroundColor: APP_LIME,
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 7
+  },
+  suggestedFollowBtnDone: { backgroundColor: "#2e3842" },
+  suggestedFollowText: { color: "#1b1f23", fontSize: 11, fontWeight: "800" },
+  suggestedFollowTextDone: { color: "#7a8690" },
   homeTopTabsBarDark: {
     backgroundColor: APP_DARK_BG
   },

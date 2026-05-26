@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
-import { useLanguage, type AppLanguage } from "../../localization/LanguageContext";
+import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister } from "../../services/api";
@@ -25,7 +25,7 @@ export function AuthChoiceScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "AuthChoice">>();
   const { signIn } = useAuth();
-  const { t, language, setLanguage } = useLanguage();
+  const { t } = useLanguage();
   const initialMode = route.params?.initialMode === "login" ? "login" : "register";
   const [mode, setMode] = React.useState<"register" | "login">(initialMode);
   const [loginPhone, setLoginPhone] = React.useState("");
@@ -87,17 +87,6 @@ export function AuthChoiceScreen() {
         </Text>
       </View>
 
-      <View style={styles.langRow}>
-        {(["English", "Hindi", "Telugu"] as AppLanguage[]).map((lang) => (
-          <Pressable
-            key={lang}
-            style={[styles.langChip, language === lang ? styles.langChipActive : null]}
-            onPress={() => setLanguage(lang)}
-          >
-            <Text style={[styles.langChipText, language === lang ? styles.langChipTextActive : null]}>{lang}</Text>
-          </Pressable>
-        ))}
-      </View>
 
       <View style={styles.modeSegment}>
         <Pressable
@@ -199,18 +188,6 @@ export function AuthChoiceScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 48 },
   header: { marginBottom: 14 },
-  langRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 14 },
-  langChip: {
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: APP_SURFACE
-  },
-  langChipActive: { backgroundColor: GREEN, borderColor: GREEN },
-  langChipText: { color: "#9aa5ad", fontSize: 11, fontWeight: "800" },
-  langChipTextActive: { color: "#1b1f23" },
   modeSegment: {
     flexDirection: "row",
     borderRadius: 12,
