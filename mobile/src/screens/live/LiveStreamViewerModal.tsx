@@ -24,10 +24,6 @@ function livePosterUri(post: HomePost): string | null {
   return null;
 }
 
-function liveRoomName(post: HomePost) {
-  return post.liveRoomName || `agrovibes-live-${post.id}`;
-}
-
 function liveTitle(post: HomePost, language: import("../../localization/translations").AppLanguage, t: (k: string) => string) {
   const raw = String(post.caption || "")
     .replace(/^\[(?:POST|REEL|LIVE|STORY)\]\s*/i, "")
