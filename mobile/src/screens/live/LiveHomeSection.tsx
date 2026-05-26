@@ -30,7 +30,13 @@ export function isLivePost(post: HomePost) {
 }
 
 export function isActiveLiveStream(post: HomePost) {
-  return isLivePost(post) && post.liveStatus === "active" && !String(post.videoUrl || "").trim();
+  return isLivePost(post) && post.liveStatus === "active";
+}
+
+export function isCompletedLiveStream(post: HomePost) {
+  if (!isLivePost(post)) return false;
+  if (post.liveStatus === "active") return false;
+  return post.liveStatus === "ended" || !!String(post.videoUrl || "").trim();
 }
 
 function isReelPost(post: HomePost) {
@@ -46,6 +52,10 @@ function livePosterUri(post: HomePost): string | null {
   return c0 || null;
 }
 
+function completedLiveHasReplay(post: HomePost) {
+  return !!String(post.videoUrl || "").trim();
+}
+
 function liveTitle(post: HomePost, language: import("../../localization/translations").AppLanguage, t: (k: string) => string) {
   const raw = String(post.caption || "")
     .replace(/^\[(?:POST|REEL|LIVE|STORY)\]\s*/i, "")
@@ -55,9 +65,14 @@ function liveTitle(post: HomePost, language: import("../../localization/translat
   return music ? formatFeedText(music, language, t) : t("liveStream");
 }
 
-/** Prefer explicit [LIVE] posts that are still broadcasting. */
+/** [LIVE] posts that are still broadcasting. */
 export function buildLiveFeed(posts: HomePost[]): HomePost[] {
-  return posts.filter((p) => isLivePost(p) && isActiveLiveStream(p));
+  return posts.filter((p) => isActiveLiveStream(p));
+}
+
+/** [LIVE] posts that have ended and should appear as completed replays. */
+export function buildCompletedLiveFeed(posts: HomePost[]): HomePost[] {
+  return posts.filter((p) => isCompletedLiveStream(p));
 }
 
 function liveViewerCountForCard(post: HomePost) {
@@ -76,6 +91,69 @@ function liveRoomName(post: HomePost) {
   return post.liveRoomName || `agrovibes-live-${post.id}`;
 }
 
+type LiveGridCardProps = {
+  post: HomePost;
+  width: number;
+  variant: "active" | "completed";
+  language: import("../../localization/translations").AppLanguage;
+  t: (k: string) => string;
+  onPress: () => void;
+};
+
+function LiveGridCard({ post, width, variant, language, t, onPress }: LiveGridCardProps) {
+  const poster = livePosterUri(post);
+  const isActive = variant === "active";
+  return (
+    <Pressable key={`card-${variant}-${post.id}`} style={[styles.gridCard, { width }]} onPress={onPress}>
+      <View style={styles.gridThumb}>
+        {poster ? (
+          <Image source={{ uri: poster }} style={styles.gridThumbImage} resizeMode="cover" />
+        ) : (
+          <View style={styles.gridThumbPlaceholder}>
+            <Ionicons
+              name={isActive ? "videocam" : completedLiveHasReplay(post) ? "play-circle-outline" : "checkmark-done-circle-outline"}
+              size={32}
+              color="rgba(255,255,255,0.35)"
+            />
+          </View>
+        )}
+        <LinearGradient colors={["transparent", "rgba(0,0,0,0.75)"]} style={styles.gridThumbGradient} />
+        {isActive ? (
+          <>
+            <View style={styles.gridLivePill}>
+              <View style={styles.gridLiveDot} />
+              <Text style={styles.gridLivePillText}>{t("liveBadge")}</Text>
+            </View>
+            <View style={styles.gridViewersPill}>
+              <Ionicons name="eye-outline" size={12} color="#fff" />
+              <Text style={styles.gridViewersText}>{formatViewers(liveViewerCountForCard(post))}</Text>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.gridEndedPill}>
+              <Ionicons name="checkmark-circle" size={11} color="#fff" />
+              <Text style={styles.gridEndedPillText}>{t("liveEndedBadge")}</Text>
+            </View>
+            <View style={styles.gridCompletedPill}>
+              <Text style={styles.gridCompletedPillText}>{t("liveCompletedLabel")}</Text>
+            </View>
+          </>
+        )}
+      </View>
+      <Text style={styles.gridTitle} numberOfLines={2}>
+        {liveTitle(post, language, t)}
+      </Text>
+      <View style={styles.gridHostRow}>
+        <UserAvatar uri={post.authorAvatarUrl} name={post.userName} size={18} borderRadius={9} />
+        <Text style={styles.gridHostName} numberOfLines={1}>
+          {post.userName}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 type LiveHomeSectionProps = {
   posts: HomePost[];
   joinPostId?: number | null;
@@ -91,10 +169,15 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
   const insets = useSafeAreaInsets();
   const [watching, setWatching] = React.useState<HomePost | null>(null);
 
-  const livePosts = React.useMemo(() => buildLiveFeed(posts), [posts]);
+  const activeLivePosts = React.useMemo(() => buildLiveFeed(posts), [posts]);
+  const completedLivePosts = React.useMemo(() => buildCompletedLiveFeed(posts), [posts]);
+  const allLivePosts = React.useMemo(
+    () => [...activeLivePosts, ...completedLivePosts],
+    [activeLivePosts, completedLivePosts]
+  );
   const watchingPost = React.useMemo(
-    () => (watching ? livePosts.find((p) => p.id === watching.id) ?? watching : null),
-    [livePosts, watching]
+    () => (watching ? allLivePosts.find((p) => p.id === watching.id) ?? watching : null),
+    [allLivePosts, watching]
   );
   const canDeleteWatching = !!watchingPost && !!canDeletePost?.(watchingPost);
   const gridGap = 10;
@@ -126,9 +209,9 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
           ) : null}
         </View>
 
-        {livePosts.length ? (
+        {activeLivePosts.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ringsRow}>
-            {livePosts.map((post) => (
+            {activeLivePosts.map((post) => (
               <Pressable key={`ring-${post.id}`} style={styles.ringItem} onPress={() => setWatching(post)}>
                 <View style={styles.ringOuter}>
                   <UserAvatar
@@ -155,58 +238,26 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
           </View>
         )}
 
-        <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>{t("popularLive")}</Text>
-        {livePosts.length ? (
+        <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>{t("completedLive")}</Text>
+        {completedLivePosts.length ? (
           <View style={[styles.grid, { paddingHorizontal: gridPad, gap: gridGap }]}>
-            {livePosts.map((post) => {
-              const poster = livePosterUri(post);
-              return (
-                <Pressable
-                  key={`card-${post.id}`}
-                  style={[styles.gridCard, { width: cardWidth }]}
-                  onPress={() => setWatching(post)}
-                >
-                  <View style={styles.gridThumb}>
-                    {poster ? (
-                      <Image source={{ uri: poster }} style={styles.gridThumbImage} resizeMode="cover" />
-                    ) : (
-                      <View style={styles.gridThumbPlaceholder}>
-                        <Ionicons name="videocam" size={32} color="rgba(255,255,255,0.35)" />
-                      </View>
-                    )}
-                    <LinearGradient colors={["transparent", "rgba(0,0,0,0.75)"]} style={styles.gridThumbGradient} />
-                    <View style={styles.gridLivePill}>
-                      <View style={styles.gridLiveDot} />
-                      <Text style={styles.gridLivePillText}>LIVE</Text>
-                    </View>
-                    <View style={styles.gridViewersPill}>
-                      <Ionicons name="eye-outline" size={12} color="#fff" />
-                      <Text style={styles.gridViewersText}>{formatViewers(liveViewerCountForCard(post))}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.gridTitle} numberOfLines={2}>
-                    {liveTitle(post, language, t)}
-                  </Text>
-                  <View style={styles.gridHostRow}>
-                    <UserAvatar uri={post.authorAvatarUrl} name={post.userName} size={18} borderRadius={9} />
-                    <Text style={styles.gridHostName} numberOfLines={1}>
-                      {post.userName}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
+            {completedLivePosts.map((post) => (
+              <LiveGridCard
+                key={`completed-${post.id}`}
+                post={post}
+                width={cardWidth}
+                variant="completed"
+                language={language}
+                t={t}
+                onPress={() => setWatching(post)}
+              />
+            ))}
           </View>
         ) : (
           <View style={styles.emptyGrid}>
-            <Ionicons name="radio-outline" size={40} color="rgba(255,255,255,0.25)" />
-            <Text style={styles.emptyGridTitle}>{t("noLiveStreamsYet")}</Text>
-            <Text style={styles.emptyGridSub}>{t("noLiveStreamsSub")}</Text>
-            {onOpenCreate ? (
-              <Pressable style={styles.goLiveBtnLarge} onPress={onOpenCreate}>
-                <Text style={styles.goLiveBtnLargeText}>{t("startLive")}</Text>
-              </Pressable>
-            ) : null}
+            <Ionicons name="checkmark-done-circle-outline" size={40} color="rgba(255,255,255,0.25)" />
+            <Text style={styles.emptyGridTitle}>{t("noCompletedLiveYet")}</Text>
+            <Text style={styles.emptyGridSub}>{t("noCompletedLiveSub")}</Text>
           </View>
         )}
       </ScrollView>
@@ -244,27 +295,27 @@ export function LiveHomeSection({ posts, joinPostId, onJoinConsumed, onOpenCreat
                   <Video
                     source={{ uri: watchingPost.videoUrl }}
                     style={styles.viewerVideo}
-                    resizeMode={ResizeMode.COVER}
+                    resizeMode={ResizeMode.CONTAIN}
                     shouldPlay
-                    isLooping
+                    isLooping={false}
                     isMuted={false}
-                    useNativeControls={false}
+                    useNativeControls
                   />
                 ) : livePosterUri(watchingPost) ? (
-                  <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="cover" />
+                  <Image source={{ uri: livePosterUri(watchingPost)! }} style={styles.viewerVideo} resizeMode="contain" />
                 ) : (
                   <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
-                    <Ionicons name="videocam-outline" size={48} color="rgba(255,255,255,0.4)" />
-                    <Text style={styles.viewerVideoPlaceholderText}>Live video is starting...</Text>
+                    <Ionicons name="checkmark-done-circle-outline" size={48} color="rgba(255,255,255,0.4)" />
+                    <Text style={styles.viewerVideoPlaceholderText}>{t("liveCompletedLabel")}</Text>
+                    <Text style={styles.viewerVideoPlaceholderSub}>{t("noCompletedRecording")}</Text>
                   </View>
                 )}
                 <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
                 <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
-                  <View style={styles.viewerLivePill}>
-                    <View style={styles.gridLiveDot} />
-                    <Text style={styles.viewerLiveText}>LIVE</Text>
+                  <View style={styles.viewerEndedPill}>
+                    <Ionicons name="checkmark-circle" size={12} color="#fff" />
+                    <Text style={styles.viewerEndedText}>{t("liveEndedBadge")}</Text>
                   </View>
-                  <Text style={styles.viewerViewers}>{formatViewers(liveViewerCountForCard(watchingPost))} watching</Text>
                 </View>
                 <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
                   <View style={styles.viewerHostRow}>
@@ -371,6 +422,29 @@ const styles = StyleSheet.create({
   },
   gridLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#fff" },
   gridLivePillText: { color: "#fff", fontSize: 10, fontWeight: "900" },
+  gridEndedPill: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(80,80,80,0.92)",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 4
+  },
+  gridEndedPillText: { color: "#fff", fontSize: 10, fontWeight: "900" },
+  gridCompletedPill: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6
+  },
+  gridCompletedPillText: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "700" },
   gridViewersPill: {
     position: "absolute",
     bottom: 8,
@@ -402,6 +476,7 @@ const styles = StyleSheet.create({
   viewerVideo: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   viewerVideoPlaceholder: { alignItems: "center", justifyContent: "center", backgroundColor: "#111" },
   viewerVideoPlaceholderText: { marginTop: 10, color: "rgba(255,255,255,0.65)", fontSize: 13, fontWeight: "700" },
+  viewerVideoPlaceholderSub: { marginTop: 6, color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: "600", textAlign: "center", paddingHorizontal: 24 },
   viewerGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: "42%" },
   viewerClose: { position: "absolute", left: 12, zIndex: 4 },
   viewerDelete: { position: "absolute", right: 12, zIndex: 4, padding: 4 },
@@ -416,6 +491,16 @@ const styles = StyleSheet.create({
     borderRadius: 5
   },
   viewerLiveText: { color: "#fff", fontSize: 11, fontWeight: "900" },
+  viewerEndedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(80,80,80,0.92)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 5
+  },
+  viewerEndedText: { color: "#fff", fontSize: 11, fontWeight: "900" },
   viewerViewers: { color: "#fff", fontSize: 13, fontWeight: "700" },
   viewerBottom: {
     position: "absolute",

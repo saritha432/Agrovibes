@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   ActivityIndicator,
-  FlatList,
   Image,
   Linking,
   Modal,
@@ -16,10 +15,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  ViewToken,
   useWindowDimensions
 } from "react-native";
-import { Audio, ResizeMode, Video } from "expo-av";
+import { ResizeMode, Video } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -34,6 +32,7 @@ import {
   fetchTaggedHomePosts,
   getWebAppOrigin,
   HomePost,
+  deleteHomePost,
   removeFollower,
   sendFollowRequest,
   sendDirectMessage,
@@ -50,6 +49,7 @@ import {
 } from "../social/localFollowStore";
 import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
 import { navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
+import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
 
 const TEAL = APP_LIME;
@@ -116,6 +116,7 @@ export function ProfileScreen({ route }: { route?: any }) {
   const [shareProfileOpen, setShareProfileOpen] = useState(false);
   const [shareBusyByUserId, setShareBusyByUserId] = useState<Record<number, boolean>>({});
   const [shareProfileSearch, setShareProfileSearch] = useState("");
+  const [profileReelViewer, setProfileReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const isMountedRef = useRef(true);
 
   const gridGap = 6;
@@ -352,45 +353,73 @@ export function ProfileScreen({ route }: { route?: any }) {
     }
     return null;
   }, [activeGalleryTab, visiblePosts]);
-  const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
 
-  useEffect(() => {
-    if (Platform.OS === "web") return;
-    void Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false
-    });
-  }, []);
+  const canDeleteFromProfileGallery = activeGalleryTab === "Posts" || activeGalleryTab === "Reels";
 
-  useEffect(() => {
-    if (activeReelIndex == null) return;
-    const current = visiblePosts[activeReelIndex];
-    if (current?.id != null) setPlayingReelId(Number(current.id));
-    const t = setTimeout(() => {
-      reelViewerListRef.current?.scrollToIndex({ index: Math.max(0, activeReelIndex), animated: false });
-    }, 0);
-    return () => clearTimeout(t);
-  }, [activeReelIndex, visiblePosts]);
+  const openProfilePostsViewer = useCallback(
+    (post: HomePost) => {
+      const ix = visiblePosts.findIndex((p) => p.id === post.id);
+      setProfileReelViewer({ posts: visiblePosts, initialIndex: ix >= 0 ? ix : 0 });
+    },
+    [visiblePosts]
+  );
 
-  const onReelViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const ordered = viewableItems
-      .filter((v) => v.isViewable && v.item != null)
-      .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
-      .sort((a, b) => a.index - b.index);
-    const focus = ordered[0];
-    setPlayingReelId(focus?.post?.id ?? null);
-    if (focus) setActiveReelIndex(focus.index);
-  }, []);
+  const handleProfileReelPostsChange = useCallback(
+    (nextPosts: HomePost[]) => {
+      if (activeGalleryTab === "Posts" || activeGalleryTab === "Reels") {
+        setUserPosts(nextPosts);
+      } else if (activeGalleryTab === "Saved") {
+        setSavedPosts(nextPosts);
+      } else if (activeGalleryTab === "Tagged") {
+        setTaggedPosts(nextPosts);
+      }
+      setProfileReelViewer((v) => {
+        if (!v) return v;
+        if (!nextPosts.length) return null;
+        const nextIndex = Math.min(v.initialIndex, nextPosts.length - 1);
+        return { posts: nextPosts, initialIndex: nextIndex };
+      });
+    },
+    [activeGalleryTab]
+  );
 
-  const onReelViewableItemsChangedRef = useRef(onReelViewableItemsChanged);
-  onReelViewableItemsChangedRef.current = onReelViewableItemsChanged;
+  const confirmDeleteProfilePost = useCallback(
+    (post: HomePost) => {
+      if (!canDeleteFromProfileGallery) return;
+      if (!token) {
+        Alert.alert(t("loginRequired"), t("loginRequiredDelete"));
+        return;
+      }
 
-  const closeReelViewer = useCallback(() => {
-    setPlayingReelId(null);
-    setActiveReelIndex(null);
-  }, []);
+      const runDelete = async () => {
+        try {
+          await deleteHomePost(token, post.id);
+          setUserPosts((prev) => prev.filter((p) => p.id !== post.id));
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Could not delete this post.";
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert(msg);
+          } else {
+            Alert.alert(t("deleteFailed"), msg);
+          }
+        }
+      };
+
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        setTimeout(() => {
+          if (!window.confirm(`${t("deletePostTitle")} ${t("deletePostBody")}`)) return;
+          void runDelete();
+        }, 0);
+        return;
+      }
+
+      Alert.alert(t("deletePostTitle"), t("deletePostBody"), [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("deleteConfirm"), style: "destructive", onPress: () => void runDelete() }
+      ]);
+    },
+    [canDeleteFromProfileGallery, t, token]
+  );
 
   const profileModel = useMemo(() => {
     if (!user) return null;
@@ -764,11 +793,8 @@ export function ProfileScreen({ route }: { route?: any }) {
                           <Pressable
                             key={post.id}
                             style={tileStyle}
-                            onPress={() => {
-                              const ix = visiblePosts.findIndex((p) => p.id === post.id);
-                              setActiveReelIndex(ix >= 0 ? ix : 0);
-                              setPlayingReelId(Number(post.id));
-                            }}
+                            onPress={() => openProfilePostsViewer(post)}
+                            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
                           >
                             <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
                             <View style={styles.gridPlayBadge} pointerEvents="none">
@@ -779,16 +805,13 @@ export function ProfileScreen({ route }: { route?: any }) {
                       }
                       /** Web only: one muted preview decode (tiny tiles + parallel decoders tank real phones). */
                       if (Platform.OS === "web") {
-                        const shouldPlayTile = activeReelIndex == null && post.id === singleGridVideoPreviewId;
+                        const shouldPlayTile = post.id === singleGridVideoPreviewId;
                         return (
                           <Pressable
                             key={post.id}
                             style={tileStyle}
-                            onPress={() => {
-                              const ix = visiblePosts.findIndex((p) => p.id === post.id);
-                              setActiveReelIndex(ix >= 0 ? ix : 0);
-                              setPlayingReelId(Number(post.id));
-                            }}
+                            onPress={() => openProfilePostsViewer(post)}
+                            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
                           >
                             <Video
                               style={styles.gridImage}
@@ -811,11 +834,8 @@ export function ProfileScreen({ route }: { route?: any }) {
                         <Pressable
                           key={post.id}
                           style={tileStyle}
-                          onPress={() => {
-                            const ix = visiblePosts.findIndex((p) => p.id === post.id);
-                            setActiveReelIndex(ix >= 0 ? ix : 0);
-                            setPlayingReelId(Number(post.id));
-                          }}
+                          onPress={() => openProfilePostsViewer(post)}
+                          onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
                         >
                           <View style={[styles.gridImage, styles.gridVideoBg, styles.gridVideoPlaceholder]}>
                             <Ionicons name="play-circle" size={30} color={LIME} />
@@ -833,7 +853,8 @@ export function ProfileScreen({ route }: { route?: any }) {
                       <Pressable
                         key={post.id}
                         style={tileStyle}
-                        onPress={() => (canOpen ? setActiveImagePost(post) : undefined)}
+                        onPress={() => (canOpen ? openProfilePostsViewer(post) : undefined)}
+                        onLongPress={canDeleteFromProfileGallery && canOpen ? () => confirmDeleteProfilePost(post) : undefined}
                       >
                         {cover ? (
                           <Image source={{ uri: cover }} style={styles.gridImage} resizeMode="cover" />
@@ -883,144 +904,14 @@ export function ProfileScreen({ route }: { route?: any }) {
         )}
       </ScrollView>
 
-      <Modal
-        visible={!!activeImagePost}
-        animationType="none"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setActiveImagePost(null)}
-        statusBarTranslucent
-      >
-        <View style={[styles.imageViewerRoot, { width, height: windowHeight }]}>
-          <ScrollView
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            style={{ width, height: windowHeight }}
-          >
-            {(() => {
-              const post = activeImagePost;
-              if (!post) return null;
-              const list: string[] = post.imageUrls && post.imageUrls.length > 0
-                ? post.imageUrls
-                : post.imageUrl
-                ? [post.imageUrl]
-                : [];
-              return list.map((uri, idx) => (
-                <View key={`${post.id}-${idx}`} style={{ width, height: windowHeight, alignItems: "center", justifyContent: "center" }}>
-                  <Image
-                    source={{ uri }}
-                    style={{ width, height: windowHeight }}
-                    resizeMode="contain"
-                  />
-                </View>
-              ));
-            })()}
-          </ScrollView>
-          <Pressable
-            style={styles.reelCloseBtn}
-            hitSlop={12}
-            onPress={() => setActiveImagePost(null)}
-            accessibilityLabel="Close image"
-          >
-            <Ionicons name="close" size={26} color="#fff" />
-          </Pressable>
-          {activeImagePost ? (
-            <View style={styles.reelCaptionWrap} pointerEvents="none">
-              <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
-                {activeImagePost.userName}
-              </Text>
-              {activeImagePost.caption ? (
-                <Text style={styles.reelCaptionText} numberOfLines={3}>
-                  {activeImagePost.caption}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-        </View>
-      </Modal>
-
-      <Modal
-        visible={activeReelIndex != null}
-        animationType="none"
-        presentationStyle="fullScreen"
-        onRequestClose={closeReelViewer}
-        statusBarTranslucent
-      >
-        <View style={[styles.reelPlayerRoot, { width, height: windowHeight }]}>
-          {activeReelIndex != null ? (
-            <FlatList
-              ref={reelViewerListRef}
-              data={visiblePosts}
-              keyExtractor={(item) => String(item.id)}
-              pagingEnabled
-              showsVerticalScrollIndicator={false}
-              initialScrollIndex={Math.max(0, activeReelIndex)}
-              getItemLayout={(_, index) => ({ length: windowHeight, offset: windowHeight * index, index })}
-              onViewableItemsChanged={(info) => onReelViewableItemsChangedRef.current(info)}
-              viewabilityConfig={{ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }}
-              onScrollToIndexFailed={() => {}}
-              removeClippedSubviews={Platform.OS !== "web"}
-              initialNumToRender={2}
-              maxToRenderPerBatch={2}
-              windowSize={3}
-              renderItem={({ item }) => {
-                const isActive = playingReelId != null ? String(playingReelId) === String(item.id) : false;
-                return (
-                  <View style={{ width, height: windowHeight }}>
-                    {item.videoUrl && isActive ? (
-                      <Video
-                        style={{ width, height: windowHeight, backgroundColor: "#262626" }}
-                        source={{ uri: item.videoUrl }}
-                        resizeMode={ResizeMode.COVER}
-                        shouldPlay
-                        isLooping
-                        isMuted={false}
-                        useNativeControls={false}
-                        usePoster={!!(item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0])}
-                        posterSource={
-                          item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0]
-                            ? { uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] }
-                            : undefined
-                        }
-                        progressUpdateIntervalMillis={750}
-                        {...(Platform.OS === "web" ? ({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any) : {})}
-                      />
-                    ) : item.videoUrl ? (
-                      item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] ? (
-                        <Image
-                          style={{ width, height: windowHeight, backgroundColor: "#262626" }}
-                          source={{ uri: item.thumbnailUrl || item.imageUrl || item.imageUrls?.[0] || "" }}
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <View style={{ width, height: windowHeight, backgroundColor: "#262626" }} />
-                      )
-                    ) : null}
-                    <View style={styles.reelCaptionWrap} pointerEvents="none">
-                      <Text style={styles.reelCaptionAuthor} numberOfLines={1}>
-                        {item.userName}
-                      </Text>
-                      {item.caption ? (
-                        <Text style={styles.reelCaptionText} numberOfLines={2}>
-                          {item.caption}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              }}
-            />
-          ) : null}
-          <Pressable
-            style={styles.reelCloseBtn}
-            hitSlop={12}
-            onPress={closeReelViewer}
-            accessibilityLabel="Close reel"
-          >
-            <Ionicons name="close" size={26} color="#fff" />
-          </Pressable>
-        </View>
-      </Modal>
+      <PostsReelViewerModal
+        visible={!!profileReelViewer}
+        posts={profileReelViewer?.posts ?? []}
+        initialIndex={profileReelViewer?.initialIndex ?? 0}
+        onClose={() => setProfileReelViewer(null)}
+        onPostsChange={handleProfileReelPostsChange}
+        canDeleteOwnPosts={canDeleteFromProfileGallery}
+      />
 
       <Modal
         visible={shareProfileOpen}
@@ -1492,6 +1383,20 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 44,
     right: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    zIndex: 10
+  },
+  reelDeleteBtn: {
+    position: "absolute",
+    top: 44,
+    left: 16,
     width: 38,
     height: 38,
     borderRadius: 19,

@@ -52,6 +52,7 @@ import {
 } from "../utils/galleryAlbums";
 import { APP_LIME, APP_LIME_SOFT_BG } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
+import { UserAvatar } from "./UserAvatar";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -351,6 +352,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [liveScheduleTime, setLiveScheduleTime] = useState("");
   const [showLiveDatePicker, setShowLiveDatePicker] = useState(false);
   const [showLiveTimePicker, setShowLiveTimePicker] = useState(false);
+  const [showLiveSetupSheet, setShowLiveSetupSheet] = useState(false);
+  const [showLiveTitleSheet, setShowLiveTitleSheet] = useState(false);
+  const [liveTitleDraft, setLiveTitleDraft] = useState("");
   const [pickedStoryVideoUri, setPickedStoryVideoUri] = useState<string>("");
   const [pickedStoryAsset, setPickedStoryAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [pickedStoryMediaType, setPickedStoryMediaType] = useState<"image" | "video" | null>(null);
@@ -518,6 +522,9 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setLiveScheduleTime("");
     setShowLiveDatePicker(false);
     setShowLiveTimePicker(false);
+    setShowLiveSetupSheet(false);
+    setShowLiveTitleSheet(false);
+    setLiveTitleDraft("");
     liveDraftPostIdRef.current = null;
     liveServerPostIdRef.current = null;
     setLiveElapsedSeconds(0);
@@ -552,6 +559,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setShowTagPeoplePanel(false);
     setTagSearchQuery("");
   }, [visible, initialType, stopAudioPreview]);
+
+  React.useEffect(() => {
+    if (entryType !== "live") {
+      setShowLiveSetupSheet(false);
+      setShowLiveTitleSheet(false);
+    }
+  }, [entryType]);
 
   React.useEffect(() => {
     return () => {
@@ -1089,7 +1103,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
     setSubmitting(true);
     try {
-      const liveCaption = caption.trim() || liveScheduleTopic.trim() || "Live stream";
+      const liveCaption = liveScheduleTopic.trim() || liveTitleDraft.trim() || caption.trim() || "Live stream";
       const { post } = await createHomePost(
         {
           userId: user?.id,
@@ -1124,15 +1138,58 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     }
   };
 
+  const submitLiveSetup = async () => {
+    setErrorText("");
+    if (!liveMode) {
+      setErrorText(t("createErrChooseOption"));
+      return;
+    }
+    if (liveMode === "schedule") {
+      const topic = liveScheduleTopic.trim() || liveTitleDraft.trim() || caption.trim();
+      const rawDate = liveScheduleDate.trim();
+      const rawTime = liveScheduleTime.trim();
+      if (!topic || !rawDate || !rawTime) {
+        setErrorText("Enter live topic, date and time.");
+        return;
+      }
+      const scheduledAt = new Date(`${rawDate}T${rawTime}`);
+      if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) {
+        setErrorText("Choose a future date and time.");
+        return;
+      }
+      if (!token) {
+        setErrorText("Please log in to schedule a live.");
+        return;
+      }
+      setSubmitting(true);
+      try {
+        await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
+        Alert.alert("Live scheduled", `Followers will be notified now and again 10 minutes before ${scheduledAt.toLocaleString()}.`);
+        setShowLiveSetupSheet(false);
+        setLiveMode(null);
+        setLiveScheduleTopic("");
+        setLiveScheduleDate("");
+        setLiveScheduleTime("");
+        setLiveTitleDraft("");
+        setShowLiveDatePicker(false);
+        setShowLiveTimePicker(false);
+        onClose();
+      } catch (e) {
+        setErrorText(e instanceof Error ? e.message : "Could not schedule live.");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    setShowLiveSetupSheet(false);
+    await startLiveKitHostFromSheet();
+  };
+
   const handleEntryShutterPress = () => {
     setErrorText("");
     if (entryType === "live") {
-      if (!liveMode) {
-        setCreateType("live");
-        return;
-      }
-      if (entryIsRecording) void stopEntryVideoRecording();
-      else void startEntryVideoRecording();
+      setLiveMode(null);
+      setShowLiveSetupSheet(true);
       return;
     }
     if (entryShutterLongPressRef.current) {
@@ -1538,8 +1595,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     ? t("locationPrefix", { place: postLocation.trim() })
     : t("addLocation");
   const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
-  const entryCameraActive =
-    visible && captureEntryView === "camera" && entryType !== "live";
+  const entryCameraActive = visible && captureEntryView === "camera";
 
   const composeOptions: Array<{
     icon: keyof typeof Ionicons.glyphMap;
@@ -1801,7 +1857,27 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 <View style={styles.igCaptureHeaderSpacer} />
               </View>
 
-              <View style={{ flex: 1 }} pointerEvents="none" />
+              <View style={{ flex: 1 }} pointerEvents="box-none">
+                {entryType === "live" && !showLiveSetupSheet ? (
+                  <Pressable
+                    style={styles.liveTitleFab}
+                    onPress={() => {
+                      setLiveTitleDraft(liveScheduleTopic);
+                      setShowLiveTitleSheet(true);
+                    }}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add live title"
+                  >
+                    <Ionicons name="reorder-three-outline" size={22} color="#fff" />
+                    {liveScheduleTopic.trim() ? (
+                      <Text style={styles.liveTitleFabText} numberOfLines={2}>
+                        {liveScheduleTopic}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                ) : null}
+              </View>
 
               {errorText ? (
                 <Text style={[styles.igCamErrorBanner, styles.igCaptureError]}>
@@ -1836,13 +1912,21 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                 )}
                 <View style={styles.igCamCaptureRowSpacer} />
                 <Pressable
-                  style={[styles.igCamCaptureOuter, entryIsRecording ? styles.igCamCaptureOuterRecording : null]}
+                  style={[
+                    styles.igCamCaptureOuter,
+                    entryIsRecording ? styles.igCamCaptureOuterRecording : null,
+                    entryType === "live" && !entryIsRecording ? styles.igCamLiveCaptureOuter : null
+                  ]}
                   onPress={handleEntryShutterPress}
                   onLongPress={() => void handleEntryShutterLongPress()}
                   onPressOut={() => void handleEntryShutterRelease()}
                   delayLongPress={280}
                 >
-                  <View style={[styles.igCamCaptureInner, entryIsRecording ? styles.igCamCaptureInnerRecording : null]} />
+                  {entryType === "live" && !entryIsRecording ? (
+                    <Ionicons name="radio-outline" size={34} color="#fff" />
+                  ) : (
+                    <View style={[styles.igCamCaptureInner, entryIsRecording ? styles.igCamCaptureInnerRecording : null]} />
+                  )}
                 </Pressable>
                 <View style={styles.igCamCaptureRowSpacer} />
                 <Pressable
@@ -1877,6 +1961,165 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   </Pressable>
                 ))}
               </View>
+
+              {showLiveTitleSheet ? (
+                <View style={styles.liveInlineSheetRoot} pointerEvents="box-none">
+                  <Pressable style={styles.liveInlineSheetBackdrop} onPress={() => setShowLiveTitleSheet(false)} />
+                  <View style={[styles.liveTitleSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                    <View style={styles.liveInlineSheetHandle} />
+                    <View style={styles.liveTitleSheetRow}>
+                      <UserAvatar
+                        uri={user?.avatarUrl}
+                        name={user?.fullName || "You"}
+                        size={44}
+                        borderRadius={22}
+                        fallbackBackgroundColor="#3f3f46"
+                        initialsColor="#fafafa"
+                      />
+                      <TextInput
+                        value={liveTitleDraft}
+                        onChangeText={setLiveTitleDraft}
+                        style={styles.liveTitleSheetInput}
+                        placeholder="Add a title..."
+                        placeholderTextColor="rgba(255,255,255,0.45)"
+                        maxLength={120}
+                        autoFocus
+                      />
+                    </View>
+                    <Text style={styles.liveTitleSheetHint}>
+                      Your followers and anyone watching will see this title.
+                    </Text>
+                    <Pressable
+                      style={[styles.liveTitleSheetBtn, !liveTitleDraft.trim() ? styles.liveTitleSheetBtnDisabled : null]}
+                      disabled={!liveTitleDraft.trim()}
+                      onPress={() => {
+                        setLiveScheduleTopic(liveTitleDraft.trim());
+                        setShowLiveTitleSheet(false);
+                      }}
+                    >
+                      <Text style={styles.liveTitleSheetBtnText}>Add title</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+
+              {showLiveSetupSheet ? (
+                <View style={styles.liveInlineSheetRoot} pointerEvents="box-none">
+                  <Pressable
+                    style={styles.liveInlineSheetBackdrop}
+                    onPress={() => {
+                      if (!isSubmitting) setShowLiveSetupSheet(false);
+                    }}
+                  />
+                  <View style={[styles.liveSetupSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                    <View style={styles.liveInlineSheetHandle} />
+                    <Text style={styles.liveSetupSheetTitle}>Go live</Text>
+                    {liveScheduleTopic.trim() ? (
+                      <Text style={styles.liveSetupSheetTopic} numberOfLines={2}>
+                        {liveScheduleTopic}
+                      </Text>
+                    ) : null}
+                    <View style={styles.liveSetupActionRow}>
+                      <Pressable
+                        style={[styles.liveSetupActionBtn, liveMode === "now" ? styles.liveSetupActionBtnActive : null]}
+                        onPress={() => {
+                          setErrorText("");
+                          setLiveMode("now");
+                        }}
+                        disabled={isSubmitting}
+                      >
+                        <Ionicons name="radio-outline" size={18} color={liveMode === "now" ? "#111" : "#C9FF35"} />
+                        <Text style={[styles.liveSetupActionText, liveMode === "now" ? styles.liveSetupActionTextActive : null]}>
+                          Start live now
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.liveSetupActionBtn, liveMode === "schedule" ? styles.liveSetupActionBtnActive : null]}
+                        onPress={() => {
+                          setErrorText("");
+                          setLiveMode("schedule");
+                          setLiveScheduleTopic((v) => v || liveTitleDraft.trim() || caption.trim());
+                        }}
+                        disabled={isSubmitting}
+                      >
+                        <Ionicons name="calendar-outline" size={18} color={liveMode === "schedule" ? "#111" : "#C9FF35"} />
+                        <Text
+                          style={[styles.liveSetupActionText, liveMode === "schedule" ? styles.liveSetupActionTextActive : null]}
+                        >
+                          Schedule live
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {liveMode === "schedule" ? (
+                      <View style={styles.liveScheduleFormDark}>
+                        <TextInput
+                          value={liveScheduleTopic}
+                          onChangeText={setLiveScheduleTopic}
+                          style={styles.liveScheduleInputDark}
+                          placeholder="Live topic"
+                          placeholderTextColor="rgba(255,255,255,0.45)"
+                        />
+                        <View style={styles.liveScheduleSplitRow}>
+                          <Pressable
+                            style={[styles.liveScheduleInputDark, styles.liveSchedulePickerInputDark]}
+                            onPress={() => setShowLiveDatePicker(true)}
+                          >
+                            <Ionicons name="calendar-outline" size={16} color="#C9FF35" />
+                            <Text
+                              style={[
+                                styles.liveSchedulePickerTextDark,
+                                !liveScheduleDate ? styles.liveSchedulePickerPlaceholderDark : null
+                              ]}
+                            >
+                              {liveScheduleDate || "Select date"}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={[styles.liveScheduleInputDark, styles.liveSchedulePickerInputDark]}
+                            onPress={() => setShowLiveTimePicker(true)}
+                          >
+                            <Ionicons name="time-outline" size={16} color="#C9FF35" />
+                            <Text
+                              style={[
+                                styles.liveSchedulePickerTextDark,
+                                !liveScheduleTime ? styles.liveSchedulePickerPlaceholderDark : null
+                              ]}
+                            >
+                              {liveScheduleTime ? timeLabel(liveScheduleTime) : "Select time"}
+                            </Text>
+                          </Pressable>
+                        </View>
+                        <Text style={styles.liveScheduleHintDark}>
+                          Followers get a schedule notification now and a reminder 10 minutes before.
+                        </Text>
+                      </View>
+                    ) : liveMode === "now" ? (
+                      <Text style={styles.liveScheduleHintDark}>Tap Go Live to start broadcasting and notify followers.</Text>
+                    ) : null}
+                    {errorText ? <Text style={styles.liveSetupError}>{errorText}</Text> : null}
+                    <View style={styles.liveSetupFooterRow}>
+                      <Pressable
+                        style={styles.liveSetupCancelBtn}
+                        onPress={() => setShowLiveSetupSheet(false)}
+                        disabled={isSubmitting}
+                      >
+                        <Text style={styles.liveSetupCancelText}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.liveSetupGoBtn, !liveMode || isSubmitting ? styles.liveSetupGoBtnDisabled : null]}
+                        onPress={() => void submitLiveSetup()}
+                        disabled={!liveMode || isSubmitting}
+                      >
+                        {isSubmitting ? (
+                          <ActivityIndicator color="#111" size="small" />
+                        ) : (
+                          <Text style={styles.liveSetupGoText}>{liveMode === "schedule" ? "Schedule" : "Go Live"}</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
             </View>
           </View>
         )
@@ -2237,8 +2480,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         isHost
         postId={liveKitHostPostId ?? undefined}
         title={liveKitHostTitle || "Live stream"}
-        onLiveEnded={(postId: number) => {
-          onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0 } as HomePost);
+        onLiveEnded={(postId: number, update?: Partial<HomePost>) => {
+          onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0, ...update } as HomePost);
         }}
         onClose={() => {
           setLiveKitHostOpen(false);
@@ -3166,6 +3409,141 @@ const styles = StyleSheet.create({
     gap: 3
   },
   igCamLiveOnlyText: { color: "#C9FF35", fontSize: 11, fontWeight: "800" },
+  igCamLiveCaptureOuter: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "#fff"
+  },
+  liveTitleFab: {
+    position: "absolute",
+    left: 14,
+    top: "38%",
+    maxWidth: 120,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(0,0,0,0.42)",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)"
+  },
+  liveTitleFabText: { color: "#fff", fontSize: 12, fontWeight: "700", flexShrink: 1 },
+  liveInlineSheetRoot: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+    zIndex: 30
+  },
+  liveInlineSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)"
+  },
+  liveInlineSheetHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.35)",
+    marginBottom: 12
+  },
+  liveTitleSheet: {
+    backgroundColor: "#111827",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 10
+  },
+  liveTitleSheetRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  liveTitleSheetInput: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    paddingVertical: 10
+  },
+  liveTitleSheetHint: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 12,
+    marginTop: 8,
+    marginBottom: 14
+  },
+  liveTitleSheetBtn: {
+    backgroundColor: "#C9FF35",
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    marginBottom: 4
+  },
+  liveTitleSheetBtnDisabled: { opacity: 0.45 },
+  liveTitleSheetBtnText: { color: "#111827", fontWeight: "900", fontSize: 15 },
+  liveSetupSheet: {
+    backgroundColor: "#111827",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 10
+  },
+  liveSetupSheetTitle: { color: "#fff", fontWeight: "900", fontSize: 18, marginBottom: 4 },
+  liveSetupSheetTopic: { color: "#C9FF35", fontWeight: "700", fontSize: 14, marginBottom: 10 },
+  liveSetupActionRow: { flexDirection: "row", gap: 10, marginTop: 8 },
+  liveSetupActionBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(201,255,53,0.45)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    gap: 6
+  },
+  liveSetupActionBtnActive: { backgroundColor: "#C9FF35", borderColor: "#C9FF35" },
+  liveSetupActionText: { color: "#C9FF35", fontWeight: "800", fontSize: 13, textAlign: "center" },
+  liveSetupActionTextActive: { color: "#111827" },
+  liveScheduleFormDark: { gap: 10, marginTop: 12 },
+  liveScheduleInputDark: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    color: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    fontWeight: "700"
+  },
+  liveSchedulePickerInputDark: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  liveSchedulePickerTextDark: { color: "#fff", fontWeight: "800", flex: 1 },
+  liveSchedulePickerPlaceholderDark: { color: "rgba(255,255,255,0.45)" },
+  liveScheduleHintDark: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 4
+  },
+  liveSetupError: { color: "#fca5a5", fontSize: 12, fontWeight: "700", marginTop: 10, textAlign: "center" },
+  liveSetupFooterRow: { flexDirection: "row", gap: 10, marginTop: 14, marginBottom: 4 },
+  liveSetupCancelBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12
+  },
+  liveSetupCancelText: { color: "#fff", fontWeight: "800" },
+  liveSetupGoBtn: {
+    flex: 1.4,
+    borderRadius: 12,
+    backgroundColor: "#C9FF35",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12
+  },
+  liveSetupGoBtnDisabled: { opacity: 0.45 },
+  liveSetupGoText: { color: "#111827", fontWeight: "900", fontSize: 15 },
   igCamCaptureRowSpacer: { flex: 1 },
   igCamCaptureCluster: {
     flexDirection: "row",

@@ -1004,7 +1004,8 @@ function normalizeHomePostRow(row) {
       delete base.live_ended_at;
     }
     if (hasLiveMedia) {
-      if (dbStatus === "ended") base.liveStatus = "ended";
+      base.liveStatus = dbStatus === "active" ? "active" : "ended";
+      if (base.liveStatus === "ended") base.liveViewerCount = 0;
     } else if (dbStatus === "ended") {
       base.liveStatus = "ended";
       base.liveViewerCount = 0;
@@ -1064,7 +1065,10 @@ async function enrichHomePostsLiveState(posts) {
       (Array.isArray(post.imageUrls) && post.imageUrls.length)
     );
     if (hasLiveMedia || post.liveStatus === "ended") {
-      if (post.liveStatus === "ended") post.liveViewerCount = 0;
+      if (post.liveStatus !== "active") {
+        post.liveStatus = "ended";
+        post.liveViewerCount = 0;
+      }
       out.push(post);
       continue;
     }
@@ -3133,6 +3137,8 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
         music_label AS "musicLabel",
         music_audio_url AS "musicAudioUrl",
         creative_meta AS "creativeMeta",
+        live_status AS "liveStatus",
+        live_ended_at AS "liveEndedAt",
         created_at AS "createdAt"
       `,
       [cleanVideoUrl, typeof thumbnailUrl === "string" && thumbnailUrl.trim() ? thumbnailUrl.trim() : null, postId, me]
@@ -3143,7 +3149,9 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
     }
     await cacheIncr("home:posts:gen");
     await invalidateProfilePostsCache(me);
-    res.json({ post: normalizeHomePostRow(updated.rows[0]) });
+    const post = normalizeHomePostRow(updated.rows[0]);
+    if (post.liveStatus !== "ended") post.liveStatus = "ended";
+    res.json({ post });
   } catch (error) {
     res.status(500).json({ message: "Failed to update live video", error: error.message });
   }
@@ -3514,6 +3522,8 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         p.music_label AS "musicLabel",
         p.music_audio_url AS "musicAudioUrl",
         p.creative_meta AS "creativeMeta",
+        p.live_status AS "liveStatus",
+        p.live_ended_at AS "liveEndedAt",
         COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
         EXISTS (
           SELECT 1 FROM home_post_likes hpl
@@ -3543,7 +3553,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
       [viewerId, fullName, username || null, emailLocal || null]
     );
 
-    const body = { posts: dedupeHomePostRows(result.rows) };
+    const body = { posts: await enrichHomePostsLiveState(dedupeHomePostRows(result.rows)) };
     res.json(body);
     await cacheSetJson(cacheKey, body, 30);
   } catch (error) {

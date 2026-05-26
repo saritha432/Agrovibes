@@ -3,8 +3,9 @@ import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { createLocalTracks, Room, RoomEvent, Track } from "livekit-client";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, endHomeLivePost, formatLiveStreamError } from "../../services/api";
+import { createLiveKitToken, endHomeLivePost, formatLiveStreamError, type HomePost } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
+import { startLiveHostRecorder, type LiveHostRecorder } from "./liveHostRecording";
 import {
   encodeLiveDataMessage,
   liveViewerCount,
@@ -12,6 +13,7 @@ import {
   type LiveComment,
   type LiveViewer
 } from "./liveRoomData";
+import { saveLiveRecordingToPost } from "./saveLiveRecordingToPost";
 
 type LiveKitRoomViewProps = {
   visible: boolean;
@@ -20,7 +22,7 @@ type LiveKitRoomViewProps = {
   title: string;
   postId?: number;
   onClose?: () => void;
-  onLiveEnded?: (postId: number) => void;
+  onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
 };
 
 function attachTrack(track: any, host: HTMLDivElement | null) {
@@ -56,7 +58,9 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
   const videoHostRef = React.useRef<HTMLDivElement | null>(null);
   const roomRef = React.useRef<Room | null>(null);
   const localTracksRef = React.useRef<any[]>([]);
+  const recorderRef = React.useRef<LiveHostRecorder | null>(null);
   const commentsRef = React.useRef<ScrollView | null>(null);
+  const [savingRecording, setSavingRecording] = React.useState(false);
   const [status, setStatus] = React.useState("Connecting live...");
   const [errorText, setErrorText] = React.useState("");
   const [liveEnded, setLiveEnded] = React.useState(false);
@@ -156,6 +160,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
               attachTrack(track, videoHostRef.current);
             }
           }
+          recorderRef.current = startLiveHostRecorder({ tracks });
           setStatus("You are live now");
         } else {
           room.remoteParticipants.forEach((participant) => {
@@ -183,6 +188,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         }
       });
       localTracksRef.current = [];
+      recorderRef.current = null;
       room.disconnect();
       roomRef.current = null;
       if (videoHostRef.current) videoHostRef.current.innerHTML = "";
@@ -212,12 +218,26 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
   const handleEndLive = React.useCallback(async () => {
     const room = roomRef.current;
     if (isHost && postId && token) {
+      setSavingRecording(true);
+      setStatus("Saving recording...");
+      let savedPost: HomePost | null = null;
+      try {
+        const recordingUri = await recorderRef.current?.stop();
+        recorderRef.current = null;
+        if (recordingUri) {
+          savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
+          if (recordingUri.startsWith("blob:")) URL.revokeObjectURL(recordingUri);
+        }
+      } catch {
+        // Continue ending the live even if upload fails.
+      }
       try {
         await endHomeLivePost(token, postId);
       } catch {
         // Still end the session locally even if the server call fails.
       }
-      onLiveEnded?.(postId);
+      onLiveEnded?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
+      setSavingRecording(false);
     }
     if (isHost && room) {
       try {
@@ -267,7 +287,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
           <View style={styles.liveDot} />
           <Text style={styles.liveText}>{liveEnded ? "ENDED" : "LIVE"}</Text>
         </View>
-        <Text style={styles.statusText}>{errorText || status}</Text>
+        <Text style={styles.statusText}>{errorText || (savingRecording ? "Saving recording..." : status)}</Text>
         {onClose ? (
           <Pressable style={styles.closeBtn} onPress={() => (isHost ? void handleEndLive() : onClose())}>
             <Ionicons name="close" size={22} color="#fff" />
@@ -313,7 +333,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
             </Pressable>
           </View>
         ) : null}
-        {isHost && !liveEnded ? (
+        {isHost && !liveEnded && !savingRecording ? (
           <Pressable style={styles.endLiveBtn} onPress={() => void handleEndLive()}>
             <Text style={styles.endLiveText}>End Live</Text>
           </Pressable>
