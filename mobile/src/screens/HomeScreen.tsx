@@ -72,7 +72,7 @@ import {
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
-import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isActiveLiveStream, isLivePost } from "./live/LiveHomeSection";
+import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -1149,7 +1149,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
     if (activeHomeTab === "Feed") {
       return orderPostsForFeed(
-        strip(posts).filter((p) => !isLivePost(p) || isActiveLiveStream(p)),
+        strip(posts).filter((p) => !isLivePost(p)),
         feedShuffleSeed,
         nowMs
       );
@@ -1291,7 +1291,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       void fetchHomePosts(token)
         .then((data) => setPosts(data.posts))
         .catch(() => {});
-    }, 20000);
+    }, 10000);
     return () => clearInterval(timer);
   }, [token]);
 

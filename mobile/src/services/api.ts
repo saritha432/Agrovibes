@@ -332,6 +332,8 @@ export interface HomePost {
   liveViewerCount?: number;
   /** Client-side timestamp for active live sessions. */
   liveStartedAt?: string;
+  /** Timestamp when the live ended. */
+  liveEndedAt?: string;
   /** LiveKit room name for active live sessions. */
   liveRoomName?: string;
 }

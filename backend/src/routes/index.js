@@ -1068,11 +1068,21 @@ async function enrichHomePostsLiveState(posts) {
       (typeof post.imageUrl === "string" && post.imageUrl.trim()) ||
       (Array.isArray(post.imageUrls) && post.imageUrls.length)
     );
+    const dbActive = String(post.liveStatus || "").toLowerCase() === "active";
     if (hasLiveMedia || post.liveStatus === "ended") {
       if (post.liveStatus !== "active") {
         post.liveStatus = "ended";
         post.liveViewerCount = 0;
       }
+      out.push(post);
+      continue;
+    }
+    // If DB says active, trust it — skip LiveKit check entirely.
+    // The end-live API is the single source of truth for stopping.
+    if (dbActive) {
+      post.liveStatus = "active";
+      post.liveViewerCount = Number(post.liveViewerCount || 0);
+      post.liveStartedAt = post.liveStartedAt || post.createdAt;
       out.push(post);
       continue;
     }
@@ -1085,24 +1095,17 @@ async function enrichHomePostsLiveState(posts) {
       continue;
     }
     if (info.ended) {
-      // Host may not have connected to LiveKit yet — trust DB "active" until explicitly ended.
-      const dbActive = String(post.liveStatus || "").toLowerCase() === "active";
-      if (dbActive) {
-        post.liveStatus = "active";
-        post.liveViewerCount = 0;
-      } else {
-        post.liveStatus = "ended";
-        post.liveViewerCount = 0;
-        if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
-          await query(
-            `
-            UPDATE home_posts
-            SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
-            WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
-            `,
-            [post.id]
-          );
-        }
+      post.liveStatus = "ended";
+      post.liveViewerCount = 0;
+      if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
+        await query(
+          `
+          UPDATE home_posts
+          SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+          WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
+          `,
+          [post.id]
+        );
       }
     } else {
       post.liveStatus = "active";
@@ -2969,7 +2972,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
 
     const body = { posts: await enrichHomePostsLiveState(dedupeHomePostRows(result.rows)) };
     res.json(body);
-    await cacheSetJson(cacheKey, body, 30);
+    await cacheSetJson(cacheKey, body, 10);
   } catch (error) {
     res.json({
       posts: [],

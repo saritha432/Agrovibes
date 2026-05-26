@@ -289,7 +289,6 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const onJoinLive = async (entry: any) => {
     const postId = Number(entry?.postId);
     if (!Number.isFinite(postId) || postId <= 0) return;
-    await onMarkPostActivityRead(entry);
     queueJoinLive(postId);
     setSheetOpen(false);
     navigateToJoinLive();
