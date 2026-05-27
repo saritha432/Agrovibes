@@ -11,9 +11,14 @@
       "web"
     ],
     "splash": {
-      "image": "./assets/logo.png",
+      "image": "./assets/logo-adaptive-foreground.png",
       "resizeMode": "contain",
       "backgroundColor": "#262626"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#262626",
+      "barStyle": "light-content",
+      "translucent": false
     },
     "assetBundlePatterns": [
       "./assets/*.png",
@@ -23,12 +28,6 @@
     "scheme": "agrovibes",
     "android": {
       "package": "com.agrovibes.app",
-      "label": "Cropvibe",
-      "statusBar": {
-        "backgroundColor": "#262626",
-        "barStyle": "light-content",
-        "translucent": false
-      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"
