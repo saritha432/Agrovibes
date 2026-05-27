@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
 import {
   AudioSession,
   LiveKitRoom,
@@ -311,6 +312,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
 
   React.useEffect(() => {
     if (!visible) return;
+    ensureLiveKitGlobals();
     AudioSession.startAudioSession().catch(() => undefined);
     return () => {
       AudioSession.stopAudioSession().catch(() => undefined);
