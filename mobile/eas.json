@@ -9,12 +9,8 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      },
-      "ios": { "simulator": false },
-      "env": { "EXPO_NO_HERMES_BUNDLE_TRANSFORM": "1" }
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": false }
     },
     "preview-simulator": {
       "distribution": "internal",

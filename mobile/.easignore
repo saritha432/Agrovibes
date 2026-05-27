@@ -33,11 +33,8 @@ eas-inspect-out/
 assets/cropvibe.png
 assets/cropvibe-intro.png
 
-# Large GIF replaced by splash.mp4 video — not referenced in app code
-assets/cropvibe-intro.gif
-
-# Duplicate asset copies (originals live at assets/ root level)
-assets/media/
+# Large unused media — not referenced in app code
+assets/splash.mp4
 
 # OS / editor junk
 .DS_Store
