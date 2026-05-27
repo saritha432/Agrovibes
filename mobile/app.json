@@ -56,12 +56,9 @@
     "web": {
       "favicon": "./assets/logo.png"
     },
-    "owner": "mounika-m",
+    "owner": "saritha-farming",
     "runtimeVersion": {
       "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/f6754164-ad7d-4832-89d0-36119b56026b"
     },
     "plugins": [
       [
@@ -78,7 +75,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "f6754164-ad7d-4832-89d0-36119b56026b"
+        "projectId": "b0f1e9b2-87d3-45e5-8925-7d531ca96ebe"
       }
     }
   }
