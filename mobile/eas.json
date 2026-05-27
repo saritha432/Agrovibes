@@ -13,8 +13,7 @@
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
       },
-      "ios": { "simulator": false },
-      "env": { "EXPO_NO_HERMES_BUNDLE_TRANSFORM": "1" }
+      "ios": { "simulator": false }
     },
     "preview-simulator": {
       "distribution": "internal",
