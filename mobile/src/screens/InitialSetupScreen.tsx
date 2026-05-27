@@ -78,7 +78,7 @@ const SLIDES = [
   }
 ] as const;
 
-const CROPVIBE_VIDEO = require("../../assets/splash.mp4");
+const CROPVIBE_VIDEO = require("../../assets/cropvibe-intro.gif");
 
 type OnboardingImageKey = "media" | "marketplace" | "community" | "learn" | "logistics" | "alldone";
 
