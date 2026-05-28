@@ -1,4 +1,5 @@
 import { Asset } from "expo-asset";
+import { ResizeMode, Video } from "expo-av";
 import React, { createElement } from "react";
 import {
   FlatList,
@@ -77,7 +78,7 @@ const SLIDES = [
   }
 ] as const;
 
-const CROPVIBE_VIDEO = require("../../assets/cropvibe-intro.gif");
+const CROPVIBE_INTRO_MP4 = require("../../assets/onboarding/cropvibe.mp4");
 
 type OnboardingImageKey = "media" | "marketplace" | "community" | "learn" | "logistics" | "alldone";
 
@@ -182,10 +183,13 @@ const COLORS = {
 
 function BrandSplashGif() {
   return (
-    <Image
-      source={CROPVIBE_VIDEO}
+    <Video
+      source={CROPVIBE_INTRO_MP4}
       style={styles.brandGif}
-      resizeMode="cover"
+      resizeMode={ResizeMode.COVER}
+      shouldPlay
+      isLooping
+      isMuted
     />
   );
 }
