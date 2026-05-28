@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Image, Modal, Pressable, StyleSheet, Text, TextStyle, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { HomePost } from "../../services/api";
 import { APP_BLACK } from "../../theme/appColors";
@@ -38,12 +39,24 @@ type LiveStreamViewerModalProps = {
   onClose: () => void;
   canDeletePost?: (post: HomePost) => boolean;
   onDeletePost?: (post: HomePost) => void;
+  onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
 };
 
-export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePost }: LiveStreamViewerModalProps) {
+export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePost, onLiveEnded }: LiveStreamViewerModalProps) {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const canDelete = !!post && !!canDeletePost?.(post);
+  const currentUserId = Number(user?.id);
+  const postUserId = Number(post?.userId);
+  const isHost =
+    !!post &&
+    isActiveLiveStream(post) &&
+    Number.isFinite(currentUserId) &&
+    currentUserId > 0 &&
+    Number.isFinite(postUserId) &&
+    postUserId > 0 &&
+    currentUserId === postUserId;
 
   return (
     <Modal visible={post != null} animationType="slide" onRequestClose={onClose}>
@@ -53,8 +66,10 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
             <LiveKitRoomView
               visible
               roomName={liveRoomName(post)}
-              isHost={false}
+              isHost={isHost}
               title={liveTitle(post, language, t)}
+              postId={post.id}
+              onLiveEnded={onLiveEnded}
               onClose={onClose}
             />
           ) : (

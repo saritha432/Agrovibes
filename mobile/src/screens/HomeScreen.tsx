@@ -1534,18 +1534,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return groups;
   }, [avatarLookup, otherStories, posts, user]);
 
-  const storyGroupsWithoutLive = useMemo(() => {
-    const liveUserIds = new Set(
-      activeLivePosts.map((p) => Number(p.userId)).filter((id) => Number.isFinite(id) && id > 0)
-    );
-    const liveNames = new Set(activeLivePosts.map((p) => normalizeIdentity(p.userName)).filter(Boolean));
-    return otherStoryGroups.filter((group) => {
-      const storyUserId = Number(group.stories[0]?.userId);
-      if (Number.isFinite(storyUserId) && storyUserId > 0 && liveUserIds.has(storyUserId)) return false;
-      const groupName = normalizeIdentity(group.userName);
-      return !(groupName && liveNames.has(groupName));
-    });
-  }, [activeLivePosts, otherStoryGroups]);
+  const storyGroupsWithoutLive = useMemo(() => otherStoryGroups, [otherStoryGroups]);
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
   const activeStoryAvatarUri = activeStory ? storyAuthorAvatarUri(activeStory, user, avatarLookup, posts) : undefined;
@@ -4257,6 +4246,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         onClose={() => setWatchingLivePost(null)}
         canDeletePost={(post) => viewerOwnsPost(post, user)}
         onDeletePost={confirmDeleteOwnPost}
+        onLiveEnded={(postId, update) => {
+          setPosts((prev) =>
+            prev.map((p) =>
+              p.id === postId
+                ? { ...p, ...(update || {}), liveStatus: "ended" as const, liveViewerCount: 0, liveEndedAt: new Date().toISOString() }
+                : p
+            )
+          );
+          setWatchingLivePost(null);
+        }}
       />
     </View>
   );
