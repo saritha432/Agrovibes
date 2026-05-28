@@ -1,4 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Audio } from "expo-av";
+import { Camera } from "expo-camera";
 import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
 import {
   AudioSession,
@@ -333,6 +335,16 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         return;
       }
       try {
+        if (isHost) {
+          const [cameraPerm, micPerm] = await Promise.all([
+            Camera.requestCameraPermissionsAsync(),
+            Audio.requestPermissionsAsync()
+          ]);
+          if (!cameraPerm.granted || !micPerm.granted) {
+            setErrorText("Camera and microphone permissions are required to go live.");
+            return;
+          }
+        }
         const lk = await createLiveKitToken(token, { roomName, canPublish: isHost });
         if (cancelled) return;
         setConnection({ url: lk.url, token: lk.token });

@@ -223,6 +223,8 @@ export function InitialSetupScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const footerReserveHeight = ONBOARDING_FOOTER_BASE_HEIGHT + insets.bottom;
+  const languageSheetHeight = Math.min(Math.max(360, Math.round(height * 0.62)), Math.round(height * 0.82));
+  const languageListMaxHeight = Math.max(180, languageSheetHeight - 150);
   const [index, setIndex] = React.useState(0);
   const [isLanguageSheetOpen, setIsLanguageSheetOpen] = React.useState(false);
   const indexRef = React.useRef(0);
@@ -507,11 +509,15 @@ export function InitialSetupScreen() {
         onRequestClose={() => setIsLanguageSheetOpen(false)}
       >
         <Pressable style={styles.languageModalBackdrop} onPress={() => setIsLanguageSheetOpen(false)}>
-          <Pressable style={styles.languageSheet} onPress={(event) => event.stopPropagation()}>
+          <Pressable style={[styles.languageSheet, { height: languageSheetHeight }]} onPress={(event) => event.stopPropagation()}>
             <View style={styles.languageSheetHandle} />
             <Text style={styles.languageSheetTitle}>{t("chooseLanguageTitle").replace(/\n/g, " ")}</Text>
             <Text style={styles.languageSheetSubtitle}>{t("chooseLanguageSub")}</Text>
-            <ScrollView style={styles.languageListScroll} contentContainerStyle={styles.languageList} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={[styles.languageListScroll, { maxHeight: languageListMaxHeight }]}
+              contentContainerStyle={styles.languageList}
+              showsVerticalScrollIndicator={false}
+            >
               {LANGUAGE_OPTIONS.map((option) => {
                 const isActive = option.value === language;
                 return (
@@ -720,7 +726,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 8
   },
-  languageListScroll: { flex: 1, marginTop: 18 },
+  languageListScroll: { marginTop: 18 },
   languageList: { gap: 10, paddingBottom: 12 },
   languageOption: {
     borderWidth: 1,
