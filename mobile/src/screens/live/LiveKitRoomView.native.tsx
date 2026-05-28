@@ -409,7 +409,11 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       connect
       audio
       video={isHost}
-      options={{ adaptiveStream: { pixelDensity: "screen" } }}
+      options={{
+        adaptiveStream: { pixelDensity: "screen" },
+        // Use rear camera by default for host live sessions.
+        videoCaptureDefaults: { facingMode: "environment" }
+      }}
       onError={(error) => setErrorText(error.message)}
     >
       <LiveRoomContent

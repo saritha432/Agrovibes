@@ -2486,7 +2486,6 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         onClose={() => {
           setLiveKitHostOpen(false);
           setLiveKitHostPostId(null);
-          onClose();
         }}
       />
     </Modal>
