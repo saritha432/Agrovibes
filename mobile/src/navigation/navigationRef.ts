@@ -38,3 +38,9 @@ export function navigateToJoinLive() {
     navigationRef.navigate("Main", { screen: "Home" });
   }
 }
+
+export function navigateToMyProfile() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("Main", { screen: "Profile" });
+  }
+}

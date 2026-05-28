@@ -1,5 +1,6 @@
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
+import { Asset } from "expo-asset";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,17 +12,107 @@ type Props = BottomTabBarProps & { onCreatePress: () => void };
 const TAB_BG = APP_BLACK;
 const MUTED = "#b9bec3";
 const BRAND_ACCENT = APP_LIME;
+const TAB_ICON_SIZE = 24;
+
+type SvgIconModule = number | string | { uri?: string; default?: string };
+
+const TAB_SVG_ICONS: Record<"Market" | "Learn" | "Services", { active: SvgIconModule; inactive: SvgIconModule }> = {
+  Market: {
+    active: require("../../assets/market-active.svg"),
+    inactive: require("../../assets/market.svg")
+  },
+  Learn: {
+    active: require("../../assets/learn-active.svg"),
+    inactive: require("../../assets/learn.svg")
+  },
+  Services: {
+    active: require("../../assets/community-active.svg"),
+    inactive: require("../../assets/community.svg")
+  }
+};
+
+function iconModuleToUri(module: SvgIconModule): string | null {
+  if (typeof module === "string" && module.length > 0) return module;
+  if (typeof module === "object" && module !== null) {
+    if (typeof module.uri === "string" && module.uri.length > 0) return module.uri;
+    if (typeof module.default === "string" && module.default.length > 0) return module.default;
+  }
+  if (typeof module === "number") {
+    const resolver = (Image as unknown as { resolveAssetSource?: (asset: number) => { uri?: string } | undefined })
+      .resolveAssetSource;
+    if (typeof resolver !== "function") return null;
+    const resolved = resolver(module);
+    return resolved?.uri ?? null;
+  }
+  return null;
+}
+
+function fallbackIconName(routeName: "Market" | "Learn" | "Services", focused: boolean): keyof typeof Ionicons.glyphMap {
+  if (routeName === "Market") return focused ? "storefront" : "storefront-outline";
+  if (routeName === "Learn") return focused ? "book" : "book-outline";
+  return focused ? "grid" : "grid-outline";
+}
+
+function TabSvgIcon({
+  routeName,
+  focused,
+  size = 15
+}: {
+  routeName: "Market" | "Learn" | "Services";
+  focused: boolean;
+  size?: number;
+}) {
+  const module = focused ? TAB_SVG_ICONS[routeName].active : TAB_SVG_ICONS[routeName].inactive;
+  const [uri, setUri] = React.useState<string | null>(() => iconModuleToUri(module));
+  const [failed, setFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    const direct = iconModuleToUri(module);
+    setUri(direct);
+    setFailed(false);
+    if (direct) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const asset = Asset.fromModule(module as number | string);
+        await asset.downloadAsync();
+        const nextUri = asset.localUri ?? asset.uri;
+        if (!cancelled && nextUri) setUri(nextUri);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [module]);
+
+  if (!uri || failed) {
+    return <Ionicons name={fallbackIconName(routeName, focused)} size={size} color={focused ? BRAND_ACCENT : MUTED} />;
+  }
+
+  if (Platform.OS === "web") {
+    return React.createElement("img", {
+      src: uri,
+      alt: "",
+      style: { width: size, height: size, display: "block", objectFit: "contain" },
+      onError: () => setFailed(true)
+    });
+  }
+
+  try {
+    const { SvgUri } = require("react-native-svg") as typeof import("react-native-svg");
+    return <SvgUri uri={uri} width={size} height={size} onError={() => setFailed(true)} />;
+  } catch {
+    return <Ionicons name={fallbackIconName(routeName, focused)} size={size} color={focused ? BRAND_ACCENT : MUTED} />;
+  }
+}
 
 function tabIcon(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
   switch (routeName) {
     case "Home":
       return focused ? "home" : "home-outline";
-    case "Market":
-      return focused ? "storefront" : "storefront-outline";
-    case "Learn":
-      return focused ? "book" : "book-outline";
-    case "Services":
-      return focused ? "grid" : "grid-outline";
     case "Profile":
       return focused ? "person" : "person-outline";
     default:
@@ -95,7 +186,7 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
   const homeFocused = isRouteFocused("Home");
   const marketFocused = isRouteFocused("Market");
   const servicesFocused = isRouteFocused("Services");
-  const profileFocused = isRouteFocused("Profile");
+  const learnFocused = isRouteFocused("Learn");
 
   return (
     <View style={[styles.wrap, { paddingBottom: bottomPad }]}>
@@ -116,15 +207,11 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
           accessibilityLabel={t("tabMarket")}
           label={t("tabMarket")}
         >
-          <Ionicons
-            name={tabIcon("Market", marketFocused)}
-            size={15}
-            color={marketFocused ? BRAND_ACCENT : MUTED}
-          />
+          <TabSvgIcon routeName="Market" focused={marketFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
 
         <TabSlot focused={false} onPress={onCreatePress} accessibilityLabel={t("tabCreate")} label={t("tabCreate")}>
-          <Ionicons name="add-circle-outline" size={15} color={MUTED} />
+          <Ionicons name="add-circle-outline" size={TAB_ICON_SIZE} color={MUTED} />
         </TabSlot>
 
         <TabSlot
@@ -133,24 +220,16 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
           accessibilityLabel={t("tabCommunity")}
           label={t("tabCommunity")}
         >
-          <Ionicons
-            name={tabIcon("Services", servicesFocused)}
-            size={15}
-            color={servicesFocused ? BRAND_ACCENT : MUTED}
-          />
+          <TabSvgIcon routeName="Services" focused={servicesFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
 
         <TabSlot
-          focused={profileFocused}
-          onPress={() => pressRoute("Profile")}
-          accessibilityLabel={t("tabProfile")}
-          label={t("tabProfile")}
+          focused={learnFocused}
+          onPress={() => pressRoute("Learn")}
+          accessibilityLabel="Learn"
+          label="Learn"
         >
-          <Ionicons
-            name={tabIcon("Profile", profileFocused)}
-            size={15}
-            color={profileFocused ? BRAND_ACCENT : MUTED}
-          />
+          <TabSvgIcon routeName="Learn" focused={learnFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
       </View>
     </View>
