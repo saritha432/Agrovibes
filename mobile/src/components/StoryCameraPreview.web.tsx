@@ -18,6 +18,16 @@ function stopStream(stream: MediaStream | null) {
   for (const track of stream.getTracks()) track.stop();
 }
 
+function detachVideo(video: HTMLVideoElement | null) {
+  if (!video) return;
+  try {
+    video.pause();
+  } catch {
+    // no-op
+  }
+  video.srcObject = null;
+}
+
 export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(function StoryCameraPreview(
   { facing = "front", active = false, mode = "picture", onPress, onRecordingChange, onAutoRecordFinished },
   ref
@@ -28,13 +38,24 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingActiveRef = useRef(false);
+  const activeRef = useRef(active);
+  const startTokenRef = useRef(0);
 
   const [ready, setReady] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    activeRef.current = active;
+    if (!active) {
+      // Invalidate any in-flight getUserMedia request.
+      startTokenRef.current += 1;
+    }
+  }, [active]);
+
   const startCamera = useCallback(async () => {
+    const startToken = ++startTokenRef.current;
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setErrorText("Camera is not supported in this browser.");
       return;
@@ -66,6 +87,10 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         video: { facingMode: facing === "front" ? "user" : "environment" },
         audio: mode === "video" || recordingActiveRef.current
       });
+      if (!activeRef.current || startToken !== startTokenRef.current) {
+        stopStream(stream);
+        return;
+      }
       streamRef.current = stream;
       video.srcObject = stream;
       video.style.transform = facing === "front" ? "scaleX(-1)" : "none";
@@ -78,10 +103,19 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
 
   useEffect(() => {
     if (!active) {
+      if (recorderRef.current?.state === "recording") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          // no-op
+        }
+      }
+      recorderRef.current = null;
       stopStream(streamRef.current);
       streamRef.current = null;
       const host = hostRef.current as unknown as HTMLElement | null;
       if (host && videoRef.current && host.contains(videoRef.current)) {
+        detachVideo(videoRef.current);
         host.removeChild(videoRef.current);
       }
       videoRef.current = null;
@@ -94,6 +128,29 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
     const t = setTimeout(() => void startCamera(), 50);
     return () => clearTimeout(t);
   }, [active, facing, mode, onRecordingChange, startCamera]);
+
+  useEffect(() => {
+    return () => {
+      startTokenRef.current += 1;
+      if (recorderRef.current?.state === "recording") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          // no-op
+        }
+      }
+      recorderRef.current = null;
+      stopStream(streamRef.current);
+      streamRef.current = null;
+      const host = hostRef.current as unknown as HTMLElement | null;
+      if (host && videoRef.current && host.contains(videoRef.current)) {
+        detachVideo(videoRef.current);
+        host.removeChild(videoRef.current);
+      }
+      videoRef.current = null;
+      recordingActiveRef.current = false;
+    };
+  }, []);
 
   const takePictureAsync = useCallback(
     async (options?: { quality?: number }) => {
