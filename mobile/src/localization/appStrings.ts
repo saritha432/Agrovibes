@@ -4,7 +4,7 @@ export const APP_STRINGS_EN = {
   tabCreate: "Create",
   tabCommunity: "Community",
   tabProfile: "Profile",
-  tabFeed: "Feed",
+  tabFeed: "Drops",
   tabFriends: "Friends",
   tabLive: "Live",
   follow: "Follow",

@@ -1595,7 +1595,19 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     ? t("locationPrefix", { place: postLocation.trim() })
     : t("addLocation");
   const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
-  const entryCameraActive = visible && captureEntryView === "camera";
+  const entryCameraActive =
+    visible &&
+    !createType &&
+    !fullScreenCameraOpen &&
+    !liveKitHostOpen &&
+    captureEntryView === "camera";
+
+  // Hard-stop inline camera whenever create is not actively on the camera surface.
+  React.useEffect(() => {
+    if (entryCameraActive) return;
+    if (!entryCameraRef.current?.isRecording()) return;
+    void entryCameraRef.current.stopRecording().catch(() => {});
+  }, [entryCameraActive]);
 
   const composeOptions: Array<{
     icon: keyof typeof Ionicons.glyphMap;

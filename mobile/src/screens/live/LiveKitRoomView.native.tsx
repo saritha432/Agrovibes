@@ -17,7 +17,6 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, Text
 import { useAuth } from "../../auth/AuthContext";
 import { createLiveKitToken, endHomeLivePost, formatLiveStreamError, type HomePost } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
-import { startLiveHostRecorder, type LiveHostRecorder } from "./liveHostRecording";
 import {
   encodeLiveDataMessage,
   liveViewerCount,
@@ -35,6 +34,10 @@ type LiveKitRoomViewProps = {
   postId?: number;
   onClose?: () => void;
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
+};
+
+type LiveHostRecorder = {
+  stop: () => Promise<string | null>;
 };
 
 function LiveRoomContent({
@@ -73,11 +76,11 @@ function LiveRoomContent({
   }, [status]);
 
   React.useEffect(() => {
-    if (!isHost || recorderRef.current) return;
-    const timer = setTimeout(() => {
-      recorderRef.current = startLiveHostRecorder({ room });
-    }, 800);
-    return () => clearTimeout(timer);
+    // Stability-first: disable local host recording while live is running.
+    // On some real devices this extra MediaRecorder pipeline causes camera/publish instability.
+    if (!isHost) return;
+    recorderRef.current = null;
+    return;
   }, [isHost, room]);
 
   const viewers = React.useMemo<LiveViewer[]>(() => {
