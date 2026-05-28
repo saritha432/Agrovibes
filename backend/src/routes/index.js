@@ -3371,8 +3371,9 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
     const userId = Number(req.user.userId);
     const userRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
     const displayName = String(userRes.rows[0]?.full_name || `User ${userId}`).trim();
+    const sessionIdentity = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const token = new AccessToken(cfg.apiKey, cfg.apiSecret, {
-      identity: String(userId),
+      identity: sessionIdentity,
       name: displayName,
       ttl: "6h"
     });
@@ -3389,7 +3390,7 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
       token: jwt,
       url: cfg.livekitUrl,
       roomName,
-      identity: String(userId),
+      identity: sessionIdentity,
       name: displayName,
       livekitHost: cfg.urlHost || null
     });
