@@ -97,6 +97,8 @@ const likeActiveColor = APP_LIME;
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
+const STORY_FALLBACK_BG = "#e5e7eb";
+const STORY_FALLBACK_INITIAL = APP_LIME;
 
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
@@ -2730,8 +2732,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   size={56}
                   borderRadius={28}
                   style={styles.storyAvatarFill}
-                  fallbackBackgroundColor="#d4dce0"
-                  initialsColor="#1f2c29"
+                  textStyle={styles.storyAvatarInitial}
+                  fallbackBackgroundColor={STORY_FALLBACK_BG}
+                  initialsColor={STORY_FALLBACK_INITIAL}
                 />
                 <Pressable
                   style={styles.yourStoryPlusBadge}
@@ -2798,8 +2801,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     size={56}
                     borderRadius={28}
                     style={styles.storyAvatarFill}
-                    fallbackBackgroundColor="#d4dce0"
-                    initialsColor="#1f2c29"
+                    textStyle={styles.storyAvatarInitial}
+                    fallbackBackgroundColor={STORY_FALLBACK_BG}
+                    initialsColor={STORY_FALLBACK_INITIAL}
                   />
                 </View>
               </View>
@@ -4625,7 +4629,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "#fff",
+    backgroundColor: "#111315",
     alignItems: "center",
     justifyContent: "center",
     overflow: "visible"
@@ -4634,11 +4638,12 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#d4dce0",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden"
   },
+  storyAvatarInitial: { fontSize: 28, fontWeight: "600" },
   storyAvatarImage: { width: 56, height: 56, borderRadius: 28 },
   storyInitial: { fontSize: 18, fontWeight: "700", color: "#1f2c29" },
   yourStoryPlusBadge: {

@@ -1,11 +1,14 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { useAuth } from "../auth/AuthContext";
+import { UserAvatar } from "./UserAvatar";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
-import { navigateToDirectInbox, navigateToUserSearch } from "../navigation/navigationRef";
+import { navigateToDirectInbox, navigateToMyProfile, navigateToUserSearch } from "../navigation/navigationRef";
 import { APP_BLACK, APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 export function AppTopBar() {
+  const { user } = useAuth();
   const { openNotificationSheet, notificationUnreadCount, messageUnreadCount } = useNotificationPanel();
 
   return (
@@ -30,6 +33,17 @@ export function AppTopBar() {
               <Text style={styles.badgeText}>{Math.min(99, notificationUnreadCount)}</Text>
             </View>
           ) : null}
+        </Pressable>
+        <Pressable style={styles.iconBadge} onPress={navigateToMyProfile}>
+          <UserAvatar
+            uri={user?.avatarUrl || null}
+            name={user?.fullName || user?.username || "U"}
+            size={24}
+            borderRadius={12}
+            fallbackBackgroundColor="#1f2328"
+            initialsColor={APP_LIME}
+            textStyle={styles.profileInitial}
+          />
         </Pressable>
       </View>
     </View>
@@ -67,5 +81,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  badgeText: { color: APP_BLACK, fontSize: 8, fontWeight: "700" }
+  badgeText: { color: APP_BLACK, fontSize: 8, fontWeight: "700" },
+  profileInitial: { fontWeight: "900" }
 });

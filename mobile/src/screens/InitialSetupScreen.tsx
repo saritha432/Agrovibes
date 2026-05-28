@@ -1,5 +1,4 @@
 import { Asset } from "expo-asset";
-import { ResizeMode, Video } from "expo-av";
 import React, { createElement } from "react";
 import {
   FlatList,
@@ -183,13 +182,10 @@ const COLORS = {
 
 function BrandSplashGif() {
   return (
-    <Video
+    <Image
       source={CROPVIBE_VIDEO}
       style={styles.brandGif}
-      resizeMode={ResizeMode.COVER}
-      shouldPlay
-      isLooping
-      isMuted
+      resizeMode="cover"
     />
   );
 }
