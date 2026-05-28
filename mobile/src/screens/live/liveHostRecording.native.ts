@@ -13,10 +13,18 @@ type StartLiveHostRecorderInput = {
 };
 
 function pickRecorderMimeType() {
-  const MediaRecorderCtor = (globalThis as { MediaRecorder?: typeof MediaRecorder }).MediaRecorder;
+  const MediaRecorderCtor = (globalThis as {
+    MediaRecorder?: (typeof MediaRecorder) & { isTypeSupported?: (mimeType: string) => boolean };
+  }).MediaRecorder;
   if (!MediaRecorderCtor) return "";
   const candidates = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
-  return candidates.find((type) => MediaRecorderCtor.isTypeSupported(type)) || "";
+  const supportsType = MediaRecorderCtor.isTypeSupported;
+  if (typeof supportsType !== "function") {
+    // Some Android/Hermes builds expose MediaRecorder but not isTypeSupported.
+    // Return empty so caller safely skips recording instead of crashing.
+    return "";
+  }
+  return candidates.find((type) => supportsType(type)) || "";
 }
 
 function buildStreamFromTracks(tracks: LocalTrack[]) {

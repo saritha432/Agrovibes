@@ -103,7 +103,7 @@ function LiveRoomContent({
     } catch {
       // no-op
     }
-    setTimeout(() => onClose?.(), 1200);
+    setStatusText("Live ended");
   }, [liveEnded, onClose, room]);
 
   React.useEffect(() => {
@@ -197,7 +197,8 @@ function LiveRoomContent({
         // no-op
       }
     }
-    onClose?.();
+    setLiveEnded(true);
+    setStatusText("Live ended");
   }, [isHost, onClose, onLiveEnded, postId, room, token]);
 
   const cameraTrack = tracks.find((track) => isTrackReference(track));
@@ -226,7 +227,7 @@ function LiveRoomContent({
         </View>
         <Text style={styles.statusText}>{errorText || (savingRecording ? "Saving recording..." : statusText)}</Text>
         {onClose ? (
-          <Pressable style={styles.closeBtn} onPress={() => (isHost ? void handleEndLive() : onClose())}>
+          <Pressable style={styles.closeBtn} onPress={() => (isHost && !liveEnded ? void handleEndLive() : onClose())}>
             <Ionicons name="close" size={22} color="#fff" />
           </Pressable>
         ) : null}
@@ -311,6 +312,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [status, setStatus] = React.useState("Connecting live...");
   const [errorText, setErrorText] = React.useState("");
+  const [debugInfo, setDebugInfo] = React.useState("");
 
   React.useEffect(() => {
     if (!visible) return;
@@ -336,15 +338,23 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       }
       try {
         if (isHost) {
+          setStatus("Checking camera/mic permissions...");
           const [cameraPerm, micPerm] = await Promise.all([
             Camera.requestCameraPermissionsAsync(),
             Audio.requestPermissionsAsync()
           ]);
+          const cameraGranted = cameraPerm.granted ? "granted" : "denied";
+          const micGranted = micPerm.granted ? "granted" : "denied";
+          setDebugInfo(`room=${roomName} post=${postId ?? "-"} host=yes cam=${cameraGranted} mic=${micGranted}`);
           if (!cameraPerm.granted || !micPerm.granted) {
             setErrorText("Camera and microphone permissions are required to go live.");
+            setStatus(`Permission blocked (cam=${cameraGranted}, mic=${micGranted})`);
             return;
           }
+        } else {
+          setDebugInfo(`room=${roomName} post=${postId ?? "-"} host=no`);
         }
+        setStatus("Requesting LiveKit token...");
         const lk = await createLiveKitToken(token, { roomName, canPublish: isHost });
         if (cancelled) return;
         setConnection({ url: lk.url, token: lk.token });
@@ -352,6 +362,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       } catch (error) {
         if (cancelled) return;
         setErrorText(formatLiveStreamError(error));
+        setStatus("Live start failed");
       }
     })();
 
@@ -368,6 +379,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         <View style={[styles.videoHost, styles.videoPlaceholder]}>
           <Ionicons name="alert-circle-outline" size={42} color="#ff6b6b" />
           <Text style={styles.videoPlaceholderText}>{errorText}</Text>
+          {debugInfo ? <Text style={styles.videoDebugText}>{debugInfo}</Text> : null}
           {onClose ? (
             <Pressable style={styles.retryCloseBtn} onPress={onClose}>
               <Text style={styles.sendText}>Close</Text>
@@ -384,6 +396,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         <View style={[styles.videoHost, styles.videoPlaceholder]}>
           <ActivityIndicator color={APP_LIME} size="large" />
           <Text style={styles.videoPlaceholderText}>{status}</Text>
+          {debugInfo ? <Text style={styles.videoDebugText}>{debugInfo}</Text> : null}
         </View>
       </View>
     );
@@ -397,7 +410,6 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       audio
       video={isHost}
       options={{ adaptiveStream: { pixelDensity: "screen" } }}
-      onDisconnected={onClose}
       onError={(error) => setErrorText(error.message)}
     >
       <LiveRoomContent
@@ -418,6 +430,7 @@ const styles = StyleSheet.create({
   videoHost: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000" },
   videoPlaceholder: { alignItems: "center", justifyContent: "center", padding: 24 },
   videoPlaceholderText: { marginTop: 12, color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: "700", textAlign: "center" },
+  videoDebugText: { marginTop: 8, color: "rgba(201,255,53,0.85)", fontSize: 11, fontWeight: "700", textAlign: "center" },
   endedOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
