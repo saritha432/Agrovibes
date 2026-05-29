@@ -11,6 +11,7 @@ import type { Course, CourseLesson } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { saveCourseProgress } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
 type Nav = NativeStackNavigationProp<LearnStackParamList, "LessonVideo">;
 type Rt = RouteProp<LearnStackParamList, "LessonVideo">;
@@ -104,7 +105,7 @@ export function LessonVideoScreen() {
           isProbablyMp4Url(lesson.videoUrl) ? (
           <View style={styles.videoCard}>
             <Video
-              source={{ uri: lesson.videoUrl }}
+              source={{ uri: videoPlaybackUrl(lesson.videoUrl) }}
               style={styles.video}
               useNativeControls
               resizeMode={ResizeMode.CONTAIN}

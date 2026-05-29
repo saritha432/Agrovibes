@@ -10,6 +10,7 @@ import type { HomePost } from "../../services/api";
 import { APP_BLACK } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
+import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { isActiveLiveStream, isLivePost, liveRoomName } from "./livePostUtils";
 import { LiveKitRoomView } from "./LiveKitRoomView";
 
@@ -91,7 +92,7 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
               ) : null}
               {post.videoUrl ? (
                 <Video
-                  source={{ uri: post.videoUrl }}
+                  source={{ uri: videoPlaybackUrl(post.videoUrl) }}
                   style={styles.viewerVideo}
                   resizeMode={ResizeMode.CONTAIN}
                   shouldPlay

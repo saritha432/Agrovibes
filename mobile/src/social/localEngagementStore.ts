@@ -298,3 +298,14 @@ export async function addLocalCommentForPost(payload: {
     parentCommentId: record.parentCommentId
   };
 }
+
+export async function removeLocalCommentForPost(postId: number, commentId: string) {
+  if (!Number.isFinite(postId) || postId <= 0) return false;
+  const id = String(commentId || "").trim();
+  if (!id) return false;
+  const rows = await readLocalComments();
+  const next = rows.filter((r) => !(Number(r.postId) === Number(postId) && String(r.id) === id));
+  if (next.length === rows.length) return false;
+  await writeLocalComments(next);
+  return true;
+}

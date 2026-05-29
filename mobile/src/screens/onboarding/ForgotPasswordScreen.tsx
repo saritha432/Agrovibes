@@ -12,6 +12,13 @@ const BG = "#262626";
 const CARD = "#252a30";
 const BORDER = "#3a424c";
 
+function sanitizeIndianMobileInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length > 10) return digits.slice(-10);
+  return digits.slice(0, 10);
+}
+
 export function ForgotPasswordScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { t } = useLanguage();
@@ -30,7 +37,8 @@ export function ForgotPasswordScreen() {
     }
     setLoading(true);
     try {
-      await sendPhoneOtp({ phone: phone.trim() });
+      const local = digits.length > 10 ? digits.slice(-10) : digits;
+      await sendPhoneOtp({ phone: `+91${local}` });
       navigation.navigate("ForgotPasswordOtp", { phone: phone.trim() });
     } catch (e: any) {
       setErrorText(e?.message || "Failed to send OTP");
@@ -49,12 +57,16 @@ export function ForgotPasswordScreen() {
       <View style={styles.card}>
         <TextInput
           value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
+          onChangeText={(raw) => {
+            setErrorText("");
+            setPhone(sanitizeIndianMobileInput(raw));
+          }}
+          keyboardType="number-pad"
           placeholder={t("enterPhone")}
           placeholderTextColor="#7f8b93"
           style={styles.input}
           autoCapitalize="none"
+          maxLength={10}
         />
 
         <Pressable style={[styles.primaryBtn, loading ? styles.disabled : null]} onPress={submit} disabled={loading}>

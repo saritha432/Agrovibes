@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { mapPostForPlayback, mapPostsForPlayback, mapStoriesForPlayback, mapStoryForPlayback } from "../utils/videoPlaybackUrl";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -143,6 +144,35 @@ export function formatLiveStreamError(error: unknown): string {
     return "LiveKit rejected the token. Camera may turn on, but video won't show until Render LIVEKIT_URL, API key and secret all match the same LiveKit Cloud project. Redeploy after saving env vars.";
   }
   return message;
+}
+
+/** User-facing auth errors (login/register); avoids raw "Request failed (502)". */
+export function formatAuthError(error: unknown, fallback = "Something went wrong. Please try again."): string {
+  const err = error as { message?: string; status?: number; payload?: { message?: string } };
+  const status = typeof err?.status === "number" ? err.status : null;
+  const msg = String(err?.payload?.message || err?.message || "").trim();
+
+  if (status === 401 || /invalid credentials/i.test(msg)) {
+    return "Incorrect mobile number or password.";
+  }
+  if (status === 400) {
+    return msg || "Please check your details and try again.";
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return "Server is temporarily unavailable. Please try again in a moment.";
+  }
+  if (status != null && status >= 500) {
+    return "Something went wrong on our side. Please try again.";
+  }
+  if (/request failed \(\d{3}\)/i.test(msg)) {
+    const code = Number(msg.match(/\((\d{3})\)/)?.[1]);
+    if (code === 401) return "Incorrect mobile number or password.";
+    if (code === 502 || code === 503 || code === 504) {
+      return "Server is temporarily unavailable. Please try again in a moment.";
+    }
+    if (code != null && code >= 500) return "Something went wrong on our side. Please try again.";
+  }
+  return msg || fallback;
 }
 
 export async function authRegister(payload: {
@@ -457,7 +487,8 @@ export async function fetchHomeStories() {
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }
-  return (await response.json()) as { stories: HomeStory[] };
+  const data = (await response.json()) as { stories: HomeStory[] };
+  return { stories: mapStoriesForPlayback(data.stories || []) };
 }
 
 export async function createHomeStory(
@@ -474,7 +505,8 @@ export async function createHomeStory(
   if (!response.ok) {
     throw new Error("Failed to create story");
   }
-  return (await response.json()) as { story: HomeStory };
+  const data = (await response.json()) as { story: HomeStory };
+  return { story: mapStoryForPlayback(data.story) };
 }
 
 export async function fetchHomePosts(token?: string | null) {
@@ -484,12 +516,14 @@ export async function fetchHomePosts(token?: string | null) {
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
-  return (await response.json()) as { posts: HomePost[] };
+  const data = (await response.json()) as { posts: HomePost[] };
+  return { posts: mapPostsForPlayback(data.posts || []) };
 }
 
 /** Current user's posts only — lighter than loading the full home feed for profile. */
 export async function fetchMyHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  return { posts: mapPostsForPlayback(data.posts || []) };
 }
 
 export type HomePostLiker = {
@@ -530,7 +564,8 @@ export async function unlikeHomePost(token: string, postId: number) {
 }
 
 export async function fetchSavedHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  return { posts: mapPostsForPlayback(data.posts || []) };
 }
 
 /**
@@ -543,7 +578,8 @@ export async function fetchTaggedHomePosts(token: string) {
   if (response.status === 404) {
     return { posts: [] as HomePost[] };
   }
-  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: mapPostsForPlayback(data.posts || []) };
 }
 
 export async function saveHomePost(token: string, postId: number) {
@@ -596,6 +632,7 @@ export async function fetchHomePostComments(postId: number, token?: string | nul
       avatarUrl?: string | null;
       createdAt?: string;
       parentCommentId?: string;
+      userId?: number;
     }[];
   };
 }
@@ -623,9 +660,18 @@ export async function createHomePostComment(
       createdAt?: string;
       avatarUrl?: string | null;
       parentCommentId?: string;
+      userId?: number;
     };
     commentsCount: number;
   };
+}
+
+export async function deleteHomePostComment(token: string, postId: number, commentId: string) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments/${encodeURIComponent(commentId)}`,
+    token,
+    { method: "DELETE" }
+  )) as { ok: boolean; commentsCount: number };
 }
 
 export async function fetchLearnCourses() {
@@ -716,7 +762,8 @@ export async function createHomePost(payload: {
   if (!response.ok) {
     throw new Error("Failed to create post");
   }
-  return (await response.json()) as { post: HomePost };
+  const data = (await response.json()) as { post: HomePost };
+  return { post: mapPostForPlayback(data.post) };
 }
 
 export async function updateHomePostLiveVideo(
@@ -724,18 +771,20 @@ export async function updateHomePostLiveVideo(
   postId: number,
   payload: { videoUrl: string; thumbnailUrl?: string }
 ) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/live-video`, token, {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/live-video`, token, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { post: HomePost };
+  return { post: mapPostForPlayback(data.post) };
 }
 
 export async function endHomeLivePost(token: string, postId: number) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
   })) as { post: HomePost };
+  return { post: mapPostForPlayback(data.post) };
 }
 
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
@@ -853,6 +902,22 @@ export async function syncLocalFollowEdgesToServer(
     followersCount: number;
     followingCount: number;
   };
+}
+
+export type MutualConnectionInfo = {
+  followsYou: boolean;
+  mutual: Array<{ userId: number; fullName: string; avatarUrl?: string }>;
+  mutualCount: number;
+};
+
+export async function fetchMutualConnections(token: string, userIds: number[]) {
+  const ids = [...new Set(userIds.filter((id) => Number.isFinite(id) && id > 0))].slice(0, 40);
+  if (!ids.length) return { connections: {} as Record<number, MutualConnectionInfo> };
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/mutual-connections`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userIds: ids })
+  })) as { connections: Record<number, MutualConnectionInfo> };
 }
 
 export async function fetchSocialNetwork(token: string, userId: number) {
@@ -1082,7 +1147,11 @@ async function uploadToCloudinary(
     : [];
   const hlsUrl = eagerUrls.find((u) => u.toLowerCase().includes(".m3u8"));
   const mp4Url = eagerUrls.find((u) => u.toLowerCase().includes(".mp4"));
-  const url = hlsUrl ?? mp4Url ?? uploaded.secure_url ?? uploaded.url;
+  // Native expo-av needs MP4; web can use HLS when available.
+  const url =
+    Platform.OS === "web"
+      ? hlsUrl ?? mp4Url ?? uploaded.secure_url ?? uploaded.url
+      : mp4Url ?? hlsUrl ?? uploaded.secure_url ?? uploaded.url;
   if (!url) throw new Error("Cloud upload missing URL");
   return { url, hlsUrl, mp4Url };
 }
