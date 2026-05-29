@@ -31,7 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -594,7 +594,7 @@ function normalizeStoryRow(raw: Partial<HomeStory> & Record<string, unknown>): H
     ...(avatarUrl ? { avatarUrl } : {}),
     hasNew: raw.hasNew != null ? !!raw.hasNew : raw["has_new"] != null ? !!raw["has_new"] : true,
     viewed: !!raw.viewed,
-    videoUrl: video ? videoPlaybackUrl(video) : undefined,
+    videoUrl: video || undefined,
     imageUrl: image || undefined,
     createdAt:
       typeof raw.createdAt === "string"
@@ -716,6 +716,30 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
       } as ViewStyle)
     : ({} as ViewStyle);
 
+function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
+  const sources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = sources[sourceIndex] ?? uri;
+  useEffect(() => setSourceIndex(0), [uri]);
+  return (
+    <Video
+      key={activeUri}
+      style={style}
+      source={{ uri: activeUri }}
+      resizeMode={ResizeMode.COVER}
+      shouldPlay
+      isLooping
+      isMuted
+      useNativeControls={false}
+      onPlaybackStatusUpdate={(status) => {
+        if (!status.isLoaded && "error" in status && status.error && sourceIndex + 1 < sources.length) {
+          setSourceIndex((i) => i + 1);
+        }
+      }}
+    />
+  );
+}
+
 type ContainedExpoVideoProps = {
   uri: string;
   shouldPlay: boolean;
@@ -753,9 +777,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
+  const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = playbackSources[sourceIndex] ?? uri;
 
   useEffect(() => {
     setNatural(null);
+    setSourceIndex(0);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -786,7 +814,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     } else {
       ref.pauseAsync().catch(() => {});
     }
-  }, [shouldPlay, uri]);
+  }, [shouldPlay, activeUri]);
 
   React.useImperativeHandle(
     ref,
@@ -801,6 +829,14 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     []
   );
 
+  const tryNextPlaybackSource = React.useCallback(() => {
+    setSourceIndex((idx) => {
+      if (idx + 1 >= playbackSources.length) return idx;
+      console.warn("[Cropvibe Video] fallback", playbackSources[idx + 1]?.slice(0, 160));
+      return idx + 1;
+    });
+  }, [playbackSources]);
+
   return (
     <View
       style={{
@@ -811,10 +847,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       }}
     >
       <Video
+        key={activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
-        source={{ uri: videoPlaybackUrl(uri) }}
+        source={{ uri: activeUri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
@@ -828,6 +865,9 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           onStatusUpdate?.(status);
           if (status.isLoaded) {
             durationRef.current = Number(status.durationMillis || 0);
+          } else if ("error" in status && status.error) {
+            console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+            if (sourceIndex + 1 < playbackSources.length) tryNextPlaybackSource();
           }
         }}
         onReadyForDisplay={
@@ -3090,7 +3130,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
-                uri={videoPlaybackUrl(post.videoUrl)}
+                uri={post.videoUrl}
                 shouldPlay={isActive}
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
@@ -3433,15 +3473,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 {isActive ? (
-                  <Video
-                    style={styles.video}
-                    source={{ uri: videoPlaybackUrl(post.videoUrl) }}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay
-                    isLooping
-                    isMuted
-                    useNativeControls={false}
-                  />
+                  <FeedPostVideo uri={post.videoUrl} style={styles.video} />
                 ) : (
                   <>
                     <Image
@@ -3773,7 +3805,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           >
             {activeStory?.videoUrl ? (
               <ContainedExpoVideo
-                uri={videoPlaybackUrl(activeStory.videoUrl)}
+                uri={activeStory.videoUrl}
                 shouldPlay
                 containerWidth={storyViewport.width || windowWidth}
                 containerHeight={storyViewport.height || Math.max(1, windowHeight - 140)}
@@ -3809,7 +3841,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           </View>
           {activePost?.videoUrl ? (
             <ContainedExpoVideo
-              uri={videoPlaybackUrl(activePost.videoUrl)}
+              uri={activePost.videoUrl}
               shouldPlay
               containerWidth={windowWidth}
               containerHeight={windowHeight}
