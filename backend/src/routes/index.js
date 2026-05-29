@@ -16,6 +16,7 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
+const { isSupabaseStorageConfigured, uploadBufferToSupabase } = require("../supabaseStorage");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -62,6 +63,39 @@ const uploadVideo = multer({
     cb(new Error("Only video files are allowed"));
   }
 });
+
+const uploadMediaMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 120 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const type = String(file.mimetype || "").toLowerCase();
+    const name = String(file.originalname || "").toLowerCase();
+    if (type.startsWith("image/") || type.startsWith("video/")) {
+      cb(null, true);
+      return;
+    }
+    if (/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v)$/i.test(name)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Only image or video files are allowed"));
+  }
+});
+
+function mediaExtFromMime(mimeType, originalName) {
+  const mime = String(mimeType || "").toLowerCase();
+  if (mime.includes("jpeg") || mime.includes("jpg")) return ".jpg";
+  if (mime.includes("png")) return ".png";
+  if (mime.includes("webp")) return ".webp";
+  if (mime.includes("gif")) return ".gif";
+  if (mime.includes("heic")) return ".heic";
+  if (mime.includes("webm")) return ".webm";
+  if (mime.includes("quicktime")) return ".mov";
+  if (mime.includes("mp4")) return ".mp4";
+  const name = String(originalName || "").toLowerCase();
+  const m = name.match(/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v)$/i);
+  return m ? m[0].toLowerCase() : ".bin";
+}
 
 function toCloudinaryHlsUrl(rawUrl) {
   const input = String(rawUrl || "").trim();
@@ -4095,6 +4129,47 @@ router.delete("/v1/home/posts/:postId/comments/:commentId", authRequired, async 
   } catch (error) {
     res.status(500).json({ message: "Failed to delete comment", error: error.message });
   }
+});
+
+router.get("/v1/media/config", (_req, res) => {
+  res.json({
+    provider: isSupabaseStorageConfigured() ? "supabase" : "cloudinary"
+  });
+});
+
+router.post("/v1/media/upload", authOptional, (req, res) => {
+  uploadMediaMemory.single("file")(req, res, async (err) => {
+    if (err) {
+      res.status(400).json({ message: err.message || "Invalid upload request" });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ message: "file is required" });
+      return;
+    }
+    if (!isSupabaseStorageConfigured()) {
+      res.status(503).json({
+        message:
+          "Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET on the server."
+      });
+      return;
+    }
+
+    try {
+      const mimeType = String(req.file.mimetype || "application/octet-stream");
+      const isVideo = mimeType.startsWith("video/");
+      const ext = mediaExtFromMime(mimeType, req.file.originalname);
+      const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+      const url = await uploadBufferToSupabase({
+        buffer: req.file.buffer,
+        mimeType,
+        objectPath
+      });
+      res.status(201).json({ url, provider: "supabase", path: objectPath });
+    } catch (error) {
+      res.status(500).json({ message: "Media upload failed", error: error.message });
+    }
+  });
 });
 
 router.post("/v1/media/cloudinary-sign", (req, res) => {

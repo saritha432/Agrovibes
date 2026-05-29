@@ -24,7 +24,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video,
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -230,9 +230,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
+  const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = playbackSources[sourceIndex] ?? uri;
 
   useEffect(() => {
     setNatural(null);
+    setSourceIndex(0);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -254,7 +258,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     if (!v) return;
     if (shouldPlay) v.playAsync().catch(() => {});
     else v.pauseAsync().catch(() => {});
-  }, [shouldPlay, uri]);
+  }, [shouldPlay, activeUri]);
+
+  const tryNextPlaybackSource = React.useCallback(() => {
+    setSourceIndex((idx) => (idx + 1 < playbackSources.length ? idx + 1 : idx));
+  }, [playbackSources.length]);
 
   React.useImperativeHandle(ref, () => ({
     seekToRatio: async (ratio: number) => {
@@ -275,10 +283,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       }}
     >
       <Video
+        key={activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
-        source={{ uri: videoPlaybackUrl(uri) }}
+        source={{ uri: activeUri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
@@ -289,6 +298,9 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         onPlaybackStatusUpdate={(status) => {
           onStatusUpdate?.(status);
           if (status.isLoaded) durationRef.current = Number(status.durationMillis || 0);
+          else if ("error" in status && status.error && sourceIndex + 1 < playbackSources.length) {
+            tryNextPlaybackSource();
+          }
         }}
         onReadyForDisplay={
           isWeb || isCover
@@ -792,7 +804,7 @@ export function PostsReelViewerModal({
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
-                uri={videoPlaybackUrl(post.videoUrl)}
+                uri={post.videoUrl}
                 shouldPlay={isActive}
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}

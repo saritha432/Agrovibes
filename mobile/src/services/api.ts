@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import { mapPostForPlayback, mapPostsForPlayback, mapStoriesForPlayback, mapStoryForPlayback } from "../utils/videoPlaybackUrl";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -487,8 +486,7 @@ export async function fetchHomeStories() {
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }
-  const data = (await response.json()) as { stories: HomeStory[] };
-  return { stories: mapStoriesForPlayback(data.stories || []) };
+  return (await response.json()) as { stories: HomeStory[] };
 }
 
 export async function createHomeStory(
@@ -505,8 +503,7 @@ export async function createHomeStory(
   if (!response.ok) {
     throw new Error("Failed to create story");
   }
-  const data = (await response.json()) as { story: HomeStory };
-  return { story: mapStoryForPlayback(data.story) };
+  return (await response.json()) as { story: HomeStory };
 }
 
 export async function fetchHomePosts(token?: string | null) {
@@ -516,14 +513,12 @@ export async function fetchHomePosts(token?: string | null) {
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
-  const data = (await response.json()) as { posts: HomePost[] };
-  return { posts: mapPostsForPlayback(data.posts || []) };
+  return (await response.json()) as { posts: HomePost[] };
 }
 
 /** Current user's posts only — lighter than loading the full home feed for profile. */
 export async function fetchMyHomePosts(token: string) {
-  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
-  return { posts: mapPostsForPlayback(data.posts || []) };
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
 }
 
 export type HomePostLiker = {
@@ -564,8 +559,7 @@ export async function unlikeHomePost(token: string, postId: number) {
 }
 
 export async function fetchSavedHomePosts(token: string) {
-  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
-  return { posts: mapPostsForPlayback(data.posts || []) };
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
 }
 
 /**
@@ -578,8 +572,7 @@ export async function fetchTaggedHomePosts(token: string) {
   if (response.status === 404) {
     return { posts: [] as HomePost[] };
   }
-  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
-  return { posts: mapPostsForPlayback(data.posts || []) };
+  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
 }
 
 export async function saveHomePost(token: string, postId: number) {
@@ -762,8 +755,7 @@ export async function createHomePost(payload: {
   if (!response.ok) {
     throw new Error("Failed to create post");
   }
-  const data = (await response.json()) as { post: HomePost };
-  return { post: mapPostForPlayback(data.post) };
+  return (await response.json()) as { post: HomePost };
 }
 
 export async function updateHomePostLiveVideo(
@@ -776,15 +768,13 @@ export async function updateHomePostLiveVideo(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { post: HomePost };
-  return { post: mapPostForPlayback(data.post) };
 }
 
 export async function endHomeLivePost(token: string, postId: number) {
-  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
   })) as { post: HomePost };
-  return { post: mapPostForPlayback(data.post) };
 }
 
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
@@ -1096,6 +1086,43 @@ async function throwCloudinaryError(uploadRes: Response, label: string) {
   throw new Error(`${label}: ${detail}`);
 }
 
+async function uploadToSupabaseServer(fileUri: string, filename: string, nativeMime: string) {
+  const form = new FormData();
+  if (Platform.OS === "web") {
+    const webResp = await fetch(fileUri);
+    const blob = await webResp.blob();
+    (form as any).append("file", blob, filename);
+  } else {
+    (form as any).append(
+      "file",
+      {
+        // @ts-ignore React Native FormData file type shape
+        uri: fileUri,
+        name: filename,
+        type: nativeMime
+      } as any
+    );
+  }
+
+  const uploadRes = await fetch(`${API_BASE_URL}/v1/media/upload`, {
+    method: "POST",
+    body: form as any
+  });
+  if (!uploadRes.ok) {
+    let detail = `Upload failed (${uploadRes.status})`;
+    try {
+      const body = (await uploadRes.json()) as { message?: string };
+      if (body?.message) detail = body.message;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+  const uploaded = (await uploadRes.json()) as { url?: string };
+  if (!uploaded.url) throw new Error("Upload response missing URL");
+  return { url: uploaded.url };
+}
+
 async function uploadToCloudinary(
   fileUri: string,
   filename: string,
@@ -1156,16 +1183,29 @@ async function uploadToCloudinary(
   return { url, hlsUrl, mp4Url };
 }
 
+async function uploadMediaFile(fileUri: string, filename: string, nativeMime: string, resource: "image" | "video") {
+  try {
+    return await uploadToSupabaseServer(fileUri, filename, nativeMime);
+  } catch (supabaseError) {
+    // Fallback for environments still on Cloudinary.
+    try {
+      return await uploadToCloudinary(fileUri, filename, nativeMime, resource);
+    } catch {
+      throw supabaseError;
+    }
+  }
+}
+
 export async function uploadVideoFile(fileUri: string) {
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
-  return uploadToCloudinary(fileUri, `video-${Date.now()}${ext}`, "video/mp4", "video");
+  return uploadMediaFile(fileUri, `video-${Date.now()}${ext}`, "video/mp4", "video");
 }
 
 export async function uploadImageFile(fileUri: string) {
   const filename = imageFilenameFromUri(fileUri);
   const mime = mimeFromUri(fileUri, "image/jpeg");
-  return uploadToCloudinary(fileUri, filename, mime, "image");
+  return uploadMediaFile(fileUri, filename, mime, "image");
 }
 
 /** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
