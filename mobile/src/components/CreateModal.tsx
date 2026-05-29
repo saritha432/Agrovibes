@@ -1595,6 +1595,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     ? t("locationPrefix", { place: postLocation.trim() })
     : t("addLocation");
   const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
+  const entryZoomLevel = entryZoomLabel === "2x" ? 2 : 1;
+
+  React.useEffect(() => {
+    if (entryFacing === "front" && entryFlashOn) {
+      setEntryFlashOn(false);
+    }
+  }, [entryFacing, entryFlashOn]);
+
   const entryCameraActive =
     visible &&
     !createType &&
@@ -1829,6 +1837,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               ref={entryCameraRef}
               active={entryCameraActive}
               facing={entryFacing}
+              flashOn={entryFlashOn}
+              zoomLevel={entryZoomLevel}
               mode={entryType === "reel" || entryType === "live" ? "video" : entryType === "post" ? "picture" : "picture"}
               onRecordingChange={onEntryRecordingChange}
               onAutoRecordFinished={onInlineAutoRecordFinished}
@@ -1856,7 +1866,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <View style={styles.igCaptureTopTimerSpacer} pointerEvents="none" />
                 )}
                 <View style={styles.igCaptureTopCenterTools} pointerEvents="box-none">
-                  <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
+                  <Pressable
+                    style={[styles.igCamRoundControl, entryFacing === "front" ? styles.igCamControlDisabled : null]}
+                    disabled={entryFacing === "front"}
+                    onPress={() => setEntryFlashOn((v) => !v)}
+                  >
                     <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#C9FF35" />
                   </Pressable>
                   <Pressable
@@ -3243,6 +3257,9 @@ const styles = StyleSheet.create({
     borderColor: "#303842",
     alignItems: "center",
     justifyContent: "center"
+  },
+  igCamControlDisabled: {
+    opacity: 0.35
   },
   igCamZoomText: {
     color: "#C9FF35",

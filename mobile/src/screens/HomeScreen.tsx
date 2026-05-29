@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToPublicProfile } from "../navigation/navigationRef";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -38,6 +39,7 @@ import {
   createHomeStory,
   createHomePostComment,
   deleteHomePost,
+  deleteHomePostComment,
   reportHomePost,
   fetchHomePostComments,
   fetchHomePostLikes,
@@ -48,6 +50,7 @@ import {
   fetchRelationships,
   fetchSocialNetwork,
   fetchUsers,
+  fetchMutualConnections,
   getWebAppOrigin,
   HomePost,
   HomeStory,
@@ -58,12 +61,14 @@ import {
   unfollowUser,
   unlikeHomePost,
   unsaveHomePost,
+  type MutualConnectionInfo,
   type UserSearchRecord
 } from "../services/api";
 import {
   addLocalCommentForPost,
   appendLocalEngagementNotification,
   getLocalCommentsForPost,
+  removeLocalCommentForPost,
   getLocalLikeStateForPosts,
   getLikersFromLocalEngagementForPost,
   getLikersFromLocalLikeMap,
@@ -71,6 +76,7 @@ import {
   type PostLiker
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
+import { formatMutualConnectionLabel } from "../social/formatMutualConnection";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
@@ -454,6 +460,7 @@ type HomeCommentRow = {
   createdAt?: string;
   parentCommentId?: string;
   avatarUrl?: string;
+  userId?: number;
 };
 
 type OtherStoryGroup = {
@@ -518,6 +525,9 @@ function normalizeCommentRow(c: Partial<HomeCommentRow> & Record<string, unknown
       : undefined;
   const avRaw = c.avatarUrl ?? c["avatar_url"] ?? c["avatarUrl"];
   const avatarUrl = typeof avRaw === "string" && avRaw.trim() ? avRaw.trim() : undefined;
+  const userIdRaw = c.userId ?? c["user_id"];
+  const userIdNum = Number(userIdRaw);
+  const userId = Number.isFinite(userIdNum) && userIdNum > 0 ? userIdNum : undefined;
   return {
     id: String(c.id ?? ""),
     user: String(c.user ?? ""),
@@ -525,7 +535,8 @@ function normalizeCommentRow(c: Partial<HomeCommentRow> & Record<string, unknown
     likes: Number.isFinite(Number(c.likes)) ? Number(c.likes) : 0,
     createdAt: typeof c.createdAt === "string" ? c.createdAt : c.createdAt != null ? String(c.createdAt) : undefined,
     parentCommentId,
-    ...(avatarUrl ? { avatarUrl } : {})
+    ...(avatarUrl ? { avatarUrl } : {}),
+    ...(userId ? { userId } : {})
   };
 }
 
@@ -583,7 +594,7 @@ function normalizeStoryRow(raw: Partial<HomeStory> & Record<string, unknown>): H
     ...(avatarUrl ? { avatarUrl } : {}),
     hasNew: raw.hasNew != null ? !!raw.hasNew : raw["has_new"] != null ? !!raw["has_new"] : true,
     viewed: !!raw.viewed,
-    videoUrl: video || undefined,
+    videoUrl: video ? videoPlaybackUrl(video) : undefined,
     imageUrl: image || undefined,
     createdAt:
       typeof raw.createdAt === "string"
@@ -803,7 +814,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         ref={(r) => {
           videoRef.current = r;
         }}
-        source={{ uri }}
+        source={{ uri: videoPlaybackUrl(uri) }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
@@ -1026,6 +1037,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [likesSheetUsers, setLikesSheetUsers] = useState<PostLiker[]>([]);
   const [likesSheetLoading, setLikesSheetLoading] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const commentSubmittingRef = useRef(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
   const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
   /** Parent comment ids whose direct replies are fully expanded (only used when direct reply count > REPLY_PREVIEW_VISIBLE). */
@@ -1067,6 +1080,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [suggestedUsers, setSuggestedUsers] = useState<UserSearchRecord[]>([]);
+  const [suggestedMutualByUserId, setSuggestedMutualByUserId] = useState<Record<number, MutualConnectionInfo>>({});
   const [suggestedFollowBusy, setSuggestedFollowBusy] = useState<Record<number, boolean>>({});
   const [suggestedFollowDone, setSuggestedFollowDone] = useState<Set<number>>(new Set());
   const [suggestedDismissed, setSuggestedDismissed] = useState<Set<number>>(new Set());
@@ -1739,15 +1753,38 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (!mounted) return;
         const myId = Number(user?.id) || 0;
         const alreadyConnected = new Set([...followingUserIds, ...followerUserIds, myId]);
-        const candidates = (data.users || []).filter((u) => !alreadyConnected.has(u.id));
-        const followerIds = [...followerUserIds];
-        const mutualFirst = candidates.sort((a, b) => {
-          const aIsMutual = followerIds.includes(a.id) ? 1 : 0;
-          const bIsMutual = followerIds.includes(b.id) ? 1 : 0;
-          return bIsMutual - aIsMutual;
+        const candidates = (data.users || []).filter(
+          (u) =>
+            u.id !== myId &&
+            !alreadyConnected.has(u.id) &&
+            u.viewerStatus !== "accepted" &&
+            u.viewerStatus !== "pending"
+        );
+        const slice = candidates.slice(0, 20);
+        const ids = slice.map((u) => u.id);
+        let connections: Record<number, MutualConnectionInfo> = {};
+        try {
+          const mutualRes = await fetchMutualConnections(token, ids);
+          connections = mutualRes.connections || {};
+        } catch {
+          connections = {};
+        }
+        const sorted = [...slice].sort((a, b) => {
+          const aConn = connections[a.id];
+          const bConn = connections[b.id];
+          const aScore = (aConn?.mutualCount ?? 0) * 10 + (aConn?.followsYou ? 5 : 0) + (followerUserIds.has(a.id) ? 1 : 0);
+          const bScore = (bConn?.mutualCount ?? 0) * 10 + (bConn?.followsYou ? 5 : 0) + (followerUserIds.has(b.id) ? 1 : 0);
+          return bScore - aScore;
         });
-        setSuggestedUsers(mutualFirst.slice(0, 15));
-      } catch {}
+        if (!mounted) return;
+        setSuggestedMutualByUserId(connections);
+        setSuggestedUsers(sorted.slice(0, 15));
+      } catch {
+        if (mounted) {
+          setSuggestedUsers([]);
+          setSuggestedMutualByUserId({});
+        }
+      }
     })();
     return () => { mounted = false; };
   }, [token, socialNetworkHydrated, followingUserIds, followerUserIds, user?.id]);
@@ -1868,6 +1905,59 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const handleDismissSuggested = useCallback((targetUserId: number) => {
     setSuggestedDismissed((prev) => new Set(prev).add(targetUserId));
   }, []);
+
+  const suggestedInlineSection = useMemo(() => {
+    const visible = suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 10);
+    if (!visible.length) return null;
+    return (
+      <View style={styles.suggestedSection}>
+        <Text style={styles.suggestedTitle}>{t("peopleYouMayKnow") || "People You May Know"}</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
+          {visible.map((person) => {
+            const isDone = suggestedFollowDone.has(person.id);
+            const isBusy = suggestedFollowBusy[person.id];
+            return (
+              <View key={person.id} style={styles.suggestedCard}>
+                <Pressable style={styles.suggestedDismiss} onPress={() => handleDismissSuggested(person.id)}>
+                  <Ionicons name="close" size={14} color="#7a8690" />
+                </Pressable>
+                <UserAvatar uri={person.avatarUrl} name={person.fullName} size={56} borderRadius={28} />
+                <Text style={styles.suggestedName} numberOfLines={1}>{person.fullName}</Text>
+                {(() => {
+                  const mutualLabel = formatMutualConnectionLabel(suggestedMutualByUserId[person.id], t);
+                  return mutualLabel ? (
+                    <Text style={styles.suggestedMutual} numberOfLines={2}>
+                      {mutualLabel}
+                    </Text>
+                  ) : person.username ? (
+                    <Text style={styles.suggestedUsername} numberOfLines={1}>@{person.username}</Text>
+                  ) : null;
+                })()}
+                <Pressable
+                  style={[styles.suggestedFollowBtn, isDone ? styles.suggestedFollowBtnDone : null]}
+                  onPress={() => !isDone && handleFollowSuggested(person.id)}
+                  disabled={isDone || isBusy}
+                >
+                  <Text style={[styles.suggestedFollowText, isDone ? styles.suggestedFollowTextDone : null]}>
+                    {isDone ? (t("requested") || "Requested") : isBusy ? "..." : (t("follow") || "Follow")}
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }, [
+    suggestedUsers,
+    suggestedMutualByUserId,
+    suggestedDismissed,
+    suggestedFollowDone,
+    suggestedFollowBusy,
+    handleDismissSuggested,
+    handleFollowSuggested,
+    t
+  ]);
 
   useEffect(() => {
     setExpandedReplyThreads({});
@@ -2532,9 +2622,88 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [t, token, user]
   );
 
+  const viewerOwnsComment = useCallback(
+    (c: HomeCommentRow) => {
+      if (c.userId != null && user?.id != null && Number(c.userId) === Number(user.id)) return true;
+      const normViewer = normalizeIdentity(user?.fullName || "");
+      const normAuthor = normalizeIdentity(c.user);
+      return !!normViewer && !!normAuthor && normViewer === normAuthor;
+    },
+    [user?.fullName, user?.id]
+  );
+
+  const confirmDeleteComment = useCallback(
+    (postId: number, comment: HomeCommentRow) => {
+      const runDelete = async () => {
+        const id = String(comment.id);
+        const pruneIds = (list: HomeCommentRow[], rootId: string) => {
+          const removed = new Set<string>([rootId]);
+          const walk = (cid: string) => {
+            for (const row of list) {
+              if (String(row.parentCommentId) === cid) {
+                const rid = String(row.id);
+                if (!removed.has(rid)) {
+                  removed.add(rid);
+                  walk(rid);
+                }
+              }
+            }
+          };
+          walk(rootId);
+          return removed;
+        };
+
+        if (id.startsWith("lc-")) {
+          await removeLocalCommentForPost(postId, id);
+          setCommentsByPost((prev) => {
+            const list = prev[postId] ?? [];
+            const removed = pruneIds(list, id);
+            return { ...prev, [postId]: list.filter((c) => !removed.has(String(c.id))) };
+          });
+          setPosts((prev) =>
+            prev.map((p) =>
+              p.id === postId ? { ...p, commentsCount: Math.max(0, Number(p.commentsCount ?? 1) - 1) } : p
+            )
+          );
+          return;
+        }
+
+        if (!token) return;
+        try {
+          const res = await deleteHomePostComment(token, postId, id);
+          setCommentsByPost((prev) => {
+            const list = prev[postId] ?? [];
+            const removed = pruneIds(list, id);
+            return { ...prev, [postId]: list.filter((c) => !removed.has(String(c.id))) };
+          });
+          setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, commentsCount: res.commentsCount } : p)));
+        } catch (e) {
+          Alert.alert(t("deleteFailed"), e instanceof Error ? e.message : t("deleteFailed"));
+        }
+      };
+
+      if (Platform.OS === "web") {
+        setTimeout(() => {
+          if (!window.confirm(`${t("deleteCommentTitle")}\n${t("deleteCommentBody")}`)) return;
+          void runDelete();
+        }, 0);
+        return;
+      }
+
+      Alert.alert(t("deleteCommentTitle"), t("deleteCommentBody"), [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("deleteConfirm"), style: "destructive", onPress: () => void runDelete() }
+      ]);
+    },
+    [t, token]
+  );
+
   const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
-    if (!text || !activeCommentsPost) return;
+    if (!text || !activeCommentsPost || commentSubmittingRef.current) return;
+    commentSubmittingRef.current = true;
+    setCommentSubmitting(true);
+    try {
     const post = activeCommentsPost;
     const normalizedPostName = normalizeIdentity(post.userName);
     const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -2566,13 +2735,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           likes: res.comment.likes ?? 0,
           createdAt: createdIso,
           parentCommentId: res.comment.parentCommentId ?? parentIdStr,
+          ...(res.comment.userId != null && Number(res.comment.userId) > 0 ? { userId: Number(res.comment.userId) } : user?.id ? { userId: user.id } : {}),
           ...(res.comment.avatarUrl && String(res.comment.avatarUrl).trim()
             ? { avatarUrl: String(res.comment.avatarUrl).trim() }
             : user?.avatarUrl && String(user.avatarUrl).trim()
               ? { avatarUrl: String(user.avatarUrl).trim() }
               : {})
         };
-    setCommentsByPost((prev) => {
+        setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
           const withoutDup = list.filter((c) => String(c.id) !== row.id);
           return { ...prev, [post.id]: [...withoutDup, row] };
@@ -2582,7 +2752,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setReplyingTo(null);
         return;
       } catch {
-        // fall through to local behavior
+        if (token) {
+          Alert.alert(t("shareFailed"), "Could not post comment. Check your connection and try again.");
+          return;
+        }
       }
     }
 
@@ -2639,7 +2812,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         commentExcerpt: excerpt
       });
     }
-  }, [activeCommentsPost, commentDraft, replyingTo, token, user?.avatarUrl, user?.email, user?.fullName, user?.id]);
+  } finally {
+    commentSubmittingRef.current = false;
+    setCommentSubmitting(false);
+  }
+  }, [activeCommentsPost, commentDraft, replyingTo, t, token, user?.avatarUrl, user?.email, user?.fullName, user?.id]);
 
   const toggleCommentSheetLike = useCallback((postId: number, commentId: string) => {
     setCommentInteractions((prev) => {
@@ -2913,7 +3090,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
-                uri={post.videoUrl}
+                uri={videoPlaybackUrl(post.videoUrl)}
                 shouldPlay={isActive}
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
@@ -3189,41 +3366,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     ]
   );
 
-  const suggestedInlineSection = useMemo(() => {
-    const visible = suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 10);
-    if (!visible.length || activeHomeTab !== "Feed") return null;
-    return (
-      <View style={styles.suggestedSection}>
-        <Text style={styles.suggestedTitle}>{t("peopleYouMayKnow") || "People You May Know"}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
-          {visible.map((person) => {
-            const isDone = suggestedFollowDone.has(person.id);
-            const isBusy = suggestedFollowBusy[person.id];
-            return (
-              <View key={person.id} style={styles.suggestedCard}>
-                <Pressable style={styles.suggestedDismiss} onPress={() => handleDismissSuggested(person.id)}>
-                  <Ionicons name="close" size={14} color="#7a8690" />
-                </Pressable>
-                <UserAvatar uri={person.avatarUrl} name={person.fullName} size={56} borderRadius={28} />
-                <Text style={styles.suggestedName} numberOfLines={1}>{person.fullName}</Text>
-                {person.username ? <Text style={styles.suggestedUsername} numberOfLines={1}>@{person.username}</Text> : null}
-                <Pressable
-                  style={[styles.suggestedFollowBtn, isDone ? styles.suggestedFollowBtnDone : null]}
-                  onPress={() => !isDone && handleFollowSuggested(person.id)}
-                  disabled={isDone || isBusy}
-                >
-                  <Text style={[styles.suggestedFollowText, isDone ? styles.suggestedFollowTextDone : null]}>
-                    {isDone ? (t("requested") || "Requested") : isBusy ? "..." : (t("follow") || "Follow")}
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
-    );
-  }, [suggestedUsers, suggestedDismissed, suggestedFollowDone, suggestedFollowBusy, activeHomeTab, handleDismissSuggested, handleFollowSuggested, t]);
-
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const feedDisplayName = displayPersonName(post.userName);
@@ -3254,7 +3396,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       );
       return (
         <>
-        {index === 2 && suggestedInlineSection}
         <View style={styles.postCard}>
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
@@ -3294,7 +3435,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 {isActive ? (
                   <Video
                     style={styles.video}
-                    source={{ uri: post.videoUrl }}
+                    source={{ uri: videoPlaybackUrl(post.videoUrl) }}
                     resizeMode={ResizeMode.COVER}
                     shouldPlay
                     isLooping
@@ -3440,7 +3581,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       openPostLikesSheet,
       playingPostId,
       relationships,
-      suggestedInlineSection,
       toggleFollow,
       togglePostLike,
       displayPersonName,
@@ -3490,6 +3630,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
+          {activeHomeTab === "Feed" ? suggestedInlineSection : null}
           <View style={[styles.reelSlot, isReelSurfaceTab ? styles.reelSlotCardGap : null]}>
             <View
               style={[styles.reelFrame, isReelSurfaceTab ? styles.reelFrameCard : null]}
@@ -3550,7 +3691,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={5}
-        ListHeaderComponent={listHeader}
+        ListHeaderComponent={
+          <>
+            {listHeader}
+            {activeHomeTab === "Feed" ? suggestedInlineSection : null}
+          </>
+        }
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
               <Text style={isReelSurfaceTab ? styles.emptyTabTitleDark : styles.emptyTabTitle}>{emptyTabTitle}</Text>
@@ -3627,7 +3773,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           >
             {activeStory?.videoUrl ? (
               <ContainedExpoVideo
-                uri={activeStory.videoUrl}
+                uri={videoPlaybackUrl(activeStory.videoUrl)}
                 shouldPlay
                 containerWidth={storyViewport.width || windowWidth}
                 containerHeight={storyViewport.height || Math.max(1, windowHeight - 140)}
@@ -3663,7 +3809,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           </View>
           {activePost?.videoUrl ? (
             <ContainedExpoVideo
-              uri={activePost.videoUrl}
+              uri={videoPlaybackUrl(activePost.videoUrl)}
               shouldPlay
               containerWidth={windowWidth}
               containerHeight={windowHeight}
@@ -3900,9 +4046,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                               {rel ? <Text style={styles.commentTime}>{rel}</Text> : null}
                       </View>
                             <Text style={styles.commentBodyText}>{displayFeedCopy(c.text)}</Text>
-                            <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
-                              <Text style={styles.commentReplyText}>Reply</Text>
-                            </Pressable>
+                            <View style={styles.commentReplyRow}>
+                              <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
+                                <Text style={styles.commentReplyText}>Reply</Text>
+                              </Pressable>
+                              {viewerOwnsComment(c) ? (
+                                <Pressable hitSlop={6} onPress={() => confirmDeleteComment(pid, c)} style={styles.commentReplyBtn}>
+                                  <Text style={styles.commentDeleteText}>Delete</Text>
+                                </Pressable>
+                              ) : null}
+                            </View>
                       </View>
                           <View style={styles.commentActionsCol}>
                             <Pressable
@@ -3990,8 +4143,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <UserAvatar
                   uri={user?.avatarUrl}
                   name={user?.fullName || "You"}
-                  size={20}
-                  borderRadius={10}
+                  size={28}
+                  borderRadius={14}
                   style={styles.commentInputAvatar}
                   fallbackBackgroundColor="#d1d5db"
                   initialsColor="#0f172a"
@@ -4002,9 +4155,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   placeholder={replyingTo ? t("writeReply") : t("addCommentPlaceholder")}
                   placeholderTextColor="#6b7280"
                   style={styles.commentInput}
+                  multiline
+                  textAlignVertical="top"
+                  maxLength={2000}
                 />
-                <Pressable style={styles.commentSendBtn} onPress={submitComment}>
-                  <Ionicons name="send" size={14} color="#111827" />
+                <Pressable
+                  style={[styles.commentSendBtn, commentSubmitting ? styles.commentSendBtnDisabled : null]}
+                  onPress={submitComment}
+                  disabled={commentSubmitting || !commentDraft.trim()}
+                >
+                  <Ionicons name="send" size={16} color="#111827" />
                 </Pressable>
               </View>
             </View>
@@ -4524,6 +4684,15 @@ const styles = StyleSheet.create({
   suggestedDismiss: { position: "absolute", top: 8, right: 8, zIndex: 1 },
   suggestedName: { color: "#eef3f8", fontSize: 12, fontWeight: "800", marginTop: 8, textAlign: "center" },
   suggestedUsername: { color: "#7a8690", fontSize: 10, fontWeight: "600", marginTop: 2 },
+  suggestedMutual: {
+    color: "#9ca3af",
+    fontSize: 10,
+    fontWeight: "600",
+    marginTop: 2,
+    textAlign: "center",
+    lineHeight: 13,
+    maxWidth: 96
+  },
   suggestedFollowBtn: {
     marginTop: 10,
     backgroundColor: APP_LIME,
@@ -4964,34 +5133,42 @@ const styles = StyleSheet.create({
   commentInputRow: {
     marginTop: 8,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     gap: 8
   },
   commentInputAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "#d1d5db",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    marginBottom: 4
   },
   commentInput: {
     flex: 1,
-    height: 28,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    minHeight: 72,
+    maxHeight: 140,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     backgroundColor: "#f9fafb",
     color: "#111827",
-    fontSize: 11
+    fontSize: 14,
+    lineHeight: 20
   },
   commentSendBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#C9FF35",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    marginBottom: 4
   },
+  commentSendBtnDisabled: { opacity: 0.45 },
+  commentReplyRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 4 },
+  commentDeleteText: { color: "#f87171", fontSize: 12, fontWeight: "700" },
   reelOptionsSheet: {
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,

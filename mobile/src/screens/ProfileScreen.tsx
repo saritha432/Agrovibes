@@ -22,6 +22,7 @@ import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -815,7 +816,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                           >
                             <Video
                               style={styles.gridImage}
-                              source={{ uri: post.videoUrl }}
+                              source={{ uri: videoPlaybackUrl(post.videoUrl) }}
                               resizeMode={ResizeMode.COVER}
                               shouldPlay={shouldPlayTile}
                               isLooping

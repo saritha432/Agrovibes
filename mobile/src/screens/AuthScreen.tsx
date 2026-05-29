@@ -5,7 +5,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { markLaunchSetupComplete } from "../onboarding/launchSetup";
-import { authLogin, authRegister } from "../services/api";
+import { authLogin, authRegister, formatAuthError } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
 
 type Mode = "login" | "register";
@@ -38,8 +38,8 @@ export function AuthScreen() {
         await markLaunchSetupComplete((payload.user as any).id);
       }
       navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
-    } catch (e: any) {
-      setError(e?.message || "Failed");
+    } catch (e: unknown) {
+      setError(formatAuthError(e, "Failed"));
     } finally {
       setLoading(false);
     }
@@ -65,10 +65,27 @@ export function AuthScreen() {
         </View>
 
         <Text style={styles.label}>Email</Text>
-        <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={styles.input} />
+        <TextInput
+          value={email}
+          onChangeText={(v) => {
+            setError(null);
+            setEmail(v);
+          }}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          style={styles.input}
+        />
 
         <Text style={styles.label}>Password</Text>
-        <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
+        <TextInput
+          value={password}
+          onChangeText={(v) => {
+            setError(null);
+            setPassword(v);
+          }}
+          secureTextEntry
+          style={styles.input}
+        />
 
         {mode === "register" ? (
           <>

@@ -2180,6 +2180,86 @@ router.get("/v1/social/relationships", authRequired, async (req, res) => {
   }
 });
 
+/** Instagram-style context: who you both know (people you follow who also follow them). */
+router.post("/v1/social/mutual-connections", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const viewerId = Number(req.user.userId);
+    const rawIds = Array.isArray(req.body?.userIds) ? req.body.userIds : [];
+    const userIds = [
+      ...new Set(
+        rawIds
+          .map((v) => Number(v))
+          .filter((id) => Number.isFinite(id) && id > 0 && id !== viewerId)
+      )
+    ].slice(0, 40);
+    if (!userIds.length) {
+      res.json({ connections: {} });
+      return;
+    }
+
+    const connections = {};
+    for (const uid of userIds) {
+      connections[uid] = { followsYou: false, mutual: [], mutualCount: 0 };
+    }
+
+    const followsYouRes = await query(
+      `
+      SELECT follower_id AS "userId"
+      FROM social_follows
+      WHERE following_id = $1
+        AND follower_id = ANY($2::INT[])
+        AND status = 'accepted'
+      `,
+      [viewerId, userIds]
+    );
+    for (const row of followsYouRes.rows) {
+      const uid = Number(row.userId);
+      if (connections[uid]) connections[uid].followsYou = true;
+    }
+
+    const mutualRes = await query(
+      `
+      SELECT
+        f_target.following_id AS "targetUserId",
+        u.id AS "userId",
+        u.full_name AS "fullName",
+        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
+      FROM social_follows f_viewer
+      JOIN social_follows f_target
+        ON f_target.follower_id = f_viewer.following_id
+        AND f_target.following_id = ANY($2::INT[])
+        AND f_target.status = 'accepted'
+      JOIN learn_users u ON u.id = f_viewer.following_id
+      WHERE f_viewer.follower_id = $1
+        AND f_viewer.status = 'accepted'
+      ORDER BY f_target.following_id ASC, u.full_name ASC
+      `,
+      [viewerId, userIds]
+    );
+
+    const grouped = {};
+    for (const row of mutualRes.rows) {
+      const tid = Number(row.targetUserId);
+      if (!grouped[tid]) grouped[tid] = [];
+      grouped[tid].push({
+        userId: Number(row.userId),
+        fullName: row.fullName,
+        avatarUrl: row.avatarUrl || undefined
+      });
+    }
+    for (const tid of userIds) {
+      const all = grouped[tid] || [];
+      connections[tid].mutual = all.slice(0, 3);
+      connections[tid].mutualCount = all.length;
+    }
+
+    res.json({ connections });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load mutual connections", error: error.message });
+  }
+});
+
 router.post("/v1/social/follow/request", authRequired, async (req, res) => {
   try {
     await ensureSocialNotificationsTable();
@@ -3857,6 +3937,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
         c.id::text AS id,
         c.body AS text,
         u.full_name AS "user",
+        c.user_id AS "userId",
         NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
         c.created_at AS "createdAt",
         c.parent_comment_id AS "parentCommentId"
@@ -3873,6 +3954,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
         user: row.user,
         text: row.text,
         likes: 0,
+        userId: row.userId != null ? Number(row.userId) : undefined,
         avatarUrl: row.avatarUrl || undefined,
         createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
         parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
@@ -3968,6 +4050,7 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
         user: actor.rows[0]?.fullName || "Member",
         text: row.body,
         likes: 0,
+        userId: actorUserId,
         createdAt: row.createdAt,
         avatarUrl: actor.rows[0]?.avatarUrl || undefined,
         parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
@@ -3976,6 +4059,41 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to add comment", error: error.message });
+  }
+});
+
+router.delete("/v1/home/posts/:postId/comments/:commentId", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostCommentsTable();
+    const postId = Number(req.params.postId);
+    const commentId = Number(req.params.commentId);
+    const actorUserId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || !Number.isFinite(commentId) || commentId <= 0) {
+      res.status(400).json({ message: "Valid postId and commentId are required" });
+      return;
+    }
+
+    const existing = await query(
+      `SELECT id, user_id FROM home_post_comments WHERE id = $1 AND post_id = $2 LIMIT 1`,
+      [commentId, postId]
+    );
+    if (!existing.rows[0]) {
+      res.status(404).json({ message: "Comment not found" });
+      return;
+    }
+    if (Number(existing.rows[0].user_id) !== actorUserId) {
+      res.status(403).json({ message: "You can only delete your own comments" });
+      return;
+    }
+
+    await query(`DELETE FROM home_post_comments WHERE id = $1 AND post_id = $2`, [commentId, postId]);
+    const countRes = await query(`SELECT COUNT(*)::int AS c FROM home_post_comments WHERE post_id = $1`, [postId]);
+    const commentsCount = Number(countRes.rows[0]?.c ?? 0);
+    await query(`UPDATE home_posts SET comments_count = $1 WHERE id = $2`, [commentsCount, postId]);
+
+    res.json({ ok: true, commentsCount });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete comment", error: error.message });
   }
 });
 
