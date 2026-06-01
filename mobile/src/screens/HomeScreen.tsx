@@ -28,7 +28,7 @@ import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { navigateToPublicProfile } from "../navigation/navigationRef";
+import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
@@ -1065,6 +1065,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [reelViewerOpen, setReelViewerOpen] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+
+  const openPostAuthorProfile = React.useCallback(
+    (post: HomePost) => {
+      const postUserId = Number(post.userId);
+      const normalizedPostName = normalizeIdentity(post.userName);
+      const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
+      const isOwn =
+        (postUserId > 0 && postUserId === Number(user?.id)) ||
+        (!postUserId && normalizedPostName.length > 0 && normalizedPostName === normalizedCurrentUserName);
+      setReelViewerOpen(null);
+      if (isOwn) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: postUserId > 0 ? postUserId : undefined,
+        userName: post.userName,
+        avatarUrl: post.authorAvatarUrl ?? null
+      });
+    },
+    [user?.fullName, user?.id]
+  );
+
   const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
   const reelBackgroundMusicRef = useRef<{ postId: number; sound: Audio.Sound } | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
@@ -3242,18 +3265,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
-                <UserAvatar
-                  uri={postAuthorAvatarUri(post, user)}
-                  name={post.userName}
-                  size={44}
-                  borderRadius={12}
-                  style={styles.reelAvatarSq}
-                  fallbackBackgroundColor="#2a2a2a"
-                  initialsColor="#fff"
-                />
-                <Text style={styles.reelUserName} numberOfLines={1}>
-                  {reelDisplayName}
-                </Text>
+                <Pressable
+                  style={styles.reelAuthorTap}
+                  onPress={() => openPostAuthorProfile(post)}
+                  accessibilityRole="button"
+                  accessibilityLabel={reelDisplayName}
+                >
+                  <UserAvatar
+                    uri={postAuthorAvatarUri(post, user)}
+                    name={post.userName}
+                    size={44}
+                    borderRadius={12}
+                    style={styles.reelAvatarSq}
+                    fallbackBackgroundColor="#2a2a2a"
+                    initialsColor="#fff"
+                  />
+                  <Text style={styles.reelUserName} numberOfLines={1}>
+                    {reelDisplayName}
+                  </Text>
+                </Pressable>
                 {!isOwnPost ? (
                   <Pressable
                     onPress={() => toggleFollow(postUserId > 0 ? postUserId : null, post.userName, currentFollowStatus)}
@@ -3402,7 +3432,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayPersonName,
       displayPostCaption,
       t,
-      labelForFollowStatus
+      labelForFollowStatus,
+      openPostAuthorProfile
     ]
   );
 
@@ -4587,6 +4618,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     flexWrap: "nowrap",
+    minWidth: 0
+  },
+  reelAuthorTap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
     minWidth: 0
   },
   reelAvatarSq: {

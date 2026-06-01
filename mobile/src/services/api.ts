@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -1084,7 +1085,12 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
     try {
       const body = (await uploadRes.json()) as { message?: string; error?: string; hint?: string };
       const msg = body?.error || body?.message;
-      if (msg) detail = `${msg}${body?.hint ? ` (${body.hint})` : ""}`;
+      if (msg) {
+        detail = `${msg}${body?.hint ? ` (${body.hint})` : ""}`;
+      }
+      if (/maximum allowed size|file too large|50mb/i.test(detail)) {
+        detail = `Maximum upload size is 50MB. Use a shorter clip or lower resolution.`;
+      }
     } catch {
       // ignore
     }
@@ -1096,6 +1102,7 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
 }
 
 export async function uploadVideoFile(fileUri: string) {
+  await assertVideoUnderUploadLimit(fileUri);
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
   return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, "video/mp4");
