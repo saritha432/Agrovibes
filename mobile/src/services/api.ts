@@ -1111,8 +1111,9 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
   if (!uploadRes.ok) {
     let detail = `Upload failed (${uploadRes.status})`;
     try {
-      const body = (await uploadRes.json()) as { message?: string };
-      if (body?.message) detail = body.message;
+      const body = (await uploadRes.json()) as { message?: string; error?: string; hint?: string };
+      const msg = body?.error || body?.message;
+      if (msg) detail = `${msg}${body?.hint ? ` (${body.hint})` : ""}`;
     } catch {
       // ignore
     }

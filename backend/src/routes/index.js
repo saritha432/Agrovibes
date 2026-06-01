@@ -16,7 +16,7 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
-const { isSupabaseStorageConfigured, uploadBufferToSupabase } = require("../supabaseStorage");
+const { isSupabaseStorageConfigured, uploadBufferToSupabase, checkSupabaseStorageHealth } = require("../supabaseStorage");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -4131,10 +4131,22 @@ router.delete("/v1/home/posts/:postId/comments/:commentId", authRequired, async 
   }
 });
 
-router.get("/v1/media/config", (_req, res) => {
-  res.json({
-    provider: isSupabaseStorageConfigured() ? "supabase" : "cloudinary"
-  });
+router.get("/v1/media/config", async (_req, res) => {
+  if (!isSupabaseStorageConfigured()) {
+    res.json({ provider: "cloudinary" });
+    return;
+  }
+  try {
+    const health = await checkSupabaseStorageHealth();
+    res.json({ provider: "supabase", ...health });
+  } catch (error) {
+    res.json({
+      provider: "supabase",
+      ok: false,
+      configured: true,
+      message: error.message || "Supabase Storage check failed"
+    });
+  }
 });
 
 router.post("/v1/media/upload", authOptional, (req, res) => {
@@ -4167,7 +4179,20 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
       });
       res.status(201).json({ url, provider: "supabase", path: objectPath });
     } catch (error) {
-      res.status(500).json({ message: "Media upload failed", error: error.message });
+      const msg = String(error.message || "");
+      res.status(500).json({
+        message: "Media upload failed",
+        error: msg,
+        hint: /bucket/i.test(msg)
+          ? 'Create a public Storage bucket named "media" in Supabase.'
+          : /jwt|api key|invalid/i.test(msg)
+            ? "Use the legacy service_role key (eyJ...), not sb_publishable_."
+            : /SUPABASE_URL|project url|pooler|https:\/\//i.test(msg)
+              ? "Fix SUPABASE_URL on Render: use Project Settings → API → Project URL (https://xxxx.supabase.co)."
+              : /Invalid path specified/i.test(msg)
+                ? "SUPABASE_URL on Render is wrong. Use https://YOUR-REF.supabase.co only — not the database URL or /storage/v1 path."
+                : undefined
+      });
     }
   });
 });
