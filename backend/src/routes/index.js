@@ -64,9 +64,12 @@ const uploadVideo = multer({
   }
 });
 
+/** Match Supabase Storage per-file limit (~50MB on most plans). */
+const MAX_MEDIA_UPLOAD_BYTES = 50 * 1024 * 1024;
+
 const uploadMediaMemory = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 120 * 1024 * 1024 },
+  limits: { fileSize: MAX_MEDIA_UPLOAD_BYTES },
   fileFilter: (_req, file, cb) => {
     const type = String(file.mimetype || "").toLowerCase();
     const name = String(file.originalname || "").toLowerCase();
@@ -4134,7 +4137,14 @@ router.get("/v1/media/config", async (_req, res) => {
 router.post("/v1/media/upload", authOptional, (req, res) => {
   uploadMediaMemory.single("file")(req, res, async (err) => {
     if (err) {
-      res.status(400).json({ message: err.message || "Invalid upload request" });
+      const errMsg = String(err.message || "");
+      res.status(400).json({
+        message: errMsg || "Invalid upload request",
+        error: errMsg,
+        hint: /file too large|limit/i.test(errMsg)
+          ? "File is over the 50MB Supabase limit. Trim the video or export a smaller MP4."
+          : undefined
+      });
       return;
     }
     if (!req.file) {
@@ -4173,7 +4183,9 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
               ? "Fix SUPABASE_URL on Render: use Project Settings → API → Project URL (https://xxxx.supabase.co)."
               : /Invalid path specified/i.test(msg)
                 ? "SUPABASE_URL on Render is wrong. Use https://YOUR-REF.supabase.co only — not the database URL or /storage/v1 path."
-                : undefined
+                : /maximum allowed size|payload too large|entity too large/i.test(msg)
+                  ? "File is over the 50MB Supabase limit. Trim the video or export a shorter/smaller MP4."
+                  : undefined
       });
     }
   });

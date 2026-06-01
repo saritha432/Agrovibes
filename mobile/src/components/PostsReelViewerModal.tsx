@@ -24,6 +24,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video,
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
+import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
@@ -464,6 +465,24 @@ export function PostsReelViewerModal({
     [language, t]
   );
 
+  const openPostAuthorProfile = useCallback(
+    (post: HomePost) => {
+      const postUserId = Number(post.userId);
+      const isOwn = viewerOwnsPost(post, user ? { id: user.id, fullName: user.fullName } : null);
+      onClose();
+      if (isOwn) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: postUserId > 0 ? postUserId : undefined,
+        userName: post.userName,
+        avatarUrl: post.authorAvatarUrl ?? null
+      });
+    },
+    [onClose, user]
+  );
+
   const applyPosts = useCallback(
     (updater: (prev: HomePost[]) => HomePost[]) => {
       setViewerPosts((prev) => {
@@ -863,18 +882,25 @@ export function PostsReelViewerModal({
           <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
-                <UserAvatar
-                  uri={postAuthorAvatarUri(post, user)}
-                  name={post.userName}
-                  size={44}
-                  borderRadius={12}
-                  style={styles.reelAvatarSq}
-                  fallbackBackgroundColor="#2a2a2a"
-                  initialsColor="#fff"
-                />
-                <Text style={styles.reelUserName} numberOfLines={1}>
-                  {reelDisplayName}
-                </Text>
+                <Pressable
+                  style={styles.reelAuthorTap}
+                  onPress={() => openPostAuthorProfile(post)}
+                  accessibilityRole="button"
+                  accessibilityLabel={reelDisplayName}
+                >
+                  <UserAvatar
+                    uri={postAuthorAvatarUri(post, user)}
+                    name={post.userName}
+                    size={44}
+                    borderRadius={12}
+                    style={styles.reelAvatarSq}
+                    fallbackBackgroundColor="#2a2a2a"
+                    initialsColor="#fff"
+                  />
+                  <Text style={styles.reelUserName} numberOfLines={1}>
+                    {reelDisplayName}
+                  </Text>
+                </Pressable>
               </View>
               <View style={styles.reelMusicRow}>
                 <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
@@ -947,6 +973,7 @@ export function PostsReelViewerModal({
       onReelStatusUpdate,
       onReelSurfaceTap,
       openCommentsForPost,
+      openPostAuthorProfile,
       playingPostId,
       reelLikeBurstByPostId,
       reelProgressByPostId,
@@ -1165,6 +1192,7 @@ const styles = StyleSheet.create({
   },
   reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
   reelUserFollowRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "nowrap", minWidth: 0 },
+  reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
   reelAvatarSq: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#2a2a2a" },
   reelUserName: { flex: 1, minWidth: 0, color: "#C9FF35", fontWeight: "800", fontSize: 16 },
   reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },

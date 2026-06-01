@@ -35,6 +35,7 @@ import {
   uploadPickedMedia,
   type HomePost
 } from "../services/api";
+import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
 import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
@@ -937,7 +938,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setSubmitting(true);
     setErrorText("");
     try {
-      await validateVideoSize(asset.uri, 120);
+      await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
       try {
         const thumb = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 400, quality: 0.72 });
@@ -1454,7 +1455,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         const taggedIds = taggedPeople.map((p) => p.id);
         if (videos.length === 1) {
           const v = videos[0];
-          await validateVideoSize(v.uri, 80);
+          await assertVideoUnderUploadLimit(v.uri);
           let derivedThumb: string | undefined;
           if (!thumbnailUrl.trim()) {
             try {
