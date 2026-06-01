@@ -97,30 +97,6 @@ function mediaExtFromMime(mimeType, originalName) {
   return m ? m[0].toLowerCase() : ".bin";
 }
 
-function toCloudinaryHlsUrl(rawUrl) {
-  const input = String(rawUrl || "").trim();
-  if (!input) return null;
-  if (!/res\.cloudinary\.com/i.test(input)) return null;
-  if (!/\/video\/upload\//i.test(input)) return null;
-  // Already HLS.
-  if (/\.m3u8($|\?)/i.test(input)) return input;
-
-  let out = input;
-  // Strip video extension before appending .m3u8 (keep query string).
-  out = out.replace(/\.(mp4|mov|m4v|webm)(?=\?|$)/i, "");
-  // Insert adaptive streaming transformation if missing.
-  if (!/\/video\/upload\/sp_auto,f_m3u8\//i.test(out)) {
-    out = out.replace(/\/video\/upload\//i, "/video/upload/sp_auto,f_m3u8/");
-  }
-  // Ensure .m3u8 extension exists (before query string if any).
-  if (!/\.m3u8($|\?)/i.test(out)) {
-    const q = out.indexOf("?");
-    if (q === -1) out = `${out}.m3u8`;
-    else out = `${out.slice(0, q)}.m3u8${out.slice(q)}`;
-  }
-  return out;
-}
-
 async function ensureLearnUsersTable() {
   if (learnUsersTableReady) return;
   await query(
@@ -4133,7 +4109,13 @@ router.delete("/v1/home/posts/:postId/comments/:commentId", authRequired, async 
 
 router.get("/v1/media/config", async (_req, res) => {
   if (!isSupabaseStorageConfigured()) {
-    res.json({ provider: "cloudinary" });
+    res.status(503).json({
+      provider: "supabase",
+      ok: false,
+      configured: false,
+      message:
+        "Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET."
+    });
     return;
   }
   try {
@@ -4197,51 +4179,6 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
   });
 });
 
-router.post("/v1/media/cloudinary-sign", (req, res) => {
-  const cloudName = String(process.env.CLOUDINARY_CLOUD_NAME || "").trim();
-  const apiKey = String(process.env.CLOUDINARY_API_KEY || "").trim();
-  const apiSecret = String(process.env.CLOUDINARY_API_SECRET || "").trim();
-
-  if (!cloudName || !apiKey || !apiSecret) {
-    res.status(500).json({ message: "Cloudinary credentials are not configured on server" });
-    return;
-  }
-
-  const folder = String(req.body?.folder || "agrovibes").trim() || "agrovibes";
-  const resourceType = String(req.body?.resourceType || "image").trim().toLowerCase() === "video" ? "video" : "image";
-  const timestamp = Math.floor(Date.now() / 1000);
-  // Video uploads are signed with eager transformations:
-  // 1) HLS stream (.m3u8) for adaptive playback on mobile
-  // 2) Optimized MP4 fallback for clients that cannot use HLS
-  // sp_auto must be the only directive in its eager component; MP4 is a separate eager pass.
-  const eager =
-    resourceType === "video"
-      ? "sp_auto|c_limit,w_720,h_1280,vc_h264,ac_aac,br_1200k,q_auto:good,f_mp4"
-      : "";
-
-  // Cloudinary requires every signed param in the upload body, sorted alphabetically in the signature.
-  const signParams = { folder, timestamp: String(timestamp) };
-  if (eager) {
-    signParams.eager = eager;
-    signParams.eager_async = "false";
-  }
-  const signaturePayload =
-    Object.keys(signParams)
-      .sort()
-      .map((key) => `${key}=${signParams[key]}`)
-      .join("&") + apiSecret;
-  const signature = crypto.createHash("sha1").update(signaturePayload).digest("hex");
-
-  res.json({
-    cloudName,
-    apiKey,
-    timestamp,
-    folder,
-    signature,
-    ...(eager ? { eager, eagerAsync: false } : {})
-  });
-});
-
 router.post("/v1/uploads/video", (req, res) => {
   uploadVideo.single("video")(req, res, (err) => {
     if (err) {
@@ -4261,62 +4198,6 @@ router.post("/v1/uploads/video", (req, res) => {
       size: req.file.size
     });
   });
-});
-
-// Admin migration: convert legacy Cloudinary MP4 URLs to HLS playback URLs.
-router.post("/v1/media/migrate-video-urls-to-hls", authRequired, requireRole(["admin"]), async (req, res) => {
-  try {
-    await ensureHomePostsTable();
-    await ensureHomeStoriesTable();
-    const dryRun = Boolean(req.body?.dryRun ?? true);
-
-    const posts = await query(
-      `
-      SELECT id, video_url AS "videoUrl"
-      FROM home_posts
-      WHERE video_url IS NOT NULL AND TRIM(video_url) <> ''
-      `
-    );
-    const stories = await query(
-      `
-      SELECT id, video_url AS "videoUrl"
-      FROM home_stories
-      WHERE video_url IS NOT NULL AND TRIM(video_url) <> ''
-      `
-    );
-
-    const postUpdates = [];
-    for (const row of posts.rows) {
-      const next = toCloudinaryHlsUrl(row.videoUrl);
-      if (next && next !== row.videoUrl) postUpdates.push({ id: row.id, from: row.videoUrl, to: next });
-    }
-    const storyUpdates = [];
-    for (const row of stories.rows) {
-      const next = toCloudinaryHlsUrl(row.videoUrl);
-      if (next && next !== row.videoUrl) storyUpdates.push({ id: row.id, from: row.videoUrl, to: next });
-    }
-
-    if (!dryRun) {
-      for (const row of postUpdates) {
-        await query(`UPDATE home_posts SET video_url = $1 WHERE id = $2`, [row.to, row.id]);
-      }
-      for (const row of storyUpdates) {
-        await query(`UPDATE home_stories SET video_url = $1 WHERE id = $2`, [row.to, row.id]);
-      }
-    }
-
-    res.json({
-      dryRun,
-      posts: { scanned: posts.rows.length, toUpdate: postUpdates.length, updated: dryRun ? 0 : postUpdates.length },
-      stories: { scanned: stories.rows.length, toUpdate: storyUpdates.length, updated: dryRun ? 0 : storyUpdates.length },
-      sample: {
-        posts: postUpdates.slice(0, 5),
-        stories: storyUpdates.slice(0, 5)
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to migrate video URLs to HLS", error: error.message });
-  }
 });
 
 router.get("/v1/learn/courses", async (_req, res) => {

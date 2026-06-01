@@ -976,24 +976,6 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
   })) as { message: DirectMessageItem };
 }
 
-async function signCloudinaryUpload(folder = "agrovibes", resourceType: "image" | "video" = "image") {
-  const signRes = await fetch(`${API_BASE_URL}/v1/media/cloudinary-sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder, resourceType })
-  });
-  if (!signRes.ok) throw new Error("Failed to sign upload");
-  return (await signRes.json()) as {
-    cloudName: string;
-    apiKey: string;
-    timestamp: number;
-    folder: string;
-    signature: string;
-    eager?: string;
-    eagerAsync?: boolean;
-  };
-}
-
 function mimeFromUri(uri: string, fallback: string) {
   const clean = uri.split("?")[0].toLowerCase();
   if (clean.endsWith(".mp4")) return "video/mp4";
@@ -1017,7 +999,7 @@ export type PickerAssetMeta = {
 };
 
 /**
- * True → use Cloudinary `image/upload`. False → `video/upload`.
+ * True → image upload. False → video upload.
  * Android `content://` and web `blob:` URIs usually have no file extension — do not rely on uri alone.
  */
 export function shouldUseImageUpload(uri: string, asset?: PickerAssetMeta | null): boolean {
@@ -1075,17 +1057,6 @@ function imageFilenameFromUri(uri: string) {
   return `image-${Date.now()}${ext}`;
 }
 
-async function throwCloudinaryError(uploadRes: Response, label: string) {
-  let detail = `${uploadRes.status} ${uploadRes.statusText}`;
-  try {
-    const body = (await uploadRes.json()) as { error?: { message?: string } };
-    if (body?.error?.message) detail = body.error.message;
-  } catch {
-    // ignore
-  }
-  throw new Error(`${label}: ${detail}`);
-}
-
 async function uploadToSupabaseServer(fileUri: string, filename: string, nativeMime: string) {
   const form = new FormData();
   if (Platform.OS === "web") {
@@ -1124,89 +1095,16 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
   return { url: uploaded.url };
 }
 
-async function uploadToCloudinary(
-  fileUri: string,
-  filename: string,
-  nativeMimeFallback: string,
-  resource: "image" | "video"
-) {
-  const sign = await signCloudinaryUpload("agrovibes", resource);
-  const form = new FormData();
-  const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
-
-  if (Platform.OS === "web") {
-    const webResp = await fetch(fileUri);
-    const blob = await webResp.blob();
-    (form as any).append("file", blob, filename);
-  } else {
-    (form as any).append(
-      "file",
-      {
-        // @ts-ignore React Native FormData file type shape
-        uri: fileUri,
-        name: filename,
-        type: nativeMime
-      } as any
-    );
-  }
-
-  form.append("api_key", sign.apiKey);
-  form.append("timestamp", String(sign.timestamp));
-  form.append("folder", sign.folder);
-  form.append("signature", sign.signature);
-  if (sign.eager) form.append("eager", sign.eager);
-  if (typeof sign.eagerAsync === "boolean") form.append("eager_async", String(sign.eagerAsync));
-
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/${resource}/upload`, {
-    method: "POST",
-    body: form as any
-  });
-
-  if (!uploadRes.ok) await throwCloudinaryError(uploadRes, "Cloudinary upload failed");
-  const uploaded = (await uploadRes.json()) as {
-    secure_url?: string;
-    url?: string;
-    eager?: Array<{ secure_url?: string; url?: string }>;
-  };
-  const eagerUrls = Array.isArray(uploaded.eager)
-    ? uploaded.eager
-        .map((e) => e?.secure_url || e?.url || "")
-        .filter((u): u is string => Boolean(u))
-    : [];
-  const hlsUrl = eagerUrls.find((u) => u.toLowerCase().includes(".m3u8"));
-  const mp4Url = eagerUrls.find((u) => u.toLowerCase().includes(".mp4"));
-  // Native expo-av needs MP4; web can use HLS when available.
-  const url =
-    Platform.OS === "web"
-      ? hlsUrl ?? mp4Url ?? uploaded.secure_url ?? uploaded.url
-      : mp4Url ?? hlsUrl ?? uploaded.secure_url ?? uploaded.url;
-  if (!url) throw new Error("Cloud upload missing URL");
-  return { url, hlsUrl, mp4Url };
-}
-
-async function uploadMediaFile(fileUri: string, filename: string, nativeMime: string, resource: "image" | "video") {
-  try {
-    return await uploadToSupabaseServer(fileUri, filename, nativeMime);
-  } catch (supabaseError) {
-    // Fallback for environments still on Cloudinary.
-    try {
-      return await uploadToCloudinary(fileUri, filename, nativeMime, resource);
-    } catch {
-      throw supabaseError;
-    }
-  }
-}
-
 export async function uploadVideoFile(fileUri: string) {
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
-  return uploadMediaFile(fileUri, `video-${Date.now()}${ext}`, "video/mp4", "video");
+  return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, "video/mp4");
 }
 
 export async function uploadImageFile(fileUri: string) {
   const filename = imageFilenameFromUri(fileUri);
   const mime = mimeFromUri(fileUri, "image/jpeg");
-  return uploadMediaFile(fileUri, filename, mime, "image");
+  return uploadToSupabaseServer(fileUri, filename, mime);
 }
 
 /** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
