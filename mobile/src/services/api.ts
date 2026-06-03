@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
@@ -487,7 +488,8 @@ export async function fetchHomeStories() {
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }
-  return (await response.json()) as { stories: HomeStory[] };
+  const data = (await response.json()) as { stories: HomeStory[] };
+  return { stories: data.stories.map(sanitizeHomeStory) };
 }
 
 export async function createHomeStory(
@@ -514,12 +516,14 @@ export async function fetchHomePosts(token?: string | null) {
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
-  return (await response.json()) as { posts: HomePost[] };
+  const data = (await response.json()) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 /** Current user's posts only — lighter than loading the full home feed for profile. */
 export async function fetchMyHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 export type HomePostLiker = {
@@ -560,7 +564,8 @@ export async function unlikeHomePost(token: string, postId: number) {
 }
 
 export async function fetchSavedHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 /**
@@ -573,7 +578,8 @@ export async function fetchTaggedHomePosts(token: string) {
   if (response.status === 404) {
     return { posts: [] as HomePost[] };
   }
-  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 export async function saveHomePost(token: string, postId: number) {
@@ -756,7 +762,8 @@ export async function createHomePost(payload: {
   if (!response.ok) {
     throw new Error("Failed to create post");
   }
-  return (await response.json()) as { post: HomePost };
+  const data = (await response.json()) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function updateHomePostLiveVideo(
@@ -769,13 +776,15 @@ export async function updateHomePostLiveVideo(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function endHomeLivePost(token: string, postId: number) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
   })) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {

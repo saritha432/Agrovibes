@@ -1,5 +1,7 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Image, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { APP_LIME } from "../theme/appColors";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
 type Props = {
   uri?: string | null;
@@ -21,13 +23,20 @@ export function UserAvatar({
   borderRadius,
   style,
   textStyle,
-  fallbackBackgroundColor = "#2a3139",
-  initialsColor = "#C9FF35"
+  fallbackBackgroundColor = APP_LIME,
+  initialsColor = "#1a2412"
 }: Props) {
   const r = borderRadius ?? size / 2;
-  const trimmed = typeof uri === "string" ? uri.trim() : "";
+  const trimmed = stripLegacyCloudinaryUrl(uri) || "";
   const initial = (String(name || "").trim().charAt(0) || "?").toUpperCase();
   const fontSize = Math.max(10, Math.round(size * 0.38));
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [trimmed]);
+
+  const showImage = Boolean(trimmed) && !imageFailed;
 
   return (
     <View
@@ -37,13 +46,18 @@ export function UserAvatar({
           width: size,
           height: size,
           borderRadius: r,
-          backgroundColor: trimmed ? "transparent" : fallbackBackgroundColor
+          backgroundColor: showImage ? "transparent" : fallbackBackgroundColor
         },
         style
       ]}
     >
-      {trimmed ? (
-        <Image source={{ uri: trimmed }} style={{ width: size, height: size, borderRadius: r }} resizeMode="cover" />
+      {showImage ? (
+        <Image
+          source={{ uri: trimmed }}
+          style={{ width: size, height: size, borderRadius: r }}
+          resizeMode="cover"
+          onError={() => setImageFailed(true)}
+        />
       ) : (
         <Text style={[styles.initials, { fontSize, color: initialsColor }, textStyle]}>{initial}</Text>
       )}

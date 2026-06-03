@@ -17,6 +17,7 @@ const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 const { isSupabaseStorageConfigured, uploadBufferToSupabase, checkSupabaseStorageHealth } = require("../supabaseStorage");
+const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -288,7 +289,7 @@ function authUserFromRow(row) {
     role: row.role,
     phone: row.phone || undefined,
     username: row.username || undefined,
-    avatarUrl: row.avatarUrl || undefined,
+    avatarUrl: stripLegacyCloudinaryUrl(row.avatarUrl) || undefined,
     bio: row.bio || undefined,
     website: row.website || undefined,
     locationLabel: row.locationLabel || undefined
@@ -1031,7 +1032,7 @@ function normalizeHomePostRow(row) {
       base.liveStartedAt = base.liveStartedAt || base.createdAt;
     }
   }
-  return base;
+  return sanitizeHomePostRowMedia(base);
 }
 
 function liveKitHttpUrl(wssUrl) {
@@ -1985,7 +1986,7 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
     const bio = String(req.body?.bio || "").trim().slice(0, 150) || null;
     const website = String(req.body?.website || "").trim().slice(0, 200) || null;
     const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 120) || null;
-    const avatarUrl = String(req.body?.avatarUrl || "").trim().slice(0, 1000) || null;
+    const avatarUrl = stripLegacyCloudinaryUrl(String(req.body?.avatarUrl || "").trim().slice(0, 1000));
 
     if (!fullName) {
       res.status(400).json({ message: "Name is required" });
@@ -2905,7 +2906,7 @@ router.get("/v1/home/stories", async (_req, res) => {
       `
     );
 
-    const body = { stories: result.rows };
+    const body = { stories: result.rows.map(sanitizeStoryRowMedia) };
     res.json(body);
     await cacheSetJson(cacheKey, body, 45);
   } catch (error) {
@@ -2949,7 +2950,14 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
         image_url AS "imageUrl",
         created_at AS "createdAt"
       `,
-      [actorUserId, userName, district, avatarLabel, videoUrl || null, imageUrl || null]
+      [
+        actorUserId,
+        userName,
+        district,
+        avatarLabel,
+        stripLegacyCloudinaryUrl(videoUrl),
+        stripLegacyCloudinaryUrl(imageUrl)
+      ]
     );
 
     let storyAvatarUrl = null;
@@ -3094,13 +3102,18 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
       creativeMeta
     } = req.body || {};
 
-    let urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
-    if (!urlList.length && typeof imageUrl === "string" && imageUrl.trim()) {
-      urlList = [imageUrl.trim()];
+    let urlList = Array.isArray(imageUrls)
+      ? imageUrls.map((u) => stripLegacyCloudinaryUrl(u)).filter(Boolean)
+      : [];
+    if (!urlList.length) {
+      const single = stripLegacyCloudinaryUrl(imageUrl);
+      if (single) urlList = [single];
     }
     const primaryImage = urlList[0] || null;
     const imageUrlsJson = urlList.length > 1 ? JSON.stringify(urlList) : null;
-    const hasVideo = !!(videoUrl && String(videoUrl).trim());
+    const cleanVideoUrl = stripLegacyCloudinaryUrl(videoUrl);
+    const cleanThumbnailUrl = stripLegacyCloudinaryUrl(thumbnailUrl);
+    const hasVideo = !!cleanVideoUrl;
     const hasImage = !!primaryImage;
     const isLivePost = /^\[LIVE\]/i.test(String(caption || "").trim());
 
@@ -3173,10 +3186,10 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         userName,
         location,
         caption,
-        videoUrl || null,
+        cleanVideoUrl,
         primaryImage,
         imageUrlsJson,
-        thumbnailUrl || null,
+        cleanThumbnailUrl,
         taggedJson,
         cleanMusicLabel,
         cleanMusicAudioUrl,
