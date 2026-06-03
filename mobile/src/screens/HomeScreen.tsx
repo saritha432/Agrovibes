@@ -77,7 +77,6 @@ import {
   type PostLiker
 } from "../social/localEngagementStore";
 import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
-import { formatMutualConnectionLabel } from "../social/formatMutualConnection";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
@@ -1970,58 +1969,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setSuggestedDismissed((prev) => new Set(prev).add(targetUserId));
   }, []);
 
-  const suggestedInlineSection = useMemo(() => {
-    const visible = suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 10);
-    if (!visible.length) return null;
-    return (
-      <View style={styles.suggestedSection}>
-        <Text style={styles.suggestedTitle}>{t("peopleYouMayKnow") || "People You May Know"}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
-          {visible.map((person) => {
-            const isDone = suggestedFollowDone.has(person.id);
-            const isBusy = suggestedFollowBusy[person.id];
-            return (
-              <View key={person.id} style={styles.suggestedCard}>
-                <Pressable style={styles.suggestedDismiss} onPress={() => handleDismissSuggested(person.id)}>
-                  <Ionicons name="close" size={14} color="#7a8690" />
-                </Pressable>
-                <UserAvatar uri={person.avatarUrl} name={person.fullName} size={56} borderRadius={28} />
-                <Text style={styles.suggestedName} numberOfLines={1}>{person.fullName}</Text>
-                {(() => {
-                  const mutualLabel = formatMutualConnectionLabel(suggestedMutualByUserId[person.id], t);
-                  return mutualLabel ? (
-                    <Text style={styles.suggestedMutual} numberOfLines={2}>
-                      {mutualLabel}
-                    </Text>
-                  ) : person.username ? (
-                    <Text style={styles.suggestedUsername} numberOfLines={1}>@{person.username}</Text>
-                  ) : null;
-                })()}
-                <Pressable
-                  style={[styles.suggestedFollowBtn, isDone ? styles.suggestedFollowBtnDone : null]}
-                  onPress={() => !isDone && handleFollowSuggested(person.id)}
-                  disabled={isDone || isBusy}
-                >
-                  <Text style={[styles.suggestedFollowText, isDone ? styles.suggestedFollowTextDone : null]}>
-                    {isDone ? (t("requested") || "Requested") : isBusy ? "..." : (t("follow") || "Follow")}
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
-    );
-  }, [
-    suggestedUsers,
-    suggestedMutualByUserId,
-    suggestedDismissed,
-    suggestedFollowDone,
-    suggestedFollowBusy,
-    handleDismissSuggested,
-    handleFollowSuggested,
-    t
-  ]);
+  const visibleSuggestedUsers = useMemo(
+    () => suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 8),
+    [suggestedUsers, suggestedDismissed]
+  );
 
   useEffect(() => {
     setExpandedReplyThreads({});
@@ -3042,6 +2993,66 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </Text>
             </Pressable>
           ))}
+
+          {activeHomeTab === "Feed"
+            ? visibleSuggestedUsers.map((person) => {
+                const isDone = suggestedFollowDone.has(person.id);
+                const isBusy = suggestedFollowBusy[person.id];
+                const firstName = displayPersonName(person.fullName).split(" ")[0] || person.fullName;
+                return (
+                  <View key={`suggest-${person.id}`} style={styles.storyItem}>
+                    <Pressable
+                      style={styles.storySuggestPress}
+                      onPress={() =>
+                        navigateToPublicProfile({
+                          userId: person.id,
+                          userName: person.fullName,
+                          avatarUrl: person.avatarUrl ?? null
+                        })
+                      }
+                      onLongPress={() => handleDismissSuggested(person.id)}
+                      delayLongPress={400}
+                    >
+                      <View style={[styles.storyRing, styles.storyRingSuggest]}>
+                        <View style={styles.storyInner}>
+                          <UserAvatar
+                            uri={person.avatarUrl}
+                            name={person.fullName}
+                            size={56}
+                            borderRadius={28}
+                            style={styles.storyAvatarFill}
+                            textStyle={styles.storyAvatarInitial}
+                            fallbackBackgroundColor={STORY_FALLBACK_BG}
+                            initialsColor={STORY_FALLBACK_INITIAL}
+                          />
+                          <Pressable
+                            style={[
+                              styles.suggestAddBadge,
+                              isDone ? styles.suggestAddBadgeDone : null
+                            ]}
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              if (!isDone && !isBusy) void handleFollowSuggested(person.id);
+                            }}
+                            disabled={isDone || isBusy}
+                            hitSlop={8}
+                          >
+                            <Ionicons
+                              name={isDone ? "checkmark" : "person-add"}
+                              size={11}
+                              color={isDone ? "#7a8690" : "#fff"}
+                            />
+                          </Pressable>
+                        </View>
+                      </View>
+                    </Pressable>
+                    <Text style={styles.storyNameDark} numberOfLines={1}>
+                      {firstName}
+                    </Text>
+                  </View>
+                );
+              })
+            : null}
         </ScrollView>
 
         <View style={styles.homeTopTabsBarDark}>
@@ -3084,7 +3095,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       posts,
       storyGroupsWithoutLive,
       user,
-      visibleHomeTopTabs
+      visibleHomeTopTabs,
+      activeHomeTab,
+      visibleSuggestedUsers,
+      suggestedFollowDone,
+      suggestedFollowBusy,
+      handleDismissSuggested,
+      handleFollowSuggested,
+      displayPersonName
     ]
   );
 
@@ -3692,7 +3710,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
-          {activeHomeTab === "Feed" ? suggestedInlineSection : null}
           <View style={[styles.reelSlot, isReelSurfaceTab ? styles.reelSlotCardGap : null]}>
             <View
               style={[styles.reelFrame, isReelSurfaceTab ? styles.reelFrameCard : null]}
@@ -3753,12 +3770,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={5}
-        ListHeaderComponent={
-          <>
-            {listHeader}
-            {activeHomeTab === "Feed" ? suggestedInlineSection : null}
-          </>
-        }
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
               <Text style={isReelSurfaceTab ? styles.emptyTabTitleDark : styles.emptyTabTitle}>{emptyTabTitle}</Text>
@@ -4731,41 +4743,22 @@ const styles = StyleSheet.create({
     backgroundColor: APP_DARK_BG
   },
   storyNameDark: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: 5, fontWeight: "600", textAlign: "center", width: "100%" },
-  suggestedSection: { paddingVertical: 10, backgroundColor: APP_DARK_BG },
-  suggestedTitle: { color: "#e0e6eb", fontSize: 13, fontWeight: "800", paddingHorizontal: 14, marginBottom: 10 },
-  suggestedRow: { paddingHorizontal: 10, gap: 10 },
-  suggestedCard: {
-    width: 140,
-    backgroundColor: "#1e2630",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#2e3842",
+  storyRingSuggest: { backgroundColor: "#3b82f6" },
+  storySuggestPress: { alignItems: "center" },
+  suggestAddBadge: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#3b82f6",
+    borderWidth: 2,
+    borderColor: "#fff",
     alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 10
+    justifyContent: "center"
   },
-  suggestedDismiss: { position: "absolute", top: 8, right: 8, zIndex: 1 },
-  suggestedName: { color: "#eef3f8", fontSize: 12, fontWeight: "800", marginTop: 8, textAlign: "center" },
-  suggestedUsername: { color: "#7a8690", fontSize: 10, fontWeight: "600", marginTop: 2 },
-  suggestedMutual: {
-    color: "#9ca3af",
-    fontSize: 10,
-    fontWeight: "600",
-    marginTop: 2,
-    textAlign: "center",
-    lineHeight: 13,
-    maxWidth: 96
-  },
-  suggestedFollowBtn: {
-    marginTop: 10,
-    backgroundColor: APP_LIME,
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 7
-  },
-  suggestedFollowBtnDone: { backgroundColor: "#2e3842" },
-  suggestedFollowText: { color: "#1b1f23", fontSize: 11, fontWeight: "800" },
-  suggestedFollowTextDone: { color: "#7a8690" },
+  suggestAddBadgeDone: { backgroundColor: "#2e3842" },
   homeTopTabsBarDark: {
     backgroundColor: APP_DARK_BG
   },
