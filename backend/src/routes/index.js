@@ -3473,7 +3473,7 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
       res.status(400).json({ message: "Valid roomName is required" });
       return;
     }
-    const canPublish = !!req.body?.canPublish;
+    const canPublish = req.body?.canPublish === true || req.body?.canPublish === "true";
     const userId = Number(req.user.userId);
     const userRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
     const displayName = String(userRes.rows[0]?.full_name || `User ${userId}`).trim();

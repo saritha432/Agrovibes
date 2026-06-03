@@ -14,7 +14,7 @@ import {
   useTracks,
   type TrackReference
 } from "@livekit/react-native";
-import { LocalVideoTrack, RoomEvent, Track } from "livekit-client";
+import { LocalVideoTrack, ConnectionState, RoomEvent, Track, type Participant } from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,6 +29,9 @@ import {
   type LiveViewer
 } from "./liveRoomData";
 import { saveLiveRecordingToPost } from "./saveLiveRecordingToPost";
+import { setActiveHostRoomName } from "./liveSessionState";
+
+type LiveCameraFacing = "front" | "back";
 
 type LiveKitRoomViewProps = {
   visible: boolean;
@@ -36,6 +39,7 @@ type LiveKitRoomViewProps = {
   isHost: boolean;
   title: string;
   postId?: number;
+  initialCameraFacing?: LiveCameraFacing;
   onClose?: () => void;
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
 };
@@ -52,10 +56,45 @@ function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid
   return tracks.find((t) => t.participant.sid !== localSid) ?? tracks[0];
 }
 
+function participantPublishesCamera(participant: Participant) {
+  return Array.from(participant.videoTrackPublications.values()).some(
+    (pub) => pub.source === Track.Source.Camera && pub.track
+  );
+}
+
+function buildLiveViewers(
+  isHost: boolean,
+  localName: string,
+  localIdentity: string,
+  participants: Participant[]
+): LiveViewer[] {
+  const remotes = participants.filter((p) => p.identity !== localIdentity);
+  if (isHost) {
+    return [
+      { id: localIdentity, name: localName, role: "Host" },
+      ...remotes.map((p) => ({ id: p.identity, name: p.name || p.identity, role: "Viewer" as const }))
+    ];
+  }
+  const hostParticipant =
+    remotes.find((p) => participantPublishesCamera(p)) ??
+    remotes.find((p) => p.isCameraEnabled) ??
+    remotes[0];
+  const rows: LiveViewer[] = [];
+  if (hostParticipant) {
+    rows.push({ id: hostParticipant.identity, name: hostParticipant.name || hostParticipant.identity, role: "Host" });
+  }
+  remotes
+    .filter((p) => p.identity !== hostParticipant?.identity)
+    .forEach((p) => rows.push({ id: p.identity, name: p.name || p.identity, role: "Viewer" }));
+  rows.push({ id: localIdentity, name: localName, role: "Viewer" });
+  return rows;
+}
+
 function LiveRoomContent({
   isHost,
   title,
   postId,
+  initialCameraFacing = "front",
   onClose,
   onLiveEnded,
   errorText,
@@ -64,6 +103,7 @@ function LiveRoomContent({
   isHost: boolean;
   title: string;
   postId?: number;
+  initialCameraFacing?: LiveCameraFacing;
   onClose?: () => void;
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
   errorText: string;
@@ -85,7 +125,8 @@ function LiveRoomContent({
   const [savingRecording, setSavingRecording] = React.useState(false);
   const [statusText, setStatusText] = React.useState(status);
   const [showViewerList, setShowViewerList] = React.useState(false);
-  const [facingFront, setFacingFront] = React.useState(true);
+  const [publishError, setPublishError] = React.useState("");
+  const [facingFront, setFacingFront] = React.useState(initialCameraFacing !== "back");
   const localName = user?.fullName || "You";
   const localSid = room.localParticipant.sid;
 
@@ -101,20 +142,43 @@ function LiveRoomContent({
     return;
   }, [isHost, room]);
 
-  const viewers = React.useMemo<LiveViewer[]>(() => {
-    if (isHost) {
-      const rows: LiveViewer[] = [{ id: room.localParticipant.identity, name: localName, role: "Host" }];
-      participants
-        .filter((p) => p.identity !== room.localParticipant.identity)
-        .forEach((p) => rows.push({ id: p.identity, name: p.name || p.identity, role: "Viewer" }));
-      return rows;
-    }
-    const rows: LiveViewer[] = participants
-      .filter((p) => p.identity !== room.localParticipant.identity)
-      .map((p) => ({ id: p.identity, name: p.name || p.identity, role: "Host" as const }));
-    rows.push({ id: room.localParticipant.identity, name: localName, role: "Viewer" });
-    return rows;
-  }, [isHost, localName, participants, room.localParticipant.identity]);
+  const viewers = React.useMemo<LiveViewer[]>(
+    () =>
+      buildLiveViewers(
+        isHost,
+        localName,
+        room.localParticipant.identity,
+        [room.localParticipant, ...participants.filter((p) => p.identity !== room.localParticipant.identity)]
+      ),
+    [isHost, localName, participants, room.localParticipant]
+  );
+
+  React.useEffect(() => {
+    if (!isHost || liveEnded) return;
+    let cancelled = false;
+    const publishHostTracks = async () => {
+      try {
+        setPublishError("");
+        await room.localParticipant.setCameraEnabled(true, {
+          facingMode: initialCameraFacing === "back" ? "environment" : "user"
+        });
+        if (cancelled) return;
+        await room.localParticipant.setMicrophoneEnabled(true);
+      } catch (error) {
+        if (cancelled) return;
+        setPublishError(formatLiveStreamError(error));
+      }
+    };
+    const onReady = () => void publishHostTracks();
+    room.on(RoomEvent.Connected, onReady);
+    room.on(RoomEvent.Reconnected, onReady);
+    if (room.state === ConnectionState.Connected) void publishHostTracks();
+    return () => {
+      cancelled = true;
+      room.off(RoomEvent.Connected, onReady);
+      room.off(RoomEvent.Reconnected, onReady);
+    };
+  }, [initialCameraFacing, isHost, liveEnded, room]);
 
   const handleLiveEnded = React.useCallback(() => {
     if (liveEnded) return;
@@ -304,7 +368,7 @@ function LiveRoomContent({
           <View style={styles.liveDot} />
           <Text style={styles.liveText}>{liveEnded ? "ENDED" : "LIVE"}</Text>
         </View>
-        <Text style={styles.statusText}>{errorText || (savingRecording ? "Saving recording..." : statusText)}</Text>
+        <Text style={styles.statusText}>{publishError || errorText || (savingRecording ? "Saving recording..." : statusText)}</Text>
         {isHost && !liveEnded ? (
           <Pressable style={styles.flipBtn} onPress={() => void flipCamera()} accessibilityLabel="Flip camera">
             <Ionicons name="camera-reverse-outline" size={22} color="#fff" />
@@ -391,12 +455,27 @@ function LiveRoomContent({
   );
 }
 
-export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onClose, onLiveEnded }: LiveKitRoomViewProps) {
+export function LiveKitRoomView({
+  visible,
+  roomName,
+  isHost,
+  title,
+  postId,
+  initialCameraFacing = "front",
+  onClose,
+  onLiveEnded
+}: LiveKitRoomViewProps) {
   const { token } = useAuth();
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [status, setStatus] = React.useState("Connecting live...");
   const [errorText, setErrorText] = React.useState("");
   const [debugInfo, setDebugInfo] = React.useState("");
+
+  React.useEffect(() => {
+    if (!visible || !isHost) return;
+    setActiveHostRoomName(roomName);
+    return () => setActiveHostRoomName(null);
+  }, [isHost, roomName, visible]);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -508,20 +587,24 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       serverUrl={connection.url}
       token={connection.token}
       connect
-      audio
-      video={isHost}
+      audio={false}
+      video={false}
       options={{
         adaptiveStream: { pixelDensity: "screen" },
         dynacast: true,
-        // Instagram-style: front camera for host; flip control switches devices.
-        videoCaptureDefaults: { facingMode: "user" }
+        videoCaptureDefaults: { facingMode: initialCameraFacing === "back" ? "environment" : "user" }
       }}
-      onError={(error) => setErrorText(error.message)}
+      onError={(error) => {
+        const msg = error.message || "";
+        if (!isHost && /insufficient permissions/i.test(msg)) return;
+        setErrorText(formatLiveStreamError(error));
+      }}
     >
       <LiveRoomContent
         isHost={isHost}
         title={title}
         postId={postId}
+        initialCameraFacing={initialCameraFacing}
         onClose={onClose}
         onLiveEnded={onLiveEnded}
         errorText={errorText}
