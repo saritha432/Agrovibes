@@ -1,4 +1,5 @@
 import { Asset } from "expo-asset";
+import { ResizeMode, Video } from "expo-av";
 import React, { createElement } from "react";
 import {
   FlatList,
@@ -179,6 +180,11 @@ const COLORS = {
   muted: "#d8ded4",
   mutedDark: "#3d3d3d"
 };
+
+function brandIntroVideoSource() {
+  const uri = artModuleToUri(CROPVIBE_INTRO_MP4 as OnboardingArtModule);
+  return uri ? { uri } : CROPVIBE_INTRO_MP4;
+}
 
 function BrandSplashGif() {
   return (

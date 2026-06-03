@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StyleSheet, View } from "react-native";
 import { CreateModal } from "../components/CreateModal";
@@ -12,6 +12,7 @@ import type { CreateType } from "../components/CreateModal";
 import type { OpenCreateOptions } from "../screens/HomeScreen";
 import { LearnStackNavigator } from "./LearnStackNavigator";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
+import { subscribeOpenLiveCreate } from "./liveCreateBridge";
 
 const Tab = createBottomTabNavigator();
 
@@ -26,6 +27,18 @@ export function AppNavigator() {
     const next = pendingFeedPostRef.current;
     pendingFeedPostRef.current = undefined;
     return next;
+  }, []);
+
+  React.useEffect(() => {
+    return subscribeOpenLiveCreate((payload) => {
+      setCreatePresetType("live");
+      setCreateLiveOptions({
+        liveTopic: payload.liveTopic,
+        scheduledLiveId: payload.scheduledLiveId,
+        autoStartLive: payload.autoStartLive
+      });
+      setCreateOpen(true);
+    });
   }, []);
 
   return (

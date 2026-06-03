@@ -27,6 +27,7 @@ import { APP_LIME } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive } from "../navigation/navigationRef";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
+import { queueOpenLiveCreate } from "../navigation/liveCreateBridge";
 
 type NotificationPanelContextValue = {
   sheetOpen: boolean;
@@ -289,10 +290,44 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const onJoinLive = async (entry: any) => {
     const postId = Number(entry?.postId);
     if (!Number.isFinite(postId) || postId <= 0) return;
+    if (String(entry?.postLiveStatus || "").toLowerCase() === "ended" || entry?.postLiveEndedAt) return;
     queueJoinLive(postId);
     setSheetOpen(false);
     navigateToJoinLive();
   };
+
+  const onStartScheduledLiveFromNotif = (entry: any) => {
+    let meta: { topic?: string; scheduleId?: number } = {};
+    try {
+      const parsed = JSON.parse(String(entry.commentExcerpt || ""));
+      if (parsed && typeof parsed === "object") meta = parsed;
+    } catch {
+      meta = {};
+    }
+    const topic = String(meta.topic || "").trim();
+    const scheduleId = Number(meta.scheduleId);
+    queueOpenLiveCreate({
+      liveTopic: topic || undefined,
+      scheduledLiveId: Number.isFinite(scheduleId) && scheduleId > 0 ? scheduleId : undefined,
+      autoStartLive: true
+    });
+    setSheetOpen(false);
+    navigateToJoinLive();
+  };
+
+  const parseLiveNotifMeta = (n: any) => {
+    let meta: { topic?: string; scheduledAt?: string; scheduleId?: number } = {};
+    try {
+      const parsed = JSON.parse(String(n.commentExcerpt || ""));
+      if (parsed && typeof parsed === "object") meta = parsed;
+    } catch {
+      meta = {};
+    }
+    return meta;
+  };
+
+  const isLivePostEnded = (n: any) =>
+    String(n?.postLiveStatus || "").toLowerCase() === "ended" || !!String(n?.postLiveEndedAt || "").trim();
 
   const postActivityLabel = (n: any) => {
     const kind = n.postIsReel ? t("postKindReel") : t("postKindPost");
@@ -308,21 +343,23 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   };
 
   const liveStartLabel = (n: any) => {
-    let meta: { topic?: string; scheduledAt?: string } = {};
-    try {
-      const parsed = JSON.parse(String(n.commentExcerpt || ""));
-      if (parsed && typeof parsed === "object") meta = parsed;
-    } catch {
-      meta = {};
-    }
+    const meta = parseLiveNotifMeta(n);
     const name = String(n.actorName || "Someone");
     const topic = meta.topic ? `: ${meta.topic}` : "";
+    if (n.type === "live_host_reminder") {
+      return meta.topic
+        ? `It's time to start your live${topic}`
+        : "It's time to start your scheduled live";
+    }
     if (n.type === "live_scheduled") {
       const when = meta.scheduledAt ? new Date(meta.scheduledAt).toLocaleString() : "soon";
       return `${name} scheduled a live${topic} at ${when}`;
     }
     if (n.type === "live_reminder") {
       return `${name} is going live in 10 minutes${topic}`;
+    }
+    if (n.type === "live_start" && isLivePostEnded(n)) {
+      return `${name} — ${t("liveEndedBadge")}`;
     }
     return `${name} started live`;
   };
@@ -341,7 +378,10 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     for (const n of accepted) items.push({ kind: "accepted", createdAt: n.createdAt || "", entry: n, key: `accepted-${String(n.id)}` });
     for (const n of declined) items.push({ kind: "declined", createdAt: n.createdAt || "", entry: n, key: `declined-${String(n.id)}` });
-    for (const n of liveStarts) items.push({ kind: "live_start", createdAt: n.createdAt || "", entry: n, key: `live-${String(n.id)}` });
+    for (const n of liveStarts) {
+      const kind = String(n.type || "live_start");
+      items.push({ kind, createdAt: n.createdAt || "", entry: n, key: `live-${kind}-${String(n.id)}` });
+    }
     for (const n of postLikes) items.push({ kind: "post_like", createdAt: n.createdAt || "", entry: n, key: `like-${n.isLocal ? n.id : `r-${n.id}`}` });
     for (const n of postComments) items.push({ kind: "post_comment", createdAt: n.createdAt || "", entry: n, key: `cmt-${n.isLocal ? n.id : `r-${n.id}`}` });
     items.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
@@ -473,19 +513,50 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     </Pressable>
                   );
                 }
-                if (item.kind === "live_start") {
-                  const postId = Number(n.postId);
-                  const canJoin = Number.isFinite(postId) && postId > 0;
+                if (item.kind === "live_host_reminder") {
                   return (
                     <View key={item.key} style={styles.liveStartRow}>
-                      <Pressable style={styles.liveStartMain} onPress={() => (canJoin ? void onJoinLive(n) : void onMarkPostActivityRead(n))}>
-                        <Ionicons name="radio" size={16} color="#ef4444" />
+                      <Pressable style={styles.liveStartMain} onPress={() => onStartScheduledLiveFromNotif(n)}>
+                        <Ionicons name="calendar" size={16} color={APP_LIME} />
                         <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
+                      </Pressable>
+                      <Pressable style={styles.joinLiveBtn} onPress={() => onStartScheduledLiveFromNotif(n)}>
+                        <Text style={styles.joinLiveText}>{t("goLive")}</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+                if (
+                  item.kind === "live_start" ||
+                  item.kind === "live_scheduled" ||
+                  item.kind === "live_reminder"
+                ) {
+                  const postId = Number(n.postId);
+                  const liveEnded = item.kind === "live_start" && isLivePostEnded(n);
+                  const canJoin = item.kind === "live_start" && Number.isFinite(postId) && postId > 0 && !liveEnded;
+                  return (
+                    <View key={item.key} style={styles.liveStartRow}>
+                      <Pressable
+                        style={styles.liveStartMain}
+                        onPress={() => (canJoin ? void onJoinLive(n) : void onMarkPostActivityRead(n))}
+                      >
+                        <Ionicons
+                          name="radio"
+                          size={16}
+                          color={liveEnded ? "rgba(255,255,255,0.4)" : "#ef4444"}
+                        />
+                        <Text style={[styles.rowText, liveEnded ? styles.rowTextMuted : null]}>
+                          {liveStartLabel(n)}
+                        </Text>
                       </Pressable>
                       {canJoin ? (
                         <Pressable style={styles.joinLiveBtn} onPress={() => void onJoinLive(n)}>
                           <Text style={styles.joinLiveText}>Join live</Text>
                         </Pressable>
+                      ) : liveEnded ? (
+                        <View style={styles.liveEndedBadge}>
+                          <Text style={styles.liveEndedBadgeText}>{t("liveEndedBadge")}</Text>
+                        </View>
                       ) : null}
                     </View>
                   );
@@ -583,5 +654,13 @@ const styles = StyleSheet.create({
   },
   liveStartMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   joinLiveBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
-  joinLiveText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 }
+  joinLiveText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
+  liveEndedBadge: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  liveEndedBadgeText: { color: "rgba(255,255,255,0.5)", fontWeight: "800", fontSize: 12 },
+  rowTextMuted: { color: "rgba(255,255,255,0.45)" }
 });
