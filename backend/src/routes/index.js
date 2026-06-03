@@ -34,6 +34,7 @@ let homePostCommentsTableReady = false;
 let homePostSavesTableReady = false;
 let postReportsTableReady = false;
 let directMessagesTableReady = false;
+let scheduledLivesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
 
@@ -199,6 +200,26 @@ function liveScheduleExcerpt(topic, scheduledAt) {
     topic: String(topic || "").trim().slice(0, 160),
     scheduledAt: String(scheduledAt || "")
   });
+}
+
+async function ensureScheduledLivesTable() {
+  if (scheduledLivesTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS scheduled_lives (
+      id SERIAL PRIMARY KEY,
+      host_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      topic TEXT NOT NULL,
+      scheduled_at TIMESTAMPTZ NOT NULL,
+      status TEXT NOT NULL DEFAULT 'scheduled',
+      post_id INT REFERENCES home_posts(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at TIMESTAMPTZ
+    )
+    `
+  );
+  scheduledLivesTableReady = true;
 }
 
 async function ensureHomePostLikesTable() {
@@ -3351,6 +3372,7 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
 async function handleScheduleLive(req, res) {
   try {
     await ensureSocialNotificationsTable();
+    await ensureScheduledLivesTable();
     const actorId = Number(req.user.userId);
     const topic = String(req.body?.topic || "").trim();
     const scheduledAtRaw = String(req.body?.scheduledAt || "").trim();
@@ -3363,7 +3385,20 @@ async function handleScheduleLive(req, res) {
       res.status(400).json({ message: "Scheduled time must be in the future" });
       return;
     }
-    const excerpt = liveScheduleExcerpt(topic, new Date(scheduledAtMs).toISOString());
+    const scheduledAtIso = new Date(scheduledAtMs).toISOString();
+    const excerpt = liveScheduleExcerpt(topic, scheduledAtIso);
+    const reminderAtMs = scheduledAtMs - 10 * 60 * 1000;
+    const reminderScheduled = reminderAtMs > Date.now();
+
+    const saved = await query(
+      `
+      INSERT INTO scheduled_lives (host_id, topic, scheduled_at, status)
+      VALUES ($1, $2, $3::timestamptz, 'scheduled')
+      RETURNING id, topic, scheduled_at AS "scheduledAt", status, created_at AS "createdAt"
+      `,
+      [actorId, topic.slice(0, 160), scheduledAtIso]
+    );
+
     await query(
       `
       INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
@@ -3375,25 +3410,90 @@ async function handleScheduleLive(req, res) {
       `,
       [actorId, excerpt]
     );
-    await query(
-      `
-      INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt, created_at)
-      SELECT f.follower_id, $1, f.id, 'live_reminder', false, NULL, $2, GREATEST($3::timestamptz - INTERVAL '10 minutes', NOW())
-      FROM social_follows f
-      WHERE f.following_id = $1
-        AND f.status = 'accepted'
-        AND f.follower_id <> $1
-      `,
-      [actorId, excerpt, new Date(scheduledAtMs).toISOString()]
-    );
-    res.status(201).json({ ok: true, topic, scheduledAt: new Date(scheduledAtMs).toISOString() });
+
+    if (reminderScheduled) {
+      await query(
+        `
+        INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt, created_at)
+        SELECT f.follower_id, $1, f.id, 'live_reminder', false, NULL, $2, $3::timestamptz
+        FROM social_follows f
+        WHERE f.following_id = $1
+          AND f.status = 'accepted'
+          AND f.follower_id <> $1
+        `,
+        [actorId, excerpt, new Date(reminderAtMs).toISOString()]
+      );
+    }
+
+    const row = saved.rows[0] || {};
+    res.status(201).json({
+      ok: true,
+      id: row.id,
+      topic,
+      scheduledAt: scheduledAtIso,
+      reminderScheduled
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to schedule live", error: error.message });
   }
 }
 
+async function handleMyScheduledLives(req, res) {
+  try {
+    await ensureScheduledLivesTable();
+    const hostId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT id, topic, scheduled_at AS "scheduledAt", status, post_id AS "postId", created_at AS "createdAt", started_at AS "startedAt"
+      FROM scheduled_lives
+      WHERE host_id = $1
+        AND status = 'scheduled'
+        AND scheduled_at >= NOW() - INTERVAL '2 hours'
+      ORDER BY scheduled_at ASC
+      LIMIT 20
+      `,
+      [hostId]
+    );
+    res.json({ scheduledLives: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load scheduled lives", error: error.message });
+  }
+}
+
+async function handleStartScheduledLive(req, res) {
+  try {
+    await ensureScheduledLivesTable();
+    const hostId = Number(req.user.userId);
+    const scheduleId = Number(req.params.scheduleId);
+    const postIdRaw = req.body?.postId;
+    const postId = postIdRaw != null ? Number(postIdRaw) : null;
+    if (!Number.isFinite(scheduleId) || scheduleId <= 0) {
+      res.status(400).json({ message: "Valid scheduleId is required" });
+      return;
+    }
+    const updated = await query(
+      `
+      UPDATE scheduled_lives
+      SET status = 'started', started_at = NOW(), post_id = COALESCE($3, post_id)
+      WHERE id = $1 AND host_id = $2 AND status = 'scheduled'
+      RETURNING id, topic, scheduled_at AS "scheduledAt", status, post_id AS "postId", started_at AS "startedAt"
+      `,
+      [scheduleId, hostId, Number.isFinite(postId) && postId > 0 ? postId : null]
+    );
+    if (!updated.rows.length) {
+      res.status(404).json({ message: "Scheduled live not found" });
+      return;
+    }
+    res.json({ scheduledLive: updated.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to start scheduled live", error: error.message });
+  }
+}
+
 router.post("/v1/live/schedule", authRequired, handleScheduleLive);
 router.post("/v1/social/live/schedule", authRequired, handleScheduleLive);
+router.get("/v1/live/scheduled/mine", authRequired, handleMyScheduledLives);
+router.post("/v1/live/scheduled/:scheduleId/start", authRequired, handleStartScheduledLive);
 
 function stripEnvValue(value) {
   return String(value || "")

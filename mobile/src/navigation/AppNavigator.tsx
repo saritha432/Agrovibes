@@ -9,6 +9,7 @@ import { ProfileScreen } from "../screens/ProfileScreen";
 import { ServicesScreen } from "../screens/ServicesScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
+import type { OpenCreateOptions } from "../screens/HomeScreen";
 import { LearnStackNavigator } from "./LearnStackNavigator";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
 
@@ -18,6 +19,7 @@ export function AppNavigator() {
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [homeRefreshToken, setHomeRefreshToken] = useState(0);
   const [createPresetType, setCreatePresetType] = useState<CreateType | null>(null);
+  const [createLiveOptions, setCreateLiveOptions] = useState<OpenCreateOptions | null>(null);
   /** Newly created post from API — consumed on the next Home feed fetch so it appears immediately even if GET is briefly stale. */
   const pendingFeedPostRef = useRef<HomePost | undefined>(undefined);
   const takePendingFeedPost = useCallback(() => {
@@ -47,8 +49,9 @@ export function AppNavigator() {
             <HomeScreen
               refreshToken={homeRefreshToken}
               takePendingFeedPost={takePendingFeedPost}
-              onOpenCreate={(type) => {
+              onOpenCreate={(type, options) => {
                 setCreatePresetType(type ?? null);
+                setCreateLiveOptions(options ?? null);
                 setCreateOpen(true);
               }}
             />
@@ -63,8 +66,12 @@ export function AppNavigator() {
         <CreateModal
           visible
           initialType={createPresetType}
+          initialLiveTopic={createLiveOptions?.liveTopic}
+          scheduledLiveId={createLiveOptions?.scheduledLiveId}
+          autoStartLive={!!createLiveOptions?.autoStartLive}
           onClose={() => {
             setCreatePresetType(null);
+            setCreateLiveOptions(null);
             setCreateOpen(false);
           }}
           onVideoPosted={(post) => {

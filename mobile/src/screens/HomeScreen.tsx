@@ -55,6 +55,7 @@ import {
   getWebAppOrigin,
   HomePost,
   HomeStory,
+  type ScheduledLive,
   likeHomePost,
   saveHomePost,
   sendDirectMessage,
@@ -89,9 +90,15 @@ import {
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
+export type OpenCreateOptions = {
+  liveTopic?: string;
+  scheduledLiveId?: number;
+  autoStartLive?: boolean;
+};
+
 interface HomeScreenProps {
   refreshToken?: number;
-  onOpenCreate?: (type?: CreateType) => void;
+  onOpenCreate?: (type?: CreateType, options?: OpenCreateOptions) => void;
   /** Returns at most once per successful create: API post to merge into the feed after refetch (read clears the slot). */
   takePendingFeedPost?: () => HomePost | undefined;
 }
@@ -3699,6 +3706,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             joinPostId={liveJoinPostId}
             onJoinConsumed={() => setLiveJoinPostId(null)}
             onOpenCreate={() => onOpenCreate?.("live")}
+            onStartScheduledLive={(schedule: ScheduledLive) =>
+              onOpenCreate?.("live", {
+                liveTopic: schedule.topic,
+                scheduledLiveId: schedule.id,
+                autoStartLive: true
+              })
+            }
             canDeletePost={(post) => viewerOwnsPost(post, user)}
             onDeletePost={confirmDeleteOwnPost}
             watchingPost={watchingLivePost}
