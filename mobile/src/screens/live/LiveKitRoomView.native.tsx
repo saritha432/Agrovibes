@@ -117,8 +117,12 @@ function LiveRoomContent({
   const commentsRef = React.useRef<ScrollView | null>(null);
   const recorderRef = React.useRef<LiveHostRecorder | null>(null);
   const videoDropTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCloseRef = React.useRef(onClose);
+  const onLiveEndedRef = React.useRef(onLiveEnded);
   onCloseRef.current = onClose;
+  onLiveEndedRef.current = onLiveEnded;
+  const liveEndedRef = React.useRef(false);
   const [comments, setComments] = React.useState<LiveComment[]>([]);
   const [commentDraft, setCommentDraft] = React.useState("");
   const [liveEnded, setLiveEnded] = React.useState(false);
@@ -181,7 +185,8 @@ function LiveRoomContent({
   }, [initialCameraFacing, isHost, liveEnded, room]);
 
   const handleLiveEnded = React.useCallback(() => {
-    if (liveEnded) return;
+    if (liveEndedRef.current) return;
+    liveEndedRef.current = true;
     setLiveEnded(true);
     if (videoDropTimerRef.current) {
       clearTimeout(videoDropTimerRef.current);
@@ -193,10 +198,15 @@ function LiveRoomContent({
       // no-op
     }
     setStatusText("Live ended");
-    if (!isHost) {
-      setTimeout(() => onCloseRef.current?.(), 1200);
-    }
-  }, [isHost, liveEnded, room]);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      if (!isHost && postId) {
+        onLiveEndedRef.current?.(postId, { id: postId, liveStatus: "ended", liveViewerCount: 0 });
+      }
+      onCloseRef.current?.();
+    }, isHost ? 1500 : 1200);
+  }, [isHost, postId, room]);
 
   const flipCamera = React.useCallback(async () => {
     if (!isHost || liveEnded) return;
@@ -252,30 +262,42 @@ function LiveRoomContent({
     const onTrackUnsubscribed = (track: { kind: Track.Kind }) => {
       if (!isHost && track.kind === Track.Kind.Video) {
         if (videoDropTimerRef.current) clearTimeout(videoDropTimerRef.current);
-        videoDropTimerRef.current = setTimeout(() => handleLiveEnded(), 2800);
+        videoDropTimerRef.current = setTimeout(() => handleLiveEnded(), 1200);
       }
     };
     const onParticipantDisconnected = () => {
-      if (!isHost && participants.filter((p) => p.identity !== room.localParticipant.identity).length === 0) {
+      if (isHost || liveEndedRef.current) return;
+      if (room.remoteParticipants.size === 0) {
         if (videoDropTimerRef.current) clearTimeout(videoDropTimerRef.current);
-        videoDropTimerRef.current = setTimeout(() => handleLiveEnded(), 1200);
+        videoDropTimerRef.current = setTimeout(() => handleLiveEnded(), 600);
+      }
+    };
+    const onDisconnected = () => {
+      if (!isHost && !liveEndedRef.current) {
+        handleLiveEnded();
       }
     };
     room.on(RoomEvent.DataReceived, onData);
     room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
     room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
     room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+    room.on(RoomEvent.Disconnected, onDisconnected);
     return () => {
       if (videoDropTimerRef.current) {
         clearTimeout(videoDropTimerRef.current);
         videoDropTimerRef.current = null;
       }
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
       room.off(RoomEvent.DataReceived, onData);
       room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
       room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
       room.off(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+      room.off(RoomEvent.Disconnected, onDisconnected);
     };
-  }, [handleLiveEnded, isHost, participants, room]);
+  }, [handleLiveEnded, isHost, room]);
 
   React.useEffect(() => {
     commentsRef.current?.scrollToEnd?.({ animated: true });
@@ -297,6 +319,18 @@ function LiveRoomContent({
   }, [commentDraft, liveEnded, localName, room]);
 
   const handleEndLive = React.useCallback(async () => {
+    if (liveEndedRef.current) return;
+    if (isHost) {
+      try {
+        await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
+          reliable: true,
+          topic: "live-chat"
+        });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      } catch {
+        // Continue ending even if broadcast fails.
+      }
+    }
     if (isHost && postId && token) {
       setSavingRecording(true);
       setStatusText("Saving recording...");
@@ -320,22 +354,13 @@ function LiveRoomContent({
     }
     if (isHost) {
       try {
-        await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
-          reliable: true,
-          topic: "live-chat"
-        });
-      } catch {
-        // no-op
-      }
-      try {
         room.disconnect();
       } catch {
         // no-op
       }
     }
-    setLiveEnded(true);
-    setStatusText("Live ended");
-  }, [isHost, onClose, onLiveEnded, postId, room, token]);
+    handleLiveEnded();
+  }, [handleLiveEnded, isHost, onLiveEnded, postId, room, token]);
 
   const cameraRefs = tracks.filter((track): track is TrackReference => isTrackReference(track));
   const cameraTrack = pickLiveCameraTrack(cameraRefs, isHost, localSid);
