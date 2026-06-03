@@ -678,13 +678,15 @@ export function ProfileScreen({ route }: { route?: any }) {
 
               <View style={styles.headerMidRow}>
                 <View style={styles.avatarWrap}>
-                  <View style={styles.avatar}>
-                    {user.avatarUrl ? (
-                      <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
-                    ) : (
-                      <Text style={styles.avatarText}>{profileModel?.initials}</Text>
-                    )}
-                  </View>
+                  <UserAvatar
+                    uri={user.avatarUrl}
+                    name={user.fullName || user.username || user.email || "U"}
+                    size={86}
+                    borderRadius={43}
+                    fallbackBackgroundColor={LIME}
+                    initialsColor="#1a2412"
+                    style={styles.avatar}
+                  />
                   <View style={styles.shieldBadge}>
                     <Ionicons name="shield-checkmark" size={12} color="#1a1a1a" />
                   </View>
@@ -1212,17 +1214,9 @@ const styles = StyleSheet.create({
   headerMidRow: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 12 },
   avatarWrap: { position: "relative" },
   avatar: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: "#262626",
-    alignItems: "center",
-    justifyContent: "center",
     borderWidth: 2,
     borderColor: LIME
   },
-  avatarText: { color: TEAL, fontSize: 28, fontWeight: "900" },
-  avatarImage: { width: "100%", height: "100%", borderRadius: 43 },
   shieldBadge: {
     position: "absolute",
     right: -2,

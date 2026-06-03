@@ -29,6 +29,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
@@ -296,12 +297,12 @@ function postAuthorAvatarUri(
   post: HomePost,
   viewer: { id?: number; fullName?: string; avatarUrl?: string } | null | undefined
 ): string | undefined {
-  const fromPost = post.authorAvatarUrl;
-  if (typeof fromPost === "string" && fromPost.trim()) return fromPost.trim();
+  const fromPost = stripLegacyCloudinaryUrl(post.authorAvatarUrl);
+  if (fromPost) return fromPost;
   if (viewer != null && Number.isFinite(Number(viewer.id)) && Number(viewer.id) > 0) {
     if (viewerOwnsPost(post, { id: Number(viewer.id), fullName: viewer.fullName })) {
-      const u = viewer.avatarUrl;
-      if (typeof u === "string" && u.trim()) return u.trim();
+      const u = stripLegacyCloudinaryUrl(viewer.avatarUrl);
+      if (u) return u;
     }
   }
   return undefined;
@@ -3277,8 +3278,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     size={44}
                     borderRadius={12}
                     style={styles.reelAvatarSq}
-                    fallbackBackgroundColor="#2a2a2a"
-                    initialsColor="#fff"
                   />
                   <Text style={styles.reelUserName} numberOfLines={1}>
                     {reelDisplayName}
@@ -4628,12 +4627,6 @@ const styles = StyleSheet.create({
     minWidth: 0
   },
   reelAvatarSq: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#2a2a2a",
-    alignItems: "center",
-    justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)"
   },

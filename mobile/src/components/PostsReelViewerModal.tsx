@@ -25,6 +25,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
@@ -99,12 +100,12 @@ function postAuthorAvatarUri(
   post: HomePost,
   viewer: { id?: number; fullName?: string; avatarUrl?: string } | null | undefined
 ): string | undefined {
-  const fromPost = post.authorAvatarUrl;
-  if (typeof fromPost === "string" && fromPost.trim()) return fromPost.trim();
+  const fromPost = stripLegacyCloudinaryUrl(post.authorAvatarUrl);
+  if (fromPost) return fromPost;
   if (viewer != null && Number.isFinite(Number(viewer.id)) && Number(viewer.id) > 0) {
     if (viewerOwnsPost(post, { id: Number(viewer.id), fullName: viewer.fullName })) {
-      const u = viewer.avatarUrl;
-      if (typeof u === "string" && u.trim()) return u.trim();
+      const u = stripLegacyCloudinaryUrl(viewer.avatarUrl);
+      if (u) return u;
     }
   }
   return undefined;
@@ -894,8 +895,6 @@ export function PostsReelViewerModal({
                     size={44}
                     borderRadius={12}
                     style={styles.reelAvatarSq}
-                    fallbackBackgroundColor="#2a2a2a"
-                    initialsColor="#fff"
                   />
                   <Text style={styles.reelUserName} numberOfLines={1}>
                     {reelDisplayName}
@@ -1193,7 +1192,7 @@ const styles = StyleSheet.create({
   reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
   reelUserFollowRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "nowrap", minWidth: 0 },
   reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
-  reelAvatarSq: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#2a2a2a" },
+  reelAvatarSq: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
   reelUserName: { flex: 1, minWidth: 0, color: "#C9FF35", fontWeight: "800", fontSize: 16 },
   reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
   reelMusicText: { color: "rgba(255,255,255,0.95)", fontSize: 13, fontWeight: "600", flex: 1 },
