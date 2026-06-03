@@ -2994,8 +2994,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Pressable>
           ))}
 
-          {activeHomeTab === "Feed"
-            ? visibleSuggestedUsers.map((person) => {
+          {visibleSuggestedUsers.map((person) => {
                 const isDone = suggestedFollowDone.has(person.id);
                 const isBusy = suggestedFollowBusy[person.id];
                 const firstName = displayPersonName(person.fullName).split(" ")[0] || person.fullName;
@@ -3051,8 +3050,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     </Text>
                   </View>
                 );
-              })
-            : null}
+              })}
         </ScrollView>
 
         <View style={styles.homeTopTabsBarDark}>
