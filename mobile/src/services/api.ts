@@ -141,6 +141,12 @@ export function formatLiveStreamError(error: unknown): string {
   if (status === 503 || message.includes("(503)")) {
     return "LiveKit is not configured on the server. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in Render env vars.";
   }
+  if (/insufficient permissions/i.test(message)) {
+    return "Live server denied camera/mic publish. Close the stream fully, then start again. If it keeps happening, check LiveKit keys on Render.";
+  }
+  if (/could not establish signal|network request failed|failed to connect/i.test(message)) {
+    return "Cannot connect to LiveKit. Check mobile internet and confirm Render LIVEKIT_URL is wss://your-project.livekit.cloud with matching API key/secret.";
+  }
   if (/invalid token/i.test(message)) {
     return "LiveKit rejected the token. Camera may turn on, but video won't show until Render LIVEKIT_URL, API key and secret all match the same LiveKit Cloud project. Redeploy after saving env vars.";
   }

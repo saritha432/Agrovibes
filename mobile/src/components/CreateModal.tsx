@@ -394,6 +394,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [liveKitHostTitle, setLiveKitHostTitle] = useState("");
   const [liveKitHostPostId, setLiveKitHostPostId] = useState<number | null>(null);
   const [liveKitHostOpen, setLiveKitHostOpen] = useState(false);
+  const [liveHostCameraFacing, setLiveHostCameraFacing] = useState<"front" | "back">("front");
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   /** Instagram-style: post flow allows multiple photos by default (up to 10). */
   const [entryMultiSelect, setEntryMultiSelect] = useState(true);
@@ -1127,6 +1128,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       onVideoPosted?.(activePost);
       setLiveKitHostRoomName(activePost.liveRoomName || `agrovibes-live-${post.id}`);
       setLiveKitHostTitle(liveCaption);
+      setLiveHostCameraFacing(entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back");
       setLiveKitHostOpen(true);
       setCreateType(null);
       setLiveMode(null);
@@ -2507,6 +2509,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         isHost
         postId={liveKitHostPostId ?? undefined}
         title={liveKitHostTitle || "Live stream"}
+        initialCameraFacing={liveHostCameraFacing}
         onLiveEnded={(postId: number, update?: Partial<HomePost>) => {
           onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0, ...update } as HomePost);
         }}

@@ -12,6 +12,7 @@ import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
 import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { isActiveLiveStream, isLivePost, liveRoomName } from "./livePostUtils";
+import { isAlreadyHostingRoom } from "./liveSessionState";
 import { LiveKitRoomView } from "./LiveKitRoomView";
 
 const BG = APP_BLACK;
@@ -58,12 +59,23 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
     Number.isFinite(postUserId) &&
     postUserId > 0 &&
     currentUserId === postUserId;
+  const alreadyHostingThisRoom = !!post && isHost && isAlreadyHostingRoom(liveRoomName(post));
 
   return (
     <Modal visible={post != null} animationType="slide" onRequestClose={onClose}>
       {post ? (
         <View style={styles.viewerRoot}>
           {isActiveLiveStream(post) ? (
+            alreadyHostingThisRoom ? (
+              <View style={styles.alreadyHostingRoot}>
+                <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
+                  <Ionicons name="close" size={28} color="#fff" />
+                </Pressable>
+                <Ionicons name="radio-outline" size={48} color="#C9FF35" />
+                <Text style={styles.alreadyHostingTitle}>You are already live</Text>
+                <Text style={styles.alreadyHostingSub}>Use the host screen to manage this stream.</Text>
+              </View>
+            ) : (
             <LiveKitRoomView
               visible
               roomName={liveRoomName(post)}
@@ -73,6 +85,7 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
               onLiveEnded={onLiveEnded}
               onClose={onClose}
             />
+            )
           ) : (
             <>
               <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
@@ -197,6 +210,15 @@ const ringStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   viewerRoot: { flex: 1, backgroundColor: "#000" },
+  alreadyHostingRoot: {
+    flex: 1,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28
+  },
+  alreadyHostingTitle: { marginTop: 16, color: "#fff", fontSize: 20, fontWeight: "800", textAlign: "center" },
+  alreadyHostingSub: { marginTop: 8, color: "rgba(255,255,255,0.7)", fontSize: 14, textAlign: "center" },
   viewerClose: { position: "absolute", right: 14, zIndex: 20 },
   viewerDelete: { position: "absolute", left: 14, zIndex: 20 },
   viewerVideo: { flex: 1, width: "100%" },
