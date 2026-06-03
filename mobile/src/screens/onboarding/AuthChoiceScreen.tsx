@@ -1,5 +1,6 @@
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -44,6 +45,7 @@ export function AuthChoiceScreen() {
   const [username, setUsername] = React.useState("");
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
 
   const phone = mode === "login" ? loginPhone : registerPhone;
   const setPhoneRaw = mode === "login" ? setLoginPhone : setRegisterPhone;
@@ -167,14 +169,27 @@ export function AuthChoiceScreen() {
             textContentType="telephoneNumber"
           />
         </View>
-        <TextInput
-          value={password}
-          onChangeText={onPasswordChange}
-          placeholder={t("passwordPlaceholder")}
-          placeholderTextColor="#7f8b93"
-          style={[styles.input, styles.spaced]}
-          secureTextEntry
-        />
+        <View style={[styles.passwordRow, styles.spaced]}>
+          <TextInput
+            value={password}
+            onChangeText={onPasswordChange}
+            placeholder={t("passwordPlaceholder")}
+            placeholderTextColor="#7f8b93"
+            style={styles.passwordInput}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Pressable
+            style={styles.passwordEyeBtn}
+            onPress={() => setShowPassword((v) => !v)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+          >
+            <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#9aa5ad" />
+          </Pressable>
+        </View>
         <Pressable
           onPress={submit}
           style={[
@@ -254,6 +269,25 @@ const styles = StyleSheet.create({
     backgroundColor: APP_SURFACE
   },
   spaced: { marginTop: 10 },
+  passwordRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    backgroundColor: APP_SURFACE
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontWeight: "700",
+    color: "#eef4f8"
+  },
+  passwordEyeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   row: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 10 },
   rowInput: { flex: 1, minWidth: 0 },
   primaryBtn: {
