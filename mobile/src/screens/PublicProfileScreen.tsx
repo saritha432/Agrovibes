@@ -23,6 +23,8 @@ import { sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
 import { useLanguage } from "../localization/LanguageContext";
 import { formatDisplayName } from "../localization/feedDisplay";
+import { UserAvatar } from "../components/UserAvatar";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
 function normalizeName(value: string) {
   return String(value || "")
@@ -44,6 +46,7 @@ export function PublicProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null | undefined>(avatarFromRoute);
+  const displayAvatarUrl = useMemo(() => stripLegacyCloudinaryUrl(avatarUrl), [avatarUrl]);
   const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -153,19 +156,21 @@ export function PublicProfileScreen() {
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => avatarUrl && setAvatarPreviewOpen(true)}
-          disabled={!avatarUrl}
-          style={({ pressed }) => [styles.avatarPressable, pressed && avatarUrl ? { opacity: 0.85 } : null]}
+          onPress={() => displayAvatarUrl && setAvatarPreviewOpen(true)}
+          disabled={!displayAvatarUrl}
+          style={({ pressed }) => [styles.avatarPressable, pressed && displayAvatarUrl ? { opacity: 0.85 } : null]}
           accessibilityRole="button"
           accessibilityLabel={t("viewProfilePhoto")}
         >
-          <View style={styles.avatar}>
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
-            ) : (
-              <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
-            )}
-          </View>
+          <UserAvatar
+            uri={avatarUrl}
+            name={userName}
+            size={78}
+            borderRadius={39}
+            fallbackBackgroundColor={T.accent}
+            initialsColor={T.bg}
+            style={styles.avatar}
+          />
         </Pressable>
         <View style={styles.statsRow}>
           <View style={styles.stat}>
@@ -251,9 +256,9 @@ export function PublicProfileScreen() {
               }
             ]}
           >
-            {avatarUrl ? (
+            {displayAvatarUrl ? (
               <Image
-                source={{ uri: avatarUrl }}
+                source={{ uri: displayAvatarUrl }}
                 style={{ width: avatarPreviewSize, height: avatarPreviewSize }}
                 resizeMode="cover"
               />
@@ -278,18 +283,9 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 20 },
   header: { flexDirection: "row", alignItems: "center", gap: 22, paddingHorizontal: 16, paddingTop: 14 },
   avatar: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    backgroundColor: T.avatarRing,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
     borderWidth: 2,
     borderColor: T.border
   },
-  avatarImage: { width: "100%", height: "100%" },
-  avatarText: { fontSize: 30, fontWeight: "800", color: T.accent },
   statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingRight: 2, gap: 0 },
   stat: { flex: 1, alignItems: "center", minWidth: 0, paddingHorizontal: 1 },
   statValue: { fontSize: 20, fontWeight: "900", color: T.text, textAlign: "center" },

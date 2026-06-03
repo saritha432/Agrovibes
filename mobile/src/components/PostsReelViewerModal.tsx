@@ -24,6 +24,9 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video,
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
+import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
+import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -97,12 +100,12 @@ function postAuthorAvatarUri(
   post: HomePost,
   viewer: { id?: number; fullName?: string; avatarUrl?: string } | null | undefined
 ): string | undefined {
-  const fromPost = post.authorAvatarUrl;
-  if (typeof fromPost === "string" && fromPost.trim()) return fromPost.trim();
+  const fromPost = stripLegacyCloudinaryUrl(post.authorAvatarUrl);
+  if (fromPost) return fromPost;
   if (viewer != null && Number.isFinite(Number(viewer.id)) && Number(viewer.id) > 0) {
     if (viewerOwnsPost(post, { id: Number(viewer.id), fullName: viewer.fullName })) {
-      const u = viewer.avatarUrl;
-      if (typeof u === "string" && u.trim()) return u.trim();
+      const u = stripLegacyCloudinaryUrl(viewer.avatarUrl);
+      if (u) return u;
     }
   }
   return undefined;
@@ -229,9 +232,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
+  const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = playbackSources[sourceIndex] ?? uri;
 
   useEffect(() => {
     setNatural(null);
+    setSourceIndex(0);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -253,7 +260,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     if (!v) return;
     if (shouldPlay) v.playAsync().catch(() => {});
     else v.pauseAsync().catch(() => {});
-  }, [shouldPlay, uri]);
+  }, [shouldPlay, activeUri]);
+
+  const tryNextPlaybackSource = React.useCallback(() => {
+    setSourceIndex((idx) => (idx + 1 < playbackSources.length ? idx + 1 : idx));
+  }, [playbackSources.length]);
 
   React.useImperativeHandle(ref, () => ({
     seekToRatio: async (ratio: number) => {
@@ -274,10 +285,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       }}
     >
       <Video
+        key={activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
-        source={{ uri }}
+        source={{ uri: activeUri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
@@ -288,6 +300,9 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         onPlaybackStatusUpdate={(status) => {
           onStatusUpdate?.(status);
           if (status.isLoaded) durationRef.current = Number(status.durationMillis || 0);
+          else if ("error" in status && status.error && sourceIndex + 1 < playbackSources.length) {
+            tryNextPlaybackSource();
+          }
         }}
         onReadyForDisplay={
           isWeb || isCover
@@ -432,6 +447,8 @@ export function PostsReelViewerModal({
   const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const commentSubmittingRef = useRef(false);
   const [optionsPost, setOptionsPost] = useState<HomePost | null>(null);
 
   const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
@@ -447,6 +464,24 @@ export function PostsReelViewerModal({
   const displayPostCaption = useCallback(
     (caption?: string | null) => formatReelCaption(caption, language, t),
     [language, t]
+  );
+
+  const openPostAuthorProfile = useCallback(
+    (post: HomePost) => {
+      const postUserId = Number(post.userId);
+      const isOwn = viewerOwnsPost(post, user ? { id: user.id, fullName: user.fullName } : null);
+      onClose();
+      if (isOwn) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: postUserId > 0 ? postUserId : undefined,
+        userName: post.userName,
+        avatarUrl: post.authorAvatarUrl ?? null
+      });
+    },
+    [onClose, user]
   );
 
   const applyPosts = useCallback(
@@ -607,9 +642,12 @@ export function PostsReelViewerModal({
 
   const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
-    if (!text || !activeCommentsPost) return;
+    if (!text || !activeCommentsPost || commentSubmittingRef.current) return;
+    commentSubmittingRef.current = true;
+    setCommentSubmitting(true);
     const post = activeCommentsPost;
 
+    try {
     if (token) {
       try {
         const res = await createHomePostComment(token, post.id, text);
@@ -631,7 +669,8 @@ export function PostsReelViewerModal({
         setCommentDraft("");
         return;
       } catch {
-        // fall through
+        Alert.alert(t("shareFailed"), "Could not post comment. Check your connection and try again.");
+        return;
       }
     }
 
@@ -650,7 +689,11 @@ export function PostsReelViewerModal({
       prev.map((p) => (p.id === post.id ? { ...p, commentsCount: (p.commentsCount ?? 0) + 1 } : p))
     );
     setCommentDraft("");
-  }, [activeCommentsPost, applyPosts, commentDraft, token, user?.avatarUrl, user?.fullName]);
+    } finally {
+      commentSubmittingRef.current = false;
+      setCommentSubmitting(false);
+    }
+  }, [activeCommentsPost, applyPosts, commentDraft, t, token, user?.avatarUrl, user?.fullName]);
 
   const sharePost = useCallback(async (post: HomePost) => {
     const caption = displayPostCaption(post.caption);
@@ -840,18 +883,23 @@ export function PostsReelViewerModal({
           <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
-                <UserAvatar
-                  uri={postAuthorAvatarUri(post, user)}
-                  name={post.userName}
-                  size={44}
-                  borderRadius={12}
-                  style={styles.reelAvatarSq}
-                  fallbackBackgroundColor="#2a2a2a"
-                  initialsColor="#fff"
-                />
-                <Text style={styles.reelUserName} numberOfLines={1}>
-                  {reelDisplayName}
-                </Text>
+                <Pressable
+                  style={styles.reelAuthorTap}
+                  onPress={() => openPostAuthorProfile(post)}
+                  accessibilityRole="button"
+                  accessibilityLabel={reelDisplayName}
+                >
+                  <UserAvatar
+                    uri={postAuthorAvatarUri(post, user)}
+                    name={post.userName}
+                    size={44}
+                    borderRadius={12}
+                    style={styles.reelAvatarSq}
+                  />
+                  <Text style={styles.reelUserName} numberOfLines={1}>
+                    {reelDisplayName}
+                  </Text>
+                </Pressable>
               </View>
               <View style={styles.reelMusicRow}>
                 <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
@@ -924,6 +972,7 @@ export function PostsReelViewerModal({
       onReelStatusUpdate,
       onReelSurfaceTap,
       openCommentsForPost,
+      openPostAuthorProfile,
       playingPostId,
       reelLikeBurstByPostId,
       reelProgressByPostId,
@@ -1045,9 +1094,16 @@ export function PostsReelViewerModal({
                   placeholder={t("addCommentPlaceholder")}
                   placeholderTextColor="#6b7280"
                   style={styles.commentInput}
+                  multiline
+                  textAlignVertical="top"
+                  maxLength={2000}
                 />
-                <Pressable style={styles.commentSendBtn} onPress={() => void submitComment()}>
-                  <Ionicons name="send" size={14} color="#111827" />
+                <Pressable
+                  style={[styles.commentSendBtn, commentSubmitting ? styles.commentSendBtnDisabled : null]}
+                  onPress={() => void submitComment()}
+                  disabled={commentSubmitting || !commentDraft.trim()}
+                >
+                  <Ionicons name="send" size={16} color="#111827" />
                 </Pressable>
               </View>
             </View>
@@ -1135,7 +1191,8 @@ const styles = StyleSheet.create({
   },
   reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
   reelUserFollowRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "nowrap", minWidth: 0 },
-  reelAvatarSq: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#2a2a2a" },
+  reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
+  reelAvatarSq: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
   reelUserName: { flex: 1, minWidth: 0, color: "#C9FF35", fontWeight: "800", fontSize: 16 },
   reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
   reelMusicText: { color: "rgba(255,255,255,0.95)", fontSize: 13, fontWeight: "600", flex: 1 },
@@ -1162,8 +1219,20 @@ const styles = StyleSheet.create({
   commentBody: { flex: 1 },
   commentUser: { color: "#C9FF35", fontWeight: "800", fontSize: 13 },
   commentText: { color: "#e5e7eb", marginTop: 2, lineHeight: 18 },
-  commentInputRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
-  commentInput: { flex: 1, backgroundColor: "#1f2937", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, color: "#fff" },
+  commentInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
+  commentInput: {
+    flex: 1,
+    minHeight: 72,
+    maxHeight: 140,
+    backgroundColor: "#1f2937",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 14,
+    lineHeight: 20
+  },
+  commentSendBtnDisabled: { opacity: 0.45 },
   commentSendBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#C9FF35", alignItems: "center", justifyContent: "center" },
   reelOptionsModalRoot: { flex: 1, justifyContent: "flex-end" },
   reelOptionsDimTap: { backgroundColor: "rgba(0,0,0,0.45)" },

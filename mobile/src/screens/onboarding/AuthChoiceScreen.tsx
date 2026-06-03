@@ -1,5 +1,6 @@
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -7,13 +8,21 @@ import { useAuth } from "../../auth/AuthContext";
 import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { authLogin, authRegister } from "../../services/api";
+import { authLogin, authRegister, formatAuthError } from "../../services/api";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
 
 const GREEN = APP_LIME;
 const BG = APP_BLACK;
 const CARD = APP_SURFACE;
 const BORDER = "#3a3a3a";
+
+/** Digits only; autocomplete with +91 keeps the last 10 (local) digits. */
+function sanitizeIndianMobileInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length > 10) return digits.slice(-10);
+  return digits.slice(0, 10);
+}
 
 /** Match backend + register: last 10 digits for @phone.agrovibes (handles +91 / leading 0). */
 function resolvePhoneEmailLocalPart(digits: string): string {
@@ -36,11 +45,22 @@ export function AuthChoiceScreen() {
   const [username, setUsername] = React.useState("");
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
 
   const phone = mode === "login" ? loginPhone : registerPhone;
-  const setPhone = mode === "login" ? setLoginPhone : setRegisterPhone;
+  const setPhoneRaw = mode === "login" ? setLoginPhone : setRegisterPhone;
   const password = mode === "login" ? loginPassword : registerPassword;
-  const setPassword = mode === "login" ? setLoginPassword : setRegisterPassword;
+  const setPasswordRaw = mode === "login" ? setLoginPassword : setRegisterPassword;
+
+  const onPhoneChange = (raw: string) => {
+    setErrorText("");
+    setPhoneRaw(sanitizeIndianMobileInput(raw));
+  };
+
+  const onPasswordChange = (raw: string) => {
+    setErrorText("");
+    setPasswordRaw(raw);
+  };
 
   const submit = async () => {
     const digits = phone.replace(/\D/g, "");
@@ -71,8 +91,12 @@ export function AuthChoiceScreen() {
         await markLaunchSetupComplete(auth.user.id);
       }
       navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
-    } catch (error: any) {
-      setErrorText(mode === "register" ? error?.message || "Failed to create account. Please try again." : error?.message || "Failed to login. Please try again.");
+    } catch (error: unknown) {
+      setErrorText(
+        mode === "register"
+          ? formatAuthError(error, "Failed to create account. Please try again.")
+          : formatAuthError(error, "Failed to login. Please try again.")
+      );
     } finally {
       setLoadingSubmit(false);
     }
@@ -135,22 +159,37 @@ export function AuthChoiceScreen() {
           </View>
           <TextInput
             value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
+            onChangeText={onPhoneChange}
+            keyboardType="number-pad"
             placeholder={mode === "login" ? t("loginMobilePlaceholder") : t("mobilePlaceholder")}
             placeholderTextColor="#7f8b93"
             style={[styles.input, styles.rowInput]}
             maxLength={10}
+            autoComplete="tel-national"
+            textContentType="telephoneNumber"
           />
         </View>
-        <TextInput
-          value={password}
-          onChangeText={setPassword}
-          placeholder={t("passwordPlaceholder")}
-          placeholderTextColor="#7f8b93"
-          style={[styles.input, styles.spaced]}
-          secureTextEntry
-        />
+        <View style={[styles.passwordRow, styles.spaced]}>
+          <TextInput
+            value={password}
+            onChangeText={onPasswordChange}
+            placeholder={t("passwordPlaceholder")}
+            placeholderTextColor="#7f8b93"
+            style={styles.passwordInput}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Pressable
+            style={styles.passwordEyeBtn}
+            onPress={() => setShowPassword((v) => !v)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+          >
+            <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#9aa5ad" />
+          </Pressable>
+        </View>
         <Pressable
           onPress={submit}
           style={[
@@ -230,6 +269,25 @@ const styles = StyleSheet.create({
     backgroundColor: APP_SURFACE
   },
   spaced: { marginTop: 10 },
+  passwordRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    backgroundColor: APP_SURFACE
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontWeight: "700",
+    color: "#eef4f8"
+  },
+  passwordEyeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   row: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 10 },
   rowInput: { flex: 1, minWidth: 0 },
   primaryBtn: {

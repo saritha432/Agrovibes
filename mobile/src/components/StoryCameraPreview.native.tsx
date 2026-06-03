@@ -2,12 +2,14 @@ import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
-import { REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
+import type { StoryCameraPreviewHandle, StoryCameraZoomLevel } from "./storyCameraTypes";
+import { REEL_MAX_RECORD_SECONDS, storyZoomToExpoRatio } from "./storyCameraTypes";
 
 type Props = {
   facing?: "front" | "back";
   active?: boolean;
+  flashOn?: boolean;
+  zoomLevel?: StoryCameraZoomLevel;
   /** `video` keeps preview in video mode (required for reliable recording on Android). */
   mode?: "picture" | "video";
   onPress?: () => void;
@@ -17,7 +19,16 @@ type Props = {
 };
 
 export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(function StoryCameraPreview(
-  { facing = "front", active = false, mode = "picture", onPress, onRecordingChange, onAutoRecordFinished },
+  {
+    facing = "front",
+    active = false,
+    flashOn = false,
+    zoomLevel = 1,
+    mode = "picture",
+    onPress,
+    onRecordingChange,
+    onAutoRecordFinished
+  },
   ref
 ) {
   const cameraRef = useRef<CameraView>(null);
@@ -115,15 +126,21 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
       if (!cameraRef.current || !ready || busy || recordingActiveRef.current) return null;
       setBusy(true);
       try {
-        const photo = await cameraRef.current.takePictureAsync({ quality: options?.quality ?? 0.9 });
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: options?.quality ?? 0.9,
+          flash: flashOn && facing === "back" ? "on" : "off"
+        });
         if (!photo?.uri) return null;
         return { uri: photo.uri, width: photo.width, height: photo.height };
       } finally {
         setBusy(false);
       }
     },
-    [busy, ready]
+    [busy, facing, flashOn, ready]
   );
+
+  const torchOn = flashOn && facing === "back" && ready;
+  const cameraZoom = storyZoomToExpoRatio(zoomLevel);
 
   useImperativeHandle(
     ref,
@@ -162,6 +179,8 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         facing={facing}
         mode={cameraViewMode}
         active={active}
+        zoom={cameraZoom}
+        enableTorch={torchOn}
         onCameraReady={() => setReady(true)}
       />
       {!ready ? (

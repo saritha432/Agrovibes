@@ -21,6 +21,16 @@ function stopStream(stream: MediaStream | null) {
   for (const track of stream.getTracks()) track.stop();
 }
 
+function detachVideo(video: HTMLVideoElement | null) {
+  if (!video) return;
+  try {
+    video.pause();
+  } catch {
+    // no-op
+  }
+  video.srcObject = null;
+}
+
 export function WebCameraCapture({
   visible,
   onClose,
@@ -36,6 +46,8 @@ export function WebCameraCapture({
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const visibleRef = useRef(visible);
+  const startTokenRef = useRef(0);
 
   const [facing, setFacing] = useState<WebCameraFacing>(initialFacing);
   const [ready, setReady] = useState(false);
@@ -43,7 +55,16 @@ export function WebCameraCapture({
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    visibleRef.current = visible;
+    if (!visible) {
+      // Invalidate any in-flight getUserMedia request.
+      startTokenRef.current += 1;
+    }
+  }, [visible]);
+
   const startCamera = useCallback(async () => {
+    const startToken = ++startTokenRef.current;
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setErrorText("Camera is not supported in this browser. Use Chrome or Edge over HTTPS/localhost.");
       return;
@@ -75,6 +96,10 @@ export function WebCameraCapture({
         video: { facingMode: facing === "front" ? "user" : "environment" },
         audio: allowVideo
       });
+      if (!visibleRef.current || startToken !== startTokenRef.current) {
+        stopStream(stream);
+        return;
+      }
       streamRef.current = stream;
       video.srcObject = stream;
       video.style.transform = facing === "front" ? "scaleX(-1)" : "none";
@@ -87,10 +112,19 @@ export function WebCameraCapture({
 
   useEffect(() => {
     if (!visible) {
+      if (recorderRef.current?.state === "recording") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          // no-op
+        }
+      }
+      recorderRef.current = null;
       stopStream(streamRef.current);
       streamRef.current = null;
       const host = hostRef.current as unknown as HTMLElement | null;
       if (host && videoRef.current && host.contains(videoRef.current)) {
+        detachVideo(videoRef.current);
         host.removeChild(videoRef.current);
       }
       videoRef.current = null;
@@ -102,10 +136,40 @@ export function WebCameraCapture({
     const t = setTimeout(() => void startCamera(), 50);
     return () => {
       clearTimeout(t);
+      if (recorderRef.current?.state === "recording") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          // no-op
+        }
+      }
+      recorderRef.current = null;
       stopStream(streamRef.current);
       streamRef.current = null;
     };
   }, [initialFacing, startCamera, visible]);
+
+  useEffect(() => {
+    return () => {
+      startTokenRef.current += 1;
+      if (recorderRef.current?.state === "recording") {
+        try {
+          recorderRef.current.stop();
+        } catch {
+          // no-op
+        }
+      }
+      recorderRef.current = null;
+      stopStream(streamRef.current);
+      streamRef.current = null;
+      const host = hostRef.current as unknown as HTMLElement | null;
+      if (host && videoRef.current && host.contains(videoRef.current)) {
+        detachVideo(videoRef.current);
+        host.removeChild(videoRef.current);
+      }
+      videoRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) return;

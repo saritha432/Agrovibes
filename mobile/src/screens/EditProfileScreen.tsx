@@ -5,6 +5,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -55,6 +56,7 @@ export function EditProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [isUploadingPhoto, setUploadingPhoto] = useState(false);
   const [isSaving, setSaving] = useState(false);
+  const [photoOptionsOpen, setPhotoOptionsOpen] = useState(false);
 
   type payloadFallback = {
     fullName?: string;
@@ -129,8 +131,30 @@ export function EditProfileScreen() {
       aspect: [1, 1]
     });
     if (picked.canceled || !picked.assets?.[0]?.uri) return;
-
     const localUri = picked.assets[0].uri;
+    await uploadSelectedProfilePhoto(localUri);
+  };
+
+  const captureProfilePhoto = async () => {
+    if (isUploadingPhoto) return;
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(t("permissionNeeded"), t("createErrCameraPerm"));
+      return;
+    }
+    const captured = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+      allowsEditing: true,
+      aspect: [1, 1]
+    });
+    if (captured.canceled || !captured.assets?.[0]?.uri) return;
+    const localUri = captured.assets[0].uri;
+    await uploadSelectedProfilePhoto(localUri);
+  };
+
+  const uploadSelectedProfilePhoto = async (localUri: string) => {
+    if (isUploadingPhoto) return;
     setUploadingPhoto(true);
     try {
       const uploaded = await uploadImageFile(localUri);
@@ -168,6 +192,46 @@ export function EditProfileScreen() {
     }
   };
 
+  const removeProfilePhoto = async () => {
+    if (isUploadingPhoto) return;
+    setUploadingPhoto(true);
+    try {
+      setAvatarUrl("");
+      if (token && user?.fullName) {
+        const updated = await updateMyProfile(token, {
+          fullName: fullName.trim() || user.fullName,
+          username: safeHandle(username) || undefined,
+          bio: bio.trim() || undefined,
+          website: website.trim() || undefined,
+          locationLabel: location.trim() || undefined,
+          avatarUrl: undefined
+        });
+        const nextToken = updated.token || token;
+        const mergedUser = buildPersistedUser(updated.user, {
+          fullName: fullName.trim() || user.fullName,
+          username: safeHandle(username) || undefined,
+          bio: bio.trim() || undefined,
+          website: website.trim() || undefined,
+          locationLabel: location.trim() || undefined,
+          avatarUrl: undefined
+        });
+        await signIn({ token: nextToken, user: mergedUser });
+      } else {
+        await updateUser({ avatarUrl: "" });
+      }
+      Alert.alert(t("photoUpdatedTitle"), "Profile photo removed.");
+    } catch (error: any) {
+      Alert.alert(t("saveFailed"), error?.message ? String(error.message) : t("saveFailedProfile"));
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const openPhotoOptions = () => {
+    if (isUploadingPhoto) return;
+    setPhotoOptionsOpen(true);
+  };
+
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView
@@ -189,7 +253,7 @@ export function EditProfileScreen() {
               </View>
             </View>
             <Pressable
-              onPress={pickProfilePhoto}
+              onPress={openPhotoOptions}
               disabled={isUploadingPhoto}
               style={({ pressed }) => [styles.changePhotoBtn, pressed && styles.changePhotoBtnPressed]}
             >
@@ -271,6 +335,56 @@ export function EditProfileScreen() {
           <Text style={styles.saveText}>{isSaving ? t("saving") : t("done")}</Text>
         </Pressable>
       </ScrollView>
+      <Modal
+        visible={photoOptionsOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoOptionsOpen(false)}
+      >
+        <Pressable style={styles.photoSheetBackdrop} onPress={() => setPhotoOptionsOpen(false)}>
+          <Pressable style={styles.photoSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.photoSheetTitle}>{t("changeProfilePhoto")}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.photoSheetAction, pressed ? styles.photoSheetActionPressed : null]}
+              onPress={() => {
+                setPhotoOptionsOpen(false);
+                void captureProfilePhoto();
+              }}
+            >
+              <Ionicons name="camera-outline" size={18} color={TEXT} />
+              <Text style={styles.photoSheetActionText}>Take photo</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.photoSheetAction, pressed ? styles.photoSheetActionPressed : null]}
+              onPress={() => {
+                setPhotoOptionsOpen(false);
+                void pickProfilePhoto();
+              }}
+            >
+              <Ionicons name="images-outline" size={18} color={TEXT} />
+              <Text style={styles.photoSheetActionText}>Gallery</Text>
+            </Pressable>
+            {avatarUrl ? (
+              <Pressable
+                style={({ pressed }) => [styles.photoSheetAction, pressed ? styles.photoSheetActionPressed : null]}
+                onPress={() => {
+                  setPhotoOptionsOpen(false);
+                  void removeProfilePhoto();
+                }}
+              >
+                <Ionicons name="trash-outline" size={18} color="#f87171" />
+                <Text style={styles.photoSheetActionTextDanger}>Remove profile photo</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={({ pressed }) => [styles.photoSheetCancel, pressed ? styles.photoSheetActionPressed : null]}
+              onPress={() => setPhotoOptionsOpen(false)}
+            >
+              <Text style={styles.photoSheetCancelText}>{t("cancel")}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -355,5 +469,43 @@ const styles = StyleSheet.create({
     borderColor: BORDER
   },
   saveBtnDisabled: { opacity: 0.6 },
-  saveText: { color: ACCENT_TEXT, fontSize: 16, fontWeight: "800" }
+  saveText: { color: ACCENT_TEXT, fontSize: 16, fontWeight: "800" },
+  photoSheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+    padding: 14
+  },
+  photoSheet: {
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 14,
+    padding: 12,
+    gap: 8
+  },
+  photoSheetTitle: { color: TEXT, fontSize: 15, fontWeight: "700", marginBottom: 2 },
+  photoSheetAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: INPUT_BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  photoSheetActionPressed: { opacity: 0.85 },
+  photoSheetActionText: { color: TEXT, fontSize: 14, fontWeight: "600" },
+  photoSheetActionTextDanger: { color: "#f87171", fontSize: 14, fontWeight: "700" },
+  photoSheetCancel: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingVertical: 10
+  },
+  photoSheetCancelText: { color: MUTED, fontSize: 14, fontWeight: "700" }
 });

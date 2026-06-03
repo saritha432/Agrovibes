@@ -4,12 +4,15 @@ import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Image, Modal, Pressable, StyleSheet, Text, TextStyle, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { HomePost } from "../../services/api";
 import { APP_BLACK } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
+import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { isActiveLiveStream, isLivePost, liveRoomName } from "./livePostUtils";
+import { isAlreadyHostingRoom } from "./liveSessionState";
 import { LiveKitRoomView } from "./LiveKitRoomView";
 
 const BG = APP_BLACK;
@@ -38,25 +41,51 @@ type LiveStreamViewerModalProps = {
   onClose: () => void;
   canDeletePost?: (post: HomePost) => boolean;
   onDeletePost?: (post: HomePost) => void;
+  onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
 };
 
-export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePost }: LiveStreamViewerModalProps) {
+export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePost, onLiveEnded }: LiveStreamViewerModalProps) {
   const { t, language } = useLanguage();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const canDelete = !!post && !!canDeletePost?.(post);
+  const currentUserId = Number(user?.id);
+  const postUserId = Number(post?.userId);
+  const isHost =
+    !!post &&
+    isActiveLiveStream(post) &&
+    Number.isFinite(currentUserId) &&
+    currentUserId > 0 &&
+    Number.isFinite(postUserId) &&
+    postUserId > 0 &&
+    currentUserId === postUserId;
+  const alreadyHostingThisRoom = !!post && isHost && isAlreadyHostingRoom(liveRoomName(post));
 
   return (
     <Modal visible={post != null} animationType="slide" onRequestClose={onClose}>
       {post ? (
         <View style={styles.viewerRoot}>
           {isActiveLiveStream(post) ? (
+            alreadyHostingThisRoom ? (
+              <View style={styles.alreadyHostingRoot}>
+                <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
+                  <Ionicons name="close" size={28} color="#fff" />
+                </Pressable>
+                <Ionicons name="radio-outline" size={48} color="#C9FF35" />
+                <Text style={styles.alreadyHostingTitle}>You are already live</Text>
+                <Text style={styles.alreadyHostingSub}>Use the host screen to manage this stream.</Text>
+              </View>
+            ) : (
             <LiveKitRoomView
               visible
               roomName={liveRoomName(post)}
-              isHost={false}
+              isHost={isHost}
               title={liveTitle(post, language, t)}
+              postId={post.id}
+              onLiveEnded={onLiveEnded}
               onClose={onClose}
             />
+            )
           ) : (
             <>
               <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
@@ -76,7 +105,7 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
               ) : null}
               {post.videoUrl ? (
                 <Video
-                  source={{ uri: post.videoUrl }}
+                  source={{ uri: videoPlaybackUrl(post.videoUrl) }}
                   style={styles.viewerVideo}
                   resizeMode={ResizeMode.CONTAIN}
                   shouldPlay
@@ -181,6 +210,15 @@ const ringStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   viewerRoot: { flex: 1, backgroundColor: "#000" },
+  alreadyHostingRoot: {
+    flex: 1,
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28
+  },
+  alreadyHostingTitle: { marginTop: 16, color: "#fff", fontSize: 20, fontWeight: "800", textAlign: "center" },
+  alreadyHostingSub: { marginTop: 8, color: "rgba(255,255,255,0.7)", fontSize: 14, textAlign: "center" },
   viewerClose: { position: "absolute", right: 14, zIndex: 20 },
   viewerDelete: { position: "absolute", left: 14, zIndex: 20 },
   viewerVideo: { flex: 1, width: "100%" },

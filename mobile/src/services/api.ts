@@ -1,4 +1,6 @@
 import { Platform } from "react-native";
+import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
+import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -139,10 +141,45 @@ export function formatLiveStreamError(error: unknown): string {
   if (status === 503 || message.includes("(503)")) {
     return "LiveKit is not configured on the server. Add LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET in Render env vars.";
   }
+  if (/insufficient permissions/i.test(message)) {
+    return "Live server denied camera/mic publish. Close the stream fully, then start again. If it keeps happening, check LiveKit keys on Render.";
+  }
+  if (/could not establish signal|network request failed|failed to connect/i.test(message)) {
+    return "Cannot connect to LiveKit. Check mobile internet and confirm Render LIVEKIT_URL is wss://your-project.livekit.cloud with matching API key/secret.";
+  }
   if (/invalid token/i.test(message)) {
     return "LiveKit rejected the token. Camera may turn on, but video won't show until Render LIVEKIT_URL, API key and secret all match the same LiveKit Cloud project. Redeploy after saving env vars.";
   }
   return message;
+}
+
+/** User-facing auth errors (login/register); avoids raw "Request failed (502)". */
+export function formatAuthError(error: unknown, fallback = "Something went wrong. Please try again."): string {
+  const err = error as { message?: string; status?: number; payload?: { message?: string } };
+  const status = typeof err?.status === "number" ? err.status : null;
+  const msg = String(err?.payload?.message || err?.message || "").trim();
+
+  if (status === 401 || /invalid credentials/i.test(msg)) {
+    return "Incorrect mobile number or password.";
+  }
+  if (status === 400) {
+    return msg || "Please check your details and try again.";
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return "Server is temporarily unavailable. Please try again in a moment.";
+  }
+  if (status != null && status >= 500) {
+    return "Something went wrong on our side. Please try again.";
+  }
+  if (/request failed \(\d{3}\)/i.test(msg)) {
+    const code = Number(msg.match(/\((\d{3})\)/)?.[1]);
+    if (code === 401) return "Incorrect mobile number or password.";
+    if (code === 502 || code === 503 || code === 504) {
+      return "Server is temporarily unavailable. Please try again in a moment.";
+    }
+    if (code != null && code >= 500) return "Something went wrong on our side. Please try again.";
+  }
+  return msg || fallback;
 }
 
 export async function authRegister(payload: {
@@ -457,7 +494,8 @@ export async function fetchHomeStories() {
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }
-  return (await response.json()) as { stories: HomeStory[] };
+  const data = (await response.json()) as { stories: HomeStory[] };
+  return { stories: data.stories.map(sanitizeHomeStory) };
 }
 
 export async function createHomeStory(
@@ -484,12 +522,14 @@ export async function fetchHomePosts(token?: string | null) {
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
-  return (await response.json()) as { posts: HomePost[] };
+  const data = (await response.json()) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 /** Current user's posts only — lighter than loading the full home feed for profile. */
 export async function fetchMyHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 export type HomePostLiker = {
@@ -530,7 +570,8 @@ export async function unlikeHomePost(token: string, postId: number) {
 }
 
 export async function fetchSavedHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 /**
@@ -543,7 +584,8 @@ export async function fetchTaggedHomePosts(token: string) {
   if (response.status === 404) {
     return { posts: [] as HomePost[] };
   }
-  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 export async function saveHomePost(token: string, postId: number) {
@@ -596,6 +638,7 @@ export async function fetchHomePostComments(postId: number, token?: string | nul
       avatarUrl?: string | null;
       createdAt?: string;
       parentCommentId?: string;
+      userId?: number;
     }[];
   };
 }
@@ -623,9 +666,18 @@ export async function createHomePostComment(
       createdAt?: string;
       avatarUrl?: string | null;
       parentCommentId?: string;
+      userId?: number;
     };
     commentsCount: number;
   };
+}
+
+export async function deleteHomePostComment(token: string, postId: number, commentId: string) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments/${encodeURIComponent(commentId)}`,
+    token,
+    { method: "DELETE" }
+  )) as { ok: boolean; commentsCount: number };
 }
 
 export async function fetchLearnCourses() {
@@ -716,7 +768,8 @@ export async function createHomePost(payload: {
   if (!response.ok) {
     throw new Error("Failed to create post");
   }
-  return (await response.json()) as { post: HomePost };
+  const data = (await response.json()) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function updateHomePostLiveVideo(
@@ -724,18 +777,20 @@ export async function updateHomePostLiveVideo(
   postId: number,
   payload: { videoUrl: string; thumbnailUrl?: string }
 ) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/live-video`, token, {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/live-video`, token, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function endHomeLivePost(token: string, postId: number) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
   })) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
@@ -855,6 +910,22 @@ export async function syncLocalFollowEdgesToServer(
   };
 }
 
+export type MutualConnectionInfo = {
+  followsYou: boolean;
+  mutual: Array<{ userId: number; fullName: string; avatarUrl?: string }>;
+  mutualCount: number;
+};
+
+export async function fetchMutualConnections(token: string, userIds: number[]) {
+  const ids = [...new Set(userIds.filter((id) => Number.isFinite(id) && id > 0))].slice(0, 40);
+  if (!ids.length) return { connections: {} as Record<number, MutualConnectionInfo> };
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/mutual-connections`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userIds: ids })
+  })) as { connections: Record<number, MutualConnectionInfo> };
+}
+
 export async function fetchSocialNetwork(token: string, userId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/network/${encodeURIComponent(String(userId))}`, token)) as {
     followers: Array<{
@@ -921,24 +992,6 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
   })) as { message: DirectMessageItem };
 }
 
-async function signCloudinaryUpload(folder = "agrovibes", resourceType: "image" | "video" = "image") {
-  const signRes = await fetch(`${API_BASE_URL}/v1/media/cloudinary-sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder, resourceType })
-  });
-  if (!signRes.ok) throw new Error("Failed to sign upload");
-  return (await signRes.json()) as {
-    cloudName: string;
-    apiKey: string;
-    timestamp: number;
-    folder: string;
-    signature: string;
-    eager?: string;
-    eagerAsync?: boolean;
-  };
-}
-
 function mimeFromUri(uri: string, fallback: string) {
   const clean = uri.split("?")[0].toLowerCase();
   if (clean.endsWith(".mp4")) return "video/mp4";
@@ -962,7 +1015,7 @@ export type PickerAssetMeta = {
 };
 
 /**
- * True → use Cloudinary `image/upload`. False → `video/upload`.
+ * True → image upload. False → video upload.
  * Android `content://` and web `blob:` URIs usually have no file extension — do not rely on uri alone.
  */
 export function shouldUseImageUpload(uri: string, asset?: PickerAssetMeta | null): boolean {
@@ -1020,27 +1073,8 @@ function imageFilenameFromUri(uri: string) {
   return `image-${Date.now()}${ext}`;
 }
 
-async function throwCloudinaryError(uploadRes: Response, label: string) {
-  let detail = `${uploadRes.status} ${uploadRes.statusText}`;
-  try {
-    const body = (await uploadRes.json()) as { error?: { message?: string } };
-    if (body?.error?.message) detail = body.error.message;
-  } catch {
-    // ignore
-  }
-  throw new Error(`${label}: ${detail}`);
-}
-
-async function uploadToCloudinary(
-  fileUri: string,
-  filename: string,
-  nativeMimeFallback: string,
-  resource: "image" | "video"
-) {
-  const sign = await signCloudinaryUpload("agrovibes", resource);
+async function uploadToSupabaseServer(fileUri: string, filename: string, nativeMime: string) {
   const form = new FormData();
-  const nativeMime = mimeFromUri(fileUri, nativeMimeFallback);
-
   if (Platform.OS === "web") {
     const webResp = await fetch(fileUri);
     const blob = await webResp.blob();
@@ -1057,46 +1091,42 @@ async function uploadToCloudinary(
     );
   }
 
-  form.append("api_key", sign.apiKey);
-  form.append("timestamp", String(sign.timestamp));
-  form.append("folder", sign.folder);
-  form.append("signature", sign.signature);
-  if (sign.eager) form.append("eager", sign.eager);
-  if (typeof sign.eagerAsync === "boolean") form.append("eager_async", String(sign.eagerAsync));
-
-  const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${sign.cloudName}/${resource}/upload`, {
+  const uploadRes = await fetch(`${API_BASE_URL}/v1/media/upload`, {
     method: "POST",
     body: form as any
   });
-
-  if (!uploadRes.ok) await throwCloudinaryError(uploadRes, "Cloudinary upload failed");
-  const uploaded = (await uploadRes.json()) as {
-    secure_url?: string;
-    url?: string;
-    eager?: Array<{ secure_url?: string; url?: string }>;
-  };
-  const eagerUrls = Array.isArray(uploaded.eager)
-    ? uploaded.eager
-        .map((e) => e?.secure_url || e?.url || "")
-        .filter((u): u is string => Boolean(u))
-    : [];
-  const hlsUrl = eagerUrls.find((u) => u.toLowerCase().includes(".m3u8"));
-  const mp4Url = eagerUrls.find((u) => u.toLowerCase().includes(".mp4"));
-  const url = hlsUrl ?? mp4Url ?? uploaded.secure_url ?? uploaded.url;
-  if (!url) throw new Error("Cloud upload missing URL");
-  return { url, hlsUrl, mp4Url };
+  if (!uploadRes.ok) {
+    let detail = `Upload failed (${uploadRes.status})`;
+    try {
+      const body = (await uploadRes.json()) as { message?: string; error?: string; hint?: string };
+      const msg = body?.error || body?.message;
+      if (msg) {
+        detail = `${msg}${body?.hint ? ` (${body.hint})` : ""}`;
+      }
+      if (/maximum allowed size|file too large|50mb/i.test(detail)) {
+        detail = `Maximum upload size is 50MB. Use a shorter clip or lower resolution.`;
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+  const uploaded = (await uploadRes.json()) as { url?: string };
+  if (!uploaded.url) throw new Error("Upload response missing URL");
+  return { url: uploaded.url };
 }
 
 export async function uploadVideoFile(fileUri: string) {
+  await assertVideoUnderUploadLimit(fileUri);
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
-  return uploadToCloudinary(fileUri, `video-${Date.now()}${ext}`, "video/mp4", "video");
+  return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, "video/mp4");
 }
 
 export async function uploadImageFile(fileUri: string) {
   const filename = imageFilenameFromUri(fileUri);
   const mime = mimeFromUri(fileUri, "image/jpeg");
-  return uploadToCloudinary(fileUri, filename, mime, "image");
+  return uploadToSupabaseServer(fileUri, filename, mime);
 }
 
 /** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */

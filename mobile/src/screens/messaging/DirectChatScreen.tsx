@@ -17,8 +17,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { queueOpenSharedPostViewer } from "../../navigation/sharedPostViewerBridge";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
@@ -189,6 +189,7 @@ export function DirectChatScreen() {
   const [activeCall, setActiveCall] = useState<"voice" | "video" | null>(null);
   const [isMuted, setMuted] = useState(false);
   const [isCameraOff, setCameraOff] = useState(false);
+  const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const listRef = useRef<FlatList<DirectMessageItem>>(null);
 
   const reload = useCallback(async () => {
@@ -245,10 +246,9 @@ export function DirectChatScreen() {
         Alert.alert("Can't open this share", "This post isn't available. Try again after refreshing your feed.");
         return;
       }
-      queueOpenSharedPostViewer(post, true);
-      navigation.navigate("Main", { screen: "Home" });
+      setSharedReelViewer({ posts: [post], initialIndex: 0 });
     },
-    [navigation, token]
+    [token]
   );
 
   return (
@@ -456,6 +456,16 @@ export function DirectChatScreen() {
           </View>
         </View>
       </Modal>
+
+      <PostsReelViewerModal
+        visible={sharedReelViewer != null}
+        posts={sharedReelViewer?.posts ?? []}
+        initialIndex={sharedReelViewer?.initialIndex ?? 0}
+        onClose={() => setSharedReelViewer(null)}
+        onPostsChange={(posts) => {
+          setSharedReelViewer((prev) => (prev ? { ...prev, posts } : null));
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }

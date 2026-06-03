@@ -16,6 +16,8 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
+const { isSupabaseStorageConfigured, uploadBufferToSupabase, checkSupabaseStorageHealth } = require("../supabaseStorage");
+const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -63,28 +65,40 @@ const uploadVideo = multer({
   }
 });
 
-function toCloudinaryHlsUrl(rawUrl) {
-  const input = String(rawUrl || "").trim();
-  if (!input) return null;
-  if (!/res\.cloudinary\.com/i.test(input)) return null;
-  if (!/\/video\/upload\//i.test(input)) return null;
-  // Already HLS.
-  if (/\.m3u8($|\?)/i.test(input)) return input;
+/** Match Supabase Storage per-file limit (~50MB on most plans). */
+const MAX_MEDIA_UPLOAD_BYTES = 50 * 1024 * 1024;
 
-  let out = input;
-  // Strip video extension before appending .m3u8 (keep query string).
-  out = out.replace(/\.(mp4|mov|m4v|webm)(?=\?|$)/i, "");
-  // Insert adaptive streaming transformation if missing.
-  if (!/\/video\/upload\/sp_auto,f_m3u8\//i.test(out)) {
-    out = out.replace(/\/video\/upload\//i, "/video/upload/sp_auto,f_m3u8/");
+const uploadMediaMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_MEDIA_UPLOAD_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const type = String(file.mimetype || "").toLowerCase();
+    const name = String(file.originalname || "").toLowerCase();
+    if (type.startsWith("image/") || type.startsWith("video/")) {
+      cb(null, true);
+      return;
+    }
+    if (/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v)$/i.test(name)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Only image or video files are allowed"));
   }
-  // Ensure .m3u8 extension exists (before query string if any).
-  if (!/\.m3u8($|\?)/i.test(out)) {
-    const q = out.indexOf("?");
-    if (q === -1) out = `${out}.m3u8`;
-    else out = `${out.slice(0, q)}.m3u8${out.slice(q)}`;
-  }
-  return out;
+});
+
+function mediaExtFromMime(mimeType, originalName) {
+  const mime = String(mimeType || "").toLowerCase();
+  if (mime.includes("jpeg") || mime.includes("jpg")) return ".jpg";
+  if (mime.includes("png")) return ".png";
+  if (mime.includes("webp")) return ".webp";
+  if (mime.includes("gif")) return ".gif";
+  if (mime.includes("heic")) return ".heic";
+  if (mime.includes("webm")) return ".webm";
+  if (mime.includes("quicktime")) return ".mov";
+  if (mime.includes("mp4")) return ".mp4";
+  const name = String(originalName || "").toLowerCase();
+  const m = name.match(/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v)$/i);
+  return m ? m[0].toLowerCase() : ".bin";
 }
 
 async function ensureLearnUsersTable() {
@@ -275,7 +289,7 @@ function authUserFromRow(row) {
     role: row.role,
     phone: row.phone || undefined,
     username: row.username || undefined,
-    avatarUrl: row.avatarUrl || undefined,
+    avatarUrl: stripLegacyCloudinaryUrl(row.avatarUrl) || undefined,
     bio: row.bio || undefined,
     website: row.website || undefined,
     locationLabel: row.locationLabel || undefined
@@ -1018,7 +1032,7 @@ function normalizeHomePostRow(row) {
       base.liveStartedAt = base.liveStartedAt || base.createdAt;
     }
   }
-  return base;
+  return sanitizeHomePostRowMedia(base);
 }
 
 function liveKitHttpUrl(wssUrl) {
@@ -1972,7 +1986,7 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
     const bio = String(req.body?.bio || "").trim().slice(0, 150) || null;
     const website = String(req.body?.website || "").trim().slice(0, 200) || null;
     const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 120) || null;
-    const avatarUrl = String(req.body?.avatarUrl || "").trim().slice(0, 1000) || null;
+    const avatarUrl = stripLegacyCloudinaryUrl(String(req.body?.avatarUrl || "").trim().slice(0, 1000));
 
     if (!fullName) {
       res.status(400).json({ message: "Name is required" });
@@ -2177,6 +2191,86 @@ router.get("/v1/social/relationships", authRequired, async (req, res) => {
     res.json({ relationships: map });
   } catch (error) {
     res.status(500).json({ message: "Failed to load relationships", error: error.message });
+  }
+});
+
+/** Instagram-style context: who you both know (people you follow who also follow them). */
+router.post("/v1/social/mutual-connections", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const viewerId = Number(req.user.userId);
+    const rawIds = Array.isArray(req.body?.userIds) ? req.body.userIds : [];
+    const userIds = [
+      ...new Set(
+        rawIds
+          .map((v) => Number(v))
+          .filter((id) => Number.isFinite(id) && id > 0 && id !== viewerId)
+      )
+    ].slice(0, 40);
+    if (!userIds.length) {
+      res.json({ connections: {} });
+      return;
+    }
+
+    const connections = {};
+    for (const uid of userIds) {
+      connections[uid] = { followsYou: false, mutual: [], mutualCount: 0 };
+    }
+
+    const followsYouRes = await query(
+      `
+      SELECT follower_id AS "userId"
+      FROM social_follows
+      WHERE following_id = $1
+        AND follower_id = ANY($2::INT[])
+        AND status = 'accepted'
+      `,
+      [viewerId, userIds]
+    );
+    for (const row of followsYouRes.rows) {
+      const uid = Number(row.userId);
+      if (connections[uid]) connections[uid].followsYou = true;
+    }
+
+    const mutualRes = await query(
+      `
+      SELECT
+        f_target.following_id AS "targetUserId",
+        u.id AS "userId",
+        u.full_name AS "fullName",
+        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
+      FROM social_follows f_viewer
+      JOIN social_follows f_target
+        ON f_target.follower_id = f_viewer.following_id
+        AND f_target.following_id = ANY($2::INT[])
+        AND f_target.status = 'accepted'
+      JOIN learn_users u ON u.id = f_viewer.following_id
+      WHERE f_viewer.follower_id = $1
+        AND f_viewer.status = 'accepted'
+      ORDER BY f_target.following_id ASC, u.full_name ASC
+      `,
+      [viewerId, userIds]
+    );
+
+    const grouped = {};
+    for (const row of mutualRes.rows) {
+      const tid = Number(row.targetUserId);
+      if (!grouped[tid]) grouped[tid] = [];
+      grouped[tid].push({
+        userId: Number(row.userId),
+        fullName: row.fullName,
+        avatarUrl: row.avatarUrl || undefined
+      });
+    }
+    for (const tid of userIds) {
+      const all = grouped[tid] || [];
+      connections[tid].mutual = all.slice(0, 3);
+      connections[tid].mutualCount = all.length;
+    }
+
+    res.json({ connections });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load mutual connections", error: error.message });
   }
 });
 
@@ -2811,7 +2905,7 @@ router.get("/v1/home/stories", async (_req, res) => {
       `
     );
 
-    const body = { stories: result.rows };
+    const body = { stories: result.rows.map(sanitizeStoryRowMedia) };
     res.json(body);
     await cacheSetJson(cacheKey, body, 45);
   } catch (error) {
@@ -2855,7 +2949,14 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
         image_url AS "imageUrl",
         created_at AS "createdAt"
       `,
-      [actorUserId, userName, district, avatarLabel, videoUrl || null, imageUrl || null]
+      [
+        actorUserId,
+        userName,
+        district,
+        avatarLabel,
+        stripLegacyCloudinaryUrl(videoUrl),
+        stripLegacyCloudinaryUrl(imageUrl)
+      ]
     );
 
     let storyAvatarUrl = null;
@@ -3000,13 +3101,18 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
       creativeMeta
     } = req.body || {};
 
-    let urlList = Array.isArray(imageUrls) ? imageUrls.filter((u) => typeof u === "string" && u.trim()) : [];
-    if (!urlList.length && typeof imageUrl === "string" && imageUrl.trim()) {
-      urlList = [imageUrl.trim()];
+    let urlList = Array.isArray(imageUrls)
+      ? imageUrls.map((u) => stripLegacyCloudinaryUrl(u)).filter(Boolean)
+      : [];
+    if (!urlList.length) {
+      const single = stripLegacyCloudinaryUrl(imageUrl);
+      if (single) urlList = [single];
     }
     const primaryImage = urlList[0] || null;
     const imageUrlsJson = urlList.length > 1 ? JSON.stringify(urlList) : null;
-    const hasVideo = !!(videoUrl && String(videoUrl).trim());
+    const cleanVideoUrl = stripLegacyCloudinaryUrl(videoUrl);
+    const cleanThumbnailUrl = stripLegacyCloudinaryUrl(thumbnailUrl);
+    const hasVideo = !!cleanVideoUrl;
     const hasImage = !!primaryImage;
     const isLivePost = /^\[LIVE\]/i.test(String(caption || "").trim());
 
@@ -3079,10 +3185,10 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         userName,
         location,
         caption,
-        videoUrl || null,
+        cleanVideoUrl,
         primaryImage,
         imageUrlsJson,
-        thumbnailUrl || null,
+        cleanThumbnailUrl,
         taggedJson,
         cleanMusicLabel,
         cleanMusicAudioUrl,
@@ -3366,12 +3472,13 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
       res.status(400).json({ message: "Valid roomName is required" });
       return;
     }
-    const canPublish = !!req.body?.canPublish;
+    const canPublish = req.body?.canPublish === true || req.body?.canPublish === "true";
     const userId = Number(req.user.userId);
     const userRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
     const displayName = String(userRes.rows[0]?.full_name || `User ${userId}`).trim();
+    const sessionIdentity = `${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const token = new AccessToken(cfg.apiKey, cfg.apiSecret, {
-      identity: String(userId),
+      identity: sessionIdentity,
       name: displayName,
       ttl: "6h"
     });
@@ -3388,7 +3495,7 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
       token: jwt,
       url: cfg.livekitUrl,
       roomName,
-      identity: String(userId),
+      identity: sessionIdentity,
       name: displayName,
       livekitHost: cfg.urlHost || null
     });
@@ -3855,6 +3962,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
         c.id::text AS id,
         c.body AS text,
         u.full_name AS "user",
+        c.user_id AS "userId",
         NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
         c.created_at AS "createdAt",
         c.parent_comment_id AS "parentCommentId"
@@ -3871,6 +3979,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
         user: row.user,
         text: row.text,
         likes: 0,
+        userId: row.userId != null ? Number(row.userId) : undefined,
         avatarUrl: row.avatarUrl || undefined,
         createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : undefined,
         parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
@@ -3966,6 +4075,7 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
         user: actor.rows[0]?.fullName || "Member",
         text: row.body,
         likes: 0,
+        userId: actorUserId,
         createdAt: row.createdAt,
         avatarUrl: actor.rows[0]?.avatarUrl || undefined,
         parentCommentId: row.parentCommentId != null ? String(row.parentCommentId) : undefined
@@ -3977,48 +4087,119 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
   }
 });
 
-router.post("/v1/media/cloudinary-sign", (req, res) => {
-  const cloudName = String(process.env.CLOUDINARY_CLOUD_NAME || "").trim();
-  const apiKey = String(process.env.CLOUDINARY_API_KEY || "").trim();
-  const apiSecret = String(process.env.CLOUDINARY_API_SECRET || "").trim();
+router.delete("/v1/home/posts/:postId/comments/:commentId", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostCommentsTable();
+    const postId = Number(req.params.postId);
+    const commentId = Number(req.params.commentId);
+    const actorUserId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || !Number.isFinite(commentId) || commentId <= 0) {
+      res.status(400).json({ message: "Valid postId and commentId are required" });
+      return;
+    }
 
-  if (!cloudName || !apiKey || !apiSecret) {
-    res.status(500).json({ message: "Cloudinary credentials are not configured on server" });
+    const existing = await query(
+      `SELECT id, user_id FROM home_post_comments WHERE id = $1 AND post_id = $2 LIMIT 1`,
+      [commentId, postId]
+    );
+    if (!existing.rows[0]) {
+      res.status(404).json({ message: "Comment not found" });
+      return;
+    }
+    if (Number(existing.rows[0].user_id) !== actorUserId) {
+      res.status(403).json({ message: "You can only delete your own comments" });
+      return;
+    }
+
+    await query(`DELETE FROM home_post_comments WHERE id = $1 AND post_id = $2`, [commentId, postId]);
+    const countRes = await query(`SELECT COUNT(*)::int AS c FROM home_post_comments WHERE post_id = $1`, [postId]);
+    const commentsCount = Number(countRes.rows[0]?.c ?? 0);
+    await query(`UPDATE home_posts SET comments_count = $1 WHERE id = $2`, [commentsCount, postId]);
+
+    res.json({ ok: true, commentsCount });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete comment", error: error.message });
+  }
+});
+
+router.get("/v1/media/config", async (_req, res) => {
+  if (!isSupabaseStorageConfigured()) {
+    res.status(503).json({
+      provider: "supabase",
+      ok: false,
+      configured: false,
+      message:
+        "Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET."
+    });
     return;
   }
-
-  const folder = String(req.body?.folder || "agrovibes").trim() || "agrovibes";
-  const resourceType = String(req.body?.resourceType || "image").trim().toLowerCase() === "video" ? "video" : "image";
-  const timestamp = Math.floor(Date.now() / 1000);
-  // Video uploads are signed with eager transformations:
-  // 1) HLS stream (.m3u8) for adaptive playback on mobile
-  // 2) Optimized MP4 fallback for clients that cannot use HLS
-  // sp_auto must be the only directive in its eager component; MP4 is a separate eager pass.
-  const eager =
-    resourceType === "video"
-      ? "sp_auto|c_limit,w_720,h_1280,vc_h264,ac_aac,br_1200k,q_auto:good,f_mp4"
-      : "";
-
-  // Cloudinary requires every signed param in the upload body, sorted alphabetically in the signature.
-  const signParams = { folder, timestamp: String(timestamp) };
-  if (eager) {
-    signParams.eager = eager;
-    signParams.eager_async = "false";
+  try {
+    const health = await checkSupabaseStorageHealth();
+    res.json({ provider: "supabase", ...health });
+  } catch (error) {
+    res.json({
+      provider: "supabase",
+      ok: false,
+      configured: true,
+      message: error.message || "Supabase Storage check failed"
+    });
   }
-  const signaturePayload =
-    Object.keys(signParams)
-      .sort()
-      .map((key) => `${key}=${signParams[key]}`)
-      .join("&") + apiSecret;
-  const signature = crypto.createHash("sha1").update(signaturePayload).digest("hex");
+});
 
-  res.json({
-    cloudName,
-    apiKey,
-    timestamp,
-    folder,
-    signature,
-    ...(eager ? { eager, eagerAsync: false } : {})
+router.post("/v1/media/upload", authOptional, (req, res) => {
+  uploadMediaMemory.single("file")(req, res, async (err) => {
+    if (err) {
+      const errMsg = String(err.message || "");
+      res.status(400).json({
+        message: errMsg || "Invalid upload request",
+        error: errMsg,
+        hint: /file too large|limit/i.test(errMsg)
+          ? "File is over the 50MB Supabase limit. Trim the video or export a smaller MP4."
+          : undefined
+      });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ message: "file is required" });
+      return;
+    }
+    if (!isSupabaseStorageConfigured()) {
+      res.status(503).json({
+        message:
+          "Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET on the server."
+      });
+      return;
+    }
+
+    try {
+      const mimeType = String(req.file.mimetype || "application/octet-stream");
+      const isVideo = mimeType.startsWith("video/");
+      const ext = mediaExtFromMime(mimeType, req.file.originalname);
+      const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+      const url = await uploadBufferToSupabase({
+        buffer: req.file.buffer,
+        mimeType,
+        objectPath
+      });
+      res.status(201).json({ url, provider: "supabase", path: objectPath });
+    } catch (error) {
+      const msg = String(error.message || "");
+      res.status(500).json({
+        message: "Media upload failed",
+        error: msg,
+        hint: /bucket/i.test(msg)
+          ? 'Create a public Storage bucket named "media" in Supabase.'
+          : /jwt|api key|invalid/i.test(msg)
+            ? "Use the legacy service_role key (eyJ...), not sb_publishable_."
+            : /SUPABASE_URL|project url|pooler|https:\/\//i.test(msg)
+              ? "Fix SUPABASE_URL on Render: use Project Settings → API → Project URL (https://xxxx.supabase.co)."
+              : /Invalid path specified/i.test(msg)
+                ? "SUPABASE_URL on Render is wrong. Use https://YOUR-REF.supabase.co only — not the database URL or /storage/v1 path."
+                : /maximum allowed size|payload too large|entity too large/i.test(msg)
+                  ? "File is over the 50MB Supabase limit. Trim the video or export a shorter/smaller MP4."
+                  : undefined
+      });
+    }
   });
 });
 
@@ -4041,62 +4222,6 @@ router.post("/v1/uploads/video", (req, res) => {
       size: req.file.size
     });
   });
-});
-
-// Admin migration: convert legacy Cloudinary MP4 URLs to HLS playback URLs.
-router.post("/v1/media/migrate-video-urls-to-hls", authRequired, requireRole(["admin"]), async (req, res) => {
-  try {
-    await ensureHomePostsTable();
-    await ensureHomeStoriesTable();
-    const dryRun = Boolean(req.body?.dryRun ?? true);
-
-    const posts = await query(
-      `
-      SELECT id, video_url AS "videoUrl"
-      FROM home_posts
-      WHERE video_url IS NOT NULL AND TRIM(video_url) <> ''
-      `
-    );
-    const stories = await query(
-      `
-      SELECT id, video_url AS "videoUrl"
-      FROM home_stories
-      WHERE video_url IS NOT NULL AND TRIM(video_url) <> ''
-      `
-    );
-
-    const postUpdates = [];
-    for (const row of posts.rows) {
-      const next = toCloudinaryHlsUrl(row.videoUrl);
-      if (next && next !== row.videoUrl) postUpdates.push({ id: row.id, from: row.videoUrl, to: next });
-    }
-    const storyUpdates = [];
-    for (const row of stories.rows) {
-      const next = toCloudinaryHlsUrl(row.videoUrl);
-      if (next && next !== row.videoUrl) storyUpdates.push({ id: row.id, from: row.videoUrl, to: next });
-    }
-
-    if (!dryRun) {
-      for (const row of postUpdates) {
-        await query(`UPDATE home_posts SET video_url = $1 WHERE id = $2`, [row.to, row.id]);
-      }
-      for (const row of storyUpdates) {
-        await query(`UPDATE home_stories SET video_url = $1 WHERE id = $2`, [row.to, row.id]);
-      }
-    }
-
-    res.json({
-      dryRun,
-      posts: { scanned: posts.rows.length, toUpdate: postUpdates.length, updated: dryRun ? 0 : postUpdates.length },
-      stories: { scanned: stories.rows.length, toUpdate: storyUpdates.length, updated: dryRun ? 0 : storyUpdates.length },
-      sample: {
-        posts: postUpdates.slice(0, 5),
-        stories: storyUpdates.slice(0, 5)
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to migrate video URLs to HLS", error: error.message });
-  }
 });
 
 router.get("/v1/learn/courses", async (_req, res) => {

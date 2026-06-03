@@ -8,6 +8,14 @@ export function formatReelCountdown(totalSeconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+/** UI zoom steps shown as 1x / 2x in Create camera. */
+export type StoryCameraZoomLevel = 1 | 2;
+
+/** Maps 1x/2x UI to Expo `CameraView` zoom (0–1 fraction of device max zoom). */
+export function storyZoomToExpoRatio(level: StoryCameraZoomLevel): number {
+  return level === 2 ? 0.22 : 0;
+}
+
 export type StoryCameraPreviewHandle = {
   takePictureAsync: (options?: { quality?: number }) => Promise<{
     uri: string;

@@ -28,9 +28,11 @@ import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { navigateToPublicProfile } from "../navigation/navigationRef";
+import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
+import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -38,6 +40,7 @@ import {
   createHomeStory,
   createHomePostComment,
   deleteHomePost,
+  deleteHomePostComment,
   reportHomePost,
   fetchHomePostComments,
   fetchHomePostLikes,
@@ -48,6 +51,7 @@ import {
   fetchRelationships,
   fetchSocialNetwork,
   fetchUsers,
+  fetchMutualConnections,
   getWebAppOrigin,
   HomePost,
   HomeStory,
@@ -58,12 +62,14 @@ import {
   unfollowUser,
   unlikeHomePost,
   unsaveHomePost,
+  type MutualConnectionInfo,
   type UserSearchRecord
 } from "../services/api";
 import {
   addLocalCommentForPost,
   appendLocalEngagementNotification,
   getLocalCommentsForPost,
+  removeLocalCommentForPost,
   getLocalLikeStateForPosts,
   getLikersFromLocalEngagementForPost,
   getLikersFromLocalLikeMap,
@@ -97,6 +103,8 @@ const likeActiveColor = APP_LIME;
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
+const STORY_FALLBACK_BG = "#e5e7eb";
+const STORY_FALLBACK_INITIAL = APP_LIME;
 
 function isReelPost(post: HomePost) {
   return /^\[REEL\]/i.test(String(post.caption || "").trim());
@@ -288,12 +296,12 @@ function postAuthorAvatarUri(
   post: HomePost,
   viewer: { id?: number; fullName?: string; avatarUrl?: string } | null | undefined
 ): string | undefined {
-  const fromPost = post.authorAvatarUrl;
-  if (typeof fromPost === "string" && fromPost.trim()) return fromPost.trim();
+  const fromPost = stripLegacyCloudinaryUrl(post.authorAvatarUrl);
+  if (fromPost) return fromPost;
   if (viewer != null && Number.isFinite(Number(viewer.id)) && Number(viewer.id) > 0) {
     if (viewerOwnsPost(post, { id: Number(viewer.id), fullName: viewer.fullName })) {
-      const u = viewer.avatarUrl;
-      if (typeof u === "string" && u.trim()) return u.trim();
+      const u = stripLegacyCloudinaryUrl(viewer.avatarUrl);
+      if (u) return u;
     }
   }
   return undefined;
@@ -452,6 +460,7 @@ type HomeCommentRow = {
   createdAt?: string;
   parentCommentId?: string;
   avatarUrl?: string;
+  userId?: number;
 };
 
 type OtherStoryGroup = {
@@ -516,6 +525,9 @@ function normalizeCommentRow(c: Partial<HomeCommentRow> & Record<string, unknown
       : undefined;
   const avRaw = c.avatarUrl ?? c["avatar_url"] ?? c["avatarUrl"];
   const avatarUrl = typeof avRaw === "string" && avRaw.trim() ? avRaw.trim() : undefined;
+  const userIdRaw = c.userId ?? c["user_id"];
+  const userIdNum = Number(userIdRaw);
+  const userId = Number.isFinite(userIdNum) && userIdNum > 0 ? userIdNum : undefined;
   return {
     id: String(c.id ?? ""),
     user: String(c.user ?? ""),
@@ -523,7 +535,8 @@ function normalizeCommentRow(c: Partial<HomeCommentRow> & Record<string, unknown
     likes: Number.isFinite(Number(c.likes)) ? Number(c.likes) : 0,
     createdAt: typeof c.createdAt === "string" ? c.createdAt : c.createdAt != null ? String(c.createdAt) : undefined,
     parentCommentId,
-    ...(avatarUrl ? { avatarUrl } : {})
+    ...(avatarUrl ? { avatarUrl } : {}),
+    ...(userId ? { userId } : {})
   };
 }
 
@@ -703,6 +716,30 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
       } as ViewStyle)
     : ({} as ViewStyle);
 
+function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
+  const sources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = sources[sourceIndex] ?? uri;
+  useEffect(() => setSourceIndex(0), [uri]);
+  return (
+    <Video
+      key={activeUri}
+      style={style}
+      source={{ uri: activeUri }}
+      resizeMode={ResizeMode.COVER}
+      shouldPlay
+      isLooping
+      isMuted
+      useNativeControls={false}
+      onPlaybackStatusUpdate={(status) => {
+        if (!status.isLoaded && "error" in status && status.error && sourceIndex + 1 < sources.length) {
+          setSourceIndex((i) => i + 1);
+        }
+      }}
+    />
+  );
+}
+
 type ContainedExpoVideoProps = {
   uri: string;
   shouldPlay: boolean;
@@ -740,9 +777,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
+  const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = playbackSources[sourceIndex] ?? uri;
 
   useEffect(() => {
     setNatural(null);
+    setSourceIndex(0);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -773,7 +814,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     } else {
       ref.pauseAsync().catch(() => {});
     }
-  }, [shouldPlay, uri]);
+  }, [shouldPlay, activeUri]);
 
   React.useImperativeHandle(
     ref,
@@ -788,6 +829,14 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     []
   );
 
+  const tryNextPlaybackSource = React.useCallback(() => {
+    setSourceIndex((idx) => {
+      if (idx + 1 >= playbackSources.length) return idx;
+      console.warn("[Cropvibe Video] fallback", playbackSources[idx + 1]?.slice(0, 160));
+      return idx + 1;
+    });
+  }, [playbackSources]);
+
   return (
     <View
       style={{
@@ -798,10 +847,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       }}
     >
       <Video
+        key={activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
-        source={{ uri }}
+        source={{ uri: activeUri }}
         shouldPlay={shouldPlay}
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
@@ -815,6 +865,9 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           onStatusUpdate?.(status);
           if (status.isLoaded) {
             durationRef.current = Number(status.durationMillis || 0);
+          } else if ("error" in status && status.error) {
+            console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+            if (sourceIndex + 1 < playbackSources.length) tryNextPlaybackSource();
           }
         }}
         onReadyForDisplay={
@@ -1012,6 +1065,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [reelViewerOpen, setReelViewerOpen] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+
+  const openPostAuthorProfile = React.useCallback(
+    (post: HomePost) => {
+      const postUserId = Number(post.userId);
+      const normalizedPostName = normalizeIdentity(post.userName);
+      const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
+      const isOwn =
+        (postUserId > 0 && postUserId === Number(user?.id)) ||
+        (!postUserId && normalizedPostName.length > 0 && normalizedPostName === normalizedCurrentUserName);
+      setReelViewerOpen(null);
+      if (isOwn) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: postUserId > 0 ? postUserId : undefined,
+        userName: post.userName,
+        avatarUrl: post.authorAvatarUrl ?? null
+      });
+    },
+    [user?.fullName, user?.id]
+  );
+
   const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
   const reelBackgroundMusicRef = useRef<{ postId: number; sound: Audio.Sound } | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
@@ -1024,6 +1100,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [likesSheetUsers, setLikesSheetUsers] = useState<PostLiker[]>([]);
   const [likesSheetLoading, setLikesSheetLoading] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const commentSubmittingRef = useRef(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
   const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
   /** Parent comment ids whose direct replies are fully expanded (only used when direct reply count > REPLY_PREVIEW_VISIBLE). */
@@ -1065,6 +1143,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
   const [legacyRelationshipByName, setLegacyRelationshipByName] = useState<Record<string, { viewerStatus: "none" | "pending" | "accepted"; canFollowBack: boolean }>>({});
   const [suggestedUsers, setSuggestedUsers] = useState<UserSearchRecord[]>([]);
+  const [suggestedMutualByUserId, setSuggestedMutualByUserId] = useState<Record<number, MutualConnectionInfo>>({});
   const [suggestedFollowBusy, setSuggestedFollowBusy] = useState<Record<number, boolean>>({});
   const [suggestedFollowDone, setSuggestedFollowDone] = useState<Set<number>>(new Set());
   const [suggestedDismissed, setSuggestedDismissed] = useState<Set<number>>(new Set());
@@ -1532,18 +1611,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return groups;
   }, [avatarLookup, otherStories, posts, user]);
 
-  const storyGroupsWithoutLive = useMemo(() => {
-    const liveUserIds = new Set(
-      activeLivePosts.map((p) => Number(p.userId)).filter((id) => Number.isFinite(id) && id > 0)
-    );
-    const liveNames = new Set(activeLivePosts.map((p) => normalizeIdentity(p.userName)).filter(Boolean));
-    return otherStoryGroups.filter((group) => {
-      const storyUserId = Number(group.stories[0]?.userId);
-      if (Number.isFinite(storyUserId) && storyUserId > 0 && liveUserIds.has(storyUserId)) return false;
-      const groupName = normalizeIdentity(group.userName);
-      return !(groupName && liveNames.has(groupName));
-    });
-  }, [activeLivePosts, otherStoryGroups]);
+  const storyGroupsWithoutLive = useMemo(() => otherStoryGroups, [otherStoryGroups]);
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
   const activeStoryAvatarUri = activeStory ? storyAuthorAvatarUri(activeStory, user, avatarLookup, posts) : undefined;
@@ -1748,15 +1816,38 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (!mounted) return;
         const myId = Number(user?.id) || 0;
         const alreadyConnected = new Set([...followingUserIds, ...followerUserIds, myId]);
-        const candidates = (data.users || []).filter((u) => !alreadyConnected.has(u.id));
-        const followerIds = [...followerUserIds];
-        const mutualFirst = candidates.sort((a, b) => {
-          const aIsMutual = followerIds.includes(a.id) ? 1 : 0;
-          const bIsMutual = followerIds.includes(b.id) ? 1 : 0;
-          return bIsMutual - aIsMutual;
+        const candidates = (data.users || []).filter(
+          (u) =>
+            u.id !== myId &&
+            !alreadyConnected.has(u.id) &&
+            u.viewerStatus !== "accepted" &&
+            u.viewerStatus !== "pending"
+        );
+        const slice = candidates.slice(0, 20);
+        const ids = slice.map((u) => u.id);
+        let connections: Record<number, MutualConnectionInfo> = {};
+        try {
+          const mutualRes = await fetchMutualConnections(token, ids);
+          connections = mutualRes.connections || {};
+        } catch {
+          connections = {};
+        }
+        const sorted = [...slice].sort((a, b) => {
+          const aConn = connections[a.id];
+          const bConn = connections[b.id];
+          const aScore = (aConn?.mutualCount ?? 0) * 10 + (aConn?.followsYou ? 5 : 0) + (followerUserIds.has(a.id) ? 1 : 0);
+          const bScore = (bConn?.mutualCount ?? 0) * 10 + (bConn?.followsYou ? 5 : 0) + (followerUserIds.has(b.id) ? 1 : 0);
+          return bScore - aScore;
         });
-        setSuggestedUsers(mutualFirst.slice(0, 15));
-      } catch {}
+        if (!mounted) return;
+        setSuggestedMutualByUserId(connections);
+        setSuggestedUsers(sorted.slice(0, 15));
+      } catch {
+        if (mounted) {
+          setSuggestedUsers([]);
+          setSuggestedMutualByUserId({});
+        }
+      }
     })();
     return () => { mounted = false; };
   }, [token, socialNetworkHydrated, followingUserIds, followerUserIds, user?.id]);
@@ -1877,6 +1968,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const handleDismissSuggested = useCallback((targetUserId: number) => {
     setSuggestedDismissed((prev) => new Set(prev).add(targetUserId));
   }, []);
+
+  const visibleSuggestedUsers = useMemo(
+    () => suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 8),
+    [suggestedUsers, suggestedDismissed]
+  );
 
   useEffect(() => {
     setExpandedReplyThreads({});
@@ -2541,9 +2637,88 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [t, token, user]
   );
 
+  const viewerOwnsComment = useCallback(
+    (c: HomeCommentRow) => {
+      if (c.userId != null && user?.id != null && Number(c.userId) === Number(user.id)) return true;
+      const normViewer = normalizeIdentity(user?.fullName || "");
+      const normAuthor = normalizeIdentity(c.user);
+      return !!normViewer && !!normAuthor && normViewer === normAuthor;
+    },
+    [user?.fullName, user?.id]
+  );
+
+  const confirmDeleteComment = useCallback(
+    (postId: number, comment: HomeCommentRow) => {
+      const runDelete = async () => {
+        const id = String(comment.id);
+        const pruneIds = (list: HomeCommentRow[], rootId: string) => {
+          const removed = new Set<string>([rootId]);
+          const walk = (cid: string) => {
+            for (const row of list) {
+              if (String(row.parentCommentId) === cid) {
+                const rid = String(row.id);
+                if (!removed.has(rid)) {
+                  removed.add(rid);
+                  walk(rid);
+                }
+              }
+            }
+          };
+          walk(rootId);
+          return removed;
+        };
+
+        if (id.startsWith("lc-")) {
+          await removeLocalCommentForPost(postId, id);
+          setCommentsByPost((prev) => {
+            const list = prev[postId] ?? [];
+            const removed = pruneIds(list, id);
+            return { ...prev, [postId]: list.filter((c) => !removed.has(String(c.id))) };
+          });
+          setPosts((prev) =>
+            prev.map((p) =>
+              p.id === postId ? { ...p, commentsCount: Math.max(0, Number(p.commentsCount ?? 1) - 1) } : p
+            )
+          );
+          return;
+        }
+
+        if (!token) return;
+        try {
+          const res = await deleteHomePostComment(token, postId, id);
+          setCommentsByPost((prev) => {
+            const list = prev[postId] ?? [];
+            const removed = pruneIds(list, id);
+            return { ...prev, [postId]: list.filter((c) => !removed.has(String(c.id))) };
+          });
+          setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, commentsCount: res.commentsCount } : p)));
+        } catch (e) {
+          Alert.alert(t("deleteFailed"), e instanceof Error ? e.message : t("deleteFailed"));
+        }
+      };
+
+      if (Platform.OS === "web") {
+        setTimeout(() => {
+          if (!window.confirm(`${t("deleteCommentTitle")}\n${t("deleteCommentBody")}`)) return;
+          void runDelete();
+        }, 0);
+        return;
+      }
+
+      Alert.alert(t("deleteCommentTitle"), t("deleteCommentBody"), [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("deleteConfirm"), style: "destructive", onPress: () => void runDelete() }
+      ]);
+    },
+    [t, token]
+  );
+
   const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
-    if (!text || !activeCommentsPost) return;
+    if (!text || !activeCommentsPost || commentSubmittingRef.current) return;
+    commentSubmittingRef.current = true;
+    setCommentSubmitting(true);
+    try {
     const post = activeCommentsPost;
     const normalizedPostName = normalizeIdentity(post.userName);
     const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -2575,13 +2750,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           likes: res.comment.likes ?? 0,
           createdAt: createdIso,
           parentCommentId: res.comment.parentCommentId ?? parentIdStr,
+          ...(res.comment.userId != null && Number(res.comment.userId) > 0 ? { userId: Number(res.comment.userId) } : user?.id ? { userId: user.id } : {}),
           ...(res.comment.avatarUrl && String(res.comment.avatarUrl).trim()
             ? { avatarUrl: String(res.comment.avatarUrl).trim() }
             : user?.avatarUrl && String(user.avatarUrl).trim()
               ? { avatarUrl: String(user.avatarUrl).trim() }
               : {})
         };
-    setCommentsByPost((prev) => {
+        setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
           const withoutDup = list.filter((c) => String(c.id) !== row.id);
           return { ...prev, [post.id]: [...withoutDup, row] };
@@ -2591,7 +2767,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setReplyingTo(null);
         return;
       } catch {
-        // fall through to local behavior
+        if (token) {
+          Alert.alert(t("shareFailed"), "Could not post comment. Check your connection and try again.");
+          return;
+        }
       }
     }
 
@@ -2648,7 +2827,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         commentExcerpt: excerpt
       });
     }
-  }, [activeCommentsPost, commentDraft, replyingTo, token, user?.avatarUrl, user?.email, user?.fullName, user?.id]);
+  } finally {
+    commentSubmittingRef.current = false;
+    setCommentSubmitting(false);
+  }
+  }, [activeCommentsPost, commentDraft, replyingTo, t, token, user?.avatarUrl, user?.email, user?.fullName, user?.id]);
 
   const toggleCommentSheetLike = useCallback((postId: number, commentId: string) => {
     setCommentInteractions((prev) => {
@@ -2730,8 +2913,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   size={56}
                   borderRadius={28}
                   style={styles.storyAvatarFill}
-                  fallbackBackgroundColor="#d4dce0"
-                  initialsColor="#1f2c29"
+                  textStyle={styles.storyAvatarInitial}
+                  fallbackBackgroundColor={STORY_FALLBACK_BG}
+                  initialsColor={STORY_FALLBACK_INITIAL}
                 />
                 <Pressable
                   style={styles.yourStoryPlusBadge}
@@ -2798,8 +2982,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     size={56}
                     borderRadius={28}
                     style={styles.storyAvatarFill}
-                    fallbackBackgroundColor="#d4dce0"
-                    initialsColor="#1f2c29"
+                    textStyle={styles.storyAvatarInitial}
+                    fallbackBackgroundColor={STORY_FALLBACK_BG}
+                    initialsColor={STORY_FALLBACK_INITIAL}
                   />
                 </View>
               </View>
@@ -2808,6 +2993,64 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </Text>
             </Pressable>
           ))}
+
+          {visibleSuggestedUsers.map((person) => {
+                const isDone = suggestedFollowDone.has(person.id);
+                const isBusy = suggestedFollowBusy[person.id];
+                const firstName = displayPersonName(person.fullName).split(" ")[0] || person.fullName;
+                return (
+                  <View key={`suggest-${person.id}`} style={styles.storyItem}>
+                    <Pressable
+                      style={styles.storySuggestPress}
+                      onPress={() =>
+                        navigateToPublicProfile({
+                          userId: person.id,
+                          userName: person.fullName,
+                          avatarUrl: person.avatarUrl ?? null
+                        })
+                      }
+                      onLongPress={() => handleDismissSuggested(person.id)}
+                      delayLongPress={400}
+                    >
+                      <View style={[styles.storyRing, styles.storyRingSuggest]}>
+                        <View style={styles.storyInner}>
+                          <UserAvatar
+                            uri={person.avatarUrl}
+                            name={person.fullName}
+                            size={56}
+                            borderRadius={28}
+                            style={styles.storyAvatarFill}
+                            textStyle={styles.storyAvatarInitial}
+                            fallbackBackgroundColor={STORY_FALLBACK_BG}
+                            initialsColor={STORY_FALLBACK_INITIAL}
+                          />
+                          <Pressable
+                            style={[
+                              styles.suggestAddBadge,
+                              isDone ? styles.suggestAddBadgeDone : null
+                            ]}
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              if (!isDone && !isBusy) void handleFollowSuggested(person.id);
+                            }}
+                            disabled={isDone || isBusy}
+                            hitSlop={8}
+                          >
+                            <Ionicons
+                              name={isDone ? "checkmark" : "person-add"}
+                              size={11}
+                              color={isDone ? "#7a8690" : "#fff"}
+                            />
+                          </Pressable>
+                        </View>
+                      </View>
+                    </Pressable>
+                    <Text style={styles.storyNameDark} numberOfLines={1}>
+                      {firstName}
+                    </Text>
+                  </View>
+                );
+              })}
         </ScrollView>
 
         <View style={styles.homeTopTabsBarDark}>
@@ -2850,7 +3093,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       posts,
       storyGroupsWithoutLive,
       user,
-      visibleHomeTopTabs
+      visibleHomeTopTabs,
+      activeHomeTab,
+      visibleSuggestedUsers,
+      suggestedFollowDone,
+      suggestedFollowBusy,
+      handleDismissSuggested,
+      handleFollowSuggested,
+      displayPersonName
     ]
   );
 
@@ -3032,18 +3282,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
-                <UserAvatar
-                  uri={postAuthorAvatarUri(post, user)}
-                  name={post.userName}
-                  size={44}
-                  borderRadius={12}
-                  style={styles.reelAvatarSq}
-                  fallbackBackgroundColor="#2a2a2a"
-                  initialsColor="#fff"
-                />
-                <Text style={styles.reelUserName} numberOfLines={1}>
-                  {reelDisplayName}
-                </Text>
+                <Pressable
+                  style={styles.reelAuthorTap}
+                  onPress={() => openPostAuthorProfile(post)}
+                  accessibilityRole="button"
+                  accessibilityLabel={reelDisplayName}
+                >
+                  <UserAvatar
+                    uri={postAuthorAvatarUri(post, user)}
+                    name={post.userName}
+                    size={44}
+                    borderRadius={12}
+                    style={styles.reelAvatarSq}
+                  />
+                  <Text style={styles.reelUserName} numberOfLines={1}>
+                    {reelDisplayName}
+                  </Text>
+                </Pressable>
                 {!isOwnPost ? (
                   <Pressable
                     onPress={() => toggleFollow(postUserId > 0 ? postUserId : null, post.userName, currentFollowStatus)}
@@ -3192,44 +3447,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayPersonName,
       displayPostCaption,
       t,
-      labelForFollowStatus
+      labelForFollowStatus,
+      openPostAuthorProfile
     ]
   );
-
-  const suggestedInlineSection = useMemo(() => {
-    const visible = suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 10);
-    if (!visible.length || activeHomeTab !== "Feed") return null;
-    return (
-      <View style={styles.suggestedSection}>
-        <Text style={styles.suggestedTitle}>{t("peopleYouMayKnow") || "People You May Know"}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
-          {visible.map((person) => {
-            const isDone = suggestedFollowDone.has(person.id);
-            const isBusy = suggestedFollowBusy[person.id];
-            return (
-              <View key={person.id} style={styles.suggestedCard}>
-                <Pressable style={styles.suggestedDismiss} onPress={() => handleDismissSuggested(person.id)}>
-                  <Ionicons name="close" size={14} color="#7a8690" />
-                </Pressable>
-                <UserAvatar uri={person.avatarUrl} name={person.fullName} size={56} borderRadius={28} />
-                <Text style={styles.suggestedName} numberOfLines={1}>{person.fullName}</Text>
-                {person.username ? <Text style={styles.suggestedUsername} numberOfLines={1}>@{person.username}</Text> : null}
-                <Pressable
-                  style={[styles.suggestedFollowBtn, isDone ? styles.suggestedFollowBtnDone : null]}
-                  onPress={() => !isDone && handleFollowSuggested(person.id)}
-                  disabled={isDone || isBusy}
-                >
-                  <Text style={[styles.suggestedFollowText, isDone ? styles.suggestedFollowTextDone : null]}>
-                    {isDone ? (t("requested") || "Requested") : isBusy ? "..." : (t("follow") || "Follow")}
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
-    );
-  }, [suggestedUsers, suggestedDismissed, suggestedFollowDone, suggestedFollowBusy, activeHomeTab, handleDismissSuggested, handleFollowSuggested, t]);
 
   const renderPost = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
@@ -3261,7 +3482,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       );
       return (
         <>
-        {index === 2 && suggestedInlineSection}
         <View style={styles.postCard}>
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
@@ -3299,15 +3519,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 {isActive ? (
-                  <Video
-                    style={styles.video}
-                    source={{ uri: post.videoUrl }}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay
-                    isLooping
-                    isMuted
-                    useNativeControls={false}
-                  />
+                  <FeedPostVideo uri={post.videoUrl} style={styles.video} />
                 ) : (
                   <>
                     <Image
@@ -3447,7 +3659,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       openPostLikesSheet,
       playingPostId,
       relationships,
-      suggestedInlineSection,
       toggleFollow,
       togglePostLike,
       displayPersonName,
@@ -3907,9 +4118,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                               {rel ? <Text style={styles.commentTime}>{rel}</Text> : null}
                       </View>
                             <Text style={styles.commentBodyText}>{displayFeedCopy(c.text)}</Text>
-                            <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
-                              <Text style={styles.commentReplyText}>Reply</Text>
-                            </Pressable>
+                            <View style={styles.commentReplyRow}>
+                              <Pressable hitSlop={6} onPress={() => onCommentReplyPress(c)} style={styles.commentReplyBtn}>
+                                <Text style={styles.commentReplyText}>Reply</Text>
+                              </Pressable>
+                              {viewerOwnsComment(c) ? (
+                                <Pressable hitSlop={6} onPress={() => confirmDeleteComment(pid, c)} style={styles.commentReplyBtn}>
+                                  <Text style={styles.commentDeleteText}>Delete</Text>
+                                </Pressable>
+                              ) : null}
+                            </View>
                       </View>
                           <View style={styles.commentActionsCol}>
                             <Pressable
@@ -3997,8 +4215,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <UserAvatar
                   uri={user?.avatarUrl}
                   name={user?.fullName || "You"}
-                  size={20}
-                  borderRadius={10}
+                  size={28}
+                  borderRadius={14}
                   style={styles.commentInputAvatar}
                   fallbackBackgroundColor="#d1d5db"
                   initialsColor="#0f172a"
@@ -4009,9 +4227,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   placeholder={replyingTo ? t("writeReply") : t("addCommentPlaceholder")}
                   placeholderTextColor="#6b7280"
                   style={styles.commentInput}
+                  multiline
+                  textAlignVertical="top"
+                  maxLength={2000}
                 />
-                <Pressable style={styles.commentSendBtn} onPress={submitComment}>
-                  <Ionicons name="send" size={14} color="#111827" />
+                <Pressable
+                  style={[styles.commentSendBtn, commentSubmitting ? styles.commentSendBtnDisabled : null]}
+                  onPress={submitComment}
+                  disabled={commentSubmitting || !commentDraft.trim()}
+                >
+                  <Ionicons name="send" size={16} color="#111827" />
                 </Pressable>
               </View>
             </View>
@@ -4253,6 +4478,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         onClose={() => setWatchingLivePost(null)}
         canDeletePost={(post) => viewerOwnsPost(post, user)}
         onDeletePost={confirmDeleteOwnPost}
+        onLiveEnded={(postId, update) => {
+          setPosts((prev) =>
+            prev.map((p) =>
+              p.id === postId
+                ? { ...p, ...(update || {}), liveStatus: "ended" as const, liveViewerCount: 0, liveEndedAt: new Date().toISOString() }
+                : p
+            )
+          );
+          setWatchingLivePost(null);
+        }}
       />
     </View>
   );
@@ -4394,13 +4629,14 @@ const styles = StyleSheet.create({
     flexWrap: "nowrap",
     minWidth: 0
   },
-  reelAvatarSq: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#2a2a2a",
+  reelAuthorTap: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 10,
+    flex: 1,
+    minWidth: 0
+  },
+  reelAvatarSq: {
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)"
   },
@@ -4505,32 +4741,22 @@ const styles = StyleSheet.create({
     backgroundColor: APP_DARK_BG
   },
   storyNameDark: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: 5, fontWeight: "600", textAlign: "center", width: "100%" },
-  suggestedSection: { paddingVertical: 10, backgroundColor: APP_DARK_BG },
-  suggestedTitle: { color: "#e0e6eb", fontSize: 13, fontWeight: "800", paddingHorizontal: 14, marginBottom: 10 },
-  suggestedRow: { paddingHorizontal: 10, gap: 10 },
-  suggestedCard: {
-    width: 140,
-    backgroundColor: "#1e2630",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#2e3842",
+  storyRingSuggest: { backgroundColor: "#3b82f6" },
+  storySuggestPress: { alignItems: "center" },
+  suggestAddBadge: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#3b82f6",
+    borderWidth: 2,
+    borderColor: "#fff",
     alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 10
+    justifyContent: "center"
   },
-  suggestedDismiss: { position: "absolute", top: 8, right: 8, zIndex: 1 },
-  suggestedName: { color: "#eef3f8", fontSize: 12, fontWeight: "800", marginTop: 8, textAlign: "center" },
-  suggestedUsername: { color: "#7a8690", fontSize: 10, fontWeight: "600", marginTop: 2 },
-  suggestedFollowBtn: {
-    marginTop: 10,
-    backgroundColor: APP_LIME,
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 7
-  },
-  suggestedFollowBtnDone: { backgroundColor: "#2e3842" },
-  suggestedFollowText: { color: "#1b1f23", fontSize: 11, fontWeight: "800" },
-  suggestedFollowTextDone: { color: "#7a8690" },
+  suggestAddBadgeDone: { backgroundColor: "#2e3842" },
   homeTopTabsBarDark: {
     backgroundColor: APP_DARK_BG
   },
@@ -4625,7 +4851,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "#fff",
+    backgroundColor: "#111315",
     alignItems: "center",
     justifyContent: "center",
     overflow: "visible"
@@ -4634,11 +4860,12 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#d4dce0",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden"
   },
+  storyAvatarInitial: { fontSize: 28, fontWeight: "600" },
   storyAvatarImage: { width: 56, height: 56, borderRadius: 28 },
   storyInitial: { fontSize: 18, fontWeight: "700", color: "#1f2c29" },
   yourStoryPlusBadge: {
@@ -4960,34 +5187,42 @@ const styles = StyleSheet.create({
   commentInputRow: {
     marginTop: 8,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     gap: 8
   },
   commentInputAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "#d1d5db",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    marginBottom: 4
   },
   commentInput: {
     flex: 1,
-    height: 28,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+    minHeight: 72,
+    maxHeight: 140,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     backgroundColor: "#f9fafb",
     color: "#111827",
-    fontSize: 11
+    fontSize: 14,
+    lineHeight: 20
   },
   commentSendBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#C9FF35",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    marginBottom: 4
   },
+  commentSendBtnDisabled: { opacity: 0.45 },
+  commentReplyRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 4 },
+  commentDeleteText: { color: "#f87171", fontSize: 12, fontWeight: "700" },
   reelOptionsSheet: {
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,

@@ -5,7 +5,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { markLaunchSetupComplete } from "../onboarding/launchSetup";
-import { authLogin, authRegister } from "../services/api";
+import { authLogin, authRegister, formatAuthError } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
 
 type Mode = "login" | "register";
@@ -24,6 +24,7 @@ export function AuthScreen() {
   const [role, setRole] = React.useState<"student" | "instructor">("student");
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [showPassword, setShowPassword] = React.useState(false);
 
   const submit = async () => {
     setLoading(true);
@@ -38,8 +39,8 @@ export function AuthScreen() {
         await markLaunchSetupComplete((payload.user as any).id);
       }
       navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
-    } catch (e: any) {
-      setError(e?.message || "Failed");
+    } catch (e: unknown) {
+      setError(formatAuthError(e, "Failed"));
     } finally {
       setLoading(false);
     }
@@ -65,10 +66,40 @@ export function AuthScreen() {
         </View>
 
         <Text style={styles.label}>Email</Text>
-        <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={styles.input} />
+        <TextInput
+          value={email}
+          onChangeText={(v) => {
+            setError(null);
+            setEmail(v);
+          }}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          style={styles.input}
+        />
 
         <Text style={styles.label}>Password</Text>
-        <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
+        <View style={styles.passwordRow}>
+          <TextInput
+            value={password}
+            onChangeText={(v) => {
+              setError(null);
+              setPassword(v);
+            }}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={styles.passwordInput}
+          />
+          <Pressable
+            style={styles.passwordEyeBtn}
+            onPress={() => setShowPassword((v) => !v)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+          >
+            <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#5b6966" />
+          </Pressable>
+        </View>
 
         {mode === "register" ? (
           <>
@@ -116,6 +147,26 @@ const styles = StyleSheet.create({
   modeTextActive: { color: GREEN },
   label: { marginTop: 10, fontWeight: "900", color: "#22312d" },
   input: { marginTop: 6, borderWidth: 1, borderColor: BORDER, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontWeight: "700", color: "#111616" },
+  passwordRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    backgroundColor: "#fff"
+  },
+  passwordInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontWeight: "700",
+    color: "#111616"
+  },
+  passwordEyeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   roleRow: { flexDirection: "row", gap: 8, marginTop: 6 },
   rolePill: { flex: 1, borderRadius: 999, borderWidth: 1, borderColor: BORDER, paddingVertical: 10, alignItems: "center" },
   rolePillActive: { backgroundColor: "#111827", borderColor: "#111827" },

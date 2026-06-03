@@ -35,6 +35,7 @@ import {
   uploadPickedMedia,
   type HomePost
 } from "../services/api";
+import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
 import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
@@ -393,6 +394,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
   const [liveKitHostTitle, setLiveKitHostTitle] = useState("");
   const [liveKitHostPostId, setLiveKitHostPostId] = useState<number | null>(null);
   const [liveKitHostOpen, setLiveKitHostOpen] = useState(false);
+  const [liveHostCameraFacing, setLiveHostCameraFacing] = useState<"front" | "back">("front");
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
   /** Instagram-style: post flow allows multiple photos by default (up to 10). */
   const [entryMultiSelect, setEntryMultiSelect] = useState(true);
@@ -937,7 +939,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setSubmitting(true);
     setErrorText("");
     try {
-      await validateVideoSize(asset.uri, 120);
+      await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
       try {
         const thumb = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 400, quality: 0.72 });
@@ -1126,6 +1128,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       onVideoPosted?.(activePost);
       setLiveKitHostRoomName(activePost.liveRoomName || `agrovibes-live-${post.id}`);
       setLiveKitHostTitle(liveCaption);
+      setLiveHostCameraFacing(entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back");
       setLiveKitHostOpen(true);
       setCreateType(null);
       setLiveMode(null);
@@ -1454,7 +1457,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         const taggedIds = taggedPeople.map((p) => p.id);
         if (videos.length === 1) {
           const v = videos[0];
-          await validateVideoSize(v.uri, 80);
+          await assertVideoUnderUploadLimit(v.uri);
           let derivedThumb: string | undefined;
           if (!thumbnailUrl.trim()) {
             try {
@@ -1595,7 +1598,27 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     ? t("locationPrefix", { place: postLocation.trim() })
     : t("addLocation");
   const entryFacing = entryCameraFacing === ImagePicker.CameraType.front ? "front" : "back";
-  const entryCameraActive = visible && captureEntryView === "camera";
+  const entryZoomLevel = entryZoomLabel === "2x" ? 2 : 1;
+
+  React.useEffect(() => {
+    if (entryFacing === "front" && entryFlashOn) {
+      setEntryFlashOn(false);
+    }
+  }, [entryFacing, entryFlashOn]);
+
+  const entryCameraActive =
+    visible &&
+    !createType &&
+    !fullScreenCameraOpen &&
+    !liveKitHostOpen &&
+    captureEntryView === "camera";
+
+  // Hard-stop inline camera whenever create is not actively on the camera surface.
+  React.useEffect(() => {
+    if (entryCameraActive) return;
+    if (!entryCameraRef.current?.isRecording()) return;
+    void entryCameraRef.current.stopRecording().catch(() => {});
+  }, [entryCameraActive]);
 
   const composeOptions: Array<{
     icon: keyof typeof Ionicons.glyphMap;
@@ -1817,6 +1840,8 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
               ref={entryCameraRef}
               active={entryCameraActive}
               facing={entryFacing}
+              flashOn={entryFlashOn}
+              zoomLevel={entryZoomLevel}
               mode={entryType === "reel" || entryType === "live" ? "video" : entryType === "post" ? "picture" : "picture"}
               onRecordingChange={onEntryRecordingChange}
               onAutoRecordFinished={onInlineAutoRecordFinished}
@@ -1844,7 +1869,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
                   <View style={styles.igCaptureTopTimerSpacer} pointerEvents="none" />
                 )}
                 <View style={styles.igCaptureTopCenterTools} pointerEvents="box-none">
-                  <Pressable style={styles.igCamRoundControl} onPress={() => setEntryFlashOn((v) => !v)}>
+                  <Pressable
+                    style={[styles.igCamRoundControl, entryFacing === "front" ? styles.igCamControlDisabled : null]}
+                    disabled={entryFacing === "front"}
+                    onPress={() => setEntryFlashOn((v) => !v)}
+                  >
                     <Ionicons name={entryFlashOn ? "flash" : "flash-outline"} size={18} color="#C9FF35" />
                   </Pressable>
                   <Pressable
@@ -2480,13 +2509,13 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         isHost
         postId={liveKitHostPostId ?? undefined}
         title={liveKitHostTitle || "Live stream"}
+        initialCameraFacing={liveHostCameraFacing}
         onLiveEnded={(postId: number, update?: Partial<HomePost>) => {
           onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0, ...update } as HomePost);
         }}
         onClose={() => {
           setLiveKitHostOpen(false);
           setLiveKitHostPostId(null);
-          onClose();
         }}
       />
     </Modal>
@@ -3232,6 +3261,9 @@ const styles = StyleSheet.create({
     borderColor: "#303842",
     alignItems: "center",
     justifyContent: "center"
+  },
+  igCamControlDisabled: {
+    opacity: 0.35
   },
   igCamZoomText: {
     color: "#C9FF35",

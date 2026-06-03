@@ -1,8 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
@@ -57,17 +56,6 @@ export function InstructorStudioScreen() {
   React.useEffect(() => {
     if (!courseId && title) setCourseId(slugify(title));
   }, [title]);
-
-  async function validateVideoSize(uri: string, maxMb: number) {
-    if (Platform.OS === "web") return;
-    const info = await FileSystem.getInfoAsync(uri, { size: true });
-    const bytes = (info as { size?: number }).size ?? 0;
-    if (!bytes) return;
-    const mb = bytes / (1024 * 1024);
-    if (mb > maxMb) {
-      throw new Error(`Video is ${mb.toFixed(1)}MB. Please select a video under ${maxMb}MB.`);
-    }
-  }
 
   async function pickLessonVideo(lessonId: string, source: "camera" | "gallery") {
     setError(null);
@@ -145,9 +133,6 @@ export function InstructorStudioScreen() {
     setLoading(true);
     try {
       let publishedCourseId = courseId;
-      for (const lesson of lessons) {
-        await validateVideoSize(lesson.videoUri, 120);
-      }
       const uploadedUrls = await Promise.all(lessons.map((lesson) => uploadVideoFile(lesson.videoUri)));
       const lessonPayload = lessons.map((lesson, idx) => ({
         id: String(idx + 1),
