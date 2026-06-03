@@ -14,7 +14,7 @@ import {
   useTracks,
   type TrackReference
 } from "@livekit/react-native";
-import { LocalVideoTrack, ConnectionState, RoomEvent, Track, type Participant } from "livekit-client";
+import { LocalVideoTrack, ConnectionState, Room, RoomEvent, Track, type Participant } from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -30,6 +30,7 @@ import {
 } from "./liveRoomData";
 import { saveLiveRecordingToPost } from "./saveLiveRecordingToPost";
 import { setActiveHostRoomName } from "./liveSessionState";
+import { startLiveHostRecorder } from "./liveHostRecording";
 
 type LiveCameraFacing = "front" | "back";
 
@@ -54,6 +55,29 @@ function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid
     return tracks.find((t) => t.participant.sid === localSid) ?? tracks[0];
   }
   return tracks.find((t) => t.participant.sid !== localSid) ?? tracks[0];
+}
+
+async function releaseHostCameraAndMic(room: Room) {
+  try {
+    await room.localParticipant.setCameraEnabled(false);
+    await room.localParticipant.setMicrophoneEnabled(false);
+  } catch {
+    // no-op
+  }
+  for (const pub of room.localParticipant.trackPublications.values()) {
+    const track = pub.track;
+    if (!track) continue;
+    try {
+      track.stop();
+    } catch {
+      // no-op
+    }
+    try {
+      await room.localParticipant.unpublishTrack(track, false);
+    } catch {
+      // no-op
+    }
+  }
 }
 
 function participantPublishesCamera(participant: Participant) {
@@ -139,12 +163,36 @@ function LiveRoomContent({
   }, [status]);
 
   React.useEffect(() => {
-    // Stability-first: disable local host recording while live is running.
-    // On some real devices this extra MediaRecorder pipeline causes camera/publish instability.
-    if (!isHost) return;
-    recorderRef.current = null;
-    return;
-  }, [isHost, room]);
+    if (!isHost || liveEnded) {
+      recorderRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tryStartRecorder = () => {
+      if (cancelled || liveEndedRef.current || recorderRef.current) return;
+      if (room.state !== ConnectionState.Connected) return;
+      try {
+        const next = startLiveHostRecorder({ room });
+        if (next && !cancelled) recorderRef.current = next;
+      } catch {
+        recorderRef.current = null;
+      }
+    };
+    const onReady = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(tryStartRecorder, 2500);
+    };
+    room.on(RoomEvent.Connected, onReady);
+    room.on(RoomEvent.Reconnected, onReady);
+    if (room.state === ConnectionState.Connected) onReady();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      room.off(RoomEvent.Connected, onReady);
+      room.off(RoomEvent.Reconnected, onReady);
+    };
+  }, [isHost, liveEnded, room]);
 
   const viewers = React.useMemo<LiveViewer[]>(
     () =>
@@ -192,11 +240,20 @@ function LiveRoomContent({
       clearTimeout(videoDropTimerRef.current);
       videoDropTimerRef.current = null;
     }
-    try {
-      room.disconnect();
-    } catch {
-      // no-op
-    }
+    void (async () => {
+      if (isHost) {
+        try {
+          await releaseHostCameraAndMic(room);
+        } catch {
+          // no-op
+        }
+      }
+      try {
+        room.disconnect();
+      } catch {
+        // no-op
+      }
+    })();
     setStatusText("Live ended");
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {
@@ -353,6 +410,11 @@ function LiveRoomContent({
       setSavingRecording(false);
     }
     if (isHost) {
+      try {
+        await releaseHostCameraAndMic(room);
+      } catch {
+        // no-op
+      }
       try {
         room.disconnect();
       } catch {

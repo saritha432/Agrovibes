@@ -20,9 +20,8 @@ function pickRecorderMimeType() {
   const candidates = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
   const supportsType = MediaRecorderCtor.isTypeSupported;
   if (typeof supportsType !== "function") {
-    // Some Android/Hermes builds expose MediaRecorder but not isTypeSupported.
-    // Return empty so caller safely skips recording instead of crashing.
-    return "";
+    // Some Android/Hermes builds expose MediaRecorder but not isTypeSupported — try webm anyway.
+    return candidates[0] || "";
   }
   return candidates.find((type) => supportsType(type)) || "";
 }

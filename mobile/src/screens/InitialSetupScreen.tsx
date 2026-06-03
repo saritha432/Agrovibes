@@ -186,16 +186,43 @@ function brandIntroVideoSource() {
   return uri ? { uri } : CROPVIBE_INTRO_MP4;
 }
 
-function BrandSplashGif() {
+function BrandSplashGif({ playing }: { playing: boolean }) {
+  const source = brandIntroVideoSource();
+  const webUri = artModuleToUri(CROPVIBE_INTRO_MP4 as OnboardingArtModule);
+
+  if (Platform.OS === "web" && webUri) {
+    return (
+      <View style={styles.brandGifWrap}>
+        {createElement("video", {
+          key: webUri,
+          src: webUri,
+          autoPlay: playing,
+          loop: true,
+          muted: true,
+          playsInline: true,
+          style: {
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            backgroundColor: "#000",
+            display: "block"
+          }
+        })}
+      </View>
+    );
+  }
+
   return (
-    <Video
-      source={CROPVIBE_INTRO_MP4}
-      style={styles.brandGif}
-      resizeMode={ResizeMode.COVER}
-      shouldPlay
-      isLooping
-      isMuted
-    />
+    <View style={styles.brandGifWrap}>
+      <Video
+        source={source}
+        style={styles.brandGif}
+        resizeMode={ResizeMode.CONTAIN}
+        shouldPlay={playing}
+        isLooping
+        isMuted
+      />
+    </View>
   );
 }
 
@@ -386,9 +413,7 @@ export function InitialSetupScreen() {
               ) : null}
               <View style={styles.content}>
                 {item.mode === "brand" ? (
-                  <View style={styles.brandGifWrap}>
-                    <BrandSplashGif />
-                  </View>
+                  <BrandSplashGif playing={isFocused && index === 0} />
                 ) : (
                   <View style={[styles.featureWrap, item.mode === "cta" ? styles.featureWrapCta : null]}>
                     <View style={[styles.copyWrap, item.mode === "cta" ? styles.copyWrapCta : null]}>
@@ -575,13 +600,16 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   brandGifWrap: {
     flex: 1,
+    width: "100%",
     backgroundColor: "#000",
-    borderRadius: 0,
+    alignItems: "center",
+    justifyContent: "center",
     overflow: "hidden"
   },
   brandGif: {
     width: "100%",
-    height: "100%"
+    height: "100%",
+    alignSelf: "center"
   },
   heroWrap: { flex: 1, marginHorizontal: -18, justifyContent: "flex-start" },
   heroLogoArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 18, minHeight: 200 },

@@ -261,6 +261,22 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       } catch {
         // Still disconnect even if broadcast fails.
       }
+      localTracksRef.current.forEach((track) => {
+        try {
+          track.stop?.();
+        } catch {
+          // no-op
+        }
+      });
+      localTracksRef.current = [];
+      recorderRef.current = null;
+      try {
+        await room.localParticipant.setCameraEnabled(false);
+        await room.localParticipant.setMicrophoneEnabled(false);
+      } catch {
+        // no-op
+      }
+      if (videoHostRef.current) videoHostRef.current.innerHTML = "";
       try {
         room.disconnect();
       } catch {
