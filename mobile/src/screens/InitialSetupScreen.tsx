@@ -1,5 +1,4 @@
 import { Asset } from "expo-asset";
-import { ResizeMode, Video } from "expo-av";
 import React, { createElement } from "react";
 import {
   FlatList,

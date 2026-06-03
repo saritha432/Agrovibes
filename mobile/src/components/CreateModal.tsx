@@ -29,6 +29,7 @@ import {
   createHomeStory,
   fetchSocialNetwork,
   scheduleLiveSession,
+  startScheduledLiveSession,
   shouldUseImageUpload,
   updateHomePostLiveVideo,
   uploadImageFile,
@@ -63,6 +64,9 @@ interface CreateModalProps {
   /** Called after a post or reel is created successfully (not for stories). Includes API `post` for optimistic feed merge. */
   onVideoPosted?: (post?: HomePost) => void;
   initialType?: CreateType | null;
+  initialLiveTopic?: string;
+  scheduledLiveId?: number;
+  autoStartLive?: boolean;
 }
 
 export type CreateType = "reel" | "post" | "story" | "live";
@@ -309,7 +313,15 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
   );
 });
 
-export function CreateModal({ visible, onClose, onVideoPosted, initialType = null }: CreateModalProps) {
+export function CreateModal({
+  visible,
+  onClose,
+  onVideoPosted,
+  initialType = null,
+  initialLiveTopic,
+  scheduledLiveId,
+  autoStartLive = false
+}: CreateModalProps) {
   const { t } = useLanguage();
   const createModes = React.useMemo(
     () =>
@@ -519,14 +531,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setPickedStoryMediaType(null);
     setPickedPostAssets([]);
     setLiveMode(null);
-    setLiveScheduleTopic("");
+    setLiveScheduleTopic(initialLiveTopic?.trim() || "");
     setLiveScheduleDate("");
     setLiveScheduleTime("");
     setShowLiveDatePicker(false);
     setShowLiveTimePicker(false);
     setShowLiveSetupSheet(false);
     setShowLiveTitleSheet(false);
-    setLiveTitleDraft("");
+    setLiveTitleDraft(initialLiveTopic?.trim() || "");
     liveDraftPostIdRef.current = null;
     liveServerPostIdRef.current = null;
     setLiveElapsedSeconds(0);
@@ -560,7 +572,7 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     setTaggedPeople([]);
     setShowTagPeoplePanel(false);
     setTagSearchQuery("");
-  }, [visible, initialType, stopAudioPreview]);
+  }, [visible, initialType, initialLiveTopic, stopAudioPreview]);
 
   React.useEffect(() => {
     if (entryType !== "live") {
@@ -1098,14 +1110,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
     void startLiveKitHostFromSheet();
   };
 
-  const startLiveKitHostFromSheet = async () => {
+  const startLiveKitHostFromSheet = async (topicOverride?: string, scheduleIdOverride?: number) => {
     if (!token) {
       setErrorText("Please log in to start live.");
       return;
     }
     setSubmitting(true);
     try {
-      const liveCaption = liveScheduleTopic.trim() || liveTitleDraft.trim() || caption.trim() || "Live stream";
+      const liveCaption = (topicOverride || liveScheduleTopic.trim() || liveTitleDraft.trim() || caption.trim() || "Live stream");
       const { post } = await createHomePost(
         {
           userId: user?.id,
@@ -1122,6 +1134,14 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
         liveViewerCount: 0,
         liveRoomName: post.liveRoomName || `agrovibes-live-${post.id}`
       };
+      const scheduleId = scheduleIdOverride ?? scheduledLiveId;
+      if (scheduleId) {
+        try {
+          await startScheduledLiveSession(token, scheduleId, post.id);
+        } catch {
+          // Live can still proceed if schedule status update fails.
+        }
+      }
       liveServerPostIdRef.current = post.id;
       liveDraftPostIdRef.current = post.id;
       setLiveKitHostPostId(post.id);
@@ -1140,6 +1160,23 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       setSubmitting(false);
     }
   };
+
+  const autoStartLiveRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!visible) {
+      autoStartLiveRef.current = false;
+      return;
+    }
+    if (!autoStartLive || !initialLiveTopic?.trim() || autoStartLiveRef.current) return;
+    autoStartLiveRef.current = true;
+    const topic = initialLiveTopic.trim();
+    setLiveScheduleTopic(topic);
+    setLiveTitleDraft(topic);
+    const timer = setTimeout(() => {
+      void startLiveKitHostFromSheet(topic, scheduledLiveId);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [visible, autoStartLive, initialLiveTopic, scheduledLiveId]);
 
   const submitLiveSetup = async () => {
     setErrorText("");
@@ -1166,8 +1203,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
       }
       setSubmitting(true);
       try {
-        await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
-        Alert.alert("Live scheduled", `Followers will be notified now and again 10 minutes before ${scheduledAt.toLocaleString()}.`);
+        const result = await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
+        const reminderNote = result.reminderScheduled
+          ? ` Followers will also get a reminder 10 minutes before.`
+          : ` Followers were notified now (no 10-minute reminder because the live is sooner than that).`;
+        Alert.alert("Live scheduled", `Your live is set for ${scheduledAt.toLocaleString()}.${reminderNote}`);
         setShowLiveSetupSheet(false);
         setLiveMode(null);
         setLiveScheduleTopic("");
@@ -1378,8 +1418,11 @@ export function CreateModal({ visible, onClose, onVideoPosted, initialType = nul
             setSubmitting(false);
             return;
           }
-          await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
-          Alert.alert("Live scheduled", `Followers will be notified now and again 10 minutes before ${scheduledAt.toLocaleString()}.`);
+          const result = await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
+          const reminderNote = result.reminderScheduled
+            ? ` Followers will also get a reminder 10 minutes before.`
+            : ` Followers were notified now (no 10-minute reminder because the live is sooner than that).`;
+          Alert.alert("Live scheduled", `Your live is set for ${scheduledAt.toLocaleString()}.${reminderNote}`);
           setSubmitting(false);
           setLiveMode(null);
           setLiveScheduleTopic("");

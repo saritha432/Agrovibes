@@ -793,6 +793,16 @@ export async function endHomeLivePost(token: string, postId: number) {
   return { post: sanitizeHomePost(data.post) };
 }
 
+export type ScheduledLive = {
+  id: number;
+  topic: string;
+  scheduledAt: string;
+  status: string;
+  postId?: number | null;
+  createdAt?: string;
+  startedAt?: string | null;
+};
+
 export async function scheduleLiveSession(token: string, payload: { topic: string; scheduledAt: string }) {
   const init = {
     method: "POST",
@@ -802,17 +812,33 @@ export async function scheduleLiveSession(token: string, payload: { topic: strin
   try {
     return (await fetchWithAuth(`${API_BASE_URL}/v1/live/schedule`, token, init)) as {
       ok: boolean;
+      id?: number;
       topic: string;
       scheduledAt: string;
+      reminderScheduled?: boolean;
     };
   } catch (error: any) {
     if (Number(error?.status) !== 404) throw error;
     return (await fetchWithAuth(`${API_BASE_URL}/v1/social/live/schedule`, token, init)) as {
       ok: boolean;
+      id?: number;
       topic: string;
       scheduledAt: string;
+      reminderScheduled?: boolean;
     };
   }
+}
+
+export async function fetchMyScheduledLives(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/scheduled/mine`, token)) as { scheduledLives: ScheduledLive[] };
+}
+
+export async function startScheduledLiveSession(token: string, scheduleId: number, postId?: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/scheduled/${encodeURIComponent(String(scheduleId))}/start`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(postId ? { postId } : {})
+  })) as { scheduledLive: ScheduledLive };
 }
 
 export async function createLiveKitToken(token: string, payload: { roomName: string; canPublish: boolean }) {

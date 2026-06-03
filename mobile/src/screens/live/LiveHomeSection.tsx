@@ -13,7 +13,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { UserAvatar } from "../../components/UserAvatar";
-import type { HomePost } from "../../services/api";
+import type { HomePost, ScheduledLive } from "../../services/api";
+import { fetchMyScheduledLives } from "../../services/api";
+import { useAuth } from "../../auth/AuthContext";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
@@ -141,6 +143,7 @@ type LiveHomeSectionProps = {
   joinPostId?: number | null;
   onJoinConsumed?: () => void;
   onOpenCreate?: () => void;
+  onStartScheduledLive?: (schedule: ScheduledLive) => void;
   canDeletePost?: (post: HomePost) => boolean;
   onDeletePost?: (post: HomePost) => void;
   watchingPost?: HomePost | null;
@@ -152,14 +155,17 @@ export function LiveHomeSection({
   joinPostId,
   onJoinConsumed,
   onOpenCreate,
+  onStartScheduledLive,
   canDeletePost,
   onDeletePost,
   watchingPost: watchingPostProp,
   onWatchingChange
 }: LiveHomeSectionProps) {
   const { t, language } = useLanguage();
+  const { token } = useAuth();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const [scheduledLives, setScheduledLives] = React.useState<ScheduledLive[]>([]);
   const [watchingLocal, setWatchingLocal] = React.useState<HomePost | null>(null);
   const watching = watchingPostProp !== undefined ? watchingPostProp : watchingLocal;
   const setWatching = onWatchingChange ?? setWatchingLocal;
@@ -188,12 +194,57 @@ export function LiveHomeSection({
     }
   }, [joinPostId, onJoinConsumed, posts, setWatching]);
 
+  const loadScheduledLives = React.useCallback(() => {
+    if (!token) {
+      setScheduledLives([]);
+      return;
+    }
+    void fetchMyScheduledLives(token)
+      .then((data) => setScheduledLives(Array.isArray(data.scheduledLives) ? data.scheduledLives : []))
+      .catch(() => setScheduledLives([]));
+  }, [token]);
+
+  React.useEffect(() => {
+    loadScheduledLives();
+    if (!token) return;
+    const timer = setInterval(loadScheduledLives, 30000);
+    return () => clearInterval(timer);
+  }, [loadScheduledLives, token]);
+
+  const formatScheduledWhen = (iso: string) => {
+    const ts = Date.parse(iso);
+    if (!Number.isFinite(ts)) return iso;
+    return new Date(ts).toLocaleString();
+  };
+
   return (
     <View style={styles.root}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 88 }]}
       >
+        {scheduledLives.length ? (
+          <View style={styles.scheduledSection}>
+            <Text style={styles.sectionTitle}>{t("scheduleLiveTitle")}</Text>
+            {scheduledLives.map((schedule) => (
+              <View key={`scheduled-${schedule.id}`} style={styles.scheduledCard}>
+                <View style={styles.scheduledCardText}>
+                  <Text style={styles.scheduledTopic} numberOfLines={2}>
+                    {schedule.topic}
+                  </Text>
+                  <Text style={styles.scheduledWhen}>{formatScheduledWhen(schedule.scheduledAt)}</Text>
+                </View>
+                {onStartScheduledLive ? (
+                  <Pressable style={styles.scheduledStartBtn} onPress={() => onStartScheduledLive(schedule)}>
+                    <Ionicons name="videocam" size={14} color="#111" />
+                    <Text style={styles.scheduledStartText}>{t("goLive")}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         <View style={styles.sectionHeadRow}>
           <Text style={styles.sectionTitle}>{t("liveNow")}</Text>
           {onOpenCreate ? (
@@ -289,6 +340,30 @@ const styles = StyleSheet.create({
     borderRadius: 999
   },
   goLiveBtnText: { color: "#111", fontWeight: "800", fontSize: 12 },
+  scheduledSection: { paddingHorizontal: 14, marginBottom: 14, gap: 10 },
+  scheduledCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#252525",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(201,255,53,0.25)"
+  },
+  scheduledCardText: { flex: 1, gap: 4 },
+  scheduledTopic: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  scheduledWhen: { color: "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: "600" },
+  scheduledStartBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: LIME,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999
+  },
+  scheduledStartText: { color: "#111", fontWeight: "900", fontSize: 11 },
   ringsRow: { paddingHorizontal: 12, gap: 14, paddingBottom: 4 },
   ringItem: { width: 72, alignItems: "center" },
   ringOuter: {

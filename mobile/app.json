@@ -21,9 +21,7 @@
       "translucent": false
     },
     "assetBundlePatterns": [
-      "./assets/*.png",
-      "./assets/*.mp4",
-      "./assets/onboarding/**"
+      "./assets/**"
     ],
     "scheme": "agrovibes",
     "android": {
