@@ -710,6 +710,20 @@ export function CreateModal({
     liveDraftPostIdRef.current = null;
     liveServerPostIdRef.current = null;
     setLiveKitHostOpen(false);
+    setLiveKitHostPostId(null);
+    setLiveKitHostRoomName("");
+    setLiveKitHostTitle("");
+    setLiveMode(null);
+    setLiveScheduleTopic("");
+    setLiveScheduleDate("");
+    setLiveScheduleTime("");
+    setShowLiveSetupSheet(false);
+    setShowLiveTitleSheet(false);
+    setShowLiveDatePicker(false);
+    setShowLiveTimePicker(false);
+    setLiveTitleDraft("");
+    setEntryType("story");
+    setCaptureEntryView("camera");
     setCreateType(null);
     setErrorText("");
     setShowCreativeTextPanel(false);
@@ -719,6 +733,11 @@ export function CreateModal({
     setShowAudioPanel(false);
     void stopAudioPreview();
     onClose();
+  };
+
+  const handleHostLiveSessionEnded = (postId: number, update?: Partial<HomePost>) => {
+    onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0, ...update } as HomePost);
+    handleClose();
   };
 
   const startPostFromEntry = () => {
@@ -1205,8 +1224,8 @@ export function CreateModal({
       try {
         const result = await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
         const reminderNote = result.reminderScheduled
-          ? ` Followers will also get a reminder 10 minutes before.`
-          : ` Followers were notified now (no 10-minute reminder because the live is sooner than that).`;
+          ? ` Followers get a reminder 10 minutes before. You will get a reminder at the scheduled time.`
+          : ` Followers were notified now. You will get a reminder at the scheduled time.`;
         Alert.alert("Live scheduled", `Your live is set for ${scheduledAt.toLocaleString()}.${reminderNote}`);
         setShowLiveSetupSheet(false);
         setLiveMode(null);
@@ -1420,8 +1439,8 @@ export function CreateModal({
           }
           const result = await scheduleLiveSession(token, { topic, scheduledAt: scheduledAt.toISOString() });
           const reminderNote = result.reminderScheduled
-            ? ` Followers will also get a reminder 10 minutes before.`
-            : ` Followers were notified now (no 10-minute reminder because the live is sooner than that).`;
+            ? ` Followers get a reminder 10 minutes before. You will get a reminder at the scheduled time.`
+            : ` Followers were notified now. You will get a reminder at the scheduled time.`;
           Alert.alert("Live scheduled", `Your live is set for ${scheduledAt.toLocaleString()}.${reminderNote}`);
           setSubmitting(false);
           setLiveMode(null);
@@ -2545,7 +2564,7 @@ export function CreateModal({
       )}
     </Modal>
 
-    <Modal visible={liveKitHostOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setLiveKitHostOpen(false)}>
+    <Modal visible={liveKitHostOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
       <LiveKitRoomView
         visible={liveKitHostOpen}
         roomName={liveKitHostRoomName}
@@ -2553,13 +2572,8 @@ export function CreateModal({
         postId={liveKitHostPostId ?? undefined}
         title={liveKitHostTitle || "Live stream"}
         initialCameraFacing={liveHostCameraFacing}
-        onLiveEnded={(postId: number, update?: Partial<HomePost>) => {
-          onVideoPosted?.({ id: postId, liveStatus: "ended", liveViewerCount: 0, ...update } as HomePost);
-        }}
-        onClose={() => {
-          setLiveKitHostOpen(false);
-          setLiveKitHostPostId(null);
-        }}
+        onLiveEnded={handleHostLiveSessionEnded}
+        onClose={handleClose}
       />
     </Modal>
 

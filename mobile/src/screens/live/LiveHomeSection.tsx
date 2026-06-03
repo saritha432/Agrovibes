@@ -144,6 +144,7 @@ type LiveHomeSectionProps = {
   onJoinConsumed?: () => void;
   onOpenCreate?: () => void;
   onStartScheduledLive?: (schedule: ScheduledLive) => void;
+  scheduledRefreshKey?: number;
   canDeletePost?: (post: HomePost) => boolean;
   onDeletePost?: (post: HomePost) => void;
   watchingPost?: HomePost | null;
@@ -156,6 +157,7 @@ export function LiveHomeSection({
   onJoinConsumed,
   onOpenCreate,
   onStartScheduledLive,
+  scheduledRefreshKey = 0,
   canDeletePost,
   onDeletePost,
   watchingPost: watchingPostProp,
@@ -206,6 +208,9 @@ export function LiveHomeSection({
 
   React.useEffect(() => {
     loadScheduledLives();
+  }, [loadScheduledLives, scheduledRefreshKey]);
+
+  React.useEffect(() => {
     if (!token) return;
     const timer = setInterval(loadScheduledLives, 30000);
     return () => clearInterval(timer);

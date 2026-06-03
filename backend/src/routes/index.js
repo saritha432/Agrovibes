@@ -2586,7 +2586,9 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         CASE
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
           ELSE false
-        END AS "postIsReel"
+        END AS "postIsReel",
+        p.live_status AS "postLiveStatus",
+        p.live_ended_at AS "postLiveEndedAt"
       FROM social_notifications n
       JOIN learn_users u ON u.id = n.actor_id
       LEFT JOIN social_follows f ON f.id = n.follow_id
@@ -2606,7 +2608,12 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       (r) => (r.type === "post_comment" || r.type === "comment_reply") && !r.isRead
     );
     const liveStarts = result.rows.filter(
-      (r) => (r.type === "live_start" || r.type === "live_scheduled" || r.type === "live_reminder") && !r.isRead
+      (r) =>
+        (r.type === "live_start" ||
+          r.type === "live_scheduled" ||
+          r.type === "live_reminder" ||
+          r.type === "live_host_reminder") &&
+        !r.isRead
     );
     res.json({
       followRequests,
@@ -3426,6 +3433,20 @@ async function handleScheduleLive(req, res) {
     }
 
     const row = saved.rows[0] || {};
+    const scheduleId = Number(row.id);
+    const hostExcerpt = JSON.stringify({
+      topic,
+      scheduledAt: scheduledAtIso,
+      scheduleId: Number.isFinite(scheduleId) && scheduleId > 0 ? scheduleId : undefined
+    });
+    await query(
+      `
+      INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt, created_at)
+      VALUES ($1, $1, NULL, 'live_host_reminder', false, NULL, $2, $3::timestamptz)
+      `,
+      [actorId, hostExcerpt, scheduledAtIso]
+    );
+
     res.status(201).json({
       ok: true,
       id: row.id,
