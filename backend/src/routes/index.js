@@ -18,6 +18,11 @@ const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
 const { isSupabaseStorageConfigured, uploadBufferToSupabase, checkSupabaseStorageHealth } = require("../supabaseStorage");
 const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
+const {
+  isEgressConfigured,
+  startLiveRoomRecording,
+  stopLiveRoomRecordingAndGetVideoUrl
+} = require("../livekitEgress");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -3337,11 +3342,20 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
       return;
     }
     const roomName = `agrovibes-live-${postId}`;
+    const lkCfg = readLiveKitConfig();
+    let savedVideoUrl = null;
+    let savedThumbUrl = null;
+    if (lkCfg.ok) {
+      savedVideoUrl = await stopLiveRoomRecordingAndGetVideoUrl(lkCfg, roomName);
+    }
     await deleteLiveKitRoom(roomName);
     const updated = await query(
       `
       UPDATE home_posts
-      SET live_status = 'ended', live_ended_at = NOW()
+      SET live_status = 'ended',
+          live_ended_at = NOW(),
+          video_url = COALESCE($2, video_url),
+          thumbnail_url = COALESCE($3, thumbnail_url)
       WHERE id = $1
       RETURNING
         id,
@@ -3363,7 +3377,7 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
         live_ended_at AS "liveEndedAt",
         created_at AS "createdAt"
       `,
-      [postId]
+      [postId, savedVideoUrl, savedThumbUrl]
     );
     await cacheIncr("home:posts:gen");
     await invalidateProfilePostsCache(me);
@@ -3567,7 +3581,8 @@ router.get("/v1/live/setup-check", authRequired, async (_req, res) => {
     urlHost: cfg.urlHost || null,
     isCloud: cfg.isCloud,
     apiKeyPrefix: cfg.apiKey ? `${cfg.apiKey.slice(0, 6)}...` : null,
-    issues: cfg.issues
+    issues: cfg.issues,
+    egressRecording: isEgressConfigured()
   });
 });
 
@@ -3612,6 +3627,11 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
       canPublishData: true
     });
     const jwt = await token.toJwt();
+    if (canPublish) {
+      void startLiveRoomRecording(cfg, roomName).catch((err) => {
+        console.warn("[livekit-egress] host start:", err?.message || err);
+      });
+    }
     res.json({
       token: jwt,
       url: cfg.livekitUrl,

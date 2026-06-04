@@ -1146,7 +1146,9 @@ export async function uploadVideoFile(fileUri: string) {
   await assertVideoUnderUploadLimit(fileUri);
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
-  return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, "video/mp4");
+  const mime =
+    ext === ".webm" ? "video/webm" : ext === ".mov" ? "video/quicktime" : ext === ".m4v" ? "video/x-m4v" : "video/mp4";
+  return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, mime);
 }
 
 export async function uploadImageFile(fileUri: string) {

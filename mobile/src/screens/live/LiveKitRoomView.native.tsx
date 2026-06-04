@@ -16,7 +16,7 @@ import {
 } from "@livekit/react-native";
 import { LocalVideoTrack, ConnectionState, RoomEvent, Track, type Participant } from "livekit-client";
 import React from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
 import { createLiveKitToken, endHomeLivePost, formatLiveStreamError, type HomePost } from "../../services/api";
@@ -29,6 +29,7 @@ import {
   type LiveViewer
 } from "./liveRoomData";
 import { saveLiveRecordingToPost } from "./saveLiveRecordingToPost";
+import { startLiveHostRecorder, type LiveHostRecorder } from "./liveHostRecording.native";
 import { setActiveHostRoomName } from "./liveSessionState";
 
 type LiveCameraFacing = "front" | "back";
@@ -42,10 +43,6 @@ type LiveKitRoomViewProps = {
   initialCameraFacing?: LiveCameraFacing;
   onClose?: () => void;
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
-};
-
-type LiveHostRecorder = {
-  stop: () => Promise<string | null>;
 };
 
 function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid: string) {
@@ -139,25 +136,6 @@ function LiveRoomContent({
   }, [status]);
 
   React.useEffect(() => {
-    // Stability-first: disable local host recording while live is running.
-    // On some real devices this extra MediaRecorder pipeline causes camera/publish instability.
-    if (!isHost) return;
-    recorderRef.current = null;
-    return;
-  }, [isHost, room]);
-
-  const viewers = React.useMemo<LiveViewer[]>(
-    () =>
-      buildLiveViewers(
-        isHost,
-        localName,
-        room.localParticipant.identity,
-        [room.localParticipant, ...participants.filter((p) => p.identity !== room.localParticipant.identity)]
-      ),
-    [isHost, localName, participants, room.localParticipant]
-  );
-
-  React.useEffect(() => {
     if (!isHost || liveEnded) return;
     let cancelled = false;
     const publishHostTracks = async () => {
@@ -168,6 +146,12 @@ function LiveRoomContent({
         });
         if (cancelled) return;
         await room.localParticipant.setMicrophoneEnabled(true);
+        if (cancelled || liveEndedRef.current) return;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        if (cancelled || liveEndedRef.current || recorderRef.current) return;
+        if (Platform.OS === "web") {
+          recorderRef.current = startLiveHostRecorder({ room });
+        }
       } catch (error) {
         if (cancelled) return;
         setPublishError(formatLiveStreamError(error));
@@ -183,6 +167,24 @@ function LiveRoomContent({
       room.off(RoomEvent.Reconnected, onReady);
     };
   }, [initialCameraFacing, isHost, liveEnded, room]);
+
+  React.useEffect(() => {
+    return () => {
+      void recorderRef.current?.stop().catch(() => undefined);
+      recorderRef.current = null;
+    };
+  }, []);
+
+  const viewers = React.useMemo<LiveViewer[]>(
+    () =>
+      buildLiveViewers(
+        isHost,
+        localName,
+        room.localParticipant.identity,
+        [room.localParticipant, ...participants.filter((p) => p.identity !== room.localParticipant.identity)]
+      ),
+    [isHost, localName, participants, room.localParticipant]
+  );
 
   const handleLiveEnded = React.useCallback(() => {
     if (liveEndedRef.current) return;
@@ -336,18 +338,25 @@ function LiveRoomContent({
       setStatusText("Saving recording...");
       let savedPost: HomePost | null = null;
       try {
-        const recordingUri = await recorderRef.current?.stop();
-        recorderRef.current = null;
-        if (recordingUri) {
-          savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
+        if (Platform.OS === "web") {
+          const recordingUri = await recorderRef.current?.stop();
+          recorderRef.current = null;
+          if (recordingUri) {
+            savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
+          }
+        }
+        const ended = await endHomeLivePost(token, postId);
+        if (ended.post?.videoUrl) {
+          savedPost = { ...ended.post, liveStatus: "ended", liveViewerCount: 0 };
+        } else if (!savedPost) {
+          setStatusText(
+            Platform.OS === "web"
+              ? "Live ended — replay could not be captured"
+              : "Live ended — replay saves on server (check LIVEKIT_EGRESS_S3 on Render)"
+          );
         }
       } catch {
-        // Continue ending the live even if upload fails.
-      }
-      try {
-        await endHomeLivePost(token, postId);
-      } catch {
-        // Still end the session locally even if the server call fails.
+        setStatusText("Live ended — upload failed");
       }
       onLiveEnded?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
       setSavingRecording(false);
