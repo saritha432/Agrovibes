@@ -241,13 +241,12 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
           savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
           if (recordingUri.startsWith("blob:")) URL.revokeObjectURL(recordingUri);
         }
+        const ended = await endHomeLivePost(token, postId);
+        if (ended.post?.videoUrl) {
+          savedPost = { ...ended.post, liveStatus: "ended", liveViewerCount: 0 };
+        }
       } catch {
         // Continue ending the live even if upload fails.
-      }
-      try {
-        await endHomeLivePost(token, postId);
-      } catch {
-        // Still end the session locally even if the server call fails.
       }
       onLiveEndedRef.current?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
       setSavingRecording(false);

@@ -17,7 +17,7 @@ function pickRecorderMimeType() {
     MediaRecorder?: (typeof MediaRecorder) & { isTypeSupported?: (mimeType: string) => boolean };
   }).MediaRecorder;
   if (!MediaRecorderCtor) return "";
-  const candidates = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+  const candidates = ["video/mp4", "video/webm;codecs=vp8,opus", "video/webm"];
   const supportsType = MediaRecorderCtor.isTypeSupported;
   if (typeof supportsType !== "function") {
     // Some Android/Hermes builds expose MediaRecorder but not isTypeSupported.
