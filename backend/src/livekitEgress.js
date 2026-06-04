@@ -3,6 +3,7 @@ const {
   EncodedFileOutput,
   EncodedFileType,
   EgressStatus,
+  RoomServiceClient,
   S3Upload
 } = require("livekit-server-sdk");
 
@@ -49,8 +50,71 @@ function getEgressClient(cfg) {
   return new EgressClient(liveKitHttpUrl(cfg.livekitUrl), cfg.apiKey, cfg.apiSecret);
 }
 
+function getRoomServiceClient(cfg) {
+  return new RoomServiceClient(liveKitHttpUrl(cfg.livekitUrl), cfg.apiKey, cfg.apiSecret);
+}
+
 function isEgressConfigured() {
   return readEgressS3Config() != null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function egressItems(list) {
+  return Array.isArray(list) ? list : list?.items || [];
+}
+
+function isRetryableEgressStartError(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  return (
+    msg.includes("not found") ||
+    msg.includes("does not exist") ||
+    msg.includes("no participants") ||
+    msg.includes("room does not") ||
+    msg.includes("requested room")
+  );
+}
+
+async function roomReadyForEgress(cfg, roomName) {
+  try {
+    const rooms = await getRoomServiceClient(cfg).listRooms([roomName]);
+    const room = (Array.isArray(rooms) ? rooms : []).find((r) => (r.name || r.room) === roomName);
+    if (!room) return false;
+    const count = Number(room.numParticipants ?? room.num_participants ?? 0);
+    return count > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function findActiveEgressSession(cfg, roomName) {
+  const client = getEgressClient(cfg);
+  let list;
+  try {
+    list = await client.listEgress({ roomName });
+  } catch {
+    return null;
+  }
+  const activeStatuses = new Set([
+    EgressStatus.EGRESS_STARTING,
+    EgressStatus.EGRESS_ACTIVE,
+    EgressStatus.EGRESS_ENDING
+  ]);
+  for (const info of egressItems(list)) {
+    const status = info.status;
+    if (!activeStatuses.has(status)) continue;
+    const egressId = info.egressId || info.egress_id;
+    if (!egressId) continue;
+    const file = info.fileResults?.[0] || info.file_results?.[0];
+    const filepath =
+      file?.filename ||
+      file?.filepath ||
+      `live/${roomName}-${egressId}.mp4`;
+    return { egressId, filepath };
+  }
+  return null;
 }
 
 async function startLiveRoomRecording(cfg, roomName) {
@@ -59,6 +123,13 @@ async function startLiveRoomRecording(cfg, roomName) {
   if (sessionsByRoom.has(roomName)) {
     return sessionsByRoom.get(roomName).egressId;
   }
+
+  const existing = await findActiveEgressSession(cfg, roomName);
+  if (existing) {
+    sessionsByRoom.set(roomName, existing);
+    return existing.egressId;
+  }
+
   const filepath = `live/${roomName}-${Date.now()}.mp4`;
   const output = new EncodedFileOutput({
     fileType: EncodedFileType.MP4,
@@ -72,22 +143,47 @@ async function startLiveRoomRecording(cfg, roomName) {
       forcePathStyle: s3cfg.forcePathStyle
     })
   });
-  try {
-    const client = getEgressClient(cfg);
-    const info = await client.startRoomCompositeEgress(roomName, output);
-    const egressId = info?.egressId || info?.egress_id;
-    if (!egressId) return null;
-    sessionsByRoom.set(roomName, { egressId, filepath });
-    return egressId;
-  } catch (error) {
-    console.warn("[livekit-egress] start failed:", error?.message || error);
-    return null;
+
+  const client = getEgressClient(cfg);
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    if (sessionsByRoom.has(roomName)) {
+      return sessionsByRoom.get(roomName).egressId;
+    }
+    if (!(await roomReadyForEgress(cfg, roomName))) {
+      await sleep(2500);
+      continue;
+    }
+    try {
+      const info = await client.startRoomCompositeEgress(roomName, output);
+      const egressId = info?.egressId || info?.egress_id;
+      if (!egressId) {
+        await sleep(2500);
+        continue;
+      }
+      sessionsByRoom.set(roomName, { egressId, filepath });
+      console.info("[livekit-egress] started", roomName, egressId);
+      return egressId;
+    } catch (error) {
+      if (!isRetryableEgressStartError(error)) {
+        console.warn("[livekit-egress] start failed:", error?.message || error);
+        return null;
+      }
+      await sleep(2500);
+    }
   }
+  console.warn("[livekit-egress] start gave up (room not ready):", roomName);
+  return null;
 }
 
 async function stopLiveRoomRecordingAndGetVideoUrl(cfg, roomName) {
-  const session = sessionsByRoom.get(roomName);
-  if (!session || !cfg?.ok) return null;
+  if (!cfg?.ok) return null;
+  let session = sessionsByRoom.get(roomName);
+  if (!session) {
+    session = await findActiveEgressSession(cfg, roomName);
+    if (session) sessionsByRoom.set(roomName, session);
+  }
+  if (!session) return null;
   const client = getEgressClient(cfg);
   try {
     await client.stopEgress(session.egressId);
@@ -103,7 +199,7 @@ async function stopLiveRoomRecordingAndGetVideoUrl(cfg, roomName) {
     } catch {
       break;
     }
-    const items = Array.isArray(list) ? list : list?.items || [];
+    const items = egressItems(list);
     const info = items[0];
     if (!info) break;
 
