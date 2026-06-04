@@ -132,17 +132,19 @@ async function startLiveRoomRecording(cfg, roomName) {
   }
 
   const filepath = `live/${roomName}-${Date.now()}.mp4`;
+  const s3Upload = new S3Upload({
+    accessKey: s3cfg.accessKey,
+    secret: s3cfg.secret,
+    bucket: s3cfg.bucket,
+    region: s3cfg.region,
+    endpoint: s3cfg.endpoint,
+    forcePathStyle: s3cfg.forcePathStyle
+  });
+  // LiveKit Cloud requires the oneof `output` field (plain `s3:` is stripped from the request).
   const output = new EncodedFileOutput({
     fileType: EncodedFileType.MP4,
     filepath,
-    s3: new S3Upload({
-      accessKey: s3cfg.accessKey,
-      secret: s3cfg.secret,
-      bucket: s3cfg.bucket,
-      region: s3cfg.region,
-      endpoint: s3cfg.endpoint,
-      forcePathStyle: s3cfg.forcePathStyle
-    })
+    output: { case: "s3", value: s3Upload }
   });
 
   const client = getEgressClient(cfg);
