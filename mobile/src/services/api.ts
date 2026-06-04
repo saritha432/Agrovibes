@@ -780,12 +780,34 @@ export async function updateHomePostLiveVideo(
   return { post: sanitizeHomePost(data.post) };
 }
 
+export type LiveRecordingMeta = {
+  saved: boolean;
+  egressConfigured?: boolean;
+  egressStarted?: boolean;
+  egressError?: string | null;
+  message: string;
+};
+
+export async function fetchLiveSetupCheck(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/setup-check`, token, {
+    method: "GET"
+  })) as {
+    configured: boolean;
+    ok: boolean;
+    egressRecording: boolean;
+    issues?: string[];
+  };
+}
+
 export async function endHomeLivePost(token: string, postId: number) {
   const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/end-live`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
-  })) as { post: HomePost };
-  return { post: sanitizeHomePost(data.post) };
+  })) as { post: HomePost; liveRecording?: LiveRecordingMeta };
+  return {
+    post: sanitizeHomePost(data.post),
+    liveRecording: data.liveRecording
+  };
 }
 
 export type ScheduledLive = {
@@ -850,7 +872,7 @@ export async function startLiveServerRecording(token: string, roomName: string) 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ roomName })
-  })) as { started: boolean; egressId?: string | null; egressRecording?: boolean };
+  })) as { started: boolean; egressId?: string | null; egressRecording?: boolean; error?: string | null };
 }
 
 export async function sendFollowRequest(token: string, targetUserId: number) {

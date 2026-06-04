@@ -119,15 +119,16 @@ async function findActiveEgressSession(cfg, roomName) {
 
 async function startLiveRoomRecording(cfg, roomName) {
   const s3cfg = readEgressS3Config();
-  if (!s3cfg || !cfg?.ok) return null;
+  if (!s3cfg) return { egressId: null, error: "egress_s3_not_configured" };
+  if (!cfg?.ok) return { egressId: null, error: "livekit_not_configured" };
   if (sessionsByRoom.has(roomName)) {
-    return sessionsByRoom.get(roomName).egressId;
+    return { egressId: sessionsByRoom.get(roomName).egressId, error: null };
   }
 
   const existing = await findActiveEgressSession(cfg, roomName);
   if (existing) {
     sessionsByRoom.set(roomName, existing);
-    return existing.egressId;
+    return { egressId: existing.egressId, error: null };
   }
 
   const filepath = `live/${roomName}-${Date.now()}.mp4`;
@@ -146,9 +147,10 @@ async function startLiveRoomRecording(cfg, roomName) {
 
   const client = getEgressClient(cfg);
   const deadline = Date.now() + 120000;
+  let lastError = "room_not_ready";
   while (Date.now() < deadline) {
     if (sessionsByRoom.has(roomName)) {
-      return sessionsByRoom.get(roomName).egressId;
+      return { egressId: sessionsByRoom.get(roomName).egressId, error: null };
     }
     if (!(await roomReadyForEgress(cfg, roomName))) {
       await sleep(2500);
@@ -158,22 +160,24 @@ async function startLiveRoomRecording(cfg, roomName) {
       const info = await client.startRoomCompositeEgress(roomName, output);
       const egressId = info?.egressId || info?.egress_id;
       if (!egressId) {
+        lastError = "egress_id_missing";
         await sleep(2500);
         continue;
       }
       sessionsByRoom.set(roomName, { egressId, filepath });
       console.info("[livekit-egress] started", roomName, egressId);
-      return egressId;
+      return { egressId, error: null };
     } catch (error) {
+      lastError = String(error?.message || error || "egress_start_failed");
       if (!isRetryableEgressStartError(error)) {
-        console.warn("[livekit-egress] start failed:", error?.message || error);
-        return null;
+        console.warn("[livekit-egress] start failed:", lastError);
+        return { egressId: null, error: lastError };
       }
       await sleep(2500);
     }
   }
   console.warn("[livekit-egress] start gave up (room not ready):", roomName);
-  return null;
+  return { egressId: null, error: lastError };
 }
 
 async function stopLiveRoomRecordingAndGetVideoUrl(cfg, roomName) {

@@ -16,12 +16,14 @@ import {
 } from "@livekit/react-native";
 import { LocalVideoTrack, ConnectionState, RoomEvent, Track, type Participant } from "livekit-client";
 import React from "react";
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
 import {
+  API_BASE_URL,
   createLiveKitToken,
   endHomeLivePost,
+  fetchLiveSetupCheck,
   formatLiveStreamError,
   startLiveServerRecording,
   type HomePost
@@ -34,8 +36,6 @@ import {
   type LiveComment,
   type LiveViewer
 } from "./liveRoomData";
-import { saveLiveRecordingToPost } from "./saveLiveRecordingToPost";
-import { startLiveHostRecorder, type LiveHostRecorder } from "./liveHostRecording.native";
 import { setActiveHostRoomName } from "./liveSessionState";
 
 type LiveCameraFacing = "front" | "back";
@@ -120,7 +120,6 @@ function LiveRoomContent({
   const participants = useParticipants();
   const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const commentsRef = React.useRef<ScrollView | null>(null);
-  const recorderRef = React.useRef<LiveHostRecorder | null>(null);
   const videoDropTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCloseRef = React.useRef(onClose);
@@ -156,12 +155,20 @@ function LiveRoomContent({
         await room.localParticipant.setMicrophoneEnabled(true);
         if (cancelled || liveEndedRef.current) return;
         await new Promise((resolve) => setTimeout(resolve, 600));
-        if (cancelled || liveEndedRef.current || recorderRef.current) return;
+        if (cancelled || liveEndedRef.current) return;
         if (token) {
-          void startLiveServerRecording(token, roomName).catch(() => undefined);
-        }
-        if (Platform.OS === "web") {
-          recorderRef.current = startLiveHostRecorder({ room });
+          try {
+            const setup = await fetchLiveSetupCheck(token);
+            if (!setup.egressRecording) {
+              setPublishError("API server cannot save live replays — set LIVEKIT_EGRESS_S3 on Render.");
+            }
+            const rec = await startLiveServerRecording(token, roomName);
+            if (!rec.started) {
+              console.warn("[live] start-recording:", rec.error || "not started");
+            }
+          } catch (err) {
+            console.warn("[live] recording setup failed:", err);
+          }
         }
       } catch (error) {
         if (cancelled) return;
@@ -178,13 +185,6 @@ function LiveRoomContent({
       room.off(RoomEvent.Reconnected, onReady);
     };
   }, [initialCameraFacing, isHost, liveEnded, room, roomName, token]);
-
-  React.useEffect(() => {
-    return () => {
-      void recorderRef.current?.stop().catch(() => undefined);
-      recorderRef.current = null;
-    };
-  }, []);
 
   const viewers = React.useMemo<LiveViewer[]>(
     () =>
@@ -332,7 +332,8 @@ function LiveRoomContent({
   }, [commentDraft, liveEnded, localName, room]);
 
   const handleEndLive = React.useCallback(async () => {
-    if (liveEndedRef.current) return;
+    if (liveEndedRef.current || savingRecording) return;
+    liveEndedRef.current = true;
     if (isHost) {
       try {
         await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
@@ -347,40 +348,37 @@ function LiveRoomContent({
     if (isHost && postId && token) {
       setSavingRecording(true);
       setStatusText("Saving recording...");
+      await new Promise((resolve) => setTimeout(resolve, 80));
       let savedPost: HomePost | null = null;
+      let resultMessage = "Recording was not saved for this live.";
       try {
-        if (Platform.OS === "web") {
-          const recordingUri = await recorderRef.current?.stop();
-          recorderRef.current = null;
-          if (recordingUri) {
-            savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
-          }
-        }
         const ended = await endHomeLivePost(token, postId);
         if (ended.post?.videoUrl) {
           savedPost = { ...ended.post, liveStatus: "ended", liveViewerCount: 0 };
+          resultMessage = "Recording saved.";
+        } else if (ended.liveRecording?.message) {
+          resultMessage = ended.liveRecording.message;
         } else if (!savedPost) {
-          setStatusText(
-            Platform.OS === "web"
-              ? "Live ended — replay could not be captured"
-              : "Live ended — replay saves on server (check LIVEKIT_EGRESS_S3 on Render)"
-          );
+          resultMessage = "Recording was not saved for this live.";
         }
       } catch {
-        setStatusText("Live ended — upload failed");
+        resultMessage = "Live ended — save failed";
       }
-      onLiveEnded?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
       setSavingRecording(false);
-    }
-    if (isHost) {
+      setStatusText(resultMessage);
+      setLiveEnded(true);
       try {
         room.disconnect();
       } catch {
         // no-op
       }
+      onLiveEnded?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      onCloseRef.current?.();
+      return;
     }
     handleLiveEnded();
-  }, [handleLiveEnded, isHost, onLiveEnded, postId, room, token]);
+  }, [handleLiveEnded, isHost, onLiveEnded, postId, room, savingRecording, token]);
 
   const cameraRefs = tracks.filter((track): track is TrackReference => isTrackReference(track));
   const cameraTrack = pickLiveCameraTrack(cameraRefs, isHost, localSid);
@@ -402,10 +400,21 @@ function LiveRoomContent({
           <Text style={styles.videoPlaceholderText}>{isHost ? "Starting camera..." : "Waiting for host..."}</Text>
         </View>
       )}
-      {liveEnded ? (
+      {savingRecording ? (
         <View style={styles.endedOverlay}>
-          <Text style={styles.endedTitle}>Live ended</Text>
-          <Text style={styles.endedSub}>Thanks for watching</Text>
+          <ActivityIndicator color={APP_LIME} size="large" />
+          <Text style={[styles.endedTitle, { marginTop: 16 }]}>Saving recording...</Text>
+          <Text style={styles.endedSub}>Please wait while your live is saved</Text>
+        </View>
+      ) : liveEnded ? (
+        <View style={styles.endedOverlay}>
+          <Ionicons
+            name={statusText.includes("saved") && !statusText.includes("not") ? "checkmark-circle" : "alert-circle-outline"}
+            size={48}
+            color={statusText.includes("saved") && !statusText.includes("not") ? APP_LIME : "#ff6b6b"}
+          />
+          <Text style={[styles.endedTitle, { marginTop: 12 }]}>Live ended</Text>
+          <Text style={styles.endedSub}>{statusText}</Text>
         </View>
       ) : null}
       <View style={[styles.topBar, { top: insets.top + 8 }]}>
@@ -570,7 +579,8 @@ export function LiveKitRoomView({
           ]);
           const cameraGranted = cameraPerm.granted ? "granted" : "denied";
           const micGranted = micPerm.granted ? "granted" : "denied";
-          setDebugInfo(`room=${roomName} post=${postId ?? "-"} host=yes cam=${cameraGranted} mic=${micGranted}`);
+          const apiHost = API_BASE_URL.replace(/^https?:\/\//, "").split("/")[0];
+          setDebugInfo(`api=${apiHost} room=${roomName} post=${postId ?? "-"} cam=${cameraGranted} mic=${micGranted}`);
           if (!cameraPerm.granted || !micPerm.granted) {
             setErrorText("Camera and microphone permissions are required to go live.");
             setStatus(`Permission blocked (cam=${cameraGranted}, mic=${micGranted})`);
