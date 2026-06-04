@@ -19,7 +19,13 @@ import React from "react";
 import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, endHomeLivePost, formatLiveStreamError, type HomePost } from "../../services/api";
+import {
+  createLiveKitToken,
+  endHomeLivePost,
+  formatLiveStreamError,
+  startLiveServerRecording,
+  type HomePost
+} from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import {
   encodeLiveDataMessage,
@@ -89,6 +95,7 @@ function buildLiveViewers(
 
 function LiveRoomContent({
   isHost,
+  roomName,
   title,
   postId,
   initialCameraFacing = "front",
@@ -98,6 +105,7 @@ function LiveRoomContent({
   status
 }: {
   isHost: boolean;
+  roomName: string;
   title: string;
   postId?: number;
   initialCameraFacing?: LiveCameraFacing;
@@ -149,6 +157,9 @@ function LiveRoomContent({
         if (cancelled || liveEndedRef.current) return;
         await new Promise((resolve) => setTimeout(resolve, 600));
         if (cancelled || liveEndedRef.current || recorderRef.current) return;
+        if (token) {
+          void startLiveServerRecording(token, roomName).catch(() => undefined);
+        }
         if (Platform.OS === "web") {
           recorderRef.current = startLiveHostRecorder({ room });
         }
@@ -166,7 +177,7 @@ function LiveRoomContent({
       room.off(RoomEvent.Connected, onReady);
       room.off(RoomEvent.Reconnected, onReady);
     };
-  }, [initialCameraFacing, isHost, liveEnded, room]);
+  }, [initialCameraFacing, isHost, liveEnded, room, roomName, token]);
 
   React.useEffect(() => {
     return () => {
@@ -636,6 +647,7 @@ export function LiveKitRoomView({
     >
       <LiveRoomContent
         isHost={isHost}
+        roomName={roomName}
         title={title}
         postId={postId}
         initialCameraFacing={initialCameraFacing}

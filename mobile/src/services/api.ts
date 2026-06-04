@@ -20,13 +20,8 @@ function resolveApiBaseUrl() {
     return PRODUCTION_API_BASE_URL;
   }
 
-  // Native binaries (APK / IPA) — when no env var is baked in, always hit production.
-  // We used to fall back to http://10.0.2.2:5000 here, but that's emulator-only and
-  // causes "Network Error" on real devices, so production is the safe default.
-  if (__DEV__) {
-    if (Platform.OS === "android") return "http://10.0.2.2:5000/api";
-    return "http://localhost:5000/api";
-  }
+  // Native (dev + release): default to production so real devices use Render egress.
+  // Local backend on emulator: EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:5000/api in mobile/.env
   return PRODUCTION_API_BASE_URL;
 }
 
@@ -847,6 +842,15 @@ export async function createLiveKitToken(token: string, payload: { roomName: str
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { token: string; url: string; roomName: string; identity: string; name: string };
+}
+
+/** Ask the server to start LiveKit room composite egress (phone replay). */
+export async function startLiveServerRecording(token: string, roomName: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/live/start-recording`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roomName })
+  })) as { started: boolean; egressId?: string | null; egressRecording?: boolean };
 }
 
 export async function sendFollowRequest(token: string, targetUserId: number) {

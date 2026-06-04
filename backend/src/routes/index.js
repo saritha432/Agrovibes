@@ -3346,7 +3346,17 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
     let savedVideoUrl = null;
     let savedThumbUrl = null;
     if (lkCfg.ok) {
+      if (isEgressConfigured()) {
+        await startLiveRoomRecording(lkCfg, roomName);
+      }
       savedVideoUrl = await stopLiveRoomRecordingAndGetVideoUrl(lkCfg, roomName);
+      if (!savedVideoUrl) {
+        console.warn("[livekit-egress] end-live no video", {
+          postId,
+          roomName,
+          egressConfigured: isEgressConfigured()
+        });
+      }
     }
     await deleteLiveKitRoom(roomName);
     const updated = await query(
@@ -3584,6 +3594,32 @@ router.get("/v1/live/setup-check", authRequired, async (_req, res) => {
     issues: cfg.issues,
     egressRecording: isEgressConfigured()
   });
+});
+
+router.post("/v1/live/start-recording", authRequired, async (req, res) => {
+  try {
+    const cfg = readLiveKitConfig();
+    if (!cfg.ok) {
+      res.status(503).json({
+        message: cfg.issues[0] || "LiveKit is not configured.",
+        issues: cfg.issues
+      });
+      return;
+    }
+    const roomName = String(req.body?.roomName || "").trim().slice(0, 120);
+    if (!roomName || !/^[a-zA-Z0-9_-]+$/.test(roomName)) {
+      res.status(400).json({ message: "Valid roomName is required" });
+      return;
+    }
+    if (!isEgressConfigured()) {
+      res.json({ started: false, egressRecording: false, egressId: null });
+      return;
+    }
+    const egressId = await startLiveRoomRecording(cfg, roomName);
+    res.json({ started: !!egressId, egressId: egressId || null, egressRecording: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to start live recording", error: error.message });
+  }
 });
 
 router.post("/v1/live/token", authRequired, async (req, res) => {

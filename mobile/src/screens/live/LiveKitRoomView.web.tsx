@@ -3,7 +3,13 @@ import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { createLocalTracks, Room, RoomEvent, Track } from "livekit-client";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, endHomeLivePost, formatLiveStreamError, type HomePost } from "../../services/api";
+import {
+  createLiveKitToken,
+  endHomeLivePost,
+  formatLiveStreamError,
+  startLiveServerRecording,
+  type HomePost
+} from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import { startLiveHostRecorder, type LiveHostRecorder } from "./liveHostRecording";
 import {
@@ -171,6 +177,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
             }
           }
           recorderRef.current = startLiveHostRecorder({ tracks });
+          void startLiveServerRecording(token, roomName).catch(() => undefined);
           setStatus("You are live now");
         } else {
           room.remoteParticipants.forEach((participant) => {
