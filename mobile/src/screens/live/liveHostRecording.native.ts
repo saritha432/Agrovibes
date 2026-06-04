@@ -19,12 +19,11 @@ function pickRecorderMimeType() {
   if (!MediaRecorderCtor) return "";
   const candidates = ["video/mp4", "video/webm;codecs=vp8,opus", "video/webm"];
   const supportsType = MediaRecorderCtor.isTypeSupported;
-  if (typeof supportsType !== "function") {
-    // Some Android/Hermes builds expose MediaRecorder but not isTypeSupported.
-    // Return empty so caller safely skips recording instead of crashing.
-    return "";
+  if (typeof supportsType === "function") {
+    return candidates.find((type) => supportsType(type)) || "";
   }
-  return candidates.find((type) => supportsType(type)) || "";
+  // Hermes/Android often has MediaRecorder without isTypeSupported — try webm.
+  return "video/webm";
 }
 
 function buildStreamFromTracks(tracks: LocalTrack[]) {
@@ -58,11 +57,24 @@ export function startLiveHostRecorder(input: StartLiveHostRecorderInput): LiveHo
   if (!stream) return null;
 
   const chunks: BlobPart[] = [];
-  const recorder = new MediaRecorderCtor(stream as unknown as MediaStream, { mimeType });
+  let recorder: InstanceType<typeof MediaRecorderCtor>;
+  try {
+    recorder = new MediaRecorderCtor(stream as unknown as MediaStream, { mimeType });
+  } catch {
+    try {
+      recorder = new MediaRecorderCtor(stream as unknown as MediaStream);
+    } catch {
+      return null;
+    }
+  }
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
-  recorder.start(1000);
+  try {
+    recorder.start(1000);
+  } catch {
+    return null;
+  }
 
   return {
     stop: () =>

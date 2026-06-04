@@ -3345,8 +3345,27 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
     const lkCfg = readLiveKitConfig();
     let savedVideoUrl = null;
     let savedThumbUrl = null;
+    let egressStarted = false;
+    let egressError = null;
+    const egressConfigured = isEgressConfigured();
     if (lkCfg.ok) {
+      if (egressConfigured) {
+        const startResult = await startLiveRoomRecording(lkCfg, roomName);
+        egressStarted = !!startResult?.egressId;
+        egressError = startResult?.error || null;
+      } else {
+        egressError = "egress_s3_not_configured";
+      }
       savedVideoUrl = await stopLiveRoomRecordingAndGetVideoUrl(lkCfg, roomName);
+      if (!savedVideoUrl) {
+        console.warn("[livekit-egress] end-live no video", {
+          postId,
+          roomName,
+          egressConfigured,
+          egressStarted,
+          egressError
+        });
+      }
     }
     await deleteLiveKitRoom(roomName);
     const updated = await query(
@@ -3384,7 +3403,26 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
     const post = normalizeHomePostRow(updated.rows[0]);
     post.liveStatus = "ended";
     post.liveViewerCount = 0;
-    res.json({ post });
+    const recordingSaved = !!String(post.videoUrl || "").trim();
+    let recordingMessage = recordingSaved
+      ? "Recording saved."
+      : "Recording was not saved for this live.";
+    if (!recordingSaved && !egressConfigured) {
+      recordingMessage =
+        "Recording was not saved — add LIVEKIT_EGRESS_S3_* and SUPABASE_URL on the API server (Render env).";
+    } else if (!recordingSaved && egressError) {
+      recordingMessage = `Recording was not saved — server error: ${egressError}`;
+    }
+    res.json({
+      post,
+      liveRecording: {
+        saved: recordingSaved,
+        egressConfigured,
+        egressStarted,
+        egressError,
+        message: recordingMessage
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to end live", error: error.message });
   }
@@ -3586,6 +3624,37 @@ router.get("/v1/live/setup-check", authRequired, async (_req, res) => {
   });
 });
 
+router.post("/v1/live/start-recording", authRequired, async (req, res) => {
+  try {
+    const cfg = readLiveKitConfig();
+    if (!cfg.ok) {
+      res.status(503).json({
+        message: cfg.issues[0] || "LiveKit is not configured.",
+        issues: cfg.issues
+      });
+      return;
+    }
+    const roomName = String(req.body?.roomName || "").trim().slice(0, 120);
+    if (!roomName || !/^[a-zA-Z0-9_-]+$/.test(roomName)) {
+      res.status(400).json({ message: "Valid roomName is required" });
+      return;
+    }
+    if (!isEgressConfigured()) {
+      res.json({ started: false, egressRecording: false, egressId: null });
+      return;
+    }
+    const startResult = await startLiveRoomRecording(cfg, roomName);
+    res.json({
+      started: !!startResult?.egressId,
+      egressId: startResult?.egressId || null,
+      egressRecording: true,
+      error: startResult?.error || null
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to start live recording", error: error.message });
+  }
+});
+
 router.post("/v1/live/token", authRequired, async (req, res) => {
   try {
     const cfg = readLiveKitConfig();
@@ -3628,8 +3697,10 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
     });
     const jwt = await token.toJwt();
     if (canPublish) {
-      void startLiveRoomRecording(cfg, roomName).catch((err) => {
-        console.warn("[livekit-egress] host start:", err?.message || err);
+      void startLiveRoomRecording(cfg, roomName).then((result) => {
+        if (!result?.egressId) {
+          console.warn("[livekit-egress] host start:", result?.error || "unknown");
+        }
       });
     }
     res.json({
