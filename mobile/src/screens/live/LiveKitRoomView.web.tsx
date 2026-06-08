@@ -3,7 +3,13 @@ import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { createLocalTracks, Room, RoomEvent, Track } from "livekit-client";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, endHomeLivePost, formatLiveStreamError, type HomePost } from "../../services/api";
+import {
+  createLiveKitToken,
+  endHomeLivePost,
+  formatLiveStreamError,
+  startLiveServerRecording,
+  type HomePost
+} from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import { startLiveHostRecorder, type LiveHostRecorder } from "./liveHostRecording";
 import {
@@ -171,6 +177,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
             }
           }
           recorderRef.current = startLiveHostRecorder({ tracks });
+          void startLiveServerRecording(token, roomName).catch(() => undefined);
           setStatus("You are live now");
         } else {
           room.remoteParticipants.forEach((participant) => {
@@ -230,10 +237,13 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
 
   const handleEndLive = React.useCallback(async () => {
     const room = roomRef.current;
+    if (savingRecording) return;
     if (isHostRef.current && postId && token) {
       setSavingRecording(true);
       setStatus("Saving recording...");
+      await new Promise((resolve) => setTimeout(resolve, 80));
       let savedPost: HomePost | null = null;
+      let resultMessage = "Recording was not saved for this live.";
       try {
         const recordingUri = await recorderRef.current?.stop();
         recorderRef.current = null;
@@ -241,42 +251,38 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
           savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
           if (recordingUri.startsWith("blob:")) URL.revokeObjectURL(recordingUri);
         }
+        const ended = await endHomeLivePost(token, postId);
+        if (ended.post?.videoUrl) {
+          savedPost = { ...ended.post, liveStatus: "ended", liveViewerCount: 0 };
+          resultMessage = "Recording saved.";
+        }
       } catch {
-        // Continue ending the live even if upload fails.
+        resultMessage = "Live ended — save failed";
       }
-      try {
-        await endHomeLivePost(token, postId);
-      } catch {
-        // Still end the session locally even if the server call fails.
-      }
-      onLiveEndedRef.current?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
       setSavingRecording(false);
-    }
-    if (isHostRef.current && room) {
-      try {
-        await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
-          reliable: true,
-          topic: "live-chat"
-        });
-      } catch {
-        // Still disconnect even if broadcast fails.
-      }
-      localTracksRef.current.forEach((track) => {
+      setStatus(resultMessage);
+      setLiveEnded(true);
+      if (room) {
         try {
-          track.stop?.();
+          await room.localParticipant.publishData(encodeLiveDataMessage({ type: "live_ended" }), {
+            reliable: true,
+            topic: "live-chat"
+          });
         } catch {
           // no-op
         }
-      });
-      localTracksRef.current = [];
-      recorderRef.current = null;
-      try {
-        await room.localParticipant.setCameraEnabled(false);
-        await room.localParticipant.setMicrophoneEnabled(false);
-      } catch {
-        // no-op
+        try {
+          room.disconnect();
+        } catch {
+          // no-op
+        }
       }
-      if (videoHostRef.current) videoHostRef.current.innerHTML = "";
+      onLiveEndedRef.current?.(postId, savedPost ?? { id: postId, liveStatus: "ended", liveViewerCount: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      onCloseRef.current?.();
+      return;
+    }
+    if (isHostRef.current && room) {
       try {
         room.disconnect();
       } catch {
@@ -284,7 +290,7 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       }
     }
     onCloseRef.current?.();
-  }, [postId, token]);
+  }, [postId, savingRecording, token]);
 
   const watchingCount = liveViewerCount(viewers, isHost);
 
@@ -305,10 +311,15 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
           backgroundColor: "#000"
         }}
       />
-      {liveEnded ? (
+      {savingRecording ? (
+        <View style={styles.endedOverlay}>
+          <Text style={styles.endedTitle}>Saving recording...</Text>
+          <Text style={styles.endedSub}>Please wait while your live is saved</Text>
+        </View>
+      ) : liveEnded ? (
         <View style={styles.endedOverlay}>
           <Text style={styles.endedTitle}>Live ended</Text>
-          <Text style={styles.endedSub}>Thanks for watching</Text>
+          <Text style={styles.endedSub}>{status}</Text>
         </View>
       ) : null}
       <View style={styles.topBar}>
