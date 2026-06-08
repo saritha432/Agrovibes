@@ -19,7 +19,12 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
-export function AppTopBar() {
+type AppTopBarProps = {
+  showSearch?: boolean;
+  showMessages?: boolean;
+};
+
+export function AppTopBar({ showSearch = true, showMessages = true }: AppTopBarProps) {
   const { user } = useAuth();
   const { openNotificationSheet, notificationUnreadCount, messageUnreadCount } = useNotificationPanel();
 
@@ -27,13 +32,17 @@ export function AppTopBar() {
     <View style={styles.topBar}>
       <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
       <View style={styles.rightSide}>
-        <Pressable style={styles.iconBadge} onPress={navigateToUserSearch}>
-          <Ionicons name="search-outline" size={16} color={APP_LIME} />
-        </Pressable>
-        <Pressable style={styles.iconBadge} onPress={navigateToDirectInbox}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color={APP_LIME} />
-          {messageUnreadCount > 0 ? <CountBadge count={messageUnreadCount} /> : null}
-        </Pressable>
+        {showSearch ? (
+          <Pressable style={styles.iconBadge} onPress={navigateToUserSearch}>
+            <Ionicons name="search-outline" size={16} color={APP_LIME} />
+          </Pressable>
+        ) : null}
+        {showMessages ? (
+          <Pressable style={styles.iconBadge} onPress={navigateToDirectInbox}>
+            <Ionicons name="chatbubble-ellipses-outline" size={16} color={APP_LIME} />
+            {messageUnreadCount > 0 ? <CountBadge count={messageUnreadCount} /> : null}
+          </Pressable>
+        ) : null}
         <Pressable style={styles.iconBadge} onPress={openNotificationSheet}>
           <Ionicons name="notifications-outline" size={16} color={APP_LIME} />
           {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}

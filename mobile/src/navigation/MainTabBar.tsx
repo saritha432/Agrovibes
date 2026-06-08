@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "../localization/LanguageContext";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
 
-type Props = BottomTabBarProps & { onCreatePress: () => void };
+type Props = BottomTabBarProps & { onCreatePress: () => void; createFocused?: boolean };
 
 const TAB_BG = APP_BLACK;
 const MUTED = "#b9bec3";
@@ -16,18 +16,22 @@ const TAB_ICON_SIZE = 24;
 
 type SvgIconModule = number | string | { uri?: string; default?: string };
 
-const TAB_SVG_ICONS: Record<"Market" | "Learn" | "Services", { active: SvgIconModule; inactive: SvgIconModule }> = {
+const TAB_SVG_ICONS: Record<"Market" | "Learn" | "Services" | "Create", { active: SvgIconModule; inactive: SvgIconModule }> = {
   Market: {
-    active: require("../../assets/market-active.svg"),
-    inactive: require("../../assets/market.svg")
+    active: require("../../assets/bottom-icons/market-active.svg"),
+    inactive: require("../../assets/bottom-icons/market.svg")
   },
   Learn: {
-    active: require("../../assets/learn-active.svg"),
-    inactive: require("../../assets/learn.svg")
+    active: require("../../assets/bottom-icons/learn-active.svg"),
+    inactive: require("../../assets/bottom-icons/learn.svg")
   },
   Services: {
-    active: require("../../assets/community-active.svg"),
-    inactive: require("../../assets/community.svg")
+    active: require("../../assets/bottom-icons/community-active.svg"),
+    inactive: require("../../assets/bottom-icons/community.svg")
+  },
+  Create: {
+    active: require("../../assets/bottom-icons/create-active.svg"),
+    inactive: require("../../assets/bottom-icons/create.svg")
   }
 };
 
@@ -47,9 +51,13 @@ function iconModuleToUri(module: SvgIconModule): string | null {
   return null;
 }
 
-function fallbackIconName(routeName: "Market" | "Learn" | "Services", focused: boolean): keyof typeof Ionicons.glyphMap {
+function fallbackIconName(
+  routeName: "Market" | "Learn" | "Services" | "Create",
+  focused: boolean
+): keyof typeof Ionicons.glyphMap {
   if (routeName === "Market") return focused ? "storefront" : "storefront-outline";
   if (routeName === "Learn") return focused ? "book" : "book-outline";
+  if (routeName === "Create") return focused ? "add-circle" : "add-circle-outline";
   return focused ? "grid" : "grid-outline";
 }
 
@@ -58,7 +66,7 @@ function TabSvgIcon({
   focused,
   size = 15
 }: {
-  routeName: "Market" | "Learn" | "Services";
+  routeName: "Market" | "Learn" | "Services" | "Create";
   focused: boolean;
   size?: number;
 }) {
@@ -147,7 +155,7 @@ function TabSlot({ focused, onPress, accessibilityLabel, label, children }: TabS
   );
 }
 
-export function MainTabBar({ state, navigation, onCreatePress }: Props) {
+export function MainTabBar({ state, navigation, onCreatePress, createFocused = false }: Props) {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
@@ -196,8 +204,7 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
             <Image
               source={require("../../assets/crop vibe.png")}
               style={[styles.logoImage, homeFocused ? styles.logoImageActive : styles.logoImageMuted]}
-              resizeMode="contain"
-            />
+              resizeMode="contain"/>
           </View>
         </TabSlot>
 
@@ -205,13 +212,17 @@ export function MainTabBar({ state, navigation, onCreatePress }: Props) {
           focused={marketFocused}
           onPress={() => pressRoute("Market")}
           accessibilityLabel={t("tabMarket")}
-          label={t("tabMarket")}
-        >
+          label={t("tabMarket")}>
           <TabSvgIcon routeName="Market" focused={marketFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
 
-        <TabSlot focused={false} onPress={onCreatePress} accessibilityLabel={t("tabCreate")} label={t("tabCreate")}>
-          <Ionicons name="add-circle-outline" size={TAB_ICON_SIZE} color={MUTED} />
+        <TabSlot
+          focused={createFocused}
+          onPress={onCreatePress}
+          accessibilityLabel={t("tabCreate")}
+          label={t("tabCreate")}
+        >
+          <TabSvgIcon routeName="Create" focused={createFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
 
         <TabSlot

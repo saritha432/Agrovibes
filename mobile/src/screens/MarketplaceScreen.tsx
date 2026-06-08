@@ -176,6 +176,9 @@ export function MarketplaceScreen() {
   const listHeader = (
     <>
       <View style={styles.topBar}>
+        <Pressable style={styles.iconBtn} onPress={() => navigation.goBack()} accessibilityLabel="Back">
+          <Ionicons name="chevron-back" size={22} color="#1f2c29" />
+        </Pressable>
         <View style={styles.locationRow}>
           <View style={styles.logoDot} />
           <View style={styles.locationChip}>

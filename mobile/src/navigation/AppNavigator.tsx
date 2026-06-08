@@ -49,6 +49,7 @@ export function AppNavigator() {
         tabBar={(props) => (
           <MainTabBar
             {...props}
+            createFocused={isCreateOpen}
             onCreatePress={() => {
               setCreatePresetType(null);
               setCreateOpen(true);
