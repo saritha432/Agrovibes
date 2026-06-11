@@ -176,8 +176,9 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
               attachTrack(track, videoHostRef.current);
             }
           }
-          recorderRef.current = startLiveHostRecorder({ tracks });
-          void startLiveServerRecording(token, roomName).catch(() => undefined);
+          // RESTORE WHEN SUPABASE PAID — uncomment two lines below (live replay → Supabase egress).
+          // recorderRef.current = startLiveHostRecorder({ tracks });
+          // void startLiveServerRecording(token, roomName).catch(() => undefined);
           setStatus("You are live now");
         } else {
           room.remoteParticipants.forEach((participant) => {
@@ -245,12 +246,15 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
       let savedPost: HomePost | null = null;
       let resultMessage = "Recording was not saved for this live.";
       try {
-        const recordingUri = await recorderRef.current?.stop();
+        // RESTORE WHEN SUPABASE PAID — uncomment block below (upload live replay to Supabase).
+        // const recordingUri = await recorderRef.current?.stop();
+        // recorderRef.current = null;
+        // if (recordingUri) {
+        //   savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
+        //   if (recordingUri.startsWith("blob:")) URL.revokeObjectURL(recordingUri);
+        // }
+        recorderRef.current?.stop();
         recorderRef.current = null;
-        if (recordingUri) {
-          savedPost = await saveLiveRecordingToPost(token, postId, recordingUri);
-          if (recordingUri.startsWith("blob:")) URL.revokeObjectURL(recordingUri);
-        }
         const ended = await endHomeLivePost(token, postId);
         if (ended.post?.videoUrl) {
           savedPost = { ...ended.post, liveStatus: "ended", liveViewerCount: 0 };

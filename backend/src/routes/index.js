@@ -3348,25 +3348,26 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
     let egressStarted = false;
     let egressError = null;
     const egressConfigured = isEgressConfigured();
-    if (lkCfg.ok) {
-      if (egressConfigured) {
-        const startResult = await startLiveRoomRecording(lkCfg, roomName);
-        egressStarted = !!startResult?.egressId;
-        egressError = startResult?.error || null;
-      } else {
-        egressError = "egress_s3_not_configured";
-      }
-      savedVideoUrl = await stopLiveRoomRecordingAndGetVideoUrl(lkCfg, roomName);
-      if (!savedVideoUrl) {
-        console.warn("[livekit-egress] end-live no video", {
-          postId,
-          roomName,
-          egressConfigured,
-          egressStarted,
-          egressError
-        });
-      }
-    }
+    // RESTORE WHEN SUPABASE PAID — uncomment block below (LiveKit egress → Supabase storage).
+    // if (lkCfg.ok) {
+    //   if (egressConfigured) {
+    //     const startResult = await startLiveRoomRecording(lkCfg, roomName);
+    //     egressStarted = !!startResult?.egressId;
+    //     egressError = startResult?.error || null;
+    //   } else {
+    //     egressError = "egress_s3_not_configured";
+    //   }
+    //   savedVideoUrl = await stopLiveRoomRecordingAndGetVideoUrl(lkCfg, roomName);
+    //   if (!savedVideoUrl) {
+    //     console.warn("[livekit-egress] end-live no video", {
+    //       postId,
+    //       roomName,
+    //       egressConfigured,
+    //       egressStarted,
+    //       egressError
+    //     });
+    //   }
+    // }
     await deleteLiveKitRoom(roomName);
     const updated = await query(
       `
@@ -3639,17 +3640,20 @@ router.post("/v1/live/start-recording", authRequired, async (req, res) => {
       res.status(400).json({ message: "Valid roomName is required" });
       return;
     }
-    if (!isEgressConfigured()) {
-      res.json({ started: false, egressRecording: false, egressId: null });
-      return;
-    }
-    const startResult = await startLiveRoomRecording(cfg, roomName);
-    res.json({
-      started: !!startResult?.egressId,
-      egressId: startResult?.egressId || null,
-      egressRecording: true,
-      error: startResult?.error || null
-    });
+    res.json({ started: false, egressRecording: false, egressId: null });
+    return;
+    // RESTORE WHEN SUPABASE PAID — uncomment block below (remove early return above).
+    // if (!isEgressConfigured()) {
+    //   res.json({ started: false, egressRecording: false, egressId: null });
+    //   return;
+    // }
+    // const startResult = await startLiveRoomRecording(cfg, roomName);
+    // res.json({
+    //   started: !!startResult?.egressId,
+    //   egressId: startResult?.egressId || null,
+    //   egressRecording: true,
+    //   error: startResult?.error || null
+    // });
   } catch (error) {
     res.status(500).json({ message: "Failed to start live recording", error: error.message });
   }
@@ -3696,13 +3700,14 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
       canPublishData: true
     });
     const jwt = await token.toJwt();
-    if (canPublish) {
-      void startLiveRoomRecording(cfg, roomName).then((result) => {
-        if (!result?.egressId) {
-          console.warn("[livekit-egress] host start:", result?.error || "unknown");
-        }
-      });
-    }
+    // RESTORE WHEN SUPABASE PAID — uncomment block below (host live egress → Supabase).
+    // if (canPublish) {
+    //   void startLiveRoomRecording(cfg, roomName).then((result) => {
+    //     if (!result?.egressId) {
+    //       console.warn("[livekit-egress] host start:", result?.error || "unknown");
+    //     }
+    //   });
+    // }
     res.json({
       token: jwt,
       url: cfg.livekitUrl,
