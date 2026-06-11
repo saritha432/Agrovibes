@@ -1,7 +1,7 @@
 import React from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
@@ -37,7 +37,15 @@ export function AuthChoiceScreen() {
   const { t } = useLanguage();
   const initialMode = route.params?.initialMode === "login" ? "login" : "register";
   const [mode, setMode] = React.useState<"register" | "login">(initialMode);
-  const [loginPhone, setLoginPhone] = React.useState("");
+  const [loginPhone, setLoginPhone] = React.useState(() => {
+    const preset = route.params?.loginPhone;
+    if (!preset) return "";
+    const digits = preset.replace(/\D/g, "");
+    return digits.length >= 10 ? digits.slice(-10) : digits;
+  });
+  const [successText, setSuccessText] = React.useState(
+    route.params?.passwordResetSuccess ? t("passwordResetSuccessMessage") : ""
+  );
   const [loginPassword, setLoginPassword] = React.useState("");
   const [registerPhone, setRegisterPhone] = React.useState("");
   const [registerPassword, setRegisterPassword] = React.useState("");
@@ -46,6 +54,21 @@ export function AuthChoiceScreen() {
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (route.params?.initialMode === "login") setMode("login");
+      if (route.params?.passwordResetSuccess) {
+        setSuccessText(t("passwordResetSuccessMessage"));
+        setMode("login");
+      }
+      const preset = route.params?.loginPhone;
+      if (preset) {
+        const digits = preset.replace(/\D/g, "");
+        if (digits.length >= 10) setLoginPhone(digits.slice(-10));
+      }
+    }, [route.params?.initialMode, route.params?.loginPhone, route.params?.passwordResetSuccess, t])
+  );
 
   const phone = mode === "login" ? loginPhone : registerPhone;
   const setPhoneRaw = mode === "login" ? setLoginPhone : setRegisterPhone;
@@ -118,6 +141,7 @@ export function AuthChoiceScreen() {
           onPress={() => {
             setMode("register");
             setErrorText("");
+            setSuccessText("");
           }}
         >
           <Text style={[styles.modeSegmentText, mode === "register" ? styles.modeSegmentTextActive : null]}>{t("getStarted")}</Text>
@@ -134,6 +158,7 @@ export function AuthChoiceScreen() {
       </View>
 
       <View style={styles.card}>
+        {successText ? <Text style={styles.successBanner}>{successText}</Text> : null}
         {mode === "register" ? (
           <>
             <TextInput
@@ -304,6 +329,18 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: "#1b1f23", fontWeight: "900", fontSize: 13 },
   helperText: { marginTop: 10, color: "#8b98a1", fontSize: 11, fontWeight: "600" },
   errorText: { marginTop: 10, color: "#ff6b6b", fontSize: 12, fontWeight: "700" },
+  successBanner: {
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: GREEN,
+    backgroundColor: "rgba(198, 255, 0, 0.12)",
+    color: GREEN,
+    fontSize: 12,
+    fontWeight: "700"
+  },
   bottomHomeBar: {
     marginTop: "auto",
     alignSelf: "center",

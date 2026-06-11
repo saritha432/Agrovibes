@@ -44,3 +44,17 @@ export function navigateToMyProfile() {
     navigationRef.navigate("Main", { screen: "Profile" });
   }
 }
+
+export function resetToLoginAfterPasswordReset(loginPhone: string) {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.reset({
+    index: 0,
+    routes: [
+      {
+        name: "AuthChoice",
+        params: { initialMode: "login", passwordResetSuccess: true, loginPhone }
+      }
+    ]
+  });
+  return true;
+}
