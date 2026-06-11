@@ -39,7 +39,7 @@ export function ForgotPasswordScreen() {
     try {
       const local = digits.length > 10 ? digits.slice(-10) : digits;
       await sendPhoneOtp({ phone: `+91${local}` });
-      navigation.navigate("ForgotPasswordOtp", { phone: phone.trim() });
+      navigation.navigate("ForgotPasswordOtp", { phone: `+91${local}` });
     } catch (e: any) {
       setErrorText(e?.message || "Failed to send OTP");
     } finally {
