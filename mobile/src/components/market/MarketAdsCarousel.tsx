@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -8,119 +8,128 @@ import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle
 } from "react-native";
-import {
-  APP_BLACK,
-  APP_LIME,
-  APP_SURFACE,
-  APP_TEXT,
-  APP_TEXT_MUTED
-} from "../../theme/appColors";
-
-type MarketAd = {
-  id: string;
-  variant: "light" | "dark";
-  title: string;
-  titleAccent?: string;
-  subtitle: string;
-};
+import { APP_BLACK, APP_LIME, APP_TEXT } from "../../theme/appColors";
+import { getActiveMarketAds, type MarketAd } from "./marketAdsConfig";
 
 const AUTOPLAY_MS = 5000;
 const CARD_GAP = 12;
-const SIDE_PAD = 16;
-const BANNER_H = 132;
+const SIDE_PAD = 21;
+const BANNER_W = 326;
+const BANNER_H = 142;
+const BANNER_RADIUS = 19.76;
+const LIGHT_CARD_BG = "#EDEDED";
+const DARK_CARD_BG = "#303132";
 
-const MARKET_ADS: MarketAd[] = [
-  {
-    id: "farm-home-light",
-    variant: "light",
-    title: "Khet Se Ghar Tak",
-    subtitle: "Bhoomi. Bazaar. Barakath."
-  },
-  {
-    id: "farm-home-dark",
-    variant: "dark",
-    title: "Khet Se",
-    titleAccent: "Ghar Tak",
-    subtitle: "Bhoomi. Bazaar. Barakath."
-  },
-  {
-    id: "delivery-light",
-    variant: "light",
-    title: "Fresh from Farm",
-    subtitle: "Same-day delivery on essentials."
-  },
-  {
-    id: "schemes-dark",
-    variant: "dark",
-    title: "Govt.",
-    titleAccent: "Schemes",
-    subtitle: "Subsidies & benefits for you."
-  }
-];
-
-function LightAdCard({ ad, width, onPress }: { ad: MarketAd; width: number; onPress: () => void }) {
+function CardGrid({ light }: { light?: boolean }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button">
-      <View style={[styles.card, styles.cardLight, { width, height: BANNER_H }]}>
-        <View style={styles.gridOverlay} pointerEvents="none">
-          {Array.from({ length: 6 }).map((_, row) => (
-            <View key={`r-${row}`} style={styles.gridRow}>
-              {Array.from({ length: 8 }).map((__, col) => (
-                <View key={`c-${col}`} style={styles.gridCell} />
-              ))}
-            </View>
+    <View style={[styles.gridOverlay, light ? styles.gridOverlayLight : styles.gridOverlayDark]} pointerEvents="none">
+      {Array.from({ length: 5 }).map((_, row) => (
+        <View key={`r-${row}`} style={styles.gridRow}>
+          {Array.from({ length: 10 }).map((__, col) => (
+            <View
+              key={`c-${col}`}
+              style={[styles.gridCell, light ? styles.gridCellLight : styles.gridCellDark]}
+            />
           ))}
         </View>
+      ))}
+    </View>
+  );
+}
+
+function AdStripCopy({ ad, variant }: { ad: MarketAd; variant: "light" | "dark" }) {
+  const isDark = variant === "dark";
+  return (
+    <View style={styles.cardInner}>
+      <Text style={isDark ? styles.darkTitleLine : styles.lightTitleLine}>{ad.title}</Text>
+      {ad.titleAccent ? (
+        <Text style={isDark ? styles.darkTitleAccentLine : styles.lightTitleAccentLine}>{ad.titleAccent}</Text>
+      ) : null}
+      <Text style={isDark ? styles.darkSubtitle : styles.lightSubtitle} numberOfLines={1}>
+        {ad.subtitle}
+      </Text>
+    </View>
+  );
+}
+
+function LightStripCard({
+  ad,
+  width,
+  height,
+  onPress
+}: {
+  ad: MarketAd;
+  width: number;
+  height: number;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button">
+      <View style={[styles.card, styles.cardLight, { width, height, borderRadius: BANNER_RADIUS }]}>
+        <CardGrid light />
         <LinearGradient
-          colors={["transparent", "rgba(201, 255, 53, 0.18)"]}
-          start={{ x: 1, y: 1 }}
-          end={{ x: 0, y: 0 }}
-          style={styles.lightGlow}
+          colors={["rgba(201, 255, 53, 0.32)", "transparent"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0.7, y: 0.9 }}
+          style={styles.lightGlowTop}
           pointerEvents="none"
         />
-        <View style={styles.cardTextWrap}>
-          <Text style={styles.lightTitle} numberOfLines={2}>
-            {ad.title}
-          </Text>
-          <Text style={styles.lightSubtitle} numberOfLines={2}>
-            {ad.subtitle}
-          </Text>
-        </View>
+        <LinearGradient
+          colors={["transparent", "rgba(201, 255, 53, 0.26)"]}
+          start={{ x: 0.4, y: 0.2 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.lightGlowBottom}
+          pointerEvents="none"
+        />
+        <AdStripCopy ad={ad} variant="light" />
       </View>
     </Pressable>
   );
 }
 
-function DarkAdCard({ ad, width, onPress }: { ad: MarketAd; width: number; onPress: () => void }) {
+function DarkStripCard({
+  ad,
+  width,
+  height,
+  onPress
+}: {
+  ad: MarketAd;
+  width: number;
+  height: number;
+  onPress: () => void;
+}) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button">
-      <View style={[styles.card, styles.cardDark, { width, height: BANNER_H }]}>
-        <View style={styles.cardTextWrap}>
-          <Text style={styles.darkTitle} numberOfLines={2}>
-            {ad.title}
-            {ad.titleAccent ? (
-              <Text style={styles.darkTitleAccent}>
-                {"\n"}
-                {ad.titleAccent}
-              </Text>
-            ) : null}
-          </Text>
-          <Text style={styles.darkSubtitle} numberOfLines={2}>
-            {ad.subtitle}
-          </Text>
-        </View>
+      <View style={[styles.card, styles.cardDark, { width, height, borderRadius: BANNER_RADIUS }]}>
+        <CardGrid />
+        <LinearGradient
+          colors={["transparent", "rgba(74, 100, 30, 0.5)", "rgba(201, 255, 53, 0.2)"]}
+          start={{ x: 0, y: 0.4 }}
+          end={{ x: 1, y: 0.8 }}
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        />
+        <AdStripCopy ad={ad} variant="dark" />
       </View>
     </Pressable>
   );
 }
 
 type MarketAdsCarouselProps = {
-  onAdPress?: () => void;
+  onAdPress?: (ad: MarketAd) => void;
+  sectionStyle?: StyleProp<ViewStyle>;
 };
 
-export function MarketAdsCarousel({ onAdPress }: MarketAdsCarouselProps) {
+/** Figma alternates light → dark → light by slide index. */
+function stripVariantForIndex(index: number): "light" | "dark" {
+  return index % 2 === 0 ? "light" : "dark";
+}
+
+export function MarketAdsCarousel({ onAdPress, sectionStyle }: MarketAdsCarouselProps) {
   const { width: windowWidth } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -128,41 +137,53 @@ export function MarketAdsCarousel({ onAdPress }: MarketAdsCarouselProps) {
   const userDraggingRef = useRef(false);
   const pauseUntilRef = useRef(0);
 
-  const cardWidth = Math.round(windowWidth * 0.78);
+  const ads = useMemo(() => getActiveMarketAds(), []);
+  const cardWidth = Math.min(BANNER_W, windowWidth - SIDE_PAD * 2);
+  const cardHeight = Math.round((cardWidth / BANNER_W) * BANNER_H);
   const snapInterval = cardWidth + CARD_GAP;
+
+  useEffect(() => {
+    indexRef.current = 0;
+    setActiveIndex(0);
+    scrollRef.current?.scrollTo({ x: 0, animated: false });
+  }, [ads.length]);
 
   const scrollToIndex = useCallback(
     (next: number) => {
-      const clamped = Math.max(0, Math.min(next, MARKET_ADS.length - 1));
+      if (ads.length === 0) return;
+      const clamped = Math.max(0, Math.min(next, ads.length - 1));
       indexRef.current = clamped;
       setActiveIndex(clamped);
       scrollRef.current?.scrollTo({ x: clamped * snapInterval, animated: true });
     },
-    [snapInterval]
+    [ads.length, snapInterval]
   );
 
   useEffect(() => {
+    if (ads.length <= 1) return undefined;
     const timer = setInterval(() => {
       if (userDraggingRef.current || Date.now() < pauseUntilRef.current) return;
-      const next = (indexRef.current + 1) % MARKET_ADS.length;
+      const next = (indexRef.current + 1) % ads.length;
       scrollToIndex(next);
     }, AUTOPLAY_MS);
     return () => clearInterval(timer);
-  }, [scrollToIndex]);
+  }, [ads.length, scrollToIndex]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const x = e.nativeEvent.contentOffset.x;
-    if (snapInterval <= 0) return;
+    if (snapInterval <= 0 || ads.length === 0) return;
     const next = Math.round(x / snapInterval);
-    const clamped = Math.max(0, Math.min(next, MARKET_ADS.length - 1));
+    const clamped = Math.max(0, Math.min(next, ads.length - 1));
     if (clamped !== indexRef.current) {
       indexRef.current = clamped;
       setActiveIndex(clamped);
     }
   };
 
+  if (ads.length === 0) return null;
+
   return (
-    <View style={styles.section}>
+    <View style={[styles.section, sectionStyle]}>
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -186,38 +207,53 @@ export function MarketAdsCarousel({ onAdPress }: MarketAdsCarouselProps) {
         }}
         onScroll={onScroll}
       >
-        {MARKET_ADS.map((ad, i) => (
-          <View key={ad.id} style={[styles.cardSlot, i < MARKET_ADS.length - 1 ? { marginRight: CARD_GAP } : null]}>
-            {ad.variant === "light" ? (
-              <LightAdCard ad={ad} width={cardWidth} onPress={() => onAdPress?.()} />
-            ) : (
-              <DarkAdCard ad={ad} width={cardWidth} onPress={() => onAdPress?.()} />
-            )}
-          </View>
-        ))}
+        {ads.map((ad, i) => {
+          const variant = stripVariantForIndex(i);
+          return (
+            <View key={ad.id} style={[styles.cardSlot, i < ads.length - 1 ? { marginRight: CARD_GAP } : null]}>
+              {variant === "light" ? (
+                <LightStripCard
+                  ad={ad}
+                  width={cardWidth}
+                  height={cardHeight}
+                  onPress={() => onAdPress?.(ad)}
+                />
+              ) : (
+                <DarkStripCard
+                  ad={ad}
+                  width={cardWidth}
+                  height={cardHeight}
+                  onPress={() => onAdPress?.(ad)}
+                />
+              )}
+            </View>
+          );
+        })}
       </ScrollView>
-      <View style={styles.dotsRow}>
-        {MARKET_ADS.map((ad, i) => (
-          <Pressable
-            key={ad.id}
-            hitSlop={6}
-            onPress={() => {
-              pauseUntilRef.current = Date.now() + AUTOPLAY_MS;
-              scrollToIndex(i);
-            }}
-            accessibilityLabel={`Ad ${i + 1}`}
-          >
-            <View style={[styles.dot, i === activeIndex ? styles.dotActive : null]} />
-          </Pressable>
-        ))}
-      </View>
+      {ads.length > 1 ? (
+        <View style={styles.dotsRow}>
+          {ads.map((ad, i) => (
+            <Pressable
+              key={ad.id}
+              hitSlop={6}
+              onPress={() => {
+                pauseUntilRef.current = Date.now() + AUTOPLAY_MS;
+                scrollToIndex(i);
+              }}
+              accessibilityLabel={`Ad ${i + 1}`}
+            >
+              <View style={[styles.dot, i === activeIndex ? styles.dotActive : null]} />
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: 20
+    marginTop: 22
   },
   row: {
     alignItems: "center"
@@ -226,21 +262,28 @@ const styles = StyleSheet.create({
     flexShrink: 0
   },
   card: {
-    borderRadius: 16,
     overflow: "hidden",
-    justifyContent: "center"
+    opacity: 1
   },
   cardLight: {
-    backgroundColor: "#e6e6e4"
+    backgroundColor: LIGHT_CARD_BG
   },
   cardDark: {
-    backgroundColor: APP_SURFACE,
-    borderWidth: 1,
-    borderColor: "rgba(201, 255, 53, 0.12)"
+    backgroundColor: DARK_CARD_BG
+  },
+  cardInner: {
+    flex: 1,
+    paddingHorizontal: 20,
+    justifyContent: "center"
   },
   gridOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.35
+    ...StyleSheet.absoluteFillObject
+  },
+  gridOverlayLight: {
+    opacity: 0.4
+  },
+  gridOverlayDark: {
+    opacity: 0.22
   },
   gridRow: {
     flex: 1,
@@ -248,49 +291,72 @@ const styles = StyleSheet.create({
   },
   gridCell: {
     flex: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(0, 0, 0, 0.08)"
+    borderWidth: StyleSheet.hairlineWidth
   },
-  lightGlow: {
-    ...StyleSheet.absoluteFillObject
+  gridCellLight: {
+    borderColor: "rgba(0, 0, 0, 0.07)"
   },
-  cardTextWrap: {
-    paddingHorizontal: 18,
-    paddingVertical: 16
+  gridCellDark: {
+    borderColor: "rgba(255, 255, 255, 0.08)"
   },
-  lightTitle: {
-    fontSize: 22,
-    lineHeight: 26,
+  lightGlowTop: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "58%",
+    height: "72%"
+  },
+  lightGlowBottom: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: "52%",
+    height: "58%"
+  },
+  lightTitleLine: {
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: "800",
+    color: APP_BLACK
+  },
+  lightTitleAccentLine: {
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: "800",
     color: APP_BLACK
   },
   lightSubtitle: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 16,
-    color: "#3a3a3a"
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "500",
+    color: APP_BLACK
   },
-  darkTitle: {
-    fontSize: 22,
-    lineHeight: 26,
+  darkTitleLine: {
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: "800",
     color: APP_TEXT
   },
-  darkTitleAccent: {
+  darkTitleAccentLine: {
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: "800",
     color: APP_LIME
   },
   darkSubtitle: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 16,
-    color: APP_TEXT_MUTED
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "500",
+    color: APP_TEXT
   },
   dotsRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     gap: 6,
-    marginTop: 12
+    marginTop: 10
   },
   dot: {
     width: 6,

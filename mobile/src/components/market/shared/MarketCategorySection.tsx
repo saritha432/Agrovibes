@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { APP_LIME, APP_TEXT } from "../../../theme/appColors";
+import type { CategoryGridItem } from "../all/marketAllConfig";
+import { MarketCardArt } from "./marketAssetUtils";
 
 const MARKET_TILE_BG = "#303132";
-import type { CategoryGridItem } from "../all/marketAllConfig";
-import { MarketCardArt, MarketSvgIcon } from "./marketAssetUtils";
 
 type MarketCategorySectionProps = {
   title: string;
@@ -17,11 +17,18 @@ type MarketCategorySectionProps = {
   onPress: (id: string) => void;
 };
 
+function chunkItems<T>(items: T[], columns: number): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += columns) {
+    rows.push(items.slice(i, i + columns));
+  }
+  return rows;
+}
+
 function CategoryTile({
   item,
   columns,
   light,
-  singleRow,
   cardW,
   fixedTileW,
   fixedTileH,
@@ -30,16 +37,16 @@ function CategoryTile({
   item: CategoryGridItem;
   columns: 2 | 3 | 4;
   light?: boolean;
-  singleRow: boolean;
   cardW: number;
   fixedTileW?: number;
   fixedTileH?: number;
   onPress: () => void;
 }) {
-  const [tileW, setTileW] = useState(0);
+  const [tileW, setTileW] = useState(fixedTileW ?? 0);
   const resolvedW = fixedTileW ?? cardW;
   const tileH = fixedTileH ?? Math.round(resolvedW * (columns === 2 ? 1.08 : 1.02));
   const artH = fixedTileH ? fixedTileH - 46 : Math.max(52, Math.round(tileH * 0.52));
+  const artW = item.artWidth ?? (fixedTileW ?? (tileW > 0 ? tileW : resolvedW));
 
   return (
     <Pressable
@@ -48,9 +55,7 @@ function CategoryTile({
         light ? styles.tileLight : null,
         fixedTileW
           ? { width: fixedTileW, height: fixedTileH ?? tileH }
-          : singleRow
-            ? [styles.tileFlex, { aspectRatio: columns === 2 ? 1.14 : 0.9 }]
-            : { width: cardW, height: tileH }
+          : { width: cardW, height: tileH }
       ]}
       onPress={onPress}
       onLayout={(e) => {
@@ -64,22 +69,19 @@ function CategoryTile({
       <View
         style={[
           styles.artStrip,
-          { height: singleRow && tileW > 0 ? Math.round(tileW * 0.52) : artH },
+          { height: artH },
           item.artWidth && item.artHeight ? styles.artStripCentered : null
         ]}
       >
-        {item.icon && tileW > 0 ? (
+        {item.icon ? (
           <MarketCardArt
             image={item.icon}
-            kind={item.artKind ?? "svg"}
-            width={item.artWidth ?? tileW}
-            height={item.artHeight ?? (singleRow && tileW > 0 ? Math.round(tileW * 0.52) : artH)}
+            kind={item.artKind ?? "png"}
+            width={artW}
+            height={item.artHeight ?? artH}
             fit={item.artWidth && item.artHeight ? "contain" : "cover"}
+            fallbackIcon={item.fallbackIcon}
           />
-        ) : item.icon ? (
-          <View style={styles.artFallback}>
-            <MarketSvgIcon module={item.icon} size={32} active={false} fallbackIcon={item.fallbackIcon} />
-          </View>
         ) : (
           <View style={styles.artFallback}>
             <Ionicons
@@ -109,26 +111,39 @@ export function MarketCategorySection({
   const outerPad = 16;
   const usable = width - outerPad * 2 - shellPad * 2;
   const cardW = Math.floor((usable - gap * (columns - 1)) / columns);
-  const singleRow = items.length === columns;
+  const rows = chunkItems(items, columns);
 
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, light ? styles.sectionTitleLight : null]}>{title}</Text>
-      <View style={[styles.grid, singleRow ? styles.gridSingleRow : null]}>
-        {items.map((item) => (
-          <CategoryTile
-            key={item.id}
-            item={item}
-            columns={columns}
-            light={light}
-            singleRow={singleRow}
-            cardW={cardW}
-            fixedTileW={tileWidth}
-            fixedTileH={tileHeight}
-            onPress={() => onPress(item.id)}
-          />
-        ))}
-      </View>
+      {rows.map((rowItems, rowIndex) => {
+        const tileW = tileWidth ?? cardW;
+        const rowContentW = rowItems.length * tileW + gap * Math.max(0, rowItems.length - 1);
+
+        return (
+          <ScrollView
+            key={`row-${rowIndex}`}
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            style={[styles.rowScroll, rowIndex < rows.length - 1 ? styles.gridRowSpaced : null]}
+            contentContainerStyle={[styles.gridRow, { minWidth: rowContentW }]}
+          >
+            {rowItems.map((item) => (
+              <CategoryTile
+                key={item.id}
+                item={item}
+                columns={columns}
+                light={light}
+                cardW={cardW}
+                fixedTileW={tileWidth}
+                fixedTileH={tileHeight}
+                onPress={() => onPress(item.id)}
+              />
+            ))}
+          </ScrollView>
+        );
+      })}
     </View>
   );
 }
@@ -147,26 +162,26 @@ const styles = StyleSheet.create({
   sectionTitleLight: {
     color: "#1a1a1a"
   },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8
+  rowScroll: {
+    width: "100%",
+    overflow: "hidden"
   },
-  gridSingleRow: {
+  gridRow: {
+    flexDirection: "row",
     flexWrap: "nowrap",
-    alignItems: "stretch"
+    gap: 8,
+    alignItems: "flex-start"
+  },
+  gridRowSpaced: {
+    marginBottom: 8
   },
   tile: {
     backgroundColor: MARKET_TILE_BG,
     borderRadius: 12,
     paddingTop: 10,
     overflow: "hidden",
-    justifyContent: "space-between"
-  },
-  tileFlex: {
-    flex: 1,
-    minWidth: 0,
-    aspectRatio: 0.88
+    justifyContent: "space-between",
+    flexShrink: 0
   },
   tileLight: {
     backgroundColor: MARKET_TILE_BG

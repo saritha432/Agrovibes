@@ -1,145 +1,88 @@
-import { Asset } from "expo-asset";
-import React, { useEffect, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import {
-  APP_BLACK,
-  APP_LIME,
-  APP_TEXT,
-  APP_TEXT_MUTED,
-  APP_TEXT_ON_LIME
-} from "../../../../theme/appColors";
-import { moduleToUri } from "../../shared/marketAssetUtils";
+import React from "react";
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { APP_LIME, APP_TEXT, APP_TEXT_ON_LIME } from "../../../../theme/appColors";
 
-const FARM_ILLUSTRATION = require("../../../../../assets/market/farm-illustration.svg");
+const MARKET_TILE_BG = "#303132";
+const FARM_ILLUSTRATION = require("../../../../../assets/market/farm-illustration.png");
 
 function FarmIllustration({ width }: { width: number }) {
   const artHeight = Math.round(width * (210 / 429));
-  const [uri, setUri] = useState<string | null>(() => moduleToUri(FARM_ILLUSTRATION));
-  const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    const direct = moduleToUri(FARM_ILLUSTRATION);
-    setUri(direct);
-    setFailed(false);
-    if (direct) return;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const asset = Asset.fromModule(FARM_ILLUSTRATION as number);
-        await asset.downloadAsync();
-        const nextUri = asset.localUri ?? asset.uri;
-        if (!cancelled && nextUri) setUri(nextUri);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (failed || !uri) return null;
-
-  if (Platform.OS === "web") {
-    return React.createElement("img", {
-      src: uri,
-      alt: "",
-      style: {
-        width,
-        height: artHeight,
-        display: "block",
-        objectFit: "cover",
-        objectPosition: "center bottom",
-        pointerEvents: "none"
-      },
-      onError: () => setFailed(true)
-    });
-  }
-
-  try {
-    const { SvgUri } = require("react-native-svg") as typeof import("react-native-svg");
-    return (
-      <View style={[styles.heroArtWrap, { width, height: artHeight }]} pointerEvents="none">
-        <SvgUri uri={uri} width={width} height={artHeight} preserveAspectRatio="xMidYMax meet" />
-      </View>
-    );
-  } catch {
-    return null;
-  }
+  return (
+    <View style={{ width, height: artHeight }} pointerEvents="none">
+      <Image source={FARM_ILLUSTRATION} style={{ width, height: artHeight }} resizeMode="cover" />
+    </View>
+  );
 }
 
 export function MarketHeroSection({ onPress }: { onPress: () => void }) {
   const { width: windowWidth } = useWindowDimensions();
-  const heroArtWidth = windowWidth - 32;
 
   return (
-    <View style={styles.heroCard}>
+    <View style={[styles.hero, { width: windowWidth }]}>
       <View style={styles.heroHeader}>
         <View style={styles.heroTextBlock}>
-          <Text style={styles.heroTitle}>
-            Khet Se{"\n"}
-            <Text style={styles.heroTitleAccent}>Ghar Tak</Text>
-          </Text>
+          <Text style={styles.heroTitleLine}>Khet Se</Text>
+          <Text style={styles.heroTitleAccentLine}>Ghar Tak</Text>
           <Text style={styles.heroSubtitle}>Bhoomi. Bazaar. Barakath.</Text>
         </View>
-        <Pressable style={styles.shopBtn} onPress={onPress}>
+        <Pressable style={styles.shopBtn} onPress={onPress} accessibilityRole="button">
           <Text style={styles.shopBtnText}>Shop Now</Text>
         </Pressable>
       </View>
-      <FarmIllustration width={heroArtWidth} />
+      <FarmIllustration width={windowWidth} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  heroCard: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderRadius: 16,
-    backgroundColor: APP_BLACK,
-    overflow: "hidden"
+  hero: {
+    alignSelf: "center",
+    backgroundColor: MARKET_TILE_BG,
+    overflow: "hidden",
+    paddingBottom: 4
   },
   heroHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 18,
+    paddingTop: 16,
     gap: 12
   },
   heroTextBlock: {
     flex: 1,
     minWidth: 0
   },
-  heroTitle: {
-    fontSize: 28,
-    lineHeight: 32,
+  heroTitleLine: {
+    fontSize: 26,
+    lineHeight: 30,
     fontWeight: "800",
     color: APP_TEXT
   },
-  heroTitleAccent: {
+  heroTitleAccentLine: {
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: "800",
     color: APP_LIME
   },
   heroSubtitle: {
     marginTop: 8,
     fontSize: 13,
-    color: APP_TEXT_MUTED
+    lineHeight: 16,
+    fontWeight: "500",
+    color: APP_TEXT
   },
   shopBtn: {
-    marginTop: 4,
+    marginTop: 2,
     backgroundColor: APP_LIME,
-    borderRadius: 22,
-    paddingHorizontal: 20,
+    borderRadius: 20,
+    paddingHorizontal: 18,
     paddingVertical: 10
   },
   shopBtnText: {
     color: APP_TEXT_ON_LIME,
     fontWeight: "700",
-    fontSize: 14
-  },
-  heroArtWrap: {
-    alignSelf: "center",
-    marginTop: 4
+    fontSize: 13
   }
 });

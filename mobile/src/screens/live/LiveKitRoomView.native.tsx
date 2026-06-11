@@ -14,7 +14,7 @@ import {
   useTracks,
   type TrackReference
 } from "@livekit/react-native";
-import { LocalVideoTrack, ConnectionState, RoomEvent, Track, type Participant } from "livekit-client";
+import { LocalVideoTrack, ConnectionState, Room, RoomEvent, Track, type Participant } from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -57,6 +57,29 @@ function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid
     return tracks.find((t) => t.participant.sid === localSid) ?? tracks[0];
   }
   return tracks.find((t) => t.participant.sid !== localSid) ?? tracks[0];
+}
+
+async function releaseHostCameraAndMic(room: Room) {
+  try {
+    await room.localParticipant.setCameraEnabled(false);
+    await room.localParticipant.setMicrophoneEnabled(false);
+  } catch {
+    // no-op
+  }
+  for (const pub of room.localParticipant.trackPublications.values()) {
+    const track = pub.track;
+    if (!track) continue;
+    try {
+      track.stop();
+    } catch {
+      // no-op
+    }
+    try {
+      await room.localParticipant.unpublishTrack(track, false);
+    } catch {
+      // no-op
+    }
+  }
 }
 
 function participantPublishesCamera(participant: Participant) {
@@ -205,11 +228,20 @@ function LiveRoomContent({
       clearTimeout(videoDropTimerRef.current);
       videoDropTimerRef.current = null;
     }
-    try {
-      room.disconnect();
-    } catch {
-      // no-op
-    }
+    void (async () => {
+      if (isHost) {
+        try {
+          await releaseHostCameraAndMic(room);
+        } catch {
+          // no-op
+        }
+      }
+      try {
+        room.disconnect();
+      } catch {
+        // no-op
+      }
+    })();
     setStatusText("Live ended");
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {

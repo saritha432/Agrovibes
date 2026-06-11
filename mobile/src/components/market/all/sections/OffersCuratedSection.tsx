@@ -4,8 +4,8 @@ import { APP_LIME, APP_TEXT } from "../../../../theme/appColors";
 import { MarketCardArt, type SvgModule } from "../../shared/marketAssetUtils";
 
 const MARKET_TAB_ACTIVE_BG = "#303132";
-const SEEDS_ART = require("../../../../../assets/market/seeds.svg");
-const FERTILIZERS_ART = require("../../../../../assets/market/fertilizers.svg");
+const SEEDS_ART = require("../../../../../assets/market/seeds.png");
+const FERTILIZERS_ART = require("../../../../../assets/market/fertilizers.png");
 
 const OFFER_GAP = 8;
 const OFFER_PAD = 16;
@@ -29,8 +29,8 @@ const OFFER_LARGE: OfferTile = {
   id: "daily",
   title: "Daily",
   accent: "Essential",
-  image: require("../../../../../assets/market/daily-essentials.svg"),
-  kind: "svg"
+  image: require("../../../../../assets/market/daily-essentials.png"),
+  kind: "png"
 };
 
 const OFFER_ROW_TOP: OfferTile[] = [
@@ -38,8 +38,8 @@ const OFFER_ROW_TOP: OfferTile[] = [
     id: "low-price",
     title: "Lowest Prices",
     accent: "Fruits Veggies",
-    image: require("../../../../../assets/market/low-price-veggies.svg"),
-    kind: "svg"
+    image: require("../../../../../assets/market/low-price-veggies.png"),
+    kind: "png"
   },
   { id: "seeds", title: "Top Picks", accent: "Seeds & Fertilizer", mix: "seeds-fertilizer" },
   { id: "soil", title: "Essentials", accent: "Soil Test Kits" },
@@ -51,15 +51,15 @@ const OFFER_ROW_BOTTOM: OfferTile[] = [
     id: "dairy",
     title: "Top Picks On",
     accent: "Dairy, Bread & Eggs",
-    image: require("../../../../../assets/market/dairy-products.svg"),
-    kind: "svg"
+    image: require("../../../../../assets/market/dairy-products.png"),
+    kind: "png"
   },
   {
     id: "tools",
     title: "Essential",
     accent: "Tools & Gear",
-    image: require("../../../../../assets/market/essentials.svg"),
-    kind: "svg"
+    image: require("../../../../../assets/market/essentials.png"),
+    kind: "png"
   },
   { id: "storage", title: "Storage", accent: "Cold Storage" },
   { id: "rental", title: "Rental", accent: "Machinery" }
@@ -74,10 +74,10 @@ function SeedsFertilizerMixArt({ width, height }: { width: number; height: numbe
   return (
     <View style={[styles.offerMixArt, { width, height }]}>
       <View style={[styles.offerMixLayer, { left: -2, bottom: 0, width: seedW, height: seedH, zIndex: 1 }]}>
-        <MarketCardArt image={SEEDS_ART} kind="svg" width={seedW} height={seedH} />
+        <MarketCardArt image={SEEDS_ART} kind="png" width={seedW} height={seedH} />
       </View>
       <View style={[styles.offerMixLayer, { right: -4, bottom: 0, width: fertW, height: fertH, zIndex: 2 }]}>
-        <MarketCardArt image={FERTILIZERS_ART} kind="svg" width={fertW} height={fertH} />
+        <MarketCardArt image={FERTILIZERS_ART} kind="png" width={fertW} height={fertH} />
       </View>
     </View>
   );
@@ -125,7 +125,7 @@ export function OffersCuratedSection({ onPress }: { onPress: () => void }) {
 
   return (
     <View style={styles.offersSection}>
-      <Text style={styles.sectionTitle}>offers curated for you</Text>
+      <Text style={styles.sectionTitle}>Offers curated for you</Text>
       <View style={styles.offersLayout}>
         <OfferTileCard
           tile={OFFER_LARGE}
@@ -177,6 +177,7 @@ export function OffersCuratedSection({ onPress }: { onPress: () => void }) {
 const styles = StyleSheet.create({
   offersSection: {
     marginTop: 16,
+    height: 260,
     paddingHorizontal: OFFER_PAD
   },
   sectionTitle: {

@@ -1,5 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { MarketCategoryListingScreen } from "../screens/MarketCategoryListingScreen";
 import { MarketHomeScreen } from "../screens/MarketHomeScreen";
 import { MarketplaceScreen } from "../screens/MarketplaceScreen";
 import { CartScreen } from "../screens/CartScreen";
@@ -18,6 +19,7 @@ export type CheckoutBill = {
 
 export type MarketStackParamList = {
   MarketplaceHome: undefined;
+  MarketCategory: { categoryId: string };
   MarketListings: undefined;
   Cart: undefined;
   Checkout: {
@@ -34,6 +36,7 @@ export function MarketStackNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="MarketplaceHome" component={MarketHomeScreen} />
+      <Stack.Screen name="MarketCategory" component={MarketCategoryListingScreen} />
       <Stack.Screen name="MarketListings" component={MarketplaceScreen} />
       <Stack.Screen name="Cart" component={CartScreen} />
       <Stack.Screen name="Checkout" component={CheckoutScreen} />

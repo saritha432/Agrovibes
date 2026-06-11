@@ -49,6 +49,7 @@ export function MarketHomeScreen() {
   const [search, setSearch] = useState("");
 
   const openStore = () => navigation.navigate("MarketListings");
+  const openCategory = (categoryId: string) => navigation.navigate("MarketCategory", { categoryId });
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -85,7 +86,7 @@ export function MarketHomeScreen() {
                 style={[styles.tabItem, on ? styles.tabItemActive : null]}
                 onPress={() => setActiveTab(tab.id)}
               >
-                <MarketSvgIcon module={tab.icon} size={30} active={on} />
+                <MarketSvgIcon module={tab.icon} size={24} active={on} />
                 <Text style={[styles.tabLabel, on ? styles.tabLabelOn : null]}>{tab.label}</Text>
                 {on ? <View style={styles.tabUnderline} /> : <View style={styles.tabUnderlineSpacer} />}
               </Pressable>
@@ -101,7 +102,7 @@ export function MarketHomeScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         {activeTab === "All" ? (
-          <MarketAllTabContent onNavigate={openStore} />
+          <MarketAllTabContent onNavigate={openCategory} onBrowse={openStore} />
         ) : (
           <MarketPlaceholderTab tabLabel={activeTab} onBrowse={openStore} />
         )}

@@ -26,22 +26,31 @@ export function useAssetUri(module: SvgModule | ImageSourcePropType) {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    const direct = moduleToUri(module as SvgModule);
-    setUri(direct);
     setFailed(false);
-    if (direct) return;
-
     let cancelled = false;
+
     void (async () => {
       try {
-        const asset = Asset.fromModule(module as number | string);
-        await asset.downloadAsync();
-        const nextUri = asset.localUri ?? asset.uri;
-        if (!cancelled && nextUri) setUri(nextUri);
+        if (typeof module === "number" || typeof module === "string") {
+          const asset = Asset.fromModule(module);
+          await asset.downloadAsync();
+          const nextUri = asset.localUri ?? asset.uri ?? moduleToUri(module as SvgModule);
+          if (!cancelled && nextUri) {
+            setUri(nextUri);
+            return;
+          }
+        }
+        const direct = moduleToUri(module as SvgModule);
+        if (!cancelled) setUri(direct);
       } catch {
-        if (!cancelled) setFailed(true);
+        const direct = moduleToUri(module as SvgModule);
+        if (!cancelled) {
+          setUri(direct);
+          if (!direct) setFailed(true);
+        }
       }
     })();
+
     return () => {
       cancelled = true;
     };
@@ -61,30 +70,7 @@ export function MarketSvgIcon({
   active: boolean;
   fallbackIcon?: keyof typeof Ionicons.glyphMap;
 }) {
-  const [uri, setUri] = useState<string | null>(() => moduleToUri(module));
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const direct = moduleToUri(module);
-    setUri(direct);
-    setFailed(false);
-    if (direct) return;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const asset = Asset.fromModule(module as number | string);
-        await asset.downloadAsync();
-        const nextUri = asset.localUri ?? asset.uri;
-        if (!cancelled && nextUri) setUri(nextUri);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [module]);
+  const { uri, failed, setFailed } = useAssetUri(module);
 
   if (failed || !uri) {
     return <Ionicons name={fallbackIcon} size={size} color={active ? APP_LIME : APP_TEXT_MUTED} />;
@@ -112,13 +98,15 @@ export function MarketCardArt({
   kind,
   width,
   height,
-  fit = "contain"
+  fit = "contain",
+  fallbackIcon = "image-outline"
 }: {
   image: SvgModule | ImageSourcePropType;
   kind: "svg" | "png";
   width: number;
   height: number;
   fit?: "contain" | "cover";
+  fallbackIcon?: keyof typeof Ionicons.glyphMap;
 }) {
   const { uri, failed, setFailed } = useAssetUri(image);
   const resizeMode = fit === "cover" ? "cover" : "contain";
@@ -136,7 +124,11 @@ export function MarketCardArt({
   }
 
   if (failed || !uri) {
-    return <View style={{ width, height }} />;
+    return (
+      <View style={{ width, height, alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={fallbackIcon} size={Math.min(width, height) * 0.45} color={APP_TEXT_MUTED} />
+      </View>
+    );
   }
 
   if (Platform.OS === "web") {
@@ -156,8 +148,20 @@ export function MarketCardArt({
 
   try {
     const { SvgUri } = require("react-native-svg") as typeof import("react-native-svg");
-    return <SvgUri uri={uri} width={width} height={height} preserveAspectRatio={preserveAspectRatio} />;
+    return (
+      <SvgUri
+        uri={uri}
+        width={width}
+        height={height}
+        preserveAspectRatio={preserveAspectRatio}
+        onError={() => setFailed(true)}
+      />
+    );
   } catch {
-    return <View style={{ width, height }} />;
+    return (
+      <View style={{ width, height, alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={fallbackIcon} size={Math.min(width, height) * 0.45} color={APP_TEXT_MUTED} />
+      </View>
+    );
   }
 }

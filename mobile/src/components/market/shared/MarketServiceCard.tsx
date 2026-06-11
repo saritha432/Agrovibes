@@ -57,8 +57,9 @@ const shellBase = {
   borderRadius: 16,
   paddingHorizontal: 14,
   paddingTop: 16,
-  paddingBottom: 4
-} as const;
+  paddingBottom: 4,
+  overflow: "hidden" as const
+};
 
 const styles = StyleSheet.create({
   shellDark: {

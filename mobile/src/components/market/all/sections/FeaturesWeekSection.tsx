@@ -15,6 +15,7 @@ type FeatureCard = {
   label: string;
   image: SvgModule | ImageSourcePropType;
   kind: "svg" | "png";
+  categoryId?: string;
 };
 
 const FEATURE_CARDS: FeatureCard[] = [
@@ -22,44 +23,42 @@ const FEATURE_CARDS: FeatureCard[] = [
     id: "kharif",
     accent: "Kharif",
     label: "Season",
-    image: require("../../../../../assets/market/season-items.svg"),
-    kind: "svg"
+    image: require("../../../../../assets/market/season-items.png"),
+    kind: "png",
+    categoryId: "seeds"
   },
   {
     id: "tractor",
     accent: "Tractor",
     label: "Rental",
     image: require("../../../../../assets/market/tractor-rental.png"),
-    kind: "png"
+    kind: "png",
+    categoryId: "browse-book"
   },
   {
     id: "drone",
     accent: "Drone",
     label: "Spraying",
     image: require("../../../../../assets/market/drone-spraying.png"),
-    kind: "png"
+    kind: "png",
+    categoryId: "crop-spray"
   },
   {
     id: "gov",
     accent: "Gov.",
     label: "Schemes",
     image: require("../../../../../assets/market/gov-schemes.png"),
-    kind: "png"
+    kind: "png",
+    categoryId: "subsidies"
   }
 ];
 
-function FeatureCardArt({ card }: { card: FeatureCard }) {
-  return (
-    <MarketCardArt
-      image={card.image}
-      kind={card.kind}
-      width={FEATURE_CARD_WIDTH}
-      height={FEATURE_ART_HEIGHT}
-    />
-  );
-}
+type FeaturesWeekSectionProps = {
+  onPress: () => void;
+  onCategoryPress?: (categoryId: string) => void;
+};
 
-export function FeaturesWeekSection({ onPress }: { onPress: () => void }) {
+export function FeaturesWeekSection({ onPress, onCategoryPress }: FeaturesWeekSectionProps) {
   return (
     <>
       <Text style={styles.sectionTitle}>Features this week</Text>
@@ -70,12 +69,27 @@ export function FeaturesWeekSection({ onPress }: { onPress: () => void }) {
         contentContainerStyle={styles.featuresRow}
       >
         {FEATURE_CARDS.map((card) => (
-          <Pressable key={card.id} style={styles.featureCard} onPress={onPress}>
+          <Pressable
+            key={card.id}
+            style={styles.featureCard}
+            onPress={() => {
+              if (card.categoryId && onCategoryPress) {
+                onCategoryPress(card.categoryId);
+                return;
+              }
+              onPress();
+            }}
+          >
             <View style={styles.featureTitleBlock}>
               <Text style={styles.featureAccent}>{card.accent}</Text>
               <Text style={styles.featureLabel}>{card.label}</Text>
             </View>
-            <FeatureCardArt card={card} />
+            <MarketCardArt
+              image={card.image}
+              kind={card.kind}
+              width={FEATURE_CARD_WIDTH}
+              height={FEATURE_ART_HEIGHT}
+            />
           </Pressable>
         ))}
       </ScrollView>
