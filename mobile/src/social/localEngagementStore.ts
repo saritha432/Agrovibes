@@ -163,6 +163,19 @@ export async function markLocalEngagementRead(id: string) {
   await writeEngagement(records);
 }
 
+export async function markAllLocalEngagementReadForViewer(viewerName: string) {
+  const norm = normalizeName(viewerName);
+  if (!norm) return;
+  const records = await readEngagement();
+  let changed = false;
+  const next = records.map((r) => {
+    if (r.recipientNameNorm !== norm || r.read) return r;
+    changed = true;
+    return { ...r, read: true };
+  });
+  if (changed) await writeEngagement(next);
+}
+
 export type PostLiker = {
   userId?: number;
   userName: string;

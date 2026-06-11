@@ -3713,6 +3713,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 autoStartLive: true
               })
             }
+            scheduledRefreshKey={refreshToken}
             canDeletePost={(post) => viewerOwnsPost(post, user)}
             onDeletePost={confirmDeleteOwnPost}
             watchingPost={watchingLivePost}
@@ -3938,7 +3939,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       >
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 12 }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 24 }]}
             pointerEvents="box-none"
           >
             <Pressable

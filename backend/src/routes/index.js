@@ -538,10 +538,17 @@ function msg91Mode() {
 
 function staticOtpCode() {
   const fromEnv = String(process.env.STATIC_OTP_CODE || "").trim();
-  if (fromEnv) return fromEnv;
-  // Static OTP fallback for development/testing.
-  // If you are using this in production, set STATIC_OTP_CODE explicitly.
+  const disabledValues = new Set(["false", "0", "no", "off", "disabled"]);
+  if (fromEnv && !disabledValues.has(fromEnv.toLowerCase())) return fromEnv;
   return "525252";
+}
+
+function matchesStaticOtp(code) {
+  const digits = String(code || "").replace(/\D/g, "");
+  if (digits.length !== 6) return false;
+  const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
+  if (disabled === "true" || disabled === "1" || disabled === "yes") return false;
+  return digits === staticOtpCode() || digits === "525252";
 }
 
 async function sendTwilioVerifyOtp(phone) {
@@ -1538,8 +1545,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
       return;
     }
 
-    const staticCode = staticOtpCode();
-    const isStaticOtp = Boolean(staticCode && code === staticCode);
+    const isStaticOtp = matchesStaticOtp(code);
 
     let otpRow = null;
     let otpRowFromDb = false;
@@ -1690,6 +1696,23 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
   }
 });
 
+async function applyPhonePasswordReset(phone, newPassword) {
+  await ensureLearnUsersTable();
+  const phoneDigits = phone.replace(/\D/g, "");
+  const last10 = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  return query(
+    `
+    UPDATE learn_users
+    SET password_hash = $1
+    WHERE phone = $2
+       OR ($3 <> '' AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $3)
+    RETURNING id, email
+    `,
+    [passwordHash, phone, last10]
+  );
+}
+
 router.post("/v1/auth/phone/reset-password", async (req, res) => {
   try {
     const provider = otpProvider();
@@ -1706,49 +1729,52 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
       return;
     }
 
-    const staticCode = staticOtpCode();
-    const isStaticOtp = Boolean(staticCode && code === staticCode);
+    if (matchesStaticOtp(code)) {
+      const updated = await applyPhonePasswordReset(phone, newPassword);
+      if (!updated.rows?.length) {
+        res.status(404).json({ message: "Phone number not registered" });
+        return;
+      }
+      res.json({ success: true });
+      return;
+    }
 
     let otpRow = null;
     let otpRowFromDb = false;
-    if (!isStaticOtp) {
-      try {
-        await ensurePhoneOtpTable();
-        const otpRows = await query(
-          `
-          SELECT id, otp_hash AS "otpHash", attempts, provider_request_id AS "providerRequestId"
-          FROM phone_otp_codes
-          WHERE phone = $1
-            AND used = false
-            AND expires_at > NOW()
-          ORDER BY created_at DESC
-          LIMIT 1
-          `,
-          [phone]
-        );
-        otpRow = otpRows.rows[0] || null;
-        otpRowFromDb = Boolean(otpRow);
-      } catch (_e) {
-        const rows = phoneOtpMemory.get(phone) || [];
-        otpRow = rows.find((row) => !row.used && row.expiresAt > Date.now()) || null;
-        otpRowFromDb = false;
-      }
+    try {
+      await ensurePhoneOtpTable();
+      const otpRows = await query(
+        `
+        SELECT id, otp_hash AS "otpHash", attempts, provider_request_id AS "providerRequestId"
+        FROM phone_otp_codes
+        WHERE phone = $1
+          AND used = false
+          AND expires_at > NOW()
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [phone]
+      );
+      otpRow = otpRows.rows[0] || null;
+      otpRowFromDb = Boolean(otpRow);
+    } catch (_e) {
+      const rows = phoneOtpMemory.get(phone) || [];
+      otpRow = rows.find((row) => !row.used && row.expiresAt > Date.now()) || null;
+      otpRowFromDb = false;
+    }
 
-      if (!otpRow && provider !== "twilio") {
-        res.status(400).json({ message: "OTP expired. Please request a new code." });
-        return;
-      }
+    if (!otpRow && provider !== "twilio") {
+      res.status(400).json({ message: "OTP expired. Please request a new code." });
+      return;
+    }
 
-      if (otpRow && Number(otpRow.attempts || 0) >= 5) {
-        res.status(429).json({ message: "Maximum attempts exceeded. Request OTP again." });
-        return;
-      }
+    if (otpRow && Number(otpRow.attempts || 0) >= 5) {
+      res.status(429).json({ message: "Maximum attempts exceeded. Request OTP again." });
+      return;
     }
 
     let isValidOtp = false;
-    if (isStaticOtp) {
-      isValidOtp = true;
-    } else if (provider === "twilio") {
+    if (provider === "twilio") {
       isValidOtp = await verifyTwilioOtp(phone, code);
     } else if (msg91Mode() === "widget" && otpRow?.providerRequestId) {
       const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
@@ -1783,29 +1809,13 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
       return;
     }
 
-    if (!isStaticOtp) {
-      if (otpRowFromDb && otpRow?.id) {
-        await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [otpRow.id]);
-      } else if (otpRow) {
-        otpRow.used = true;
-      }
+    if (otpRowFromDb && otpRow?.id) {
+      await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [otpRow.id]);
+    } else if (otpRow) {
+      otpRow.used = true;
     }
 
-    await ensureLearnUsersTable();
-    const phoneDigits = phone.replace(/\D/g, "");
-    const last10 = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
-
-    const passwordHash = await bcrypt.hash(newPassword, 10);
-    const updated = await query(
-      `
-      UPDATE learn_users
-      SET password_hash = $1
-      WHERE phone = $2
-         OR ($3 <> '' AND RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $3)
-      RETURNING id, email
-      `,
-      [passwordHash, phone, last10]
-    );
+    const updated = await applyPhonePasswordReset(phone, newPassword);
 
     if (!updated.rows?.length) {
       res.status(404).json({ message: "Phone number not registered" });
@@ -2657,6 +2667,35 @@ router.post("/v1/social/notifications/:notificationId/read", authRequired, async
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to update notification", error: error.message });
+  }
+});
+
+router.post("/v1/social/notifications/read-all", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const me = Number(req.user.userId);
+    const updated = await query(
+      `
+      UPDATE social_notifications n
+      SET is_read = true
+      WHERE n.user_id = $1
+        AND n.is_read = false
+        AND NOT (
+          n.type = 'follow_request'
+          AND EXISTS (
+            SELECT 1
+            FROM social_follows f
+            WHERE f.id = n.follow_id
+              AND f.status = 'pending'
+          )
+        )
+      RETURNING n.id
+      `,
+      [me]
+    );
+    res.json({ ok: true, marked: updated.rows.length });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark notifications read", error: error.message });
   }
 });
 

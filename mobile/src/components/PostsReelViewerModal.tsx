@@ -10,6 +10,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  StatusBar,
   ScrollView,
   Share,
   StyleSheet,
@@ -989,7 +990,11 @@ export function PostsReelViewerModal({
 
   const safeInitialIndex =
     visible && viewerPosts.length > 0 ? Math.max(0, Math.min(initialIndex, viewerPosts.length - 1)) : 0;
-  const reelTopInset = Platform.OS === "web" ? 8 : insets.top;
+  const reelTopInset = React.useMemo(() => {
+    const sbh = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
+    const webPad = Platform.OS === "web" ? 12 : 0;
+    return Math.max(insets.top, sbh, webPad);
+  }, [insets.top]);
 
   useEffect(() => {
     if (!visible || windowHeight <= 0 || safeInitialIndex <= 0) return;
@@ -1005,7 +1010,7 @@ export function PostsReelViewerModal({
     <>
       <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
-          <View style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 12 }]} pointerEvents="box-none">
+          <View style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 24 }]} pointerEvents="box-none">
             <Pressable onPress={onClose} hitSlop={14} style={styles.reelViewerBackBtn} accessibilityRole="button" accessibilityLabel="Go back">
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>

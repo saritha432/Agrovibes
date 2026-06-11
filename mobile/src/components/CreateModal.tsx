@@ -723,7 +723,7 @@ export function CreateModal({
     setShowLiveTimePicker(false);
     setLiveTitleDraft("");
     setEntryType("story");
-    setCaptureEntryView("camera");
+    setCaptureEntryView("gallery");
     setCreateType(null);
     setErrorText("");
     setShowCreativeTextPanel(false);

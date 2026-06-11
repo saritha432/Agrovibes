@@ -80,8 +80,9 @@ export function flattenNotificationFeedSnapshot(snap: NotificationFeedSnapshot):
   return [...snap.pending, ...snap.accepted, ...snap.declined, ...snap.postLikes, ...snap.postComments, ...snap.liveStarts];
 }
 
+/** Badge = notifications newer than when the user last closed the panel (not full history). */
 export function countUnreadSocialNotifications(entries: any[], lastSeenMs: number): number {
-  if (!lastSeenMs) return entries.length;
+  if (!Number.isFinite(lastSeenMs) || lastSeenMs <= 0) return 0;
   return entries.filter((n) => {
     const ts = Date.parse(String(n?.createdAt || ""));
     return Number.isFinite(ts) && ts > lastSeenMs;

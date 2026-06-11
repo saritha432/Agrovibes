@@ -1014,6 +1014,12 @@ export async function markSocialNotificationRead(token: string, notificationId: 
   })) as { ok: boolean };
 }
 
+export async function markAllSocialNotificationsRead(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications/read-all`, token, {
+    method: "POST"
+  })) as { ok: boolean; marked?: number };
+}
+
 export async function fetchRelationships(token: string, userIds: number[]) {
   const cleaned = [...new Set(userIds.filter((v) => Number.isFinite(v) && v > 0))];
   if (!cleaned.length) return { relationships: {} as Record<number, SocialRelationship> };
