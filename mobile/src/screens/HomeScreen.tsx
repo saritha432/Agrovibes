@@ -32,7 +32,7 @@ import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navi
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
-import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { AppTopBar } from "../components/AppTopBar";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
@@ -724,10 +724,7 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
     : ({} as ViewStyle);
 
 function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
-  const sources = useMemo(() => videoPlaybackSources(uri), [uri]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = sources[sourceIndex] ?? uri;
-  useEffect(() => setSourceIndex(0), [uri]);
+  const activeUri = videoPlaybackUrl(uri);
   return (
     <Video
       key={activeUri}
@@ -739,8 +736,8 @@ function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
       isMuted
       useNativeControls={false}
       onPlaybackStatusUpdate={(status) => {
-        if (!status.isLoaded && "error" in status && status.error && sourceIndex + 1 < sources.length) {
-          setSourceIndex((i) => i + 1);
+        if (!status.isLoaded && "error" in status && status.error) {
+          console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
         }
       }}
     />
@@ -784,13 +781,10 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
-  const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = playbackSources[sourceIndex] ?? uri;
+  const activeUri = useMemo(() => videoPlaybackUrl(uri), [uri]);
 
   useEffect(() => {
     setNatural(null);
-    setSourceIndex(0);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -836,14 +830,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     []
   );
 
-  const tryNextPlaybackSource = React.useCallback(() => {
-    setSourceIndex((idx) => {
-      if (idx + 1 >= playbackSources.length) return idx;
-      console.warn("[Cropvibe Video] fallback", playbackSources[idx + 1]?.slice(0, 160));
-      return idx + 1;
-    });
-  }, [playbackSources]);
-
   return (
     <View
       style={{
@@ -874,7 +860,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
             durationRef.current = Number(status.durationMillis || 0);
           } else if ("error" in status && status.error) {
             console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-            if (sourceIndex + 1 < playbackSources.length) tryNextPlaybackSource();
           }
         }}
         onReadyForDisplay={
