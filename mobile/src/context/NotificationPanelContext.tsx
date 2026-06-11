@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import {
   fetchMessageThreads,
   fetchRelationships,
+  markAllSocialNotificationsRead,
   markSocialNotificationRead,
   respondToFollowRequest,
   sendFollowRequest
@@ -65,17 +66,101 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [postComments, setPostComments] = useState<any[]>([]);
   const [liveStarts, setLiveStarts] = useState<any[]>([]);
   const [lastSeenMs, setLastSeenMs] = useState(0);
+  const [lastSeenReady, setLastSeenReady] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
-
-  const notificationSeenKey = useMemo(() => {
-    const identity = String(user?.email || user?.id || user?.fullName || "guest").toLowerCase();
-    return `agrovibes.notifications.lastSeen.${identity}`;
-  }, [user?.email, user?.fullName, user?.id]);
 
   const viewerUserId = useMemo(() => {
     const parsed = Number(user?.id);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, [user?.id]);
+
+  const notificationSeenKey = useMemo(() => {
+    if (viewerUserId) return `agrovibes.notifications.lastSeen.v2.uid.${viewerUserId}`;
+    const identity = String(user?.email || user?.fullName || "guest").toLowerCase();
+    return `agrovibes.notifications.lastSeen.v2.${identity}`;
+  }, [user?.email, user?.fullName, viewerUserId]);
+
+  const lastSeenMsRef = useRef(0);
+  lastSeenMsRef.current = lastSeenMs;
+  const dismissedIdsRef = useRef<Set<string>>(new Set());
+
+  const persistLastSeenMs = useCallback(
+    async (ms: number) => {
+      setLastSeenMs(ms);
+      lastSeenMsRef.current = ms;
+      try {
+        await AsyncStorage.setItem(notificationSeenKey, String(ms));
+      } catch {
+        // no-op
+      }
+    },
+    [notificationSeenKey]
+  );
+
+  const bumpLastSeenFromEntry = useCallback(
+    (entry: any) => {
+      const ts = Date.parse(String(entry?.createdAt || ""));
+      const next =
+        Number.isFinite(ts) && ts > 0 ? Math.max(lastSeenMsRef.current, ts) : Date.now();
+      setLastSeenMs(next);
+      lastSeenMsRef.current = next;
+      void AsyncStorage.setItem(notificationSeenKey, String(next)).catch(() => {});
+    },
+    [notificationSeenKey]
+  );
+
+  const notificationEntryId = useCallback((entry: any) => {
+    if (entry?.id == null) return "";
+    return String(entry.id);
+  }, []);
+
+  const filterOutNotificationEntry = useCallback(
+    (list: any[], entry: any) => {
+      const entryId = notificationEntryId(entry);
+      if (!entryId) return list;
+      return list.filter((n) => String(n?.id) !== entryId);
+    },
+    [notificationEntryId]
+  );
+
+  const filterDismissedNotifications = useCallback((list: any[]) => {
+    const dismissed = dismissedIdsRef.current;
+    if (!dismissed.size) return list;
+    return list.filter((n) => !dismissed.has(String(n?.id)));
+  }, []);
+
+  const optimisticDismissNotification = useCallback(
+    (entry: any) => {
+      bumpLastSeenFromEntry(entry);
+      setLiveStarts((prev) => filterOutNotificationEntry(prev, entry));
+      setPostLikes((prev) => filterOutNotificationEntry(prev, entry));
+      setPostComments((prev) => filterOutNotificationEntry(prev, entry));
+      setAccepted((prev) => filterOutNotificationEntry(prev, entry));
+      setDeclined((prev) => filterOutNotificationEntry(prev, entry));
+      setPending((prev) => filterOutNotificationEntry(prev, entry));
+
+      if (entry?.isLocal) {
+        const id = String(entry.id);
+        void (async () => {
+          if (entry.type === "post_like" || entry.type === "post_comment" || entry.type === "comment_reply") {
+            await markLocalEngagementRead(id);
+            return;
+          }
+          await markLocalAcceptedSeen(id).catch(() => undefined);
+          await markLocalDeclinedSeen(id).catch(() => undefined);
+        })();
+        return;
+      }
+
+      const entryId = notificationEntryId(entry);
+      if (entryId) dismissedIdsRef.current.add(entryId);
+
+      if (token && typeof entry.id === "number") {
+        void markSocialNotificationRead(token, Number(entry.id)).catch(() => {});
+      }
+    },
+    [bumpLastSeenFromEntry, filterOutNotificationEntry, notificationEntryId, token]
+  );
 
   const loadNotifications = useCallback(async () => {
     if (!user?.fullName) return;
@@ -106,13 +191,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       userEmail: user.email,
       userId: user.id
     });
-    const mergedPending = snap.pending;
+    const mergedPending = filterDismissedNotifications(snap.pending);
     setPending(mergedPending);
-    setAccepted(snap.accepted);
-    setDeclined(snap.declined);
-    setPostLikes(snap.postLikes);
-    setPostComments(snap.postComments);
-    setLiveStarts(snap.liveStarts);
+    setAccepted(filterDismissedNotifications(snap.accepted));
+    setDeclined(filterDismissedNotifications(snap.declined));
+    setPostLikes(filterDismissedNotifications(snap.postLikes));
+    setPostComments(filterDismissedNotifications(snap.postComments));
+    setLiveStarts(filterDismissedNotifications(snap.liveStarts));
 
     const fbQueue = followBackQueueRef.current;
     const nameSet = new Set<string>();
@@ -170,7 +255,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         })
       );
     }
-  }, [token, user?.email, user?.fullName, user?.id, viewerUserId]);
+  }, [filterDismissedNotifications, token, user?.email, user?.fullName, user?.id, viewerUserId]);
 
   useEffect(() => {
     loadNotifications();
@@ -180,15 +265,25 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
+    setLastSeenReady(false);
+    void (async () => {
       try {
         const raw = await AsyncStorage.getItem(notificationSeenKey);
         if (!mounted) return;
         const parsed = Number(raw || 0);
-        setLastSeenMs(Number.isFinite(parsed) ? parsed : 0);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          setLastSeenMs(parsed);
+        } else {
+          const now = Date.now();
+          setLastSeenMs(now);
+          await AsyncStorage.setItem(notificationSeenKey, String(now));
+        }
       } catch {
         if (!mounted) return;
-        setLastSeenMs(0);
+        const now = Date.now();
+        setLastSeenMs(now);
+      } finally {
+        if (mounted) setLastSeenReady(true);
       }
     })();
     return () => {
@@ -197,7 +292,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   }, [notificationSeenKey]);
 
   const notificationUnreadCount = useMemo(() => {
-    if (sheetOpen) return 0;
+    if (sheetOpen || !lastSeenReady) return 0;
     const entries = flattenNotificationFeedSnapshot({
       pending,
       accepted,
@@ -207,14 +302,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       liveStarts
     });
     return countUnreadSocialNotifications(entries, lastSeenMs);
-  }, [accepted, declined, lastSeenMs, liveStarts, sheetOpen, pending, postComments, postLikes]);
-
-  useEffect(() => {
-    if (!sheetOpen) return;
-    const now = Date.now();
-    setLastSeenMs(now);
-    AsyncStorage.setItem(notificationSeenKey, String(now)).catch(() => {});
-  }, [notificationSeenKey, sheetOpen]);
+  }, [accepted, declined, lastSeenMs, lastSeenReady, liveStarts, sheetOpen, pending, postComments, postLikes]);
 
   const openNotificationSheet = useCallback(() => {
     setSheetOpen(true);
@@ -222,8 +310,20 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   }, [loadNotifications]);
 
   const closeNotificationSheet = useCallback(() => {
+    const now = Date.now();
+    void persistLastSeenMs(now);
     setSheetOpen(false);
-  }, []);
+    if (token) {
+      void (async () => {
+        try {
+          await markAllSocialNotificationsRead(token);
+        } catch {
+          // Badge already cleared via lastSeenMs; server sync may retry on next poll.
+        }
+        await loadNotifications();
+      })();
+    }
+  }, [loadNotifications, persistLastSeenMs, token]);
 
   const onRespond = async (entry: any, action: "accept" | "decline") => {
     if (entry?.isLocal) {
@@ -256,35 +356,20 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
   };
 
-  const onMarkAcceptedRead = async (entry: any) => {
-    if (entry?.isLocal) {
-      await markLocalAcceptedSeen(String(entry.id));
-      await loadNotifications();
-      return;
-    }
-    if (token && entry?.id) {
-      await markSocialNotificationRead(token, Number(entry.id));
-      await loadNotifications();
-    }
+  const onMarkAcceptedRead = (entry: any) => {
+    optimisticDismissNotification(entry);
   };
 
-  const onMarkDeclinedRead = async (entry: any) => {
-    if (entry?.isLocal) {
-      await markLocalDeclinedSeen(String(entry.id));
-      await loadNotifications();
-    }
+  const onMarkDeclinedRead = (entry: any) => {
+    optimisticDismissNotification(entry);
   };
 
-  const onMarkPostActivityRead = async (entry: any) => {
-    if (entry?.isLocal) {
-      await markLocalEngagementRead(String(entry.id));
-      await loadNotifications();
-      return;
-    }
-    if (token && entry?.id && typeof entry.id === "number") {
-      await markSocialNotificationRead(token, Number(entry.id));
-      await loadNotifications();
-    }
+  const onMarkPostActivityRead = (entry: any) => {
+    optimisticDismissNotification(entry);
+  };
+
+  const onDismissNotification = (entry: any) => {
+    optimisticDismissNotification(entry);
   };
 
   const onJoinLive = async (entry: any) => {
@@ -523,6 +608,14 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                       <Pressable style={styles.joinLiveBtn} onPress={() => onStartScheduledLiveFromNotif(n)}>
                         <Text style={styles.joinLiveText}>{t("goLive")}</Text>
                       </Pressable>
+                      <Pressable
+                        style={styles.dismissBtn}
+                        onPress={() => onDismissNotification(n)}
+                        hitSlop={8}
+                        accessibilityLabel="Dismiss notification"
+                      >
+                        <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
+                      </Pressable>
                     </View>
                   );
                 }
@@ -538,7 +631,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     <View key={item.key} style={styles.liveStartRow}>
                       <Pressable
                         style={styles.liveStartMain}
-                        onPress={() => (canJoin ? void onJoinLive(n) : void onMarkPostActivityRead(n))}
+                        onPress={() => (canJoin ? void onJoinLive(n) : void onDismissNotification(n))}
                       >
                         <Ionicons
                           name="radio"
@@ -558,6 +651,14 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                           <Text style={styles.liveEndedBadgeText}>{t("liveEndedBadge")}</Text>
                         </View>
                       ) : null}
+                      <Pressable
+                        style={styles.dismissBtn}
+                        onPress={() => onDismissNotification(n)}
+                        hitSlop={8}
+                        accessibilityLabel="Dismiss notification"
+                      >
+                        <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
+                      </Pressable>
                     </View>
                   );
                 }
@@ -662,5 +763,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8
   },
   liveEndedBadgeText: { color: "rgba(255,255,255,0.5)", fontWeight: "800", fontSize: 12 },
-  rowTextMuted: { color: "rgba(255,255,255,0.45)" }
+  rowTextMuted: { color: "rgba(255,255,255,0.45)" },
+  dismissBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)"
+  }
 });

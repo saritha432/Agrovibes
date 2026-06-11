@@ -2660,6 +2660,35 @@ router.post("/v1/social/notifications/:notificationId/read", authRequired, async
   }
 });
 
+router.post("/v1/social/notifications/read-all", authRequired, async (req, res) => {
+  try {
+    await ensureSocialNotificationsTable();
+    const me = Number(req.user.userId);
+    const updated = await query(
+      `
+      UPDATE social_notifications n
+      SET is_read = true
+      WHERE n.user_id = $1
+        AND n.is_read = false
+        AND NOT (
+          n.type = 'follow_request'
+          AND EXISTS (
+            SELECT 1
+            FROM social_follows f
+            WHERE f.id = n.follow_id
+              AND f.status = 'pending'
+          )
+        )
+      RETURNING n.id
+      `,
+      [me]
+    );
+    res.json({ ok: true, marked: updated.rows.length });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark notifications read", error: error.message });
+  }
+});
+
 router.get("/v1/messages/threads", authRequired, async (req, res) => {
   try {
     await ensureDirectMessagesTable();
