@@ -44,7 +44,7 @@ export type MainTabParamList = {
 export type RootStackParamList = {
   Splash: undefined;
   InitialSetup: undefined;
-  AuthChoice: { initialMode?: "register" | "login" } | undefined;
+  AuthChoice: { initialMode?: "register" | "login"; passwordResetSuccess?: boolean; loginPhone?: string } | undefined;
   OtpVerify: { phone: string };
   ForgotPassword: undefined;
   ForgotPasswordOtp: { phone: string };
