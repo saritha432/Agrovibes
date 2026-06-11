@@ -179,20 +179,21 @@ function LiveRoomContent({
         if (cancelled || liveEndedRef.current) return;
         await new Promise((resolve) => setTimeout(resolve, 600));
         if (cancelled || liveEndedRef.current) return;
-        if (token) {
-          try {
-            const setup = await fetchLiveSetupCheck(token);
-            if (!setup.egressRecording) {
-              setPublishError("API server cannot save live replays — set LIVEKIT_EGRESS_S3 on Render.");
-            }
-            const rec = await startLiveServerRecording(token, roomName);
-            if (!rec.started) {
-              console.warn("[live] start-recording:", rec.error || "not started");
-            }
-          } catch (err) {
-            console.warn("[live] recording setup failed:", err);
-          }
-        }
+        // RESTORE WHEN SUPABASE PAID — uncomment block below (live replay → Supabase egress).
+        // if (token) {
+        //   try {
+        //     const setup = await fetchLiveSetupCheck(token);
+        //     if (!setup.egressRecording) {
+        //       setPublishError("API server cannot save live replays — set LIVEKIT_EGRESS_S3 on Render.");
+        //     }
+        //     const rec = await startLiveServerRecording(token, roomName);
+        //     if (!rec.started) {
+        //       console.warn("[live] start-recording:", rec.error || "not started");
+        //     }
+        //   } catch (err) {
+        //     console.warn("[live] recording setup failed:", err);
+        //   }
+        // }
       } catch (error) {
         if (cancelled) return;
         setPublishError(formatLiveStreamError(error));

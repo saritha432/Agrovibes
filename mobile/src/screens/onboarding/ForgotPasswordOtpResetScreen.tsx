@@ -1,10 +1,11 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { resetToLoginAfterPasswordReset } from "../../navigation/navigationRef";
 import { resetPasswordWithOtp, sendPhoneOtp } from "../../services/api";
 import { useLanguage } from "../../localization/LanguageContext";
 import { APP_LIME } from "../../theme/appColors";
@@ -20,6 +21,27 @@ function normalizePhoneForApi(phone: string) {
   const digits = phone.replace(/\D/g, "");
   const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
   return last10.length === 10 ? `+91${last10}` : phone.trim();
+}
+
+function phoneDigitsForLogin(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+function goToLoginAfterReset(
+  navigation: NativeStackNavigationProp<RootStackParamList>,
+  loginPhone: string
+) {
+  const params = {
+    initialMode: "login" as const,
+    passwordResetSuccess: true,
+    loginPhone
+  };
+  if (resetToLoginAfterPasswordReset(loginPhone)) return;
+  navigation.reset({
+    index: 0,
+    routes: [{ name: "AuthChoice", params }]
+  });
 }
 
 export function ForgotPasswordOtpResetScreen() {
@@ -40,6 +62,8 @@ export function ForgotPasswordOtpResetScreen() {
   const [confirmPasswordError, setConfirmPasswordError] = React.useState("");
   const [countdown, setCountdown] = React.useState(30);
   const [resending, setResending] = React.useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = React.useState(false);
+  const [pendingLoginPhone, setPendingLoginPhone] = React.useState("");
 
   React.useEffect(() => {
     if (countdown <= 0) return;
@@ -94,7 +118,8 @@ export function ForgotPasswordOtpResetScreen() {
         code: digits,
         newPassword: newPassword.trim()
       });
-      navigation.goBack();
+      setPendingLoginPhone(phoneDigitsForLogin(apiPhone));
+      setShowSuccessPopup(true);
     } catch (e: any) {
       const message = String(e?.message || "Failed to reset password");
       if (/otp expired/i.test(message) && digits === STATIC_OTP_HINT) {
@@ -123,8 +148,35 @@ export function ForgotPasswordOtpResetScreen() {
     }
   };
 
+  const dismissSuccessPopup = () => {
+    const loginPhone = pendingLoginPhone;
+    setShowSuccessPopup(false);
+    setPendingLoginPhone("");
+    if (loginPhone) goToLoginAfterReset(navigation, loginPhone);
+  };
+
   return (
     <View style={styles.screen}>
+      <Modal
+        visible={showSuccessPopup}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissSuccessPopup}
+      >
+        <View style={styles.popupBackdrop}>
+          <View style={styles.popupCard}>
+            <View style={styles.popupIconWrap}>
+              <Ionicons name="checkmark-circle" size={44} color={GREEN} />
+            </View>
+            <Text style={styles.popupTitle}>{t("passwordResetSuccessTitle")}</Text>
+            <Text style={styles.popupMessage}>{t("passwordResetSuccessMessage")}</Text>
+            <Pressable style={styles.popupBtn} onPress={dismissSuccessPopup} accessibilityRole="button">
+              <Text style={styles.popupBtnText}>{t("ok")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.card}>
         <Text style={styles.title}>6 Digit Code</Text>
         <Text style={styles.subtitle}>
@@ -292,5 +344,49 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: "#232930"
   },
-  backText: { color: "#d8dde3", fontWeight: "700", fontSize: 12 }
+  backText: { color: "#d8dde3", fontWeight: "700", fontSize: 12 },
+  popupBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24
+  },
+  popupCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: CARD,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
+    alignItems: "center"
+  },
+  popupIconWrap: { marginBottom: 10 },
+  popupTitle: {
+    color: GREEN,
+    fontWeight: "900",
+    fontSize: 18,
+    textAlign: "center",
+    marginBottom: 8
+  },
+  popupMessage: {
+    color: "#b8c2ca",
+    fontWeight: "600",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
+    marginBottom: 18
+  },
+  popupBtn: {
+    width: "100%",
+    backgroundColor: GREEN,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12
+  },
+  popupBtnText: { color: "#1b1f23", fontWeight: "900", fontSize: 14 }
 });
