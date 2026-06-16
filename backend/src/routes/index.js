@@ -16,7 +16,7 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
-const { isSupabaseStorageConfigured, uploadBufferToSupabase, checkSupabaseStorageHealth } = require("../supabaseStorage");
+const { isMediaStorageConfigured, uploadMediaBuffer, checkMediaStorageHealth } = require("../mediaStorage");
 const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 const {
   isEgressConfigured,
@@ -71,8 +71,8 @@ const uploadVideo = multer({
   }
 });
 
-/** Match Supabase Storage per-file limit (~50MB on most plans). */
-const MAX_MEDIA_UPLOAD_BYTES = 50 * 1024 * 1024;
+/** Supabase ~50MB; S3 allows larger uploads via API. */
+const MAX_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 const uploadMediaMemory = multer({
   storage: multer.memoryStorage(),
@@ -4379,25 +4379,25 @@ router.delete("/v1/home/posts/:postId/comments/:commentId", authRequired, async 
 });
 
 router.get("/v1/media/config", async (_req, res) => {
-  if (!isSupabaseStorageConfigured()) {
+  if (!isMediaStorageConfigured()) {
     res.status(503).json({
-      provider: "supabase",
+      provider: null,
       ok: false,
       configured: false,
       message:
-        "Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET."
+        "Media storage is not configured. Set AWS S3 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET) or Supabase Storage vars."
     });
     return;
   }
   try {
-    const health = await checkSupabaseStorageHealth();
-    res.json({ provider: "supabase", ...health });
+    const health = await checkMediaStorageHealth();
+    res.json(health);
   } catch (error) {
     res.json({
-      provider: "supabase",
+      provider: null,
       ok: false,
       configured: true,
-      message: error.message || "Supabase Storage check failed"
+      message: error.message || "Media storage check failed"
     });
   }
 });
@@ -4410,7 +4410,7 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
         message: errMsg || "Invalid upload request",
         error: errMsg,
         hint: /file too large|limit/i.test(errMsg)
-          ? "File is over the 50MB Supabase limit. Trim the video or export a smaller MP4."
+          ? "File is over the 100MB upload limit. Trim the video or export a smaller MP4."
           : undefined
       });
       return;
@@ -4419,10 +4419,10 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
       res.status(400).json({ message: "file is required" });
       return;
     }
-    if (!isSupabaseStorageConfigured()) {
+    if (!isMediaStorageConfigured()) {
       res.status(503).json({
         message:
-          "Supabase Storage is not configured. Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET on the server."
+          "Media storage is not configured. Set AWS S3 or Supabase Storage env vars on the server."
       });
       return;
     }
@@ -4432,28 +4432,30 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
       const isVideo = mimeType.startsWith("video/");
       const ext = mediaExtFromMime(mimeType, req.file.originalname);
       const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-      const url = await uploadBufferToSupabase({
+      const uploaded = await uploadMediaBuffer({
         buffer: req.file.buffer,
         mimeType,
         objectPath
       });
-      res.status(201).json({ url, provider: "supabase", path: objectPath });
+      res.status(201).json({ url: uploaded.url, provider: uploaded.provider, path: uploaded.path });
     } catch (error) {
       const msg = String(error.message || "");
       res.status(500).json({
         message: "Media upload failed",
         error: msg,
-        hint: /bucket/i.test(msg)
-          ? 'Create a public Storage bucket named "media" in Supabase.'
-          : /jwt|api key|invalid/i.test(msg)
-            ? "Use the legacy service_role key (eyJ...), not sb_publishable_."
-            : /SUPABASE_URL|project url|pooler|https:\/\//i.test(msg)
-              ? "Fix SUPABASE_URL on Render: use Project Settings → API → Project URL (https://xxxx.supabase.co)."
-              : /Invalid path specified/i.test(msg)
-                ? "SUPABASE_URL on Render is wrong. Use https://YOUR-REF.supabase.co only — not the database URL or /storage/v1 path."
-                : /maximum allowed size|payload too large|entity too large/i.test(msg)
-                  ? "File is over the 50MB Supabase limit. Trim the video or export a shorter/smaller MP4."
-                  : undefined
+        hint: /AWS|S3|bucket/i.test(msg)
+          ? "Check AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET and IAM s3:PutObject permission."
+          : /bucket/i.test(msg)
+            ? 'Create a public Storage bucket named "media" in Supabase.'
+            : /jwt|api key|invalid/i.test(msg)
+              ? "Use the legacy service_role key (eyJ...), not sb_publishable_."
+              : /SUPABASE_URL|project url|pooler|https:\/\//i.test(msg)
+                ? "Fix SUPABASE_URL on Render: use Project Settings → API → Project URL (https://xxxx.supabase.co)."
+                : /Invalid path specified/i.test(msg)
+                  ? "SUPABASE_URL on Render is wrong. Use https://YOUR-REF.supabase.co only — not the database URL or /storage/v1 path."
+                  : /maximum allowed size|payload too large|entity too large/i.test(msg)
+                    ? "File is over the upload size limit. Trim the video or export a shorter/smaller MP4."
+                    : undefined
       });
     }
   });

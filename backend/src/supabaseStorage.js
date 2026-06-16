@@ -85,6 +85,67 @@ async function uploadBufferToSupabase({ buffer, mimeType, objectPath }) {
   return publicUrl;
 }
 
+function publicUrlToObjectPath(publicUrl, bucket) {
+  const u = String(publicUrl || "").trim();
+  if (!u) return null;
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const idx = u.indexOf(marker);
+  if (idx === -1) return null;
+  return u.slice(idx + marker.length).replace(/^\//, "");
+}
+
+/** List all file paths under a storage prefix (recursive). */
+async function listStorageFilesUnderPrefix(prefix) {
+  const ctx = getSupabaseAdmin();
+  if (!ctx) {
+    throw new Error("Supabase Storage is not configured");
+  }
+  const root = String(prefix || "").replace(/^\/+|\/+$/g, "");
+  const paths = [];
+
+  async function walk(folder) {
+    const { data, error } = await ctx.client.storage.from(ctx.bucket).list(folder, {
+      limit: 200,
+      sortBy: { column: "name", order: "asc" }
+    });
+    if (error) throw new Error(error.message || "list failed");
+    for (const item of data || []) {
+      const rel = folder ? `${folder}/${item.name}` : item.name;
+      if (item.id != null) {
+        paths.push(rel);
+      } else {
+        await walk(rel);
+      }
+    }
+  }
+
+  await walk(root);
+  return paths;
+}
+
+async function deleteStorageObjectPaths(paths) {
+  const ctx = getSupabaseAdmin();
+  if (!ctx) {
+    throw new Error("Supabase Storage is not configured");
+  }
+  const clean = Array.from(new Set((paths || []).map((p) => String(p || "").replace(/^\//, "")).filter(Boolean)));
+  if (clean.length === 0) return { deleted: 0, errors: [] };
+
+  const errors = [];
+  let deleted = 0;
+  const batchSize = 100;
+  for (let i = 0; i < clean.length; i += batchSize) {
+    const batch = clean.slice(i, i + batchSize);
+    const { data, error } = await ctx.client.storage.from(ctx.bucket).remove(batch);
+    if (error) {
+      errors.push(error.message || String(error));
+      continue;
+    }
+    deleted += Array.isArray(data) ? data.length : batch.length;
+  }
+  return { deleted, errors };
+}
+
 async function checkSupabaseStorageHealth() {
   const cfg = readSupabaseStorageConfig();
   if (!cfg) {
@@ -120,5 +181,8 @@ module.exports = {
   readSupabaseStorageConfig,
   isSupabaseStorageConfigured,
   uploadBufferToSupabase,
+  publicUrlToObjectPath,
+  listStorageFilesUnderPrefix,
+  deleteStorageObjectPaths,
   checkSupabaseStorageHealth
 };
