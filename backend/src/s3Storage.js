@@ -60,15 +60,28 @@ async function uploadBufferToS3({ buffer, mimeType, objectPath }) {
   }
 
   const key = String(objectPath || "").replace(/^\/+/, "");
-  await client.send(
-    new PutObjectCommand({
-      Bucket: cfg.bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: mimeType || "application/octet-stream",
-      CacheControl: "public, max-age=31536000, immutable"
-    })
-  );
+  const usePublicAcl = stripEnv(process.env.AWS_S3_PUBLIC_READ) !== "false";
+  const putInput = {
+    Bucket: cfg.bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: mimeType || "application/octet-stream",
+    CacheControl: "public, max-age=31536000, immutable"
+  };
+  if (usePublicAcl) {
+    putInput.ACL = "public-read";
+  }
+  try {
+    await client.send(new PutObjectCommand(putInput));
+  } catch (error) {
+    const msg = String(error?.message || error || "");
+    if (usePublicAcl && /acl|access control/i.test(msg)) {
+      throw new Error(
+        `${msg}. In S3: disable Block Public ACLs, set Object Ownership to "Bucket owner preferred", or set AWS_S3_PUBLIC_READ=false and use a bucket policy on agrovibes/* instead.`
+      );
+    }
+    throw error;
+  }
 
   return buildS3PublicUrl(key);
 }
