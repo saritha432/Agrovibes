@@ -18,7 +18,11 @@ async function ensureAndroidChannel() {
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync("default", {
     name: "Default",
+    description: "General Cropvibe notifications",
     importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: false,
+    sound: "default",
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35"
   });

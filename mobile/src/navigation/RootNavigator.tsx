@@ -66,7 +66,13 @@ export type RootStackParamList = {
   UserSearch: undefined;
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
   DirectInbox: undefined;
-  DirectChat: { peerUserId: number; peerName: string; peerKey?: string; peerAvatarUrl?: string | null };
+  DirectChat: {
+    peerUserId: number;
+    peerName: string;
+    peerKey?: string;
+    peerAvatarUrl?: string | null;
+    incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number };
+  };
   SettingsMenu: undefined;
   Privacy: undefined;
   About: undefined;

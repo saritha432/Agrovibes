@@ -15,6 +15,12 @@ export function navigateToDirectInbox() {
   }
 }
 
+export function navigateToDirectChat(params: RootStackParamList["DirectChat"]) {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("DirectChat", params);
+  }
+}
+
 export function navigateToEditProfile() {
   if (navigationRef.isReady()) {
     navigationRef.navigate("EditProfile");

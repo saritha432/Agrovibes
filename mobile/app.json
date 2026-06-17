@@ -75,7 +75,7 @@
         "expo-notifications",
         {
           "icon": "./assets/logo-adaptive-foreground.png",
-          "color": "#C9FF35",
+          "color": "#FFFFFF",
           "defaultChannel": "default"
         }
       ],
