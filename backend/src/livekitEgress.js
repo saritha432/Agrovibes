@@ -46,6 +46,28 @@ function supabasePublicUrlForPath(filepath) {
   return `${base}/storage/v1/object/public/${bucket}/${clean}`;
 }
 
+function egressPublicUrlForPath(filepath) {
+  const egressCfg = readEgressS3Config();
+  if (!egressCfg) return null;
+  const clean = String(filepath || "").replace(/^\//, "");
+  if (!clean) return null;
+  if (/supabase/i.test(egressCfg.endpoint || "")) {
+    return supabasePublicUrlForPath(clean);
+  }
+  try {
+    const { buildS3PublicUrl } = require("./s3Storage");
+    return buildS3PublicUrl(clean);
+  } catch {
+    const region = egressCfg.region || "us-east-1";
+    const bucket = egressCfg.bucket;
+    const origin =
+      region === "us-east-1"
+        ? `https://${bucket}.s3.amazonaws.com`
+        : `https://${bucket}.s3.${region}.amazonaws.com`;
+    return `${origin}/${clean}`;
+  }
+}
+
 function getEgressClient(cfg) {
   return new EgressClient(liveKitHttpUrl(cfg.livekitUrl), cfg.apiKey, cfg.apiSecret);
 }
@@ -217,7 +239,7 @@ async function stopLiveRoomRecordingAndGetVideoUrl(cfg, roomName) {
       if (location && /^https?:\/\//i.test(String(location))) {
         return String(location).trim();
       }
-      return supabasePublicUrlForPath(session.filepath);
+      return egressPublicUrlForPath(session.filepath);
     }
     if (status === EgressStatus.EGRESS_FAILED || status === EgressStatus.EGRESS_ABORTED) {
       sessionsByRoom.delete(roomName);
@@ -227,7 +249,7 @@ async function stopLiveRoomRecordingAndGetVideoUrl(cfg, roomName) {
   }
 
   sessionsByRoom.delete(roomName);
-  return supabasePublicUrlForPath(session.filepath);
+  return egressPublicUrlForPath(session.filepath);
 }
 
 module.exports = {

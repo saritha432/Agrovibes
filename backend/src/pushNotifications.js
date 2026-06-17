@@ -158,7 +158,21 @@ async function sendPushToUser(userId, { title, body, data }) {
     android: {
       priority: "high",
       notification: {
-        channelId: "default"
+        channelId: "default",
+        priority: "max",
+        visibility: "public",
+        defaultSound: true,
+        defaultVibrateTimings: true
+      }
+    },
+    apns: {
+      headers: {
+        "apns-priority": "10"
+      },
+      payload: {
+        aps: {
+          sound: "default"
+        }
       }
     }
   });
@@ -190,6 +204,20 @@ async function sendSocialPushToUser({ userId, type, actorName, postId, commentEx
       type: type || "generic",
       postId: postId != null ? String(postId) : "",
       followId: followId != null ? String(followId) : ""
+    }
+  });
+}
+
+async function sendIncomingCallPush({ userId, callerName, mode, roomName, callerId }) {
+  const label = mode === "video" ? "Incoming video call" : "Incoming voice call";
+  return sendPushToUser(userId, {
+    title: String(callerName || "Someone").trim() || "Someone",
+    body: label,
+    data: {
+      type: "incoming_call",
+      mode: mode === "video" ? "video" : "voice",
+      roomName: String(roomName || ""),
+      callerId: callerId != null ? String(callerId) : ""
     }
   });
 }
@@ -227,6 +255,7 @@ module.exports = {
   registerPushDeviceToken,
   unregisterPushDeviceToken,
   sendPushToUser,
+  sendIncomingCallPush,
   sendSocialPushToUser,
   sendSocialPushToFollowers
 };

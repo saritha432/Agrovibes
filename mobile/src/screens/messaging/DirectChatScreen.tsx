@@ -5,7 +5,6 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -20,9 +19,10 @@ import { useAuth } from "../../auth/AuthContext";
 import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
-import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePosts, fetchMessageThread, ringDirectCall, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
+import { DirectCallView, type DirectCallMode } from "./DirectCallView";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
@@ -178,7 +178,7 @@ export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName, peerAvatarUrl } = route.params;
+  const { peerUserId, peerName, peerAvatarUrl, incomingCall } = route.params;
   const { t } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
@@ -186,9 +186,12 @@ export function DirectChatScreen() {
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
   );
   const [draft, setDraft] = useState("");
-  const [activeCall, setActiveCall] = useState<"voice" | "video" | null>(null);
-  const [isMuted, setMuted] = useState(false);
-  const [isCameraOff, setCameraOff] = useState(false);
+  const [callSession, setCallSession] = useState<{
+    roomName: string;
+    mode: DirectCallMode;
+    connectEnabled: boolean;
+    statusLabel?: string;
+  } | null>(null);
   const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const listRef = useRef<FlatList<DirectMessageItem>>(null);
 
@@ -223,16 +226,45 @@ export function DirectChatScreen() {
     await reload();
   };
 
+  useEffect(() => {
+    if (!incomingCall?.roomName) return;
+    setCallSession({
+      roomName: incomingCall.roomName,
+      mode: incomingCall.mode,
+      connectEnabled: false,
+      statusLabel: incomingCall.mode === "video" ? "Incoming video call" : "Incoming voice call"
+    });
+  }, [incomingCall?.mode, incomingCall?.roomName]);
+
+  const startCall = async (mode: DirectCallMode) => {
+    if (!token || Platform.OS === "web") {
+      Alert.alert("Unavailable", "Voice and video calls are available in the mobile app.");
+      return;
+    }
+    try {
+      const result = await ringDirectCall(token, { peerUserId, mode });
+      setCallSession({
+        roomName: result.roomName,
+        mode: result.mode,
+        connectEnabled: true,
+        statusLabel: mode === "video" ? "Calling..." : "Calling..."
+      });
+    } catch (error) {
+      Alert.alert("Call failed", error instanceof Error ? error.message : "Could not start call.");
+    }
+  };
+
   const openVoiceCall = () => {
-    setMuted(false);
-    setCameraOff(false);
-    setActiveCall("voice");
+    void startCall("voice");
   };
 
   const openVideoCall = () => {
-    setMuted(false);
-    setCameraOff(false);
-    setActiveCall("video");
+    void startCall("video");
+  };
+
+  const closeCall = () => {
+    setCallSession(null);
+    navigation.setParams({ incomingCall: undefined });
   };
 
   const bottomPad = Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8;
@@ -393,69 +425,25 @@ export function DirectChatScreen() {
           <Ionicons name="send" size={18} color={draft.trim() ? "#111" : MUTED} />
         </Pressable>
       </View>
-      <Modal visible={!!activeCall} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setActiveCall(null)}>
-        <View style={[styles.callScreen, activeCall === "video" ? styles.videoCallScreen : null, { paddingTop: Math.max(insets.top, 18) }]}>
-          {activeCall === "video" ? (
-            <View style={styles.videoPreview}>
-              {isCameraOff ? (
-                <View style={styles.videoCameraOff}>
-                  <Ionicons name="videocam-off-outline" size={34} color="#fff" />
-                  <Text style={styles.videoCameraOffText}>Camera off</Text>
-                </View>
-              ) : (
-                <View style={styles.videoAvatarLarge}>
-                  <UserAvatar
-                    uri={peerAvatar}
-                    name={peerName}
-                    size={120}
-                    borderRadius={60}
-                    fallbackBackgroundColor="#262626"
-                    initialsColor="#fff"
-                  />
-                </View>
-              )}
-            </View>
-          ) : null}
-          <View style={styles.callTopBar}>
-            <Pressable style={styles.callTopIcon} onPress={() => setActiveCall(null)}>
-              <Ionicons name="chevron-down" size={28} color="#fff" />
-            </Pressable>
-          </View>
-          <View style={styles.callIdentity}>
-            <UserAvatar
-              uri={peerAvatar}
-              name={peerName}
-              size={activeCall === "video" ? 82 : 118}
-              borderRadius={activeCall === "video" ? 41 : 59}
-              style={[styles.callAvatar, activeCall === "video" ? styles.callAvatarVideo : null]}
-              fallbackBackgroundColor={APP_LIME}
-              initialsColor="#111"
-            />
-            <Text style={styles.callName}>{peerName}</Text>
-            <Text style={styles.callStatus}>{activeCall === "video" ? "Video calling..." : "Calling..."}</Text>
-          </View>
-          <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-            <Pressable style={styles.callControlBtn} onPress={() => setMuted((v) => !v)}>
-              <Ionicons name={isMuted ? "mic-off" : "mic"} size={24} color="#fff" />
-            </Pressable>
-            {activeCall === "video" ? (
-              <Pressable style={styles.callControlBtn} onPress={() => setCameraOff((v) => !v)}>
-                <Ionicons name={isCameraOff ? "videocam-off" : "videocam"} size={24} color="#fff" />
-              </Pressable>
-            ) : (
-              <Pressable style={styles.callControlBtn} onPress={openVideoCall}>
-                <Ionicons name="videocam" size={24} color="#fff" />
-              </Pressable>
-            )}
-            <Pressable style={[styles.callControlBtn, styles.endCallBtn]} onPress={() => setActiveCall(null)}>
-              <Ionicons name="call" size={25} color="#fff" />
-            </Pressable>
-            <Pressable style={styles.callControlBtn}>
-              <Ionicons name={activeCall === "video" ? "camera-reverse" : "volume-high"} size={24} color="#fff" />
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <DirectCallView
+        visible={!!callSession}
+        roomName={callSession?.roomName || ""}
+        mode={callSession?.mode || "voice"}
+        peerName={peerName}
+        peerAvatarUrl={peerAvatar}
+        connectEnabled={callSession?.connectEnabled ?? false}
+        statusLabel={callSession?.statusLabel}
+        onAccept={() => {
+          if (!callSession) return;
+          setCallSession({
+            ...callSession,
+            connectEnabled: true,
+            statusLabel: callSession.mode === "video" ? "Connecting video..." : "Connecting..."
+          });
+        }}
+        onDecline={closeCall}
+        onClose={closeCall}
+      />
 
       <PostsReelViewerModal
         visible={sharedReelViewer != null}

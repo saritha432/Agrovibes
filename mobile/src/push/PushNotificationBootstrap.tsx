@@ -1,7 +1,7 @@
 import React from "react";
 import { Platform } from "react-native";
 import { useAuth } from "../auth/AuthContext";
-import { navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
+import { navigateToDirectChat, navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
 import {
   addNotificationReceivedListener,
   addNotificationResponseListener,
@@ -32,12 +32,39 @@ export function PushNotificationBootstrap() {
 
   React.useEffect(() => {
     if (Platform.OS === "web") return;
-    const receivedSub = addNotificationReceivedListener(() => {
-      // In-app badge refresh is handled by NotificationPanel polling/focus.
+    const receivedSub = addNotificationReceivedListener((event) => {
+      const data = event.request.content.data || {};
+      const type = String(data.type || "");
+      if (type !== "incoming_call") return;
+      const callerId = Number(data.callerId);
+      const roomName = String(data.roomName || "").trim();
+      const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+      const callerName = String(event.request.content.title || "Someone").trim() || "Someone";
+      if (Number.isFinite(callerId) && callerId > 0 && roomName) {
+        navigateToDirectChat({
+          peerUserId: callerId,
+          peerName: callerName,
+          incomingCall: { roomName, mode, callerId }
+        });
+      }
     });
     const responseSub = addNotificationResponseListener((response) => {
       const data = response.notification.request.content.data || {};
       const type = String(data.type || "");
+      if (type === "incoming_call") {
+        const callerId = Number(data.callerId);
+        const roomName = String(data.roomName || "").trim();
+        const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+        const callerName = String(response.notification.request.content.title || "Someone").trim() || "Someone";
+        if (Number.isFinite(callerId) && callerId > 0 && roomName) {
+          navigateToDirectChat({
+            peerUserId: callerId,
+            peerName: callerName,
+            incomingCall: { roomName, mode, callerId }
+          });
+        }
+        return;
+      }
       if (type === "direct_message") {
         navigateToDirectInbox();
         return;

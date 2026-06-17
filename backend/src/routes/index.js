@@ -27,6 +27,7 @@ const {
   isPushConfigured,
   registerPushDeviceToken,
   unregisterPushDeviceToken,
+  sendIncomingCallPush,
   sendSocialPushToUser,
   sendSocialPushToFollowers
 } = require("../pushNotifications");
@@ -2879,6 +2880,46 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load message thread", error: error.message });
+  }
+});
+
+router.post("/v1/calls/ring", authRequired, async (req, res) => {
+  try {
+    const cfg = readLiveKitConfig();
+    if (!cfg.livekitUrl || !cfg.apiKey || !cfg.apiSecret) {
+      res.status(503).json({
+        message: "LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET."
+      });
+      return;
+    }
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.body?.peerUserId);
+    const mode = String(req.body?.mode || "voice").trim() === "video" ? "video" : "voice";
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    const peerRes = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+    const low = Math.min(me, peerUserId);
+    const high = Math.max(me, peerUserId);
+    const roomName = `dmcall-${low}-${high}-${Date.now()}`;
+    const callerName = await actorDisplayName(me);
+    void sendIncomingCallPush({
+      userId: peerUserId,
+      callerName,
+      mode,
+      roomName,
+      callerId: me
+    }).catch((error) => {
+      console.warn("[push] incoming call:", error?.message || error);
+    });
+    res.status(201).json({ roomName, mode, peerUserId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to start call", error: error.message });
   }
 });
 
