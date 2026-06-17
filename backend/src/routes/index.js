@@ -4247,8 +4247,6 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
   }
 });
 
-});
-
 router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
   try {
     await ensureHomePostsTable();
