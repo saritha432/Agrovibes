@@ -1020,6 +1020,25 @@ export async function markAllSocialNotificationsRead(token: string) {
   })) as { ok: boolean; marked?: number };
 }
 
+export async function registerPushToken(
+  token: string,
+  body: { token: string; platform: "android" | "ios" | string }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/push/register`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })) as { ok: boolean };
+}
+
+export async function unregisterPushToken(authToken: string, deviceToken: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/push/register`, authToken, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: deviceToken })
+  })) as { ok: boolean; removed?: number };
+}
+
 export async function fetchRelationships(token: string, userIds: number[]) {
   const cleaned = [...new Set(userIds.filter((v) => Number.isFinite(v) && v > 0))];
   if (!cleaned.length) return { relationships: {} as Record<number, SocialRelationship> };

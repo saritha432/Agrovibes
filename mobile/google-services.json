@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "838897580934",
+    "project_id": "cropvibe",
+    "storage_bucket": "cropvibe.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:838897580934:android:fb0b12b79566aa5bd10a07",
+        "android_client_info": {
+          "package_name": "com.agrovibes.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDgfT_2dtDt1F8IqGVXJVXjlCwTUqgiXN4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
