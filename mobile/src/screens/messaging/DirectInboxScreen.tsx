@@ -38,8 +38,11 @@ function formatTime(ts: number) {
 }
 
 function previewMessage(body: string, t: (key: string) => string) {
+  if (String(body || "").startsWith("[Cropvibe Live]")) return t("sharedLive");
   if (String(body || "").startsWith("[Cropvibe Reel]") || String(body || "").startsWith("[AgroVibe Reel]")) return t("sharedReel");
   if (String(body || "").startsWith("[Cropvibe Profile]")) return t("sharedProfile");
+  if (String(body || "").startsWith("[Cropvibe Voice]")) return t("voiceMessage");
+  if (String(body || "").startsWith("[Cropvibe Media]")) return t("sharedMedia");
   return body;
 }
 

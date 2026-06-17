@@ -132,6 +132,8 @@ function socialPushCopy({ type, actorName, commentExcerpt }) {
       return { title: "Your live starts soon", body: "Your scheduled live starts in 10 minutes" };
     case "direct_message":
       return { title: actor, body: excerpt || "Sent you a message" };
+    case "live_share":
+      return { title: actor, body: excerpt || "Shared a live video" };
     default:
       return { title: "Cropvibe", body: `${actor} sent you a notification` };
   }

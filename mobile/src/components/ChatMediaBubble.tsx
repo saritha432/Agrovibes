@@ -1,0 +1,64 @@
+import { Ionicons } from "@expo/vector-icons";
+import { ResizeMode, Video } from "expo-av";
+import React from "react";
+import { Image, Linking, Pressable, StyleSheet, View } from "react-native";
+import type { DmMediaPayload } from "../screens/messaging/dmMessageFormats";
+import { APP_LIME } from "../theme/appColors";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+
+type ChatMediaBubbleProps = {
+  media: DmMediaPayload;
+  isSelf: boolean;
+};
+
+export function ChatMediaBubble({ media }: ChatMediaBubbleProps) {
+  const openMedia = () => {
+    void Linking.openURL(media.url).catch(() => undefined);
+  };
+
+  return (
+    <Pressable style={styles.card} onPress={openMedia}>
+      {media.kind === "image" ? (
+        <Image source={{ uri: media.url }} style={styles.media} resizeMode="cover" />
+      ) : (
+        <Video
+          source={{ uri: videoPlaybackUrl(media.url) }}
+          style={styles.media}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay={false}
+          isMuted
+          useNativeControls={false}
+        />
+      )}
+      {media.kind === "video" ? (
+        <View style={styles.playBadge}>
+          <Ionicons name="play" size={16} color="#111" />
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    width: 200,
+    height: 260,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#1a1a1a",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)"
+  },
+  media: { width: "100%", height: "100%" },
+  playBadge: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  }
+});

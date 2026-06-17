@@ -92,3 +92,14 @@ export function formatReelCaption(caption: string | null | undefined, language: 
   if (!stripped) return "";
   return formatFeedText(stripped, language, t);
 }
+
+/** Chat share card label — keeps [REEL] / [POST] prefix visible like Instagram. */
+export function sharedReelCardCaption(caption?: string | null): string {
+  const raw = String(caption || "").trim();
+  if (/^\[(?:POST|REEL|LIVE|STORY)\]/i.test(raw)) {
+    return raw.split("\n")[0].trim();
+  }
+  const stripped = stripInternalCaptionPrefix(raw);
+  if (stripped) return `[REEL] ${stripped}`;
+  return "[REEL]";
+}

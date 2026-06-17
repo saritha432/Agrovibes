@@ -806,33 +806,8 @@ export function ProfileScreen({ route }: { route?: any }) {
                           </Pressable>
                         );
                       }
-                      /** Web only: one muted preview decode (tiny tiles + parallel decoders tank real phones). */
-                      if (Platform.OS === "web") {
-                        const shouldPlayTile = post.id === singleGridVideoPreviewId;
-                        return (
-                          <Pressable
-                            key={post.id}
-                            style={tileStyle}
-                            onPress={() => openProfilePostsViewer(post)}
-                            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
-                          >
-                            <Video
-                              style={styles.gridImage}
-                              source={{ uri: videoPlaybackUrl(post.videoUrl) }}
-                              resizeMode={ResizeMode.COVER}
-                              shouldPlay={shouldPlayTile}
-                              isLooping
-                              isMuted
-                              useNativeControls={false}
-                              progressUpdateIntervalMillis={2000}
-                              {...({ videoStyle: { width: "100%", height: "100%", objectFit: "cover" } } as any)}
-                            />
-                            <View style={styles.gridPlayBadge} pointerEvents="none">
-                              <Ionicons name="play" size={12} color="#111" />
-                            </View>
-                          </Pressable>
-                        );
-                      }
+                      /** One muted grid preview when no still image (web + native). */
+                      const shouldPlayTile = post.id === singleGridVideoPreviewId;
                       return (
                         <Pressable
                           key={post.id}
@@ -840,9 +815,16 @@ export function ProfileScreen({ route }: { route?: any }) {
                           onPress={() => openProfilePostsViewer(post)}
                           onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
                         >
-                          <View style={[styles.gridImage, styles.gridVideoBg, styles.gridVideoPlaceholder]}>
-                            <Ionicons name="play-circle" size={30} color={LIME} />
-                          </View>
+                          <Video
+                            style={styles.gridImage}
+                            source={{ uri: videoPlaybackUrl(post.videoUrl) }}
+                            resizeMode={ResizeMode.COVER}
+                            shouldPlay={shouldPlayTile}
+                            isLooping
+                            isMuted
+                            useNativeControls={false}
+                            progressUpdateIntervalMillis={2000}
+                          />
                           <View style={styles.gridPlayBadge} pointerEvents="none">
                             <Ionicons name="play" size={12} color="#111" />
                           </View>
