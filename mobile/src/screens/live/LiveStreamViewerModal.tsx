@@ -80,6 +80,7 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
               visible
               roomName={liveRoomName(post)}
               isHost={isHost}
+              sharePost={post}
               title={liveTitle(post, language, t)}
               postId={post.id}
               onLiveEnded={onLiveEnded}

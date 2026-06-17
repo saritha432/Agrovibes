@@ -8,11 +8,9 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   Pressable,
-  Share,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -33,7 +31,9 @@ import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar } from "../components/AppTopBar";
+import { PostShareSheet } from "../components/PostShareSheet";
 import { UserAvatar } from "../components/UserAvatar";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -52,13 +52,11 @@ import {
   fetchSocialNetwork,
   fetchUsers,
   fetchMutualConnections,
-  getWebAppOrigin,
   HomePost,
   HomeStory,
   type ScheduledLive,
   likeHomePost,
   saveHomePost,
-  sendDirectMessage,
   sendFollowRequest,
   unfollowUser,
   unlikeHomePost,
@@ -1084,8 +1082,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const reelBackgroundMusicRef = useRef<{ postId: number; sound: Audio.Sound } | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
   const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
-  const [shareSearch, setShareSearch] = useState("");
-  const [shareBusyUserId, setShareBusyUserId] = useState<number | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [likesSheetPost, setLikesSheetPost] = useState<HomePost | null>(null);
@@ -2102,152 +2098,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     lastActiveReelIdRef.current = next ?? null;
   }, [playingPostId]);
 
-  const buildShareLink = useCallback((post: HomePost) => {
-    return `${getWebAppOrigin()}/reel/${encodeURIComponent(String(post.id))}`;
-  }, []);
-
-  const shareMessage = useCallback(
-    (post: HomePost) => {
-      const caption = displayPostCaption(post.caption);
-      const link = buildShareLink(post);
-      const intro = t("shareReelMessage", { name: displayPersonName(post.userName) });
-      return `${intro}${caption ? `\n${caption}` : ""}\n${link}`;
-    },
-    [buildShareLink, displayPersonName, displayPostCaption, t]
-  );
-
-  const reelChatMessage = useCallback(
-    (post: HomePost) => {
-      return `[Cropvibe Reel]\n${JSON.stringify({
-        id: post.id,
-        userId: post.userId ?? null,
-        userName: post.userName,
-        author: post.userName,
-        location: post.location || "",
-        caption: post.caption || "",
-        likesCount: post.likesCount ?? 0,
-        commentsCount: post.commentsCount ?? 0,
-        videoUrl: post.videoUrl || null,
-        imageUrl: post.imageUrl || null,
-        imageUrls: Array.isArray(post.imageUrls) && post.imageUrls.length > 0 ? post.imageUrls : undefined,
-        thumbnailUrl: post.thumbnailUrl || post.imageUrl || null,
-        musicLabel: post.musicLabel ?? null,
-        musicAudioUrl: post.musicAudioUrl ?? null,
-        creativeMeta: post.creativeMeta,
-        authorAvatarUrl: post.authorAvatarUrl ?? null,
-        createdAt: post.createdAt || new Date().toISOString(),
-        viewerHasLiked: post.viewerHasLiked,
-        viewerHasSaved: post.viewerHasSaved,
-        link: buildShareLink(post)
-      })}`;
-    },
-    [buildShareLink]
-  );
-
-  const shareRecipients = useMemo(() => {
-    const viewerName = normalizeIdentity(user?.fullName || "");
-    const viewerId = Number(user?.id);
-    const seen = new Set<string>();
-    type ShareRecipient = { id: number | null; name: string; avatarUrl?: string | null };
-    const rows: ShareRecipient[] = [];
-
-    const add = (name: string, userId: number | null, avatarUrl?: string | null) => {
-      const n = String(name || "").trim();
-      if (!n) return;
-      const uid = userId != null && Number.isFinite(userId) && userId > 0 ? userId : null;
-      const key = uid != null ? `id:${uid}` : `name:${normalizeIdentity(n)}`;
-      if (seen.has(key)) return;
-      if ((uid != null && uid === viewerId) || normalizeIdentity(n) === viewerName) return;
-      seen.add(key);
-      const entry: ShareRecipient = { id: uid, name: n };
-      if (typeof avatarUrl === "string" && avatarUrl.trim()) entry.avatarUrl = avatarUrl.trim();
-      rows.push(entry);
-    };
-
-    for (const peer of followingSharePeers) {
-      add(peer.name, peer.id);
-    }
-    const q = normalizeIdentity(shareSearch);
-    return rows
-      .filter((item) => !q || normalizeIdentity(item.name).includes(q))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
-      .slice(0, 48);
-  }, [followingSharePeers, shareSearch, user?.fullName, user?.id]);
-
-  const onSendReelToChat = useCallback(
-    async (post: HomePost, recipient: { id: number | null; name: string; avatarUrl?: string | null }) => {
-      if (!token) {
-        Alert.alert(t("loginRequired"), t("loginRequiredChat"));
-        return;
-      }
-      if (!recipient.id) {
-        Alert.alert(t("chatUnavailable"), t("chatUnavailableSend"));
-        return;
-      }
-      setShareBusyUserId(recipient.id);
-      try {
-        await sendDirectMessage(token, recipient.id, reelChatMessage(post));
-        setSharePost(null);
-        setShareSearch("");
-        Alert.alert(t("sentTitle"), t("reelSentTo", { name: displayPersonName(recipient.name) }));
-      } catch {
-        Alert.alert(t("sendFailed"), t("sendFailedReel"));
-      } finally {
-        setShareBusyUserId(null);
-      }
-    },
-    [reelChatMessage, token]
-  );
-
-  const openExternalWithFallback = useCallback(async (primaryUrl: string, fallbackUrl: string) => {
-    try {
-      const supported = await Linking.canOpenURL(primaryUrl);
-      if (supported) {
-        await Linking.openURL(primaryUrl);
-        return;
-      }
-    } catch {
-      // fallback to web URL
-    }
-    await Linking.openURL(fallbackUrl);
-  }, []);
-
-  const onShareToSystem = useCallback(
+  const onCopyPostLink = useCallback(
     async (post: HomePost) => {
       try {
-        await Share.share({ message: shareMessage(post) });
+        await Clipboard.setStringAsync(buildPostShareLink(post));
+        setActiveReelOptionsPost(null);
+        Alert.alert(t("copied"), t("copiedPostLink"));
       } catch {
-        Alert.alert(t("shareFailed"), t("shareFailedSystem"));
+        Alert.alert(t("copyFailedTitle"), t("copyFailed"));
       }
     },
-    [shareMessage]
-  );
-
-  const onShareToWhatsApp = useCallback(
-    async (post: HomePost) => {
-      const msg = encodeURIComponent(shareMessage(post));
-      await openExternalWithFallback(`whatsapp://send?text=${msg}`, `https://wa.me/?text=${msg}`);
-    },
-    [openExternalWithFallback, shareMessage]
-  );
-
-  const onShareToMessenger = useCallback(
-    async (post: HomePost) => {
-      const link = encodeURIComponent(buildShareLink(post));
-      await openExternalWithFallback(
-        `fb-messenger://share?link=${link}`,
-        `https://www.messenger.com/share?link=${link}`
-      );
-    },
-    [buildShareLink, openExternalWithFallback]
-  );
-
-  const onShareToSnapchat = useCallback(
-    async (post: HomePost) => {
-      const link = encodeURIComponent(buildShareLink(post));
-      await openExternalWithFallback(`snapchat://share?link=${link}`, `https://www.snapchat.com/`);
-    },
-    [buildShareLink, openExternalWithFallback]
+    [t]
   );
 
   const onAddReelToStory = useCallback(
@@ -2288,15 +2149,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           [serverStory, ...prev.filter((s) => Number(s.id) !== Number(optimistic.id) && Number(s.id) !== Number(serverStory.id))].slice(0, 20)
         );
         setStories((prev) => applyViewedStories(mergeStories([serverStory, ...prev], [])));
-        setSharePost(null);
         Alert.alert(t("addedTitle"), t("addedToStory"));
       } catch {
-        // fallback to existing create flow when API is unavailable
-        setSharePost(null);
         onOpenCreate?.("story");
       }
     },
-    [applyViewedStories, onOpenCreate, token, user?.avatarUrl, user?.fullName, user?.id]
+    [applyViewedStories, onOpenCreate, token, user?.avatarUrl, user?.fullName, user?.id, t]
   );
 
   const togglePostLike = useCallback(
@@ -2497,19 +2355,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       }
     },
     [token]
-  );
-
-  const onCopyPostLink = useCallback(
-    async (post: HomePost) => {
-      try {
-        await Clipboard.setStringAsync(buildShareLink(post));
-        setActiveReelOptionsPost(null);
-        Alert.alert(t("copied"), t("copiedPostLink"));
-      } catch {
-        Alert.alert(t("copyFailedTitle"), t("copyFailed"));
-      }
-    },
-    [buildShareLink]
   );
 
   const onNotInterestedInPost = useCallback((post: HomePost) => {
@@ -3410,10 +3255,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       openCommentsForPost,
       openPostLikesSheet,
       onAddReelToStory,
-      onShareToMessenger,
-      onShareToSnapchat,
-      onShareToSystem,
-      onShareToWhatsApp,
       playingPostId,
       activeReelMusicPostId,
       reelFrameWidth,
@@ -3613,7 +3454,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Pressable style={styles.postActionIconBtn} onPress={() => openCommentsForPost(post)}>
                 <Ionicons name="chatbubble-outline" size={23} color="#111" />
               </Pressable>
-              <Pressable style={styles.postActionIconBtn}>
+              <Pressable style={styles.postActionIconBtn} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={22} color="#111" />
               </Pressable>
             </View>
@@ -4392,86 +4233,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         </Pressable>
       </Modal>
 
-      <Modal visible={!!sharePost} transparent animationType="slide" onRequestClose={() => setSharePost(null)}>
-        <Pressable style={styles.shareBackdrop} onPress={() => setSharePost(null)}>
-          <Pressable style={[styles.shareSheet, { paddingBottom: Math.max(insets.bottom + 10, 20) }]} onPress={(e) => e.stopPropagation?.()}>
-            <View style={styles.shareHandle} />
-            <View style={styles.shareSearchRow}>
-              <Ionicons name="search" size={16} color="#C9FF35" />
-              <TextInput
-                value={shareSearch}
-                onChangeText={setShareSearch}
-                placeholder={t("search")}
-                placeholderTextColor="#97a0a8"
-                style={styles.shareSearchInput}
-              />
-              <Pressable style={styles.shareSearchAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
-                <Ionicons name="person-add-outline" size={16} color="#C9FF35" />
-              </Pressable>
-            </View>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sharePeopleRow}>
-              {shareRecipients.length ? (
-                shareRecipients.map((recipient) => (
-                  <Pressable
-                    key={`${recipient.id || "name"}-${recipient.name}`}
-                    style={styles.sharePersonItem}
-                    onPress={() => sharePost && onSendReelToChat(sharePost, recipient)}
-                    disabled={shareBusyUserId === recipient.id}
-                  >
-                    <View style={styles.sharePersonAvatar}>
-                      {shareBusyUserId === recipient.id ? (
-                        <Ionicons name="checkmark" size={18} color="#C9FF35" />
-                      ) : (
-                        <UserAvatar
-                          uri={recipient.avatarUrl}
-                          name={recipient.name}
-                          size={52}
-                          borderRadius={26}
-                          fallbackBackgroundColor="#343b43"
-                          initialsColor="#C9FF35"
-                        />
-                      )}
-                    </View>
-                    <Text style={styles.sharePersonName} numberOfLines={1}>
-                      {recipient.name}
-                    </Text>
-                  </Pressable>
-                ))
-              ) : (
-                <Text style={styles.shareNoPeopleText}>No chats found</Text>
-              )}
-            </ScrollView>
-
-            <View style={styles.shareFooterRow}>
-              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onAddReelToStory(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="add-circle-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>{t("addToStory")}</Text>
-              </Pressable>
-              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="link-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>{t("copyLink")}</Text>
-              </Pressable>
-              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSystem(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="open-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>{t("shareTo")}</Text>
-              </Pressable>
-              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToWhatsApp(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="logo-whatsapp" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>{t("whatsapp")}</Text>
-              </Pressable>
-              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToMessenger(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="chatbubble-ellipses-outline" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>{t("messenger")}</Text>
-              </Pressable>
-              <Pressable style={styles.shareFooterAction} onPress={() => sharePost && onShareToSnapchat(sharePost)}>
-                <View style={styles.shareFooterIcon}><Ionicons name="logo-snapchat" size={20} color="#C9FF35" /></View>
-                <Text style={styles.shareFooterText}>{t("snapchat")}</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <PostShareSheet
+        visible={!!sharePost}
+        post={sharePost}
+        onClose={() => setSharePost(null)}
+        onAddToStory={onAddReelToStory}
+        followingPeers={followingSharePeers}
+      />
 
       <LiveStreamViewerModal
         post={watchingLivePost}

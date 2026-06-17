@@ -527,6 +527,17 @@ export async function fetchMyHomePosts(token: string) {
   return { posts: data.posts.map(sanitizeHomePost) };
 }
 
+export async function fetchHomePost(token: string | null | undefined, postId: number) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to load post");
+  }
+  const data = (await response.json()) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
+}
+
 export type HomePostLiker = {
   userId: number;
   fullName: string;
@@ -1217,6 +1228,13 @@ export async function uploadImageFile(fileUri: string) {
   const filename = imageFilenameFromUri(fileUri);
   const mime = mimeFromUri(fileUri, "image/jpeg");
   return uploadToSupabaseServer(fileUri, filename, mime);
+}
+
+export async function uploadAudioFile(fileUri: string) {
+  const lower = fileUri.split("?")[0].toLowerCase();
+  const ext = lower.endsWith(".caf") ? ".caf" : lower.endsWith(".mp3") ? ".mp3" : ".m4a";
+  const mime = ext === ".mp3" ? "audio/mpeg" : ext === ".caf" ? "audio/x-caf" : "audio/m4a";
+  return uploadToSupabaseServer(fileUri, `audio-${Date.now()}${ext}`, mime);
 }
 
 /** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */

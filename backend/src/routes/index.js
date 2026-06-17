@@ -2957,11 +2957,27 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       `,
       [me, peerUserId, body]
     );
+    const isLiveShare = String(body).startsWith("[Cropvibe Live]");
+    let livePostId;
+    if (isLiveShare) {
+      try {
+        const parsed = JSON.parse(String(body).slice("[Cropvibe Live]".length).trim());
+        const pid = Number(parsed?.postId);
+        if (Number.isFinite(pid) && pid > 0) livePostId = pid;
+      } catch {
+        // no-op
+      }
+    }
     fireSocialPush({
       userId: peerUserId,
-      type: "direct_message",
+      type: isLiveShare ? "live_share" : "direct_message",
       actorName: await actorDisplayName(me),
-      commentExcerpt: body.length > 120 ? `${body.slice(0, 117)}...` : body
+      postId: livePostId,
+      commentExcerpt: isLiveShare
+        ? "Shared a live video"
+        : body.length > 120
+          ? `${body.slice(0, 117)}...`
+          : body
     });
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {
@@ -4228,6 +4244,82 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
     res.json({ saved: false });
   } catch (error) {
     res.status(500).json({ message: "Failed to unsave post", error: error.message });
+  }
+});
+
+});
+
+router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const viewerId = req.user?.userId ? Number(req.user.userId) : null;
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, u.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        p.live_status AS "liveStatus",
+        p.live_ended_at AS "liveEndedAt",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_likes hpl
+            WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
+          )
+        END AS "viewerHasLiked",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_saves hps
+            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+          )
+        END AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT id, avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) u ON TRUE
+      WHERE p.id = $2
+      LIMIT 1
+      `,
+      [viewerId, postId]
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const posts = await enrichHomePostsLiveState(dedupeHomePostRows(result.rows));
+    res.json({ post: posts[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load post", error: error.message });
   }
 });
 

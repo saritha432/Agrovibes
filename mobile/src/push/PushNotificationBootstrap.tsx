@@ -2,6 +2,7 @@ import React from "react";
 import { Platform } from "react-native";
 import { useAuth } from "../auth/AuthContext";
 import { navigateToDirectChat, navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
+import { queueJoinLive } from "../navigation/liveJoinBridge";
 import {
   addNotificationReceivedListener,
   addNotificationResponseListener,
@@ -35,7 +36,15 @@ export function PushNotificationBootstrap() {
     const receivedSub = addNotificationReceivedListener((event) => {
       const data = event.request.content.data || {};
       const type = String(data.type || "");
-      if (type !== "incoming_call") return;
+      if (type !== "incoming_call" && type !== "live_share") return;
+      if (type === "live_share") {
+        const postId = Number(data.postId);
+        if (Number.isFinite(postId) && postId > 0) {
+          queueJoinLive(postId);
+          navigateToJoinLive();
+        }
+        return;
+      }
       const callerId = Number(data.callerId);
       const roomName = String(data.roomName || "").trim();
       const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
@@ -62,6 +71,16 @@ export function PushNotificationBootstrap() {
             peerName: callerName,
             incomingCall: { roomName, mode, callerId }
           });
+        }
+        return;
+      }
+      if (type === "live_share") {
+        const postId = Number(data.postId);
+        if (Number.isFinite(postId) && postId > 0) {
+          queueJoinLive(postId);
+          navigateToJoinLive();
+        } else {
+          navigateToDirectInbox();
         }
         return;
       }
