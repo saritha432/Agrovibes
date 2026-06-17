@@ -12,6 +12,7 @@ import { LanguageProvider } from "./src/localization/LanguageContext";
 import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK, APP_LIME } from "./src/theme/appColors";
+import { PushNotificationBootstrap } from "./src/push/PushNotificationBootstrap";
 
 export default function App() {
   const { ready: fontsReady } = useAppFonts();
@@ -29,6 +30,7 @@ export default function App() {
       <LanguageProvider>
         <AuthProvider>
           <LanguageSync />
+          <PushNotificationBootstrap />
           <OnboardingProvider>
             <CartProvider>
               <NavigationContainer ref={navigationRef}>

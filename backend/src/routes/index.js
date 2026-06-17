@@ -23,6 +23,13 @@ const {
   startLiveRoomRecording,
   stopLiveRoomRecordingAndGetVideoUrl
 } = require("../livekitEgress");
+const {
+  isPushConfigured,
+  registerPushDeviceToken,
+  unregisterPushDeviceToken,
+  sendSocialPushToUser,
+  sendSocialPushToFollowers
+} = require("../pushNotifications");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -42,6 +49,23 @@ let directMessagesTableReady = false;
 let scheduledLivesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
+
+function fireSocialPush(payload) {
+  void sendSocialPushToUser(payload).catch((error) => {
+    console.warn("[push] social:", error?.message || error);
+  });
+}
+
+function fireSocialPushToFollowers(payload) {
+  void sendSocialPushToFollowers(payload).catch((error) => {
+    console.warn("[push] followers:", error?.message || error);
+  });
+}
+
+async function actorDisplayName(userId) {
+  const result = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
+  return String(result.rows[0]?.full_name || "Someone").trim() || "Someone";
+}
 
 const uploadsRootDir = path.join(process.cwd(), "uploads");
 const videoUploadDir = path.join(uploadsRootDir, "videos");
@@ -2371,6 +2395,12 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
         `,
         [targetUserId, actorUserId, followRow.id]
       );
+      fireSocialPush({
+        userId: targetUserId,
+        type: "follow_request",
+        actorName: await actorDisplayName(actorUserId),
+        followId: followRow.id
+      });
     }
 
     const [actorCounts, targetCounts] = await Promise.all([socialCountsForUser(actorUserId), socialCountsForUser(targetUserId)]);
@@ -2563,6 +2593,12 @@ router.post("/v1/social/follow/:followId/respond", authRequired, async (req, res
         `,
         [updatedFollow.followerId, updatedFollow.followingId, followId]
       );
+      fireSocialPush({
+        userId: updatedFollow.followerId,
+        type: "follow_accept",
+        actorName: await actorDisplayName(updatedFollow.followingId),
+        followId
+      });
     }
 
     const [actorCounts, targetCounts] = await Promise.all([
@@ -2640,6 +2676,49 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load notifications", error: error.message });
+  }
+});
+
+router.get("/v1/push/config", authRequired, async (_req, res) => {
+  res.json({
+    provider: "fcm",
+    configured: isPushConfigured()
+  });
+});
+
+router.post("/v1/push/register", authRequired, async (req, res) => {
+  try {
+    const token = String(req.body?.token || "").trim();
+    const platform = String(req.body?.platform || "android").trim().slice(0, 16) || "android";
+    if (!token) {
+      res.status(400).json({ message: "token is required" });
+      return;
+    }
+    await registerPushDeviceToken({
+      userId: Number(req.user.userId),
+      token,
+      platform
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to register push token", error: error.message });
+  }
+});
+
+router.delete("/v1/push/register", authRequired, async (req, res) => {
+  try {
+    const token = String(req.body?.token || req.query?.token || "").trim();
+    if (!token) {
+      res.status(400).json({ message: "token is required" });
+      return;
+    }
+    const result = await unregisterPushDeviceToken({
+      userId: Number(req.user.userId),
+      token
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unregister push token", error: error.message });
   }
 });
 
@@ -2837,6 +2916,12 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       `,
       [me, peerUserId, body]
     );
+    fireSocialPush({
+      userId: peerUserId,
+      type: "direct_message",
+      actorName: await actorDisplayName(me),
+      commentExcerpt: body.length > 120 ? `${body.slice(0, 117)}...` : body
+    });
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to send message", error: error.message });
@@ -3287,6 +3372,12 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         `,
         [actorId, normalizedPost.id, "started live"]
       );
+      fireSocialPushToFollowers({
+        hostUserId: actorId,
+        type: "live_start",
+        postId: normalizedPost.id,
+        commentExcerpt: "started live"
+      });
     }
 
     await cacheIncr("home:posts:gen");
@@ -3509,6 +3600,11 @@ async function handleScheduleLive(req, res) {
       `,
       [actorId, excerpt]
     );
+    fireSocialPushToFollowers({
+      hostUserId: actorId,
+      type: "live_scheduled",
+      commentExcerpt: topic
+    });
 
     if (reminderScheduled) {
       await query(
@@ -4167,6 +4263,12 @@ router.post("/v1/home/posts/:postId/like", authRequired, async (req, res) => {
          VALUES ($1, $2, NULL, 'post_like', false, $3, NULL)`,
         [authorUserId, actorUserId, postId]
       );
+      fireSocialPush({
+        userId: authorUserId,
+        type: "post_like",
+        actorName: await actorDisplayName(actorUserId),
+        postId
+      });
     }
     await cacheIncr("home:posts:gen");
     res.json({ liked: true, likesCount: Number(updated.rows[0]?.likesCount || 0) });
@@ -4305,6 +4407,13 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
          VALUES ($1, $2, NULL, 'comment_reply', false, $3, $4)`,
         [parentCommentAuthorId, actorUserId, postId, excerpt]
       );
+      fireSocialPush({
+        userId: parentCommentAuthorId,
+        type: "comment_reply",
+        actorName: await actorDisplayName(actorUserId),
+        postId,
+        commentExcerpt: excerpt
+      });
     }
 
     if (authorUserId && authorUserId !== actorUserId) {
@@ -4316,6 +4425,13 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
            VALUES ($1, $2, NULL, 'post_comment', false, $3, $4)`,
           [authorUserId, actorUserId, postId, excerpt]
         );
+        fireSocialPush({
+          userId: authorUserId,
+          type: "post_comment",
+          actorName: await actorDisplayName(actorUserId),
+          postId,
+          commentExcerpt: excerpt
+        });
       }
     }
 
