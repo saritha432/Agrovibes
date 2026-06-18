@@ -2971,6 +2971,7 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
     fireSocialPush({
       userId: peerUserId,
       type: isLiveShare ? "live_share" : "direct_message",
+      actorId: me,
       actorName: await actorDisplayName(me),
       postId: livePostId,
       commentExcerpt: isLiveShare

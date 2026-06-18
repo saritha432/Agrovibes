@@ -13,6 +13,7 @@ import type { OpenCreateOptions } from "../screens/HomeScreen";
 import { LearnStackNavigator } from "./LearnStackNavigator";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
 import { subscribeOpenLiveCreate } from "./liveCreateBridge";
+import { runPendingNotificationNavigation } from "../push/notificationNavigation";
 
 const Tab = createBottomTabNavigator();
 
@@ -39,6 +40,10 @@ export function AppNavigator() {
       });
       setCreateOpen(true);
     });
+  }, []);
+
+  useEffect(() => {
+    runPendingNotificationNavigation();
   }, []);
 
   return (
