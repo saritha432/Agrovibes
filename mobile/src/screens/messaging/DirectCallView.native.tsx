@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
-import { Camera } from "expo-camera";
+import { Camera, CameraView, useCameraPermissions } from "expo-camera";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import {
   AndroidAudioTypePresets,
@@ -41,6 +41,49 @@ function remoteParticipant(participants: Participant[], localIdentity: string) {
   return participants.find((p) => p.identity !== localIdentity) || null;
 }
 
+function PreConnectVideoPreview({
+  peerName,
+  statusLabel,
+  onClose
+}: {
+  peerName: string;
+  statusLabel?: string;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const [permission, requestPermission] = useCameraPermissions();
+
+  React.useEffect(() => {
+    if (!permission?.granted) void requestPermission();
+  }, [permission?.granted, requestPermission]);
+
+  return (
+    <View style={[styles.callScreen, styles.videoCallScreen]}>
+      {permission?.granted ? (
+        <CameraView style={styles.remoteVideo} facing="front" mirror />
+      ) : (
+        <View style={styles.videoPreview}>
+          <ActivityIndicator size="large" color={APP_LIME} />
+        </View>
+      )}
+      <View style={[styles.callTopBar, { paddingTop: Math.max(insets.top, 12) }]}>
+        <Pressable style={styles.callTopIcon} onPress={onClose}>
+          <Ionicons name="chevron-down" size={28} color="#fff" />
+        </Pressable>
+      </View>
+      <View style={styles.callIdentity}>
+        <Text style={styles.callName}>{peerName}</Text>
+        <Text style={styles.callStatus}>{statusLabel || "Calling..."}</Text>
+      </View>
+      <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+        <Pressable style={[styles.callControlBtn, styles.endCallBtn]} onPress={onClose}>
+          <Ionicons name="call" size={25} color="#fff" />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function CallRoomContent({
   mode,
   peerName,
@@ -57,14 +100,28 @@ function CallRoomContent({
   const insets = useSafeAreaInsets();
   const room = useRoomContext();
   const participants = useParticipants();
-  const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
+  const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const [muted, setMuted] = React.useState(false);
   const [cameraOff, setCameraOff] = React.useState(mode === "voice");
   const [facingFront, setFacingFront] = React.useState(true);
   const [status, setStatus] = React.useState(statusLabel || "Connecting...");
   const localIdentity = room.localParticipant.identity;
   const peer = remoteParticipant(participants, localIdentity);
-  const remoteVideo = cameraTracks.find((t) => isTrackReference(t) && t.participant.identity !== localIdentity);
+  const localVideo = cameraTracks.find(
+    (track) => isTrackReference(track) && track.participant.identity === localIdentity
+  );
+  const remoteVideo = cameraTracks.find(
+    (track) => isTrackReference(track) && track.participant.identity !== localIdentity
+  );
+  const showRemoteVideo =
+    mode === "video" &&
+    !cameraOff &&
+    remoteVideo &&
+    isTrackReference(remoteVideo) &&
+    room.state === ConnectionState.Connected &&
+    !!peer;
+  const showLocalVideo =
+    mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -93,7 +150,7 @@ function CallRoomContent({
       return;
     }
     if (room.state === ConnectionState.Connected) {
-      setStatus(statusLabel || "Ringing...");
+      setStatus(statusLabel || (mode === "video" ? "Calling..." : "Ringing..."));
     }
   }, [mode, peer, room.state, statusLabel]);
 
@@ -130,8 +187,15 @@ function CallRoomContent({
 
   return (
     <View style={[styles.callScreen, mode === "video" ? styles.videoCallScreen : null]}>
-      {mode === "video" && remoteVideo && isTrackReference(remoteVideo) && !cameraOff ? (
-        <VideoTrack trackRef={remoteVideo} style={styles.remoteVideo} />
+      {showRemoteVideo ? (
+        <VideoTrack trackRef={remoteVideo} style={styles.remoteVideo} objectFit="cover" />
+      ) : showLocalVideo ? (
+        <VideoTrack
+          trackRef={localVideo}
+          style={styles.remoteVideo}
+          objectFit="cover"
+          mirror={facingFront}
+        />
       ) : (
         <View style={styles.videoPreview}>
           <UserAvatar
@@ -144,6 +208,18 @@ function CallRoomContent({
           />
         </View>
       )}
+
+      {showRemoteVideo && showLocalVideo ? (
+        <View style={styles.localPip}>
+          <VideoTrack
+            trackRef={localVideo}
+            style={styles.localPipVideo}
+            objectFit="cover"
+            mirror={facingFront}
+            zOrder={1}
+          />
+        </View>
+      ) : null}
 
       <View style={[styles.callTopBar, { paddingTop: Math.max(insets.top, 12) }]}>
         <Pressable style={styles.callTopIcon} onPress={endCall}>
@@ -272,7 +348,7 @@ export function DirectCallView({
               <Ionicons name="close" size={28} color="#fff" />
             </Pressable>
             <Pressable style={[styles.incomingBtn, styles.acceptBtn]} onPress={onAccept}>
-              <Ionicons name="call" size={26} color="#fff" />
+              <Ionicons name={mode === "video" ? "videocam" : "call"} size={26} color="#fff" />
             </Pressable>
           </View>
         </View>
@@ -284,10 +360,14 @@ export function DirectCallView({
           </Pressable>
         </View>
       ) : !connection ? (
-        <View style={styles.loadingScreen}>
-          <ActivityIndicator size="large" color={APP_LIME} />
-          <Text style={styles.loadingText}>{statusLabel || "Connecting call..."}</Text>
-        </View>
+        mode === "video" ? (
+          <PreConnectVideoPreview peerName={peerName} statusLabel={statusLabel} onClose={onClose} />
+        ) : (
+          <View style={styles.loadingScreen}>
+            <ActivityIndicator size="large" color={APP_LIME} />
+            <Text style={styles.loadingText}>{statusLabel || "Connecting call..."}</Text>
+          </View>
+        )
       ) : (
         <LiveKitRoom
           serverUrl={connection.url}
@@ -318,6 +398,19 @@ const styles = StyleSheet.create({
   },
   videoCallScreen: { backgroundColor: "#050505" },
   remoteVideo: { ...StyleSheet.absoluteFillObject },
+  localPip: {
+    position: "absolute",
+    top: 72,
+    right: 16,
+    width: 108,
+    height: 152,
+    borderRadius: 14,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.35)",
+    zIndex: 3
+  },
+  localPipVideo: { width: "100%", height: "100%" },
   videoPreview: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",

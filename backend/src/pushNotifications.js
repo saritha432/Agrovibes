@@ -197,13 +197,14 @@ async function sendPushToUser(userId, { title, body, data }) {
   return { sent: response.successCount, failed: response.failureCount };
 }
 
-async function sendSocialPushToUser({ userId, type, actorName, postId, commentExcerpt, followId }) {
+async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, commentExcerpt, followId }) {
   const copy = socialPushCopy({ type, actorName, commentExcerpt });
   return sendPushToUser(userId, {
     title: copy.title,
     body: copy.body,
     data: {
       type: type || "generic",
+      actorId: actorId != null ? String(actorId) : "",
       postId: postId != null ? String(postId) : "",
       followId: followId != null ? String(followId) : ""
     }

@@ -11,11 +11,11 @@ import {
   View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuth } from "../../auth/AuthContext";
-import { useLanguage } from "../../localization/LanguageContext";
+import { useAuth } from "../auth/AuthContext";
+import { useLanguage } from "../localization/LanguageContext";
 import { buildLiveShareChatMessage } from "../screens/messaging/liveShareMessage";
-import { fetchSocialNetwork, sendDirectMessage, type HomePost } from "../../services/api";
-import { APP_LIME } from "../../theme/appColors";
+import { fetchSocialNetwork, sendDirectMessage, type HomePost } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 import { UserAvatar } from "./UserAvatar";
 
 type LiveShareSheetProps = {
