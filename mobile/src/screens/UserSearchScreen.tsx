@@ -1,122 +1,50 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Platform,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
+import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import {
-  fetchMutualConnections,
-  fetchSocialNetwork,
-  fetchUsers,
-  sendFollowRequest,
-  type MutualConnectionInfo,
-  type UserSearchRecord
-} from "../services/api";
-import { formatMutualConnectionLabel } from "../social/formatMutualConnection";
-import {
-  getLocalFollowNetworkByIdentity,
-  sendLocalFollowRequestByIdentity
-} from "../social/localFollowStore";
+import { fetchHomePosts, type HomePost } from "../services/api";
 import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
 import { useLanguage } from "../localization/LanguageContext";
-import { UserAvatar } from "../components/UserAvatar";
+import { isReelPost, postMatchesExploreQuery, reelGridStillUri } from "../utils/reelGrid";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { ResizeMode, Video } from "expo-av";
 
-type SearchUserFollowRow = "following" | "requested" | "follow_back" | "follow";
-
-type SearchUser = {
-  id?: number;
-  key?: string;
-  name: string;
-  username?: string | null;
-  avatarUrl?: string | null;
-  followRow: SearchUserFollowRow;
-};
-
-function normalizeName(value: string) {
-  return String(value || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeKey(value?: string) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function parsePersonUserId(person: { key?: string }) {
-  const raw = String(person.key || "").trim();
-  return /^\d+$/.test(raw) ? Number(raw) : null;
-}
-
-function mapRemoteUsersToSearchRows(
-  remoteUsers: UserSearchRecord[],
-  ctx: {
-    selfName: string;
-    followingIds: Set<number>;
-    followingNames: Set<string>;
-  }
-): SearchUser[] {
-  const list: SearchUser[] = [];
-  const seen = new Set<string>();
-  for (const remoteUser of remoteUsers) {
-    const n = normalizeName(remoteUser.fullName);
-    if (!n || n === ctx.selfName || seen.has(`id:${remoteUser.id}`)) continue;
-    seen.add(`id:${remoteUser.id}`);
-
-    const inMergedFollowing = ctx.followingIds.has(remoteUser.id) || ctx.followingNames.has(n);
-    const serverAccepted = remoteUser.viewerStatus === "accepted";
-    const outgoingPending = remoteUser.viewerStatus === "pending";
-    const isFollowing = serverAccepted || inMergedFollowing;
-
-    let followRow: SearchUserFollowRow;
-    if (isFollowing) followRow = "following";
-    else if (outgoingPending) followRow = "requested";
-    else if (remoteUser.canFollowBack) followRow = "follow_back";
-    else followRow = "follow";
-
-    list.push({
-      id: remoteUser.id,
-      key: String(remoteUser.id),
-      name: remoteUser.fullName,
-      username: remoteUser.username,
-      avatarUrl: remoteUser.avatarUrl,
-      followRow
-    });
-  }
-  return list.sort((a, b) => a.name.localeCompare(b.name));
-}
+const GRID_GAP = 2;
+const GRID_PAD = 2;
 
 export function UserSearchScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { width } = useWindowDimensions();
   const { t } = useLanguage();
-  const { token, user } = useAuth();
-
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: t("searchUsers") });
-  }, [navigation, t]);
+  const { token } = useAuth();
 
   const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<SearchUser[]>([]);
-  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
-  const [mutualByUserId, setMutualByUserId] = useState<Record<number, MutualConnectionInfo>>({});
-  const [busyName, setBusyName] = useState<string | null>(null);
+  const [posts, setPosts] = useState<HomePost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reelViewer, setReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
 
-  const trimmedQuery = query.trim();
-  const isSearching = trimmedQuery.length > 0;
+  const gridTileSize = (width - GRID_PAD * 2 - GRID_GAP * 2) / 3;
+  const reelTileHeight = Math.round(gridTileSize * (16 / 9));
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: t("search") });
+  }, [navigation, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -133,279 +61,82 @@ export function UserSearchScreen() {
     }, [])
   );
 
-  const buildFollowContext = useCallback(async () => {
-    const selfName = normalizeName(user?.fullName || "");
-    const identity = { name: user?.fullName || "", key: user?.email || String(user?.id || "") };
-    const followingIds = new Set<number>();
-    const followingNames = new Set<string>();
-    const followerIds: number[] = [];
-
-    if (token && user?.id) {
-      try {
-        const [network, localNet] = await Promise.all([
-          fetchSocialNetwork(token, Number(user.id)),
-          getLocalFollowNetworkByIdentity(identity)
-        ]);
-        const mergedFollowing = [...(network.following || []), ...(localNet.following || [])];
-        for (const p of mergedFollowing) {
-          const pid = parsePersonUserId(p);
-          if (pid != null && pid > 0) followingIds.add(pid);
-          const nn = normalizeName(p.name);
-          if (nn) followingNames.add(nn);
-        }
-        for (const p of network.followers || []) {
-          const pid = parsePersonUserId(p);
-          if (pid != null && pid > 0) followerIds.push(pid);
-        }
-      } catch {
-        // Suggestions still load without network merge.
-      }
-    }
-
-    return { selfName, followingIds, followingNames, followerIds, identity };
-  }, [token, user?.email, user?.fullName, user?.id]);
-
-  const loadSuggestions = useCallback(async () => {
-    if (!token || !user?.id) {
-      setSuggestions([]);
-      return;
-    }
+  const loadExploreReels = useCallback(async () => {
+    setLoading(true);
     try {
-      const { selfName, followingIds, followingNames, followerIds } = await buildFollowContext();
-      const myId = Number(user.id);
-      const data = await fetchUsers(token, { limit: 40 });
-      const alreadyConnected = new Set([...followingIds, ...followerIds, myId]);
-      const candidates = (data.users || []).filter(
-        (u) =>
-          u.id !== myId &&
-          !alreadyConnected.has(u.id) &&
-          u.viewerStatus !== "accepted" &&
-          u.viewerStatus !== "pending"
-      );
-      const slice = candidates.slice(0, 20);
-      const ids = slice.map((u) => u.id);
-      let connections: Record<number, MutualConnectionInfo> = {};
-      try {
-        const mutualRes = await fetchMutualConnections(token, ids);
-        connections = mutualRes.connections || {};
-      } catch {
-        connections = {};
-      }
-      const sorted = [...slice].sort((a, b) => {
-        const aConn = connections[a.id];
-        const bConn = connections[b.id];
-        const aScore = (aConn?.mutualCount ?? 0) * 10 + (aConn?.followsYou ? 5 : 0) + (followerIds.includes(a.id) ? 1 : 0);
-        const bScore = (bConn?.mutualCount ?? 0) * 10 + (bConn?.followsYou ? 5 : 0) + (followerIds.includes(b.id) ? 1 : 0);
-        return bScore - aScore;
-      });
-      setMutualByUserId(connections);
-      setSuggestions(mapRemoteUsersToSearchRows(sorted.slice(0, 15), { selfName, followingIds, followingNames }));
+      const data = await fetchHomePosts(token);
+      setPosts((data.posts || []).filter(isReelPost));
     } catch {
-      setSuggestions([]);
-      setMutualByUserId({});
+      setPosts([]);
+    } finally {
+      setLoading(false);
     }
-  }, [buildFollowContext, token, user?.id]);
-
-  const runSearch = useCallback(
-    async (searchText: string) => {
-      const q = searchText.trim();
-      if (!q) {
-        setSearchResults([]);
-        return;
-      }
-      if (!token) {
-        setSearchResults([]);
-        return;
-      }
-      try {
-        const { selfName, followingIds, followingNames } = await buildFollowContext();
-        const { users: remoteUsers } = await fetchUsers(token, { search: q, limit: 50 });
-        const rows = mapRemoteUsersToSearchRows(remoteUsers, { selfName, followingIds, followingNames });
-        const ids = rows.map((r) => r.id).filter((id): id is number => id != null && id > 0);
-        let connections: Record<number, MutualConnectionInfo> = {};
-        try {
-          const mutualRes = await fetchMutualConnections(token, ids);
-          connections = mutualRes.connections || {};
-        } catch {
-          connections = {};
-        }
-        setMutualByUserId(connections);
-        setSearchResults(rows);
-      } catch {
-        setSearchResults([]);
-        setMutualByUserId({});
-      }
-    },
-    [buildFollowContext, token]
-  );
+  }, [token]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadSuggestions();
-    }, [loadSuggestions])
+      void loadExploreReels();
+    }, [loadExploreReels])
   );
 
-  useEffect(() => {
-    if (!isSearching) {
-      setSearchResults([]);
-      return;
-    }
-    const handle = setTimeout(() => {
-      void runSearch(trimmedQuery);
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [isSearching, runSearch, trimmedQuery]);
+  const trimmedQuery = query.trim();
+  const visibleReels = useMemo(
+    () => posts.filter((post) => postMatchesExploreQuery(post, trimmedQuery)),
+    [posts, trimmedQuery]
+  );
 
-  const refreshLists = useCallback(async () => {
-    if (isSearching) await runSearch(trimmedQuery);
-    else await loadSuggestions();
-  }, [isSearching, loadSuggestions, runSearch, trimmedQuery]);
+  const openReelViewer = useCallback(
+    (post: HomePost) => {
+      const index = visibleReels.findIndex((p) => p.id === post.id);
+      setReelViewer({ posts: visibleReels, initialIndex: index >= 0 ? index : 0 });
+    },
+    [visibleReels]
+  );
 
-  const onFollow = async (person: SearchUser) => {
-    if (!user?.fullName) return;
-    setBusyName(person.name);
-    try {
-      if (token && person.id) {
-        await sendFollowRequest(token, person.id);
-      } else {
-        await sendLocalFollowRequestByIdentity(
-          { name: user.fullName, key: user.email || String(user.id || "") },
-          { name: person.name, key: person.key }
-        );
-      }
-      await refreshLists();
-    } finally {
-      setBusyName(null);
-    }
-  };
+  const renderGridItem = useCallback(
+    ({ item }: { item: HomePost }) => {
+      const stillUri = reelGridStillUri(item);
+      const tileStyle = [styles.gridTile, { width: gridTileSize, height: reelTileHeight }];
 
-  const renderUserRow = useCallback(
-    (item: SearchUser) => (
-      <View style={styles.row}>
-        <Pressable
-          style={styles.rowMain}
-          onPress={() =>
-            navigation.navigate("PublicProfile", {
-              userId: item.id,
-              userName: item.name,
-              userKey: item.key,
-              avatarUrl: item.avatarUrl
-            })
-          }
-        >
-          <View style={styles.avatar}>
-            {item.avatarUrl ? (
-              <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} resizeMode="cover" />
-            ) : (
-              <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
-            )}
-          </View>
-          <View style={styles.nameCol}>
-            <Text style={styles.name} numberOfLines={1}>
-              {item.name}
-            </Text>
-            {(() => {
-              const mutualLabel =
-                item.id != null ? formatMutualConnectionLabel(mutualByUserId[item.id], t) : "";
-              if (mutualLabel) {
-                return (
-                  <Text style={styles.mutualHint} numberOfLines={2}>
-                    {mutualLabel}
-                  </Text>
-                );
-              }
-              return item.username ? (
-                <Text style={styles.username} numberOfLines={1}>
-                  @{item.username.replace(/^@/, "")}
-                </Text>
-              ) : null;
-            })()}
+      return (
+        <Pressable style={tileStyle} onPress={() => openReelViewer(item)}>
+          {stillUri ? (
+            <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
+          ) : item.videoUrl ? (
+            <Video
+              style={styles.gridImage}
+              source={{ uri: videoPlaybackUrl(item.videoUrl) }}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={false}
+              isLooping
+              isMuted
+              useNativeControls={false}
+            />
+          ) : (
+            <View style={[styles.gridImage, styles.gridPlaceholder]} />
+          )}
+          <View style={styles.gridPlayBadge} pointerEvents="none">
+            <Ionicons name="play" size={12} color="#111" />
           </View>
         </Pressable>
-        {item.followRow === "following" ? (
-          <Text style={styles.followingText}>{t("following")}</Text>
-        ) : item.followRow === "requested" ? (
-          <Text style={styles.requestedText}>{t("requested")}</Text>
-        ) : item.followRow === "follow_back" ? (
-          <Pressable style={styles.followBtn} onPress={() => onFollow(item)} disabled={busyName === item.name}>
-            <Text style={styles.followBtnText}>{busyName === item.name ? t("followBusy") : t("followBack")}</Text>
-          </Pressable>
-        ) : (
-          <Pressable style={styles.followBtn} onPress={() => onFollow(item)} disabled={busyName === item.name}>
-            <Text style={styles.followBtnText}>{busyName === item.name ? t("followBusy") : t("follow")}</Text>
-          </Pressable>
-        )}
-      </View>
-    ),
-    [busyName, mutualByUserId, navigation, onFollow, t]
+      );
+    },
+    [gridTileSize, openReelViewer, reelTileHeight]
   );
-
-  const suggestionsHeader = useMemo(() => {
-    if (isSearching || !suggestions.length) return null;
-    return (
-      <View style={styles.suggestedBlock}>
-        <Text style={styles.suggestedTitle}>{t("peopleYouMayKnow")}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestedRow}>
-          {suggestions.map((person) => (
-            <View key={person.key || person.name} style={styles.suggestedCard}>
-              <Pressable
-                onPress={() =>
-                  navigation.navigate("PublicProfile", {
-                    userId: person.id,
-                    userName: person.name,
-                    userKey: person.key,
-                    avatarUrl: person.avatarUrl
-                  })
-                }
-              >
-                <UserAvatar uri={person.avatarUrl} name={person.name} size={52} borderRadius={26} />
-              </Pressable>
-              <Text style={styles.suggestedName} numberOfLines={1}>
-                {person.name}
-              </Text>
-              {person.id != null && formatMutualConnectionLabel(mutualByUserId[person.id], t) ? (
-                <Text style={styles.suggestedMutual} numberOfLines={2}>
-                  {formatMutualConnectionLabel(mutualByUserId[person.id], t)}
-                </Text>
-              ) : null}
-              {person.followRow === "following" || person.followRow === "requested" ? (
-                <Text style={styles.suggestedStatus}>
-                  {person.followRow === "following" ? t("following") : t("requested")}
-                </Text>
-              ) : (
-                <Pressable style={styles.suggestedFollowBtn} onPress={() => onFollow(person)} disabled={busyName === person.name}>
-                  <Text style={styles.suggestedFollowText}>
-                    {busyName === person.name ? t("followBusy") : person.followRow === "follow_back" ? t("followBack") : t("follow")}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  }, [busyName, isSearching, mutualByUserId, navigation, onFollow, suggestions, t]);
-
-  const listEmpty = useMemo(() => {
-    if (!isSearching) {
-      if (suggestions.length) return null;
-      return <Text style={styles.empty}>{t("searchUsers")}</Text>;
-    }
-    return <Text style={styles.empty}>{t("noUsersFound")}</Text>;
-  }, [isSearching, suggestions.length, t]);
 
   return (
     <View style={styles.root}>
       <View style={styles.searchWrap}>
-        <Ionicons name="search" size={18} color={T.muted} />
+        <Image source={require("../../assets/search.png")} style={styles.searchIcon} resizeMode="contain" />
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder={t("searchUsers")}
+          placeholder={t("search")}
           placeholderTextColor={T.muted}
           style={styles.input}
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="search"
         />
         {query.length > 0 ? (
           <Pressable hitSlop={8} onPress={() => setQuery("")}>
@@ -414,19 +145,45 @@ export function UserSearchScreen() {
         ) : null}
       </View>
 
-      {!isSearching ? suggestionsHeader : null}
-
-      {isSearching ? (
-        <FlatList
-          data={searchResults}
-          keyExtractor={(item) => `${item.key || item.name}`}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={listEmpty}
-          renderItem={({ item }) => renderUserRow(item)}
-        />
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={T.accent} />
+        </View>
+      ) : visibleReels.length === 0 ? (
+        <View style={styles.centered}>
+          <Text style={styles.emptyTitle}>{trimmedQuery ? t("emptyNothingTitle") : t("emptyReelsTitle")}</Text>
+          {!trimmedQuery ? <Text style={styles.emptySub}>{t("emptyReelsSub")}</Text> : null}
+        </View>
       ) : (
-        <View style={styles.idleBody}>{listEmpty}</View>
+        <FlatList
+          data={visibleReels}
+          keyExtractor={(item) => String(item.id)}
+          numColumns={3}
+          renderItem={renderGridItem}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.gridList}
+          columnWrapperStyle={styles.gridRow}
+        />
       )}
+
+      <PostsReelViewerModal
+        visible={!!reelViewer}
+        posts={reelViewer?.posts ?? []}
+        initialIndex={reelViewer?.initialIndex ?? 0}
+        onClose={() => setReelViewer(null)}
+        onPostsChange={(nextPosts) => {
+          setPosts(nextPosts);
+          setReelViewer((current) => {
+            if (!current) return current;
+            if (!nextPosts.length) return null;
+            return {
+              posts: nextPosts,
+              initialIndex: Math.min(current.initialIndex, nextPosts.length - 1)
+            };
+          });
+        }}
+      />
     </View>
   );
 }
@@ -447,74 +204,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8
   },
+  searchIcon: { width: 18, height: 18, tintColor: T.muted },
   input: { flex: 1, color: T.text, fontSize: 15, paddingVertical: 0 },
-  idleBody: { flex: 1 },
-  suggestedBlock: { paddingBottom: 8 },
-  suggestedTitle: {
-    color: T.text,
-    fontSize: 14,
-    fontWeight: "800",
-    paddingHorizontal: 14,
-    marginBottom: 10
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  emptyTitle: { color: T.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
+  emptySub: { color: T.muted, fontSize: 14, textAlign: "center", marginTop: 8 },
+  gridList: { paddingHorizontal: GRID_PAD, paddingBottom: 16 },
+  gridRow: { gap: GRID_GAP, marginBottom: GRID_GAP },
+  gridTile: {
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: "#1a1a1a",
+    position: "relative"
   },
-  suggestedRow: { paddingHorizontal: 12, gap: 10 },
-  suggestedCard: {
-    width: 108,
+  gridImage: { width: "100%", height: "100%" },
+  gridPlaceholder: { backgroundColor: "#262626" },
+  gridPlayBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "rgba(255,255,255,0.92)",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    backgroundColor: T.searchBarBg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border
-  },
-  suggestedName: { marginTop: 8, color: T.text, fontSize: 12, fontWeight: "700", maxWidth: 96, textAlign: "center" },
-  suggestedMutual: {
-    marginTop: 4,
-    color: T.muted,
-    fontSize: 10,
-    fontWeight: "600",
-    maxWidth: 96,
-    textAlign: "center",
-    lineHeight: 13
-  },
-  mutualHint: { color: T.muted, fontSize: 12, fontWeight: "600", marginTop: 2, lineHeight: 16 },
-  suggestedFollowBtn: {
-    marginTop: 8,
-    backgroundColor: T.accent,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6
-  },
-  suggestedFollowText: { color: T.accentText, fontSize: 11, fontWeight: "800" },
-  suggestedStatus: { marginTop: 8, color: T.muted, fontSize: 11, fontWeight: "700" },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: T.rowDivider,
-    gap: 10
-  },
-  rowMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: T.avatarRing,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden"
-  },
-  avatarImage: { width: "100%", height: "100%" },
-  avatarText: { color: T.accent, fontWeight: "800", fontSize: 17 },
-  nameCol: { flex: 1, minWidth: 0 },
-  name: { color: T.text, fontWeight: "700", fontSize: 15 },
-  username: { color: T.muted, fontSize: 12, fontWeight: "600", marginTop: 2 },
-  followBtn: { backgroundColor: T.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  followBtnText: { color: T.accentText, fontSize: 13, fontWeight: "800" },
-  followingText: { color: T.muted, fontWeight: "700", fontSize: 13 },
-  requestedText: { color: T.muted, fontWeight: "700", fontSize: 13, fontStyle: "italic" },
-  empty: { padding: 20, textAlign: "center", color: T.muted, fontSize: 14 }
+    justifyContent: "center"
+  }
 });
