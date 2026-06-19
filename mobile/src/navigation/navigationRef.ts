@@ -11,7 +11,7 @@ export function navigateToCart() {
 
 export function navigateToDirectInbox() {
   if (navigationRef.isReady()) {
-    navigationRef.navigate("DirectInbox");
+    navigationRef.navigate("Main", { screen: "Messages" });
   }
 }
 
@@ -29,7 +29,7 @@ export function navigateToEditProfile() {
 
 export function navigateToUserSearch() {
   if (navigationRef.isReady()) {
-    navigationRef.navigate("UserSearch");
+    navigationRef.navigate("Main", { screen: "Search" });
   }
 }
 

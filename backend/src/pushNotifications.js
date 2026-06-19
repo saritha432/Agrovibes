@@ -108,6 +108,74 @@ async function removeInvalidTokens(tokens) {
   await query(`DELETE FROM push_device_tokens WHERE token = ANY($1::text[])`, [tokens]);
 }
 
+function formatVoiceDuration(ms) {
+  const totalSec = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function directMessagePushPayload(body) {
+  const text = String(body || "").trim();
+  if (!text) return { excerpt: "Message", imageUrl: null };
+
+  if (text.startsWith("[Cropvibe Live]")) {
+    return { excerpt: "Live video", imageUrl: null };
+  }
+
+  if (text.startsWith("[Cropvibe Media]")) {
+    const jsonText = text.slice("[Cropvibe Media]".length).trim();
+    if (jsonText.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        const url = String(parsed?.url || "").trim();
+        if (parsed?.kind === "video") return { excerpt: "Video", imageUrl: null };
+        if (parsed?.kind === "image") {
+          return {
+            excerpt: "Photo",
+            imageUrl: /^https?:\/\//i.test(url) ? url : null
+          };
+        }
+      } catch {
+        // fall through
+      }
+    }
+    return { excerpt: "Photo", imageUrl: null };
+  }
+
+  if (text.startsWith("[Cropvibe Voice]")) {
+    const jsonText = text.slice("[Cropvibe Voice]".length).trim();
+    let excerpt = "Voice message";
+    if (jsonText.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        const durationMs = Number(parsed?.durationMs);
+        if (Number.isFinite(durationMs) && durationMs > 0) {
+          excerpt = `Voice message (${formatVoiceDuration(durationMs)})`;
+        }
+      } catch {
+        // fall through
+      }
+    }
+    return { excerpt, imageUrl: null };
+  }
+
+  if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) {
+    return { excerpt: "Reel", imageUrl: null };
+  }
+
+  if (text.startsWith("[Cropvibe Profile]")) {
+    return { excerpt: "Profile", imageUrl: null };
+  }
+
+  const excerpt = text.length > 120 ? `${text.slice(0, 117)}...` : text;
+  return { excerpt, imageUrl: null };
+}
+
+function formatDirectMessagePushExcerpt(body) {
+  return directMessagePushPayload(body).excerpt;
+}
+
 function socialPushCopy({ type, actorName, commentExcerpt }) {
   const actor = String(actorName || "Someone").trim() || "Someone";
   const excerpt = String(commentExcerpt || "").trim();
@@ -131,15 +199,15 @@ function socialPushCopy({ type, actorName, commentExcerpt }) {
     case "live_host_reminder":
       return { title: "Your live starts soon", body: "Your scheduled live starts in 10 minutes" };
     case "direct_message":
-      return { title: actor, body: excerpt || "Sent you a message" };
+      return { title: actor, body: excerpt || "Message" };
     case "live_share":
-      return { title: actor, body: excerpt || "Shared a live video" };
+      return { title: actor, body: excerpt || "Live video" };
     default:
       return { title: "Cropvibe", body: `${actor} sent you a notification` };
   }
 }
 
-async function sendPushToUser(userId, { title, body, data }) {
+async function sendPushToUser(userId, { title, body, data, imageUrl }) {
   if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
   const tokens = await listTokensForUser(userId);
   if (!tokens.length) return { sent: 0, skipped: "no_tokens" };
@@ -150,12 +218,17 @@ async function sendPushToUser(userId, { title, body, data }) {
     payloadData[String(key)] = String(value);
   }
 
+  const image = String(imageUrl || "").trim();
+  const hasImage = /^https?:\/\//i.test(image);
+  const notification = {
+    title: String(title || "Cropvibe"),
+    body: String(body || "")
+  };
+  if (hasImage) notification.imageUrl = image;
+
   const response = await admin.messaging().sendEachForMulticast({
     tokens,
-    notification: {
-      title: String(title || "Cropvibe"),
-      body: String(body || "")
-    },
+    notification,
     data: payloadData,
     android: {
       priority: "high",
@@ -164,7 +237,8 @@ async function sendPushToUser(userId, { title, body, data }) {
         priority: "max",
         visibility: "public",
         defaultSound: true,
-        defaultVibrateTimings: true
+        defaultVibrateTimings: true,
+        ...(hasImage ? { imageUrl: image } : {})
       }
     },
     apns: {
@@ -173,9 +247,11 @@ async function sendPushToUser(userId, { title, body, data }) {
       },
       payload: {
         aps: {
-          sound: "default"
+          sound: "default",
+          ...(hasImage ? { "mutable-content": 1 } : {})
         }
-      }
+      },
+      ...(hasImage ? { fcm_options: { image } } : {})
     }
   });
 
@@ -197,11 +273,12 @@ async function sendPushToUser(userId, { title, body, data }) {
   return { sent: response.successCount, failed: response.failureCount };
 }
 
-async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, commentExcerpt, followId }) {
+async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, commentExcerpt, followId, imageUrl }) {
   const copy = socialPushCopy({ type, actorName, commentExcerpt });
   return sendPushToUser(userId, {
     title: copy.title,
     body: copy.body,
+    imageUrl,
     data: {
       type: type || "generic",
       actorId: actorId != null ? String(actorId) : "",
@@ -257,6 +334,8 @@ module.exports = {
   isPushConfigured,
   registerPushDeviceToken,
   unregisterPushDeviceToken,
+  formatDirectMessagePushExcerpt,
+  directMessagePushPayload,
   sendPushToUser,
   sendIncomingCallPush,
   sendSocialPushToUser,

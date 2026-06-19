@@ -10,7 +10,8 @@ export function buildPostShareMessage(
   opts: { intro: string; caption: string }
 ) {
   const link = buildPostShareLink(post);
-  return `${opts.intro}${opts.caption ? `\n${opts.caption}` : ""}\n${link}`;
+  const caption = opts.caption ? `\n${opts.caption}` : "";
+  return `${opts.intro}${caption}\n${link}`;
 }
 
 export function buildReelChatMessage(post: HomePost) {

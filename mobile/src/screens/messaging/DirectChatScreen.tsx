@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -49,8 +49,74 @@ const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";
 const YELLOW = APP_LIME;
-const BUBBLE_PEER = "#262626";
-const INPUT_BG = "#262626";
+const BUBBLE_PEER = "#3a3f46";
+const COMPOSER_BG = "#303132";
+const COMPOSER_HEIGHT = 59;
+const COMPOSER_PADDING = 12;
+const COMPOSER_GAP = 12;
+const COMPOSER_RADIUS = 8;
+const CAMERA_ICON_SIZE = 35;
+const COMPOSER_ICON = 24;
+
+const CHAT_ASSETS = {
+  camera: require("../../../assets/camera.svg"),
+  mic: require("../../../assets/mic-icon.svg"),
+  gallery: require("../../../assets/gallery-icon.svg"),
+  sticker: require("../../../assets/sticker-icon.svg"),
+  plus: require("../../../assets/plus-icon.svg"),
+  voiceCall: require("../../../assets/voicecal-icon.svg"),
+  videoCall: require("../../../assets/videocal-icon.svg")
+} as const;
+
+const HEADER_CALL_ICON = 34;
+
+function ChatAssetIcon({ source, size = COMPOSER_ICON }: { source: number; size?: number }) {
+  return <Image source={source} style={{ width: size, height: size }} resizeMode="contain" />;
+}
+
+function formatDateSeparator(ts: number) {
+  const d = new Date(ts);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const time = d
+    .toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true })
+    .replace(/\s/g, "")
+    .toUpperCase();
+  const sameDay = (a: Date, b: Date) =>
+    a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+  if (sameDay(d, now)) return `TODAY AT ${time}`;
+  if (sameDay(d, yesterday)) return `YESTERDAY AT ${time}`;
+  const datePart = d
+    .toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+    .toUpperCase();
+  return `${datePart} AT ${time}`;
+}
+
+type ThreadListItem =
+  | { type: "date"; id: string; label: string }
+  | { type: "message"; id: string; message: DirectMessageItem };
+
+function buildThreadListItems(messages: DirectMessageItem[]): ThreadListItem[] {
+  const items: ThreadListItem[] = [];
+  let lastDayKey = "";
+  for (const message of messages) {
+    const d = new Date(message.createdAt);
+    const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (dayKey !== lastDayKey) {
+      items.push({ type: "date", id: `date-${dayKey}`, label: formatDateSeparator(d.getTime()) });
+      lastDayKey = dayKey;
+    }
+    items.push({ type: "message", id: String(message.id), message });
+  }
+  return items;
+}
+
+function formatPeerHandle(peerKey?: string) {
+  const raw = String(peerKey || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("@") ? raw.toLowerCase() : `@${raw.toLowerCase()}`;
+}
 
 function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -237,10 +303,12 @@ export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName, peerAvatarUrl, incomingCall } = route.params;
+  const { peerUserId, peerName, peerKey, peerAvatarUrl, incomingCall } = route.params;
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
+  const peerHandle = formatPeerHandle(peerKey);
+  const threadItems = useMemo(() => buildThreadListItems(messages), [messages]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
   );
@@ -256,7 +324,7 @@ export function DirectChatScreen() {
   const [attachBusy, setAttachBusy] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
-  const listRef = useRef<FlatList<DirectMessageItem>>(null);
+  const listRef = useRef<FlatList<ThreadListItem>>(null);
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceStartedAtRef = useRef(0);
@@ -540,6 +608,14 @@ export function DirectChatScreen() {
     navigation.setParams({ incomingCall: undefined });
   };
 
+  const openMoreAttachments = () => {
+    Alert.alert("Attachments", undefined, [
+      { text: "Camera", onPress: () => void openCamera() },
+      { text: "Gallery", onPress: () => void openGallery() },
+      { text: "Cancel", style: "cancel" }
+    ]);
+  };
+
   const bottomPad = Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8;
 
   const openSharedCropvibeCard = useCallback(
@@ -564,47 +640,61 @@ export function DirectChatScreen() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
-        <Pressable hitSlop={12} style={styles.headerIcon} onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={28} color={YELLOW} />
+        <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={28} color={TEXT} />
         </Pressable>
-        <View style={styles.headerCenter}>
-          <UserAvatar
-            uri={peerAvatar}
-            name={peerName}
-            size={32}
-            borderRadius={16}
-            style={styles.headerAvatar}
-            fallbackBackgroundColor="#262626"
-            initialsColor={YELLOW}
-          />
+        <UserAvatar
+          uri={peerAvatar}
+          name={peerName}
+          size={40}
+          borderRadius={20}
+          style={styles.headerAvatar}
+          fallbackBackgroundColor="#3a3f46"
+          initialsColor={TEXT}
+        />
+        <View style={styles.headerMeta}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {peerName}
           </Text>
+          {peerHandle ? (
+            <Text style={styles.headerHandle} numberOfLines={1}>
+              {peerHandle}
+            </Text>
+          ) : null}
         </View>
         <View style={styles.headerRight}>
-          <Pressable hitSlop={8} onPress={openVoiceCall}>
-            <Ionicons name="call-outline" size={22} color={YELLOW} />
+          <Pressable hitSlop={8} onPress={openVoiceCall} style={styles.headerAction}>
+            <ChatAssetIcon source={CHAT_ASSETS.voiceCall} size={HEADER_CALL_ICON} />
           </Pressable>
-          <Pressable hitSlop={8} onPress={openVideoCall}>
-            <Ionicons name="videocam-outline" size={24} color={YELLOW} />
+          <Pressable hitSlop={8} onPress={openVideoCall} style={styles.headerAction}>
+            <ChatAssetIcon source={CHAT_ASSETS.videoCall} size={HEADER_CALL_ICON} />
           </Pressable>
         </View>
       </View>
 
       <FlatList
         ref={listRef}
-        data={messages}
-        keyExtractor={(m) => String(m.id)}
+        data={threadItems}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => {
-          const isSelf = Number(item.senderId) === Number(user?.id);
-          const parsedPost = parseSharedCropvibeContent(item.body);
+          if (item.type === "date") {
+            return (
+              <View style={styles.dateSeparatorWrap}>
+                <Text style={styles.dateSeparatorText}>{item.label}</Text>
+              </View>
+            );
+          }
+
+          const messageItem = item.message;
+          const isSelf = Number(messageItem.senderId) === Number(user?.id);
+          const parsedPost = parseSharedCropvibeContent(messageItem.body);
           const sharedPost = parsedPost ? mergeHydratedPost(parsedPost) : null;
-          const sharedProfile = parseSharedProfileContent(item.body);
-          const sharedLive = parseLiveShareContent(item.body);
-          const sharedMedia = parseDmMediaMessage(item.body);
-          const sharedVoice = parseDmVoiceMessage(item.body);
+          const sharedProfile = parseSharedProfileContent(messageItem.body);
+          const sharedLive = parseLiveShareContent(messageItem.body);
+          const sharedMedia = parseDmMediaMessage(messageItem.body);
+          const sharedVoice = parseDmVoiceMessage(messageItem.body);
           const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice);
           return (
             <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
@@ -655,7 +745,7 @@ export function DirectChatScreen() {
                     post={sharedPost}
                     language={language}
                     t={t}
-                    onPress={() => void openSharedCropvibeCard(item.body)}
+                    onPress={() => void openSharedCropvibeCard(messageItem.body)}
                   />
                 ) : sharedMedia ? (
                   <ChatMediaBubble media={sharedMedia} isSelf={isSelf} />
@@ -688,10 +778,10 @@ export function DirectChatScreen() {
                     </View>
                   </Pressable>
                 ) : (
-                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{item.body}</Text>
+                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{messageItem.body}</Text>
                 )}
                 <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, isRichCard ? styles.reelMeta : null]}>
-                  {formatMsgTime(new Date(item.createdAt).getTime())}
+                  {formatMsgTime(new Date(messageItem.createdAt).getTime())}
                 </Text>
               </View>
             </View>
@@ -706,12 +796,16 @@ export function DirectChatScreen() {
         }
       />
 
-      <View style={[styles.composer, { paddingBottom: bottomPad }]}>
-        <Pressable style={styles.composerIcon} onPress={() => void openCamera()} disabled={attachBusy || isRecordingVoice}>
-          <Ionicons name="camera-outline" size={26} color={YELLOW} />
-        </Pressable>
+      <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+        <View style={styles.composerBar}>
+          <Pressable
+            style={styles.cameraBtn}
+            onPress={() => void openCamera()}
+            disabled={attachBusy || isRecordingVoice}
+          >
+            <ChatAssetIcon source={CHAT_ASSETS.camera} size={CAMERA_ICON_SIZE} />
+          </Pressable>
 
-        <View style={styles.inputShell}>
           {isRecordingVoice ? (
             <View style={styles.recordingRow}>
               <View style={styles.recordingDot} />
@@ -726,7 +820,7 @@ export function DirectChatScreen() {
               <TextInput
                 value={draft}
                 onChangeText={setDraft}
-                placeholder={t("messagePlaceholder")}
+                placeholder="Message"
                 placeholderTextColor={MUTED}
                 style={styles.input}
                 multiline
@@ -734,7 +828,11 @@ export function DirectChatScreen() {
                 onSubmitEditing={send}
                 editable={!attachBusy}
               />
-              {!draft.trim() ? (
+              {draft.trim() ? (
+                <Pressable style={styles.inputTrailingBtn} onPress={send} disabled={attachBusy}>
+                  <Ionicons name="send" size={20} color={YELLOW} />
+                </Pressable>
+              ) : (
                 <View style={styles.inputTrailing}>
                   <Pressable
                     style={styles.inputTrailingBtn}
@@ -742,26 +840,22 @@ export function DirectChatScreen() {
                     onPressIn={() => void startVoiceRecording()}
                     onPressOut={() => void stopVoiceRecordingAndSend()}
                   >
-                    <Ionicons name="mic-outline" size={22} color={YELLOW} />
+                    <ChatAssetIcon source={CHAT_ASSETS.mic} size={COMPOSER_ICON} />
                   </Pressable>
                   <Pressable style={styles.inputTrailingBtn} onPress={() => void openGallery()} disabled={attachBusy}>
-                    <Ionicons name="images-outline" size={22} color={YELLOW} />
+                    <ChatAssetIcon source={CHAT_ASSETS.gallery} size={COMPOSER_ICON} />
+                  </Pressable>
+                  <Pressable style={styles.inputTrailingBtn} disabled={attachBusy}>
+                    <ChatAssetIcon source={CHAT_ASSETS.sticker} size={COMPOSER_ICON} />
+                  </Pressable>
+                  <Pressable style={styles.inputTrailingBtn} onPress={openMoreAttachments} disabled={attachBusy}>
+                    <ChatAssetIcon source={CHAT_ASSETS.plus} size={COMPOSER_ICON} />
                   </Pressable>
                 </View>
-              ) : null}
+              )}
             </>
           )}
         </View>
-
-        {draft.trim() && !isRecordingVoice ? (
-          <Pressable
-            style={[styles.sendBtn, styles.sendBtnActive]}
-            onPress={send}
-            disabled={attachBusy}
-          >
-            <Ionicons name="send" size={18} color="#111" />
-          </Pressable>
-        ) : null}
       </View>
       <DirectCallView
         visible={!!callSession}
@@ -802,39 +896,49 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 8,
-    paddingBottom: 10,
+    paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: BORDER,
-    backgroundColor: BG
+    backgroundColor: BG,
+    gap: 10
   },
-  headerIcon: { width: 40, alignItems: "flex-start" },
-  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  headerBack: { width: 28, alignItems: "flex-start" },
+  headerMeta: { flex: 1, minWidth: 0, justifyContent: "center" },
   headerAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#262626",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#3a3f46",
     alignItems: "center",
     justifyContent: "center"
   },
-  headerAvatarText: { fontSize: 14, fontWeight: "800", color: YELLOW },
-  headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT, maxWidth: 180 },
-  headerRight: { flexDirection: "row", alignItems: "center", gap: 14, width: 80, justifyContent: "flex-end" },
+  headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT },
+  headerHandle: { marginTop: 2, fontSize: 13, fontWeight: "500", color: MUTED },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 16 },
+  headerAction: { alignItems: "center", justifyContent: "center" },
+  dateSeparatorWrap: { alignItems: "center", marginVertical: 14 },
+  dateSeparatorText: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    color: MUTED,
+    textTransform: "uppercase"
+  },
   listContent: { paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 },
   bubbleRow: { marginBottom: 10, flexDirection: "row" },
   bubbleRowSelf: { justifyContent: "flex-end" },
   bubbleRowPeer: { justifyContent: "flex-start" },
   bubble: { maxWidth: "78%", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleSelf: { backgroundColor: YELLOW },
+  bubbleSelf: { backgroundColor: "#3a3f46" },
   bubblePeer: { backgroundColor: BUBBLE_PEER },
   reelBubbleWrap: { maxWidth: "84%" },
   reelBubbleWrapSelf: { alignItems: "flex-end" },
   reelBubbleWrapPeer: { alignItems: "flex-start" },
   bubbleText: { fontSize: 15, lineHeight: 20 },
-  bubbleTextSelf: { color: "#111" },
+  bubbleTextSelf: { color: TEXT },
   bubbleTextPeer: { color: TEXT },
   bubbleMeta: { marginTop: 4, fontSize: 11, alignSelf: "flex-end" },
-  bubbleMetaSelf: { color: "rgba(0,0,0,0.62)" },
+  bubbleMetaSelf: { color: MUTED },
   bubbleMetaPeer: { color: MUTED },
   reelMeta: { color: MUTED, marginTop: 3, marginRight: 4 },
   sharedReelCard: {
@@ -904,47 +1008,45 @@ const styles = StyleSheet.create({
   threadEmpty: { paddingVertical: 48, alignItems: "center" },
   threadEmptyText: { fontSize: 15, color: MUTED },
   threadEmptyBold: { fontWeight: "800", color: TEXT },
-  composer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: 10,
+  composerWrap: {
+    paddingHorizontal: 16,
     paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BORDER,
-    backgroundColor: BG,
-    gap: 8
+    backgroundColor: BG
   },
-  composerIcon: { paddingBottom: 10 },
-  inputShell: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: INPUT_BG,
+  composerBar: {
+    width: "100%",
+    maxWidth: 398,
+    alignSelf: "center",
+    minHeight: COMPOSER_HEIGHT,
+    borderRadius: COMPOSER_RADIUS,
+    padding: COMPOSER_PADDING,
+    backgroundColor: COMPOSER_BG,
     flexDirection: "row",
-    alignItems: "center"
+    alignItems: "center",
+    gap: COMPOSER_GAP
+  },
+  cameraBtn: {
+    width: CAMERA_ICON_SIZE,
+    height: CAMERA_ICON_SIZE,
+    alignItems: "center",
+    justifyContent: "center"
   },
   input: {
     flex: 1,
-    minHeight: 40,
+    minHeight: COMPOSER_HEIGHT - COMPOSER_PADDING * 2,
     maxHeight: 120,
-    paddingLeft: 14,
-    paddingRight: 4,
-    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+    paddingVertical: 0,
     fontSize: 15,
     color: TEXT
   },
   inputTrailing: {
     flexDirection: "row",
     alignItems: "center",
-    paddingRight: 6,
-    gap: 2
+    gap: COMPOSER_GAP
   },
   inputTrailingBtn: {
-    width: 34,
-    height: 34,
+    width: COMPOSER_ICON,
+    height: COMPOSER_ICON,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -952,9 +1054,8 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10
+    gap: COMPOSER_GAP,
+    minHeight: COMPOSER_HEIGHT - COMPOSER_PADDING * 2
   },
   recordingDot: {
     width: 8,
@@ -964,16 +1065,6 @@ const styles = StyleSheet.create({
   },
   recordingText: { flex: 1, color: TEXT, fontSize: 14, fontWeight: "700" },
   recordingTimer: { color: MUTED, fontSize: 13, fontWeight: "700", marginRight: 4 },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#262626",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 2
-  },
-  sendBtnActive: { backgroundColor: YELLOW },
   callScreen: {
     flex: 1,
     backgroundColor: "#121212",

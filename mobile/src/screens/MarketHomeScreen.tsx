@@ -39,7 +39,7 @@ const MARKET_TABS: { id: MarketTabId; label: string; icon: SvgModule }[] = [
   { id: "Services", label: "Services", icon: require("../../assets/market/services.svg") }
 ];
 
-const SEARCH_ICON = require("../../assets/search.png");
+const SEARCH_ICON = require("../../assets/bottom-icons/search.svg");
 const MIC_ICON = require("../../assets/market/mic-icon.svg");
 
 export function MarketHomeScreen() {

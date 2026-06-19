@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/reel/:id",
+      "destination": "https://agrovibes.onrender.com/api/share/reel/:id"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

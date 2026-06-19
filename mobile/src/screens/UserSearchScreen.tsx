@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,13 +13,12 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
-import type { RootStackParamList } from "../navigation/RootNavigator";
 import { fetchHomePosts, type HomePost } from "../services/api";
-import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
+import { APP_LIME } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { isReelPost, postMatchesExploreQuery, reelGridStillUri } from "../utils/reelGrid";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
@@ -27,9 +26,25 @@ import { ResizeMode, Video } from "expo-av";
 
 const GRID_GAP = 2;
 const GRID_PAD = 2;
+const BG = "#121212";
+const SEARCH_BG = "#303132";
+const TILE_A = "#303132";
+const TILE_B = "#383838";
+const MUTED = "#9e9e9e";
+const TEXT = "#ffffff";
+
+const EXPLORE_ASSETS = {
+  search: require("../../assets/searchY-icon.svg"),
+  video: require("../../assets/video-icon.svg")
+} as const;
+
+function tileBackground(index: number) {
+  const row = Math.floor(index / 3);
+  const col = index % 3;
+  return (row + col) % 2 === 0 ? TILE_A : TILE_B;
+}
 
 export function UserSearchScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { width } = useWindowDimensions();
   const { t } = useLanguage();
   const { token } = useAuth();
@@ -42,15 +57,11 @@ export function UserSearchScreen() {
   const gridTileSize = (width - GRID_PAD * 2 - GRID_GAP * 2) / 3;
   const reelTileHeight = Math.round(gridTileSize * (16 / 9));
 
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: t("search") });
-  }, [navigation, t]);
-
   useFocusEffect(
     useCallback(() => {
       StatusBar.setBarStyle("light-content");
       if (Platform.OS === "android") {
-        StatusBar.setBackgroundColor(T.navBg);
+        StatusBar.setBackgroundColor(BG);
       }
       return () => {
         StatusBar.setBarStyle("dark-content");
@@ -94,9 +105,13 @@ export function UserSearchScreen() {
   );
 
   const renderGridItem = useCallback(
-    ({ item }: { item: HomePost }) => {
+    ({ item, index }: { item: HomePost; index: number }) => {
       const stillUri = reelGridStillUri(item);
-      const tileStyle = [styles.gridTile, { width: gridTileSize, height: reelTileHeight }];
+      const tileBg = tileBackground(index);
+      const tileStyle = [
+        styles.gridTile,
+        { width: gridTileSize, height: reelTileHeight, backgroundColor: tileBg }
+      ];
 
       return (
         <Pressable style={tileStyle} onPress={() => openReelViewer(item)}>
@@ -112,11 +127,9 @@ export function UserSearchScreen() {
               isMuted
               useNativeControls={false}
             />
-          ) : (
-            <View style={[styles.gridImage, styles.gridPlaceholder]} />
-          )}
-          <View style={styles.gridPlayBadge} pointerEvents="none">
-            <Ionicons name="play" size={12} color="#111" />
+          ) : null}
+          <View style={styles.gridVideoBadge} pointerEvents="none">
+            <Image source={EXPLORE_ASSETS.video} style={styles.gridVideoIcon} resizeMode="contain" />
           </View>
         </Pressable>
       );
@@ -125,14 +138,14 @@ export function UserSearchScreen() {
   );
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.searchWrap}>
-        <Image source={require("../../assets/search.png")} style={styles.searchIcon} resizeMode="contain" />
+        <Image source={EXPLORE_ASSETS.search} style={styles.searchIcon} resizeMode="contain" />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder={t("search")}
-          placeholderTextColor={T.muted}
+          placeholderTextColor={MUTED}
           style={styles.input}
           autoCapitalize="none"
           autoCorrect={false}
@@ -140,14 +153,14 @@ export function UserSearchScreen() {
         />
         {query.length > 0 ? (
           <Pressable hitSlop={8} onPress={() => setQuery("")}>
-            <Ionicons name="close-circle" size={18} color={T.muted} />
+            <Ionicons name="close-circle" size={18} color={MUTED} />
           </Pressable>
         ) : null}
       </View>
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={T.accent} />
+          <ActivityIndicator color={APP_LIME} />
         </View>
       ) : visibleReels.length === 0 ? (
         <View style={styles.centered}>
@@ -184,50 +197,43 @@ export function UserSearchScreen() {
           });
         }}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+  root: { flex: 1, backgroundColor: BG },
   searchWrap: {
-    marginHorizontal: 14,
+    marginHorizontal: 16,
     marginTop: 10,
     marginBottom: 8,
-    backgroundColor: T.searchBarBg,
+    backgroundColor: SEARCH_BG,
     borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
     paddingHorizontal: 12,
     height: 40,
     alignItems: "center",
     flexDirection: "row",
     gap: 8
   },
-  searchIcon: { width: 18, height: 18, tintColor: T.muted },
-  input: { flex: 1, color: T.text, fontSize: 15, paddingVertical: 0 },
+  searchIcon: { width: 20, height: 20 },
+  input: { flex: 1, color: TEXT, fontSize: 15, paddingVertical: 0 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  emptyTitle: { color: T.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
-  emptySub: { color: T.muted, fontSize: 14, textAlign: "center", marginTop: 8 },
+  emptyTitle: { color: TEXT, fontSize: 16, fontWeight: "700", textAlign: "center" },
+  emptySub: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 8 },
   gridList: { paddingHorizontal: GRID_PAD, paddingBottom: 16 },
   gridRow: { gap: GRID_GAP, marginBottom: GRID_GAP },
   gridTile: {
-    borderRadius: 4,
     overflow: "hidden",
-    backgroundColor: "#1a1a1a",
     position: "relative"
   },
   gridImage: { width: "100%", height: "100%" },
-  gridPlaceholder: { backgroundColor: "#262626" },
-  gridPlayBadge: {
+  gridVideoBadge: {
     position: "absolute",
-    top: 6,
-    right: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    alignItems: "center",
-    justifyContent: "center"
+    top: 8,
+    right: 8
+  },
+  gridVideoIcon: {
+    width: 20,
+    height: 20
   }
 });
