@@ -2806,6 +2806,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         t.peer_id AS "peerUserId",
         u.full_name AS "peerName",
         u.email AS "peerEmail",
+        NULLIF(TRIM(u.username), '') AS "peerUsername",
         NULLIF(TRIM(u.avatar_url), '') AS "peerAvatarUrl",
         t.sender_id AS "lastSenderId",
         t.receiver_id AS "lastReceiverId",

@@ -281,7 +281,7 @@ export function UserSearchScreen() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder={t("searchUsers")}
+          placeholder={t("search")}
           placeholderTextColor={MUTED}
           style={styles.input}
           autoCapitalize="none"

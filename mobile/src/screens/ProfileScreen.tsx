@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   ActivityIndicator,
+  FlatList,
   Image,
   Linking,
   Modal,
@@ -19,14 +20,16 @@ import {
 } from "react-native";
 import { ResizeMode, Video } from "expo-av";
 import * as Clipboard from "expo-clipboard";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import {
+  fetchHomePosts,
   fetchSavedHomePosts,
   fetchMyHomePosts,
   fetchProfileStats,
@@ -53,7 +56,7 @@ import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache }
 import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { APP_LIME } from "../theme/appColors";
-import { reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
+import { isReelPost, reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
 
 const PAGE_BG = "#262626";
 const SURFACE = "#303132";
@@ -91,6 +94,32 @@ function profileTileBackground(index: number) {
   return reelGridTileBackground(index, 3);
 }
 
+function normalizeProfileName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function postBelongsToProfileUser(
+  post: HomePost,
+  user: { id?: number | string; fullName?: string | null; username?: string | null; email?: string | null }
+) {
+  const uid = Number(user.id);
+  if (uid > 0 && Number(post.userId) === uid) return true;
+  const names = [user.fullName, user.username, user.email?.split("@")[0]]
+    .map((v) => normalizeProfileName(String(v || "")))
+    .filter(Boolean);
+  const postName = normalizeProfileName(post.userName || "");
+  return postName.length > 0 && names.some((name) => name === postName);
+}
+
+function pickDefaultGalleryTab(_posts: HomePost[]): GalleryTab {
+  return "Posts";
+}
+
 function safeHandle(name: string) {
   const base = String(name || "user")
     .toLowerCase()
@@ -106,11 +135,23 @@ function formatStatCount(value: number) {
 
 type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
-export function ProfileScreen({ route }: { route?: any }) {
-  const navigation = useNavigation<NativeStackNavigationProp<any>>();
+export function ProfileScreen({ route: routeProp }: { route?: any }) {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navRoute = useRoute();
+  const route = routeProp ?? navRoute;
+  const isPublicProfileView = navRoute.name === "PublicProfile";
+  const publicUserId = isPublicProfileView ? (route.params?.userId as number | undefined) : undefined;
+  const publicUserName = isPublicProfileView ? String(route.params?.userName || "") : "";
+  const publicUserKey = isPublicProfileView ? (route.params?.userKey as string | undefined) : undefined;
+  const publicAvatarFromRoute = isPublicProfileView ? (route.params?.avatarUrl as string | null | undefined) : undefined;
   const { width, height: windowHeight } = useWindowDimensions();
   const { user, token, signOut } = useAuth();
   const { t } = useLanguage();
+  const [publicUsername, setPublicUsername] = useState<string | null>(null);
+  const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
+  const [publicBio, setPublicBio] = useState("");
+  const [isFollowingPublic, setIsFollowingPublic] = useState(false);
+  const [followPublicBusy, setFollowPublicBusy] = useState(false);
   const [userPosts, setUserPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
@@ -144,6 +185,7 @@ export function ProfileScreen({ route }: { route?: any }) {
   const [shareProfileSearch, setShareProfileSearch] = useState("");
   const [profileReelViewer, setProfileReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const isMountedRef = useRef(true);
+  const profileInitialTabRef = useRef<GalleryTab | undefined>(route?.params?.initialTab);
 
   const gridGap = 2;
   const gridTileSize = (width - gridGap * 2) / 3;
@@ -166,15 +208,46 @@ export function ProfileScreen({ route }: { route?: any }) {
   };
 
   const loadUserPosts = useCallback(async () => {
+    if (isPublicProfileView) {
+      setPostsLoading(true);
+      try {
+        const home = await fetchHomePosts(token ?? undefined);
+        const byName = normalizeProfileName(publicUserName);
+        const posts = (home.posts || []).filter((post) =>
+          publicUserId ? Number(post.userId) === Number(publicUserId) : normalizeProfileName(post.userName || "") === byName
+        );
+        if (!isMountedRef.current) return;
+        setUserPosts(posts);
+      } catch {
+        if (!isMountedRef.current) return;
+        setUserPosts([]);
+      } finally {
+        if (isMountedRef.current) setPostsLoading(false);
+      }
+      return;
+    }
     if (!token || !user?.id) {
       setUserPosts([]);
       return;
     }
     setPostsLoading(true);
     try {
-      const data = await fetchMyHomePosts(token);
+      let posts: HomePost[] = [];
+      try {
+        const data = await fetchMyHomePosts(token);
+        posts = data.posts || [];
+      } catch {
+        posts = [];
+      }
+      if (!posts.length) {
+        try {
+          const home = await fetchHomePosts(token);
+          posts = (home.posts || []).filter((post) => postBelongsToProfileUser(post, user));
+        } catch {
+          posts = [];
+        }
+      }
       if (!isMountedRef.current) return;
-      const posts = data.posts || [];
       setUserPosts(posts);
       writeProfilePostsCache({ userId: Number(user.id), userPosts: posts, fetchedAt: Date.now() });
     } catch {
@@ -183,7 +256,7 @@ export function ProfileScreen({ route }: { route?: any }) {
     } finally {
       if (isMountedRef.current) setPostsLoading(false);
     }
-  }, [token, user?.id]);
+  }, [isPublicProfileView, publicUserId, publicUserName, token, user]);
 
   const loadSavedPosts = useCallback(async () => {
     if (!token || !user?.id) {
@@ -249,14 +322,28 @@ export function ProfileScreen({ route }: { route?: any }) {
 
   useFocusEffect(
     useCallback(() => {
-      if (route?.params?.initialTab === "Saved") {
-        setActiveGalleryTab("Saved");
+      if (isPublicProfileView) {
+        profileInitialTabRef.current = undefined;
+        setActiveGalleryTab("Posts");
+        return;
       }
-    }, [route?.params?.initialTab])
+      const tab = route?.params?.initialTab;
+      if (tab === "Saved" || tab === "Tagged" || tab === "Reels" || tab === "Posts") {
+        profileInitialTabRef.current = tab;
+        setActiveGalleryTab(tab);
+      } else {
+        profileInitialTabRef.current = undefined;
+        setActiveGalleryTab(pickDefaultGalleryTab([]));
+      }
+    }, [isPublicProfileView, route?.params?.initialTab])
   );
 
   useFocusEffect(
     useCallback(() => {
+      if (isPublicProfileView) {
+        void loadUserPosts();
+        return;
+      }
       if (!user?.id) return;
       const hadCache = hydrateProfilePostsFromCache();
       void loadUserPosts();
@@ -266,7 +353,7 @@ export function ProfileScreen({ route }: { route?: any }) {
         // Preload saved in background — common profile tab after reels.
         void loadSavedPosts();
       }
-    }, [hydrateProfilePostsFromCache, loadSavedPosts, loadTaggedPosts, loadUserPosts, user?.id])
+    }, [hydrateProfilePostsFromCache, isPublicProfileView, loadSavedPosts, loadTaggedPosts, loadUserPosts, user?.id])
   );
 
   useEffect(() => {
@@ -354,15 +441,69 @@ export function ProfileScreen({ route }: { route?: any }) {
   }, [token, user?.id, user?.fullName, user?.email]);
 
   useEffect(() => {
+    if (isPublicProfileView) return;
     void refreshMergedFollowStats();
-  }, [refreshMergedFollowStats]);
+  }, [isPublicProfileView, refreshMergedFollowStats]);
+
+  useEffect(() => {
+    if (!isPublicProfileView) return;
+    let mounted = true;
+    if (!(token && publicUserId)) {
+      setFollowersCount(0);
+      setFollowingCount(0);
+      return;
+    }
+    fetchProfileStats(token, publicUserId)
+      .then((stats) => {
+        if (!mounted) return;
+        setFollowersCount(Number(stats.followersCount || 0));
+        setFollowingCount(Number(stats.followingCount || 0));
+        setIsFollowingPublic(stats.viewerStatus === "accepted" || stats.viewerStatus === "pending");
+        setPublicUsername(stats.username ? String(stats.username) : null);
+        setPublicBio(String(stats.bio || "").trim());
+        const fromApi =
+          stats.avatarUrl != null && String(stats.avatarUrl).trim().length > 0 ? String(stats.avatarUrl).trim() : null;
+        const fromRoute =
+          publicAvatarFromRoute != null && String(publicAvatarFromRoute).trim().length > 0
+            ? String(publicAvatarFromRoute).trim()
+            : null;
+        setPublicAvatarUrl(fromApi ?? fromRoute);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setFollowersCount(0);
+        setFollowingCount(0);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [isPublicProfileView, publicAvatarFromRoute, publicUserId, token]);
 
   const visiblePosts = useMemo(() => {
-    if (activeGalleryTab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
-    if (activeGalleryTab === "Saved") return savedPosts.filter((p) => !!p.videoUrl);
-    if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => !!p.videoUrl);
-    return userPosts.filter((p) => !p.videoUrl);
+    if (activeGalleryTab === "Posts") return userPosts;
+    if (activeGalleryTab === "Reels") return userPosts.filter((p) => isReelPost(p));
+    if (activeGalleryTab === "Saved") return savedPosts.filter((p) => isReelPost(p));
+    if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => isReelPost(p));
+    return userPosts;
   }, [activeGalleryTab, savedPosts, taggedPosts, userPosts]);
+
+  const handleGalleryTabPress = useCallback(
+    (tabKey: GalleryTab) => {
+      setActiveGalleryTab(tabKey);
+      if (tabKey === "Posts" || tabKey === "Reels") {
+        void loadUserPosts();
+        return;
+      }
+      if (tabKey === "Saved") {
+        void loadSavedPosts();
+        return;
+      }
+      if (tabKey === "Tagged") {
+        void loadTaggedPosts();
+      }
+    },
+    [loadSavedPosts, loadTaggedPosts, loadUserPosts]
+  );
 
   const galleryLoading = useMemo(() => {
     if (activeGalleryTab === "Saved") return savedLoading && savedPosts.length === 0;
@@ -380,7 +521,13 @@ export function ProfileScreen({ route }: { route?: any }) {
     return null;
   }, [activeGalleryTab, visiblePosts]);
 
-  const canDeleteFromProfileGallery = activeGalleryTab === "Posts" || activeGalleryTab === "Reels";
+  const canDeleteFromProfileGallery =
+    !isPublicProfileView && (activeGalleryTab === "Posts" || activeGalleryTab === "Reels");
+
+  const galleryTabs = useMemo(
+    (): GalleryTab[] => (isPublicProfileView ? ["Posts", "Reels"] : ["Posts", "Reels", "Saved", "Tagged"]),
+    [isPublicProfileView]
+  );
 
   const openProfilePostsViewer = useCallback(
     (post: HomePost) => {
@@ -447,35 +594,130 @@ export function ProfileScreen({ route }: { route?: any }) {
     [canDeleteFromProfileGallery, t, token]
   );
 
-  const profileModel = useMemo(() => {
+  const renderProfileGridItem = useCallback(
+    ({ item: post, index }: { item: HomePost; index: number }) => {
+      const tileHeight = isReelTab ? reelTileHeight : gridTileSize;
+      const tileStyle = [
+        styles.gridTile,
+        { width: gridTileSize, height: tileHeight, backgroundColor: profileTileBackground(index) }
+      ];
+      if (post.videoUrl) {
+        const stillUri = reelGridStillUri(post);
+        if (stillUri) {
+          return (
+            <Pressable
+              key={post.id}
+              style={tileStyle}
+              onPress={() => openProfilePostsViewer(post)}
+              onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
+            >
+              <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
+              <View style={styles.gridPlayBadge} pointerEvents="none">
+                <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
+              </View>
+            </Pressable>
+          );
+        }
+        const shouldPlayTile = post.id === singleGridVideoPreviewId;
+        return (
+          <Pressable
+            key={post.id}
+            style={tileStyle}
+            onPress={() => openProfilePostsViewer(post)}
+            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
+          >
+            <Video
+              style={styles.gridImage}
+              source={{ uri: videoPlaybackUrl(post.videoUrl) }}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={shouldPlayTile}
+              isLooping
+              isMuted
+              useNativeControls={false}
+              progressUpdateIntervalMillis={2000}
+            />
+            <View style={styles.gridPlayBadge} pointerEvents="none">
+              <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
+            </View>
+          </Pressable>
+        );
+      }
+      const galleryFirst = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls[0] : null;
+      const cover = post.imageUrl || galleryFirst || null;
+      const canOpen = !!cover;
+      return (
+        <Pressable
+          key={post.id}
+          style={tileStyle}
+          onPress={() => (canOpen ? openProfilePostsViewer(post) : undefined)}
+          onLongPress={canDeleteFromProfileGallery && canOpen ? () => confirmDeleteProfilePost(post) : undefined}
+        >
+          {cover ? (
+            <Image source={{ uri: cover }} style={styles.gridImage} resizeMode="cover" />
+          ) : (
+            <View style={[styles.gridPlaceholder, { flex: 1, backgroundColor: profileTileBackground(index) }]} />
+          )}
+          {post.imageUrls && post.imageUrls.length > 1 ? (
+            <View style={styles.gridGalleryBadge} pointerEvents="none">
+              <Ionicons name="copy" size={12} color={TEXT} />
+            </View>
+          ) : null}
+        </Pressable>
+      );
+    },
+    [
+      canDeleteFromProfileGallery,
+      confirmDeleteProfilePost,
+      gridTileSize,
+      isReelTab,
+      openProfilePostsViewer,
+      reelTileHeight,
+      singleGridVideoPreviewId
+    ]
+  );
+
+  const profileSubject = useMemo(() => {
+    if (isPublicProfileView) {
+      if (!publicUserName) return null;
+      return {
+        id: publicUserId,
+        fullName: publicUserName,
+        username: publicUsername,
+        avatarUrl: publicAvatarUrl,
+        bio: publicBio
+      };
+    }
     if (!user) return null;
-    const handle = user.username ? `@${user.username.replace(/^@+/, "")}` : safeHandle(user.fullName || user.email);
-    const initials = String(user.fullName || user.email || "U")
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      username: user.username,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio
+    };
+  }, [
+    isPublicProfileView,
+    publicAvatarUrl,
+    publicBio,
+    publicUserId,
+    publicUserName,
+    publicUsername,
+    user
+  ]);
+
+  const profileModel = useMemo(() => {
+    if (!profileSubject) return null;
+    const handle = profileSubject.username
+      ? `@${String(profileSubject.username).replace(/^@+/, "")}`
+      : safeHandle(profileSubject.fullName || "user");
+    const initials = String(profileSubject.fullName || "U")
       .split(" ")
       .filter(Boolean)
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase())
       .join("");
     return { posts: userPosts.length, followers: followersCount, following: followingCount, handle, initials: initials || "U" };
-  }, [followersCount, followingCount, user, userPosts.length]);
-
-  const roleLabel = useMemo(() => {
-    if (!user) return "";
-    if (user.role === "instructor" || user.role === "admin") return "Instructor · Seller";
-    return "Farmer · Buyer";
-  }, [user]);
-
-  const bioText = useMemo(() => {
-    if (!user) return "";
-    return user.bio?.trim() || `${user.fullName} — growing and trading fresh produce. Share tips and connect with the community.`;
-  }, [user]);
-
-  const locationDisplay = useMemo(() => {
-    if (!user?.locationLabel) return "Add your district";
-    const parts = user.locationLabel.split(",").map((s) => s.trim());
-    if (parts.length >= 2) return `${parts[0]}, ${parts[1]}`;
-    return user.locationLabel;
-  }, [user]);
+  }, [followersCount, followingCount, profileSubject, userPosts.length]);
 
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
 
@@ -671,34 +913,81 @@ export function ProfileScreen({ route }: { route?: any }) {
     setFollowingActionMenuFor((prev) => (prev === rowId ? null : rowId));
   };
 
-  const profileHeaderName = user?.username || user?.fullName || "";
+  const profileHeaderName = isPublicProfileView
+    ? publicUsername || publicUserName
+    : user?.username || user?.fullName || "";
+
+  const followPublicUser = async () => {
+    if (!user?.fullName || isFollowingPublic || followPublicBusy) return;
+    setFollowPublicBusy(true);
+    try {
+      if (token && publicUserId) {
+        await sendFollowRequest(token, publicUserId);
+      } else {
+        await sendLocalFollowRequestByIdentity(
+          { name: user.fullName, key: user.email || String(user.id || "") },
+          { name: publicUserName, key: publicUserKey || (publicUserId ? String(publicUserId) : undefined) }
+        );
+      }
+      setIsFollowingPublic(true);
+      setFollowersCount((v) => v + 1);
+    } catch {
+      Alert.alert(t("followFailed"), t("tryAgainMoment"));
+    } finally {
+      setFollowPublicBusy(false);
+    }
+  };
+
+  const openPublicMessage = () => {
+    if (!publicUserId) {
+      Alert.alert(t("unavailable"), t("cannotOpenChat"));
+      return;
+    }
+    navigation.navigate("DirectChat", {
+      peerUserId: publicUserId,
+      peerName: publicUserName,
+      peerKey: publicUserKey || String(publicUserId),
+      peerAvatarUrl: publicAvatarUrl
+    });
+  };
 
   return (
     <>
       <SafeAreaView style={styles.safeRoot} edges={["top"]}>
-        {user ? (
+        {profileSubject ? (
           <View
             style={[
               styles.topBar,
               { maxWidth: Math.min(PROFILE_HEADER_MAX_WIDTH, width) }
             ]}
           >
-            <View style={styles.topBarUsernameWrap}>
-              <Text style={styles.topBarUsername}>{profileHeaderName}</Text>
+            {isPublicProfileView ? (
+              <Pressable style={styles.topBarBackBtn} hitSlop={8} accessibilityLabel="Back" onPress={() => navigation.goBack()}>
+                <Ionicons name="chevron-back" size={26} color={TEXT} />
+              </Pressable>
+            ) : null}
+            <View style={[styles.topBarUsernameWrap, isPublicProfileView ? styles.topBarUsernameWrapPublic : null]}>
+              <Text style={styles.topBarUsername} numberOfLines={1}>
+                {profileHeaderName}
+              </Text>
             </View>
-            <Pressable
-              style={styles.topBarMenuBtn}
-              hitSlop={8}
-              accessibilityLabel="Menu"
-              onPress={() => navigation.navigate("SettingsMenu")}
-            >
-              <Image source={PROFILE_ASSETS.menu} style={styles.menuIcon} resizeMode="contain" />
-            </Pressable>
+            {isPublicProfileView ? (
+              <View style={styles.topBarBackBtn} />
+            ) : (
+              <Pressable
+                style={styles.topBarMenuBtn}
+                hitSlop={8}
+                accessibilityLabel="Menu"
+                onPress={() => navigation.navigate("SettingsMenu")}
+              >
+                <Image source={PROFILE_ASSETS.menu} style={styles.menuIcon} resizeMode="contain" />
+              </Pressable>
+            )}
           </View>
         ) : null}
 
         <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
-        {!user ? (
+        {!profileSubject && !isPublicProfileView ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{t("welcome")}</Text>
             <Text style={styles.cardSub}>{t("welcomeSub")}</Text>
@@ -707,13 +996,13 @@ export function ProfileScreen({ route }: { route?: any }) {
               <Text style={styles.primaryBtnText}>{t("getStarted")}</Text>
             </Pressable>
           </View>
-        ) : (
+        ) : profileSubject ? (
           <>
             <View style={styles.profileCard}>
               <View style={styles.headerMidRow}>
                 <UserAvatar
-                  uri={user.avatarUrl}
-                  name={user.fullName || user.username || user.email || "U"}
+                  uri={profileSubject.avatarUrl}
+                  name={profileSubject.fullName || profileSubject.username || "U"}
                   size={88}
                   borderRadius={44}
                   fallbackBackgroundColor={SURFACE}
@@ -727,30 +1016,62 @@ export function ProfileScreen({ route }: { route?: any }) {
                       <Text style={styles.statValue}>{formatStatCount(profileModel?.posts ?? 0)}</Text>
                       <Text style={styles.statLabel}>{t("posts")}</Text>
                     </View>
-                    <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
-                      <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
-                      <Text style={styles.statLabel}>{t("followers")}</Text>
-                    </Pressable>
-                    <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
-                      <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
-                      <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
-                    </Pressable>
+                    {isPublicProfileView ? (
+                      <>
+                        <View style={styles.statItem}>
+                          <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
+                          <Text style={styles.statLabel}>{t("followers")}</Text>
+                        </View>
+                        <View style={styles.statItem}>
+                          <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
+                          <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
+                        </View>
+                      </>
+                    ) : (
+                      <>
+                        <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
+                          <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
+                          <Text style={styles.statLabel}>{t("followers")}</Text>
+                        </Pressable>
+                        <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
+                          <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
+                          <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
+                        </Pressable>
+                      </>
+                    )}
                   </View>
                 </View>
               </View>
 
-              <Text style={styles.bio}>{bioText}</Text>
+              {profileSubject.bio?.trim() ? <Text style={styles.bio}>{profileSubject.bio.trim()}</Text> : null}
 
-              <View style={styles.profileActionsRow}>
-                <Pressable style={styles.profileActionBtn} onPress={navigateToEditProfile}>
-                  <Text style={styles.profileActionBtnText}>{t("editProfile")}</Text>
-                </Pressable>
-                <Pressable style={styles.profileActionBtn} onPress={handleShareProfile}>
-                  <Text style={styles.profileActionBtnText}>Share Profile</Text>
-                </Pressable>
-              </View>
+              {isPublicProfileView ? (
+                <View style={styles.profileActionsRow}>
+                  <Pressable
+                    style={styles.profileActionBtn}
+                    onPress={() => void followPublicUser()}
+                    disabled={isFollowingPublic || followPublicBusy}
+                  >
+                    <Text style={styles.profileActionBtnText}>
+                      {isFollowingPublic ? t("following") : followPublicBusy ? t("followBusy") : t("follow")}
+                    </Text>
+                  </Pressable>
+                  <Pressable style={styles.profileActionBtn} onPress={openPublicMessage}>
+                    <Text style={styles.profileActionBtnText}>{t("messageBtn")}</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.profileActionsRow}>
+                  <Pressable style={styles.profileActionBtn} onPress={navigateToEditProfile}>
+                    <Text style={styles.profileActionBtnText}>{t("editProfile")}</Text>
+                  </Pressable>
+                  <Pressable style={styles.profileActionBtn} onPress={handleShareProfile}>
+                    <Text style={styles.profileActionBtnText}>Share Profile</Text>
+                  </Pressable>
+                </View>
+              )}
 
-              {isInstructor ? (
+              {!isPublicProfileView && isInstructor ? (
                 <Pressable style={styles.studioBtn} onPress={() => navigation.navigate("InstructorStudio")}>
                   <Ionicons name="school-outline" size={18} color={LIME} />
                   <Text style={styles.studioText}>Instructor Studio</Text>
@@ -762,11 +1083,11 @@ export function ProfileScreen({ route }: { route?: any }) {
 
             <View style={styles.gallerySection}>
               <View style={styles.iconTabsRow}>
-                {(["Posts", "Reels", "Saved", "Tagged"] as const).map((tabKey) => {
+                {galleryTabs.map((tabKey) => {
                   const icons = PROFILE_TAB_ICONS[tabKey];
                   const active = activeGalleryTab === tabKey;
                   return (
-                    <Pressable key={tabKey} style={styles.iconTab} onPress={() => setActiveGalleryTab(tabKey)}>
+                    <Pressable key={tabKey} style={styles.iconTab} onPress={() => handleGalleryTabPress(tabKey)}>
                       <Image
                         source={active ? icons.active : icons.inactive}
                         style={styles.profileTabIcon}
@@ -778,118 +1099,25 @@ export function ProfileScreen({ route }: { route?: any }) {
                 })}
               </View>
 
-              <View style={[styles.grid, { gap: gridGap }]}>
-                {galleryLoading ? (
-                  <View style={styles.galleryLoadingWrap}>
-                    <ActivityIndicator size="small" color={LIME} />
-                  </View>
-                ) : visiblePosts.length ? (
-                  visiblePosts.map((post, index) => {
-                    const tileHeight = isReelTab ? reelTileHeight : gridTileSize;
-                    const tileStyle = [
-                      styles.gridTile,
-                      { width: gridTileSize, height: tileHeight, backgroundColor: profileTileBackground(index) }
-                    ];
-                    if (post.videoUrl) {
-                      const stillUri = reelGridStillUri(post);
-                      if (stillUri) {
-                        return (
-                          <Pressable
-                            key={post.id}
-                            style={tileStyle}
-                            onPress={() => openProfilePostsViewer(post)}
-                            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
-                          >
-                            <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
-                            <View style={styles.gridPlayBadge} pointerEvents="none">
-                              <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
-                            </View>
-                          </Pressable>
-                        );
-                      }
-                      /** One muted grid preview when no still image (web + native). */
-                      const shouldPlayTile = post.id === singleGridVideoPreviewId;
-                      return (
-                        <Pressable
-                          key={post.id}
-                          style={tileStyle}
-                          onPress={() => openProfilePostsViewer(post)}
-                          onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
-                        >
-                          <Video
-                            style={styles.gridImage}
-                            source={{ uri: videoPlaybackUrl(post.videoUrl) }}
-                            resizeMode={ResizeMode.COVER}
-                            shouldPlay={shouldPlayTile}
-                            isLooping
-                            isMuted
-                            useNativeControls={false}
-                            progressUpdateIntervalMillis={2000}
-                          />
-                          <View style={styles.gridPlayBadge} pointerEvents="none">
-                            <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
-                          </View>
-                        </Pressable>
-                      );
-                    }
-                    const galleryFirst = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls[0] : null;
-                    const cover = post.imageUrl || galleryFirst || null;
-                    const canOpen = !!cover;
-                    return (
-                      <Pressable
-                        key={post.id}
-                        style={tileStyle}
-                        onPress={() => (canOpen ? openProfilePostsViewer(post) : undefined)}
-                        onLongPress={canDeleteFromProfileGallery && canOpen ? () => confirmDeleteProfilePost(post) : undefined}
-                      >
-                        {cover ? (
-                          <Image source={{ uri: cover }} style={styles.gridImage} resizeMode="cover" />
-                        ) : (
-                          <View style={[styles.gridPlaceholder, { flex: 1, backgroundColor: profileTileBackground(index) }]} />
-                        )}
-                        {post.imageUrls && post.imageUrls.length > 1 ? (
-                          <View style={styles.gridGalleryBadge} pointerEvents="none">
-                            <Ionicons name="copy" size={12} color={TEXT} />
-                          </View>
-                        ) : null}
-                      </Pressable>
-                    );
-                  })
-                ) : (
-                  <View style={styles.placeholderGridRow}>
-                    {activeGalleryTab === "Tagged" ? (
-                      <View style={styles.emptyWrap}>
-                        <Ionicons name="pricetag-outline" size={22} color={TEXT} />
-                        <Text style={styles.emptyText}>{t("noTaggedPosts")}</Text>
-                      </View>
-                    ) : activeGalleryTab === "Saved" ? (
-                      <View style={styles.emptyWrap}>
-                        <Ionicons name="bookmark-outline" size={22} color={TEXT} />
-                        <Text style={styles.emptyText}>{t("savedReelsEmpty")}</Text>
-                      </View>
-                    ) : (
-                      <>
-                        {Array.from({ length: 9 }).map((_, index) => (
-                          <View
-                            key={`placeholder-${index}`}
-                            style={[
-                              styles.gridPlaceholder,
-                              {
-                                width: gridTileSize,
-                                height: gridTileSize,
-                                backgroundColor: profileTileBackground(index)
-                              }
-                            ]}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </View>
-                )}
-              </View>
+              {galleryLoading ? (
+                <View style={styles.galleryLoadingWrap}>
+                  <ActivityIndicator size="small" color={LIME} />
+                </View>
+              ) : visiblePosts.length ? (
+                <FlatList
+                  key={activeGalleryTab}
+                  data={visiblePosts}
+                  keyExtractor={(item) => String(item.id)}
+                  numColumns={3}
+                  scrollEnabled={false}
+                  renderItem={renderProfileGridItem}
+                  columnWrapperStyle={styles.gridRow}
+                  contentContainerStyle={styles.gridList}
+                />
+              ) : null}
             </View>
           </>
-        )}
+        ) : null}
       </ScrollView>
       </SafeAreaView>
 
@@ -1159,6 +1387,16 @@ const styles = StyleSheet.create({
   topBarMenuBtn: {
     flexShrink: 0
   },
+  topBarBackBtn: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0
+  },
+  topBarUsernameWrapPublic: {
+    alignItems: "center"
+  },
   menuIcon: {
     width: 34,
     height: 34
@@ -1261,7 +1499,8 @@ const styles = StyleSheet.create({
   iconTabUnderline: { marginTop: 8, height: 2, width: 32, backgroundColor: LIME, borderRadius: 2 },
   iconTabSpacer: { marginTop: 8, height: 2, width: 32 },
 
-  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 2, paddingHorizontal: 0 },
+  gridList: { width: "100%" },
+  gridRow: { gap: 2, marginBottom: 2 },
   gridTile: { overflow: "hidden", position: "relative" },
   gridImage: { width: "100%", height: "100%" },
   gridPlayBadge: {
@@ -1276,7 +1515,6 @@ const styles = StyleSheet.create({
   gridPastelA: { backgroundColor: SURFACE },
   gridPastelB: { backgroundColor: SURFACE_ALT },
   gridPastelC: { backgroundColor: SURFACE },
-  placeholderGridRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
 
   emptyWrap: {
     width: "100%",
@@ -1285,6 +1523,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   emptyText: { color: TEXT, opacity: 0.62, fontWeight: "700", textAlign: "center" },
+  emptySub: { color: TEXT, opacity: 0.62, fontSize: 14, textAlign: "center", marginTop: 8 },
 
   reelPlayerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_A },
   imageViewerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_B },

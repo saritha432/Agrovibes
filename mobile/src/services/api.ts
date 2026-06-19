@@ -435,6 +435,7 @@ export interface MessageThread {
   peerUserId: number;
   peerName: string;
   peerEmail?: string;
+  peerUsername?: string | null;
   peerAvatarUrl?: string | null;
   lastSenderId?: number;
   lastReceiverId?: number;
