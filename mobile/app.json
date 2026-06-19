@@ -20,17 +20,36 @@
       "barStyle": "light-content",
       "translucent": false
     },
-    "assetBundlePatterns": [
-      "./assets/**"
-    ],
+    "assetBundlePatterns": [],
     "scheme": "agrovibes",
     "android": {
       "package": "com.agrovibes.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "agrovibes.app",
+              "pathPrefix": "/reel"
+            },
+            {
+              "scheme": "https",
+              "host": "agrovibes.app",
+              "pathPrefix": "/watch"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"
       },
       "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -63,6 +82,15 @@
     },
     "plugins": [
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Cropvibe uses your camera to record reels, stories, and posts.",
@@ -75,7 +103,7 @@
         "expo-notifications",
         {
           "icon": "./assets/logo-adaptive-foreground.png",
-          "color": "#C9FF35",
+          "color": "#FFFFFF",
           "defaultChannel": "default"
         }
       ],

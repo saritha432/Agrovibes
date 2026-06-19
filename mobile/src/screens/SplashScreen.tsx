@@ -4,6 +4,7 @@ import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { runPendingNotificationNavigation } from "../push/notificationNavigation";
 import { APP_LIME } from "../theme/appColors";
 
 export function SplashScreen() {
@@ -27,6 +28,7 @@ export function SplashScreen() {
         routes: [{ name: "Main" }]
       })
     );
+    setTimeout(() => runPendingNotificationNavigation(), 0);
   }, [authLoading, token, user, navigation]);
 
   return (

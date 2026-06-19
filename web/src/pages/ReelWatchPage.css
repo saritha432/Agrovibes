@@ -1,0 +1,72 @@
+.reel-watch {
+  min-height: 100vh;
+  background: #111;
+  color: #f5f5f5;
+}
+
+.reel-watch__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.reel-watch__brand {
+  color: #c9ff35;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.reel-watch__open-app {
+  color: #111;
+  background: #c9ff35;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.reel-watch__status {
+  padding: 32px 18px;
+  text-align: center;
+  color: #b5b5b5;
+}
+
+.reel-watch__body {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.reel-watch__player {
+  border-radius: 16px;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 9 / 16;
+}
+
+.reel-watch__video,
+.reel-watch__image,
+.reel-watch__placeholder {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.reel-watch__placeholder {
+  display: grid;
+  place-items: center;
+  color: #888;
+}
+
+.reel-watch__meta {
+  margin-top: 16px;
+}
+
+.reel-watch__meta p {
+  margin: 8px 0 0;
+  color: #d4d4d4;
+  line-height: 1.5;
+}

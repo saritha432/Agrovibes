@@ -1,10 +1,6 @@
 import React from "react";
-import { Ionicons } from "@expo/vector-icons";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { useAuth } from "../auth/AuthContext";
-import { UserAvatar } from "./UserAvatar";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
-import { navigateToDirectInbox, navigateToMyProfile, navigateToUserSearch } from "../navigation/navigationRef";
 import { APP_BLACK, APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
 function CountBadge({ count }: { count: number }) {
@@ -19,46 +15,16 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
-type AppTopBarProps = {
-  showSearch?: boolean;
-  showMessages?: boolean;
-};
-
-export function AppTopBar({ showSearch = true, showMessages = true }: AppTopBarProps) {
-  const { user } = useAuth();
-  const { openNotificationSheet, notificationUnreadCount, messageUnreadCount } = useNotificationPanel();
+export function AppTopBar() {
+  const { openNotificationSheet, notificationUnreadCount } = useNotificationPanel();
 
   return (
     <View style={styles.topBar}>
       <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
-      <View style={styles.rightSide}>
-        {showSearch ? (
-          <Pressable style={styles.iconBadge} onPress={navigateToUserSearch}>
-            <Ionicons name="search-outline" size={16} color={APP_LIME} />
-          </Pressable>
-        ) : null}
-        {showMessages ? (
-          <Pressable style={styles.iconBadge} onPress={navigateToDirectInbox}>
-            <Ionicons name="chatbubble-ellipses-outline" size={16} color={APP_LIME} />
-            {messageUnreadCount > 0 ? <CountBadge count={messageUnreadCount} /> : null}
-          </Pressable>
-        ) : null}
-        <Pressable style={styles.iconBadge} onPress={openNotificationSheet}>
-          <Ionicons name="notifications-outline" size={16} color={APP_LIME} />
-          {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}
-        </Pressable>
-        <Pressable style={styles.iconBadge} onPress={navigateToMyProfile}>
-          <UserAvatar
-            uri={user?.avatarUrl || null}
-            name={user?.fullName || user?.username || "U"}
-            size={24}
-            borderRadius={12}
-            fallbackBackgroundColor="#1f2328"
-            initialsColor={APP_LIME}
-            textStyle={styles.profileInitial}
-          />
-        </Pressable>
-      </View>
+      <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
+        <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />
+        {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}
+      </Pressable>
     </View>
   );
 }
@@ -74,14 +40,16 @@ const styles = StyleSheet.create({
     paddingTop: 10
   },
   logoImage: { width: 132, height: 28, maxWidth: "46%" },
-  rightSide: { flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" },
   iconBadge: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    marginLeft: "auto",
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "transparent"
+    justifyContent: "center"
+  },
+  notificationIcon: {
+    width: 34,
+    height: 34,
   },
   badge: {
     position: "absolute",
@@ -111,6 +79,5 @@ const styles = StyleSheet.create({
     ...(Platform.OS === "android"
       ? { includeFontPadding: false, textAlignVertical: "center" as const }
       : { marginTop: -0.5 })
-  },
-  profileInitial: { fontWeight: "900" }
+  }
 });

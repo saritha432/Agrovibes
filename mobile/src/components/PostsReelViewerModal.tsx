@@ -12,7 +12,6 @@ import {
   Pressable,
   StatusBar,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -27,8 +26,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
-import { videoPlaybackSources } from "../utils/videoPlaybackUrl";
+import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
+import { PostShareSheet } from "./PostShareSheet";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
@@ -40,7 +40,6 @@ import {
   createHomePostComment,
   deleteHomePost,
   fetchHomePostComments,
-  getWebAppOrigin,
   HomePost,
   likeHomePost,
   unlikeHomePost
@@ -52,7 +51,7 @@ import {
 } from "../social/localEngagementStore";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
-const postTints = ["#8a5b00", APP_LIME, "#8b3a62", "#105f75"];
+import { reelPlayerBackground } from "../utils/reelGrid";
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
@@ -217,6 +216,7 @@ type ContainedExpoVideoProps = {
   fit?: "contain" | "cover";
   isLooping?: boolean;
   isMuted?: boolean;
+  posterUri?: string;
   onStatusUpdate?: (status: AVPlaybackStatus) => void;
 };
 
@@ -225,7 +225,18 @@ type ContainedExpoVideoHandle = {
 };
 
 const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo(
-  { uri, shouldPlay, preloadOnly = false, containerWidth, containerHeight, fit = "contain", isLooping = true, isMuted = false, onStatusUpdate },
+  {
+    uri,
+    shouldPlay,
+    preloadOnly = false,
+    containerWidth,
+    containerHeight,
+    fit = "cover",
+    isLooping = true,
+    isMuted = false,
+    posterUri,
+    onStatusUpdate
+  },
   ref
 ) {
   const isWeb = Platform.OS === "web";
@@ -235,7 +246,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const durationRef = useRef(0);
   const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
   const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = playbackSources[sourceIndex] ?? uri;
+  const activeUri = videoPlaybackUrl(playbackSources[sourceIndex] ?? uri);
 
   useEffect(() => {
     setNatural(null);
@@ -295,6 +306,8 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
         useNativeControls={false}
+        usePoster={!!posterUri}
+        posterSource={posterUri ? { uri: posterUri } : undefined}
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
@@ -451,6 +464,7 @@ export function PostsReelViewerModal({
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const commentSubmittingRef = useRef(false);
   const [optionsPost, setOptionsPost] = useState<HomePost | null>(null);
+  const [shareTargetPost, setShareTargetPost] = useState<HomePost | null>(null);
 
   const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
@@ -514,7 +528,7 @@ export function PostsReelViewerModal({
   }, [visible, posts, initialIndex]);
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
+    if (!visible || Platform.OS === "web") return;
     void Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
@@ -524,7 +538,7 @@ export function PostsReelViewerModal({
       interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
       playThroughEarpieceAndroid: false
     });
-  }, []);
+  }, [visible]);
 
   const triggerReelLikeBurst = useCallback((postId: number) => {
     setReelLikeBurstByPostId((prev) => ({ ...prev, [postId]: (prev[postId] || 0) + 1 }));
@@ -696,17 +710,6 @@ export function PostsReelViewerModal({
     }
   }, [activeCommentsPost, applyPosts, commentDraft, t, token, user?.avatarUrl, user?.fullName]);
 
-  const sharePost = useCallback(async (post: HomePost) => {
-    const caption = displayPostCaption(post.caption);
-    const link = `${getWebAppOrigin()}/reel/${encodeURIComponent(String(post.id))}`;
-    const intro = t("shareReelMessage", { name: displayPersonName(post.userName) });
-    try {
-      await Share.share({ message: `${intro}${caption ? `\n${caption}` : ""}\n${link}` });
-    } catch {
-      Alert.alert(t("shareFailed"), t("shareFailedSystem"));
-    }
-  }, [displayPersonName, displayPostCaption, t]);
-
   const confirmDeletePost = useCallback(
     (post: HomePost) => {
       if (!canDeleteOwnPosts || !viewerOwnsPost(post, user ? { id: user.id, fullName: user.fullName } : null)) return;
@@ -788,12 +791,20 @@ export function PostsReelViewerModal({
     [visible, viewerPosts, windowHeight]
   );
 
+  const intendedPlayingId = useMemo(() => {
+    if (!visible || !posts.length) return null;
+    const ix = Math.max(0, Math.min(initialIndex, posts.length - 1));
+    return posts[ix]?.id ?? null;
+  }, [initialIndex, posts, visible]);
+
+  const effectivePlayingId = playingPostId ?? intendedPlayingId;
+
   const renderReelPage = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const pageH = windowHeight;
       const reelContentWidth = windowWidth;
-      const isActive = playingPostId === post.id && !!post.videoUrl;
-      const activeIndex = viewerPosts.findIndex((p) => p.id === playingPostId);
+      const isActive = effectivePlayingId === post.id && !!post.videoUrl;
+      const activeIndex = viewerPosts.findIndex((p) => p.id === effectivePlayingId);
       const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
@@ -818,7 +829,7 @@ export function PostsReelViewerModal({
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
 
       return (
-        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth }]}>
+        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && (isActive || isNearActive) ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
@@ -830,7 +841,8 @@ export function PostsReelViewerModal({
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
-                fit="contain"
+                fit="cover"
+                posterUri={reelPoster || undefined}
                 isLooping
                 isMuted={isReelMuted}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
@@ -868,7 +880,7 @@ export function PostsReelViewerModal({
             </Pressable>
           ) : (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
+              <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
@@ -938,7 +950,7 @@ export function PostsReelViewerModal({
                 <Ionicons name="chatbubble-outline" size={REEL_ACTION_ICON} color="#fff" />
                 <Text style={styles.reelActionCount}>{shownCommentsCount}</Text>
               </Pressable>
-              <Pressable style={styles.reelActionItem} onPress={() => void sharePost(post)}>
+              <Pressable style={styles.reelActionItem} onPress={() => setShareTargetPost(post)}>
                 <Ionicons name="paper-plane-outline" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setOptionsPost(post)}>
@@ -974,10 +986,10 @@ export function PostsReelViewerModal({
       onReelSurfaceTap,
       openCommentsForPost,
       openPostAuthorProfile,
-      playingPostId,
+      effectivePlayingId,
       reelLikeBurstByPostId,
       reelProgressByPostId,
-      sharePost,
+      setShareTargetPost,
       t,
       togglePostLike,
       triggerReelLikeBurst,
@@ -1049,7 +1061,7 @@ export function PostsReelViewerModal({
                   animated: false
                 });
               }}
-              extraData={`${playingPostId}-${windowHeight}-${viewerPosts.length}`}
+              extraData={`${effectivePlayingId}-${windowHeight}-${viewerPosts.length}`}
               initialNumToRender={Math.min(5, viewerPosts.length || 1)}
               removeClippedSubviews={false}
             />
@@ -1138,6 +1150,12 @@ export function PostsReelViewerModal({
           </View>
         </View>
       </Modal>
+
+      <PostShareSheet
+        visible={!!shareTargetPost}
+        post={shareTargetPost}
+        onClose={() => setShareTargetPost(null)}
+      />
     </>
   );
 }

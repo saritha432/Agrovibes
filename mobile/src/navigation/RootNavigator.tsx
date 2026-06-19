@@ -22,9 +22,7 @@ import { InitialSetupScreen } from "../screens/InitialSetupScreen";
 import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
 import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
 import { EditProfileScreen } from "../screens/EditProfileScreen";
-import { UserSearchScreen } from "../screens/UserSearchScreen";
 import { PublicProfileScreen } from "../screens/PublicProfileScreen";
-import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
@@ -35,9 +33,11 @@ import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 
 export type MainTabParamList = {
   Home: undefined;
+  Search: undefined;
   Market: NavigatorScreenParams<MarketStackParamList>;
   Learn: NavigatorScreenParams<LearnStackParamList>;
   Services: undefined;
+  Messages: undefined;
   Profile: undefined;
 };
 
@@ -63,10 +63,14 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   InstructorStudio: undefined;
   EditProfile: undefined;
-  UserSearch: undefined;
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
-  DirectInbox: undefined;
-  DirectChat: { peerUserId: number; peerName: string; peerKey?: string; peerAvatarUrl?: string | null };
+  DirectChat: {
+    peerUserId: number;
+    peerName: string;
+    peerKey?: string;
+    peerAvatarUrl?: string | null;
+    incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number };
+  };
   SettingsMenu: undefined;
   Privacy: undefined;
   About: undefined;
@@ -111,19 +115,6 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen
-        name="UserSearch"
-        component={UserSearchScreen}
-        options={{
-          headerShown: true,
-          title: "Search",
-          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
-          headerTintColor: socialDiscoveryTheme.navTint,
-          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
-        }}
-      />
-      <Stack.Screen
         name="PublicProfile"
         component={PublicProfileScreen}
         options={{
@@ -132,19 +123,6 @@ export function RootNavigator() {
           headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
           headerTintColor: socialDiscoveryTheme.navTint,
           headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
-        }}
-      />
-      <Stack.Screen
-        name="DirectInbox"
-        component={DirectInboxScreen}
-        options={{
-          headerShown: true,
-          title: "Messages",
-          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
-          headerTintColor: socialDiscoveryTheme.accent,
-          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.accent },
           headerShadowVisible: false,
           contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
         }}

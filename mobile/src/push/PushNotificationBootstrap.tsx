@@ -1,13 +1,16 @@
 import React from "react";
 import { Platform } from "react-native";
+import * as Notifications from "expo-notifications";
 import { useAuth } from "../auth/AuthContext";
-import { navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
+import { queueJoinLive } from "../navigation/liveJoinBridge";
+import { navigateToDirectChat, navigateToJoinLive } from "../navigation/navigationRef";
 import {
   addNotificationReceivedListener,
   addNotificationResponseListener,
   registerPushNotifications,
   unregisterPushNotifications
 } from "./pushNotifications";
+import { handleNotificationResponse } from "./notificationNavigation";
 
 export function PushNotificationBootstrap() {
   const { token, user } = useAuth();
@@ -32,19 +35,37 @@ export function PushNotificationBootstrap() {
 
   React.useEffect(() => {
     if (Platform.OS === "web") return;
-    const receivedSub = addNotificationReceivedListener(() => {
-      // In-app badge refresh is handled by NotificationPanel polling/focus.
+
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) handleNotificationResponse(response);
     });
-    const responseSub = addNotificationResponseListener((response) => {
-      const data = response.notification.request.content.data || {};
+
+    const receivedSub = addNotificationReceivedListener((event) => {
+      const data = event.request.content.data || {};
       const type = String(data.type || "");
-      if (type === "direct_message") {
-        navigateToDirectInbox();
+      if (type !== "incoming_call" && type !== "live_share") return;
+      if (type === "live_share") {
+        const postId = Number(data.postId);
+        if (Number.isFinite(postId) && postId > 0) {
+          queueJoinLive(postId);
+          navigateToJoinLive();
+        }
         return;
       }
-      if (type === "live_start" || type === "live_scheduled" || type === "live_reminder") {
-        navigateToJoinLive();
+      const callerId = Number(data.callerId);
+      const roomName = String(data.roomName || "").trim();
+      const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+      const callerName = String(event.request.content.title || "Someone").trim() || "Someone";
+      if (Number.isFinite(callerId) && callerId > 0 && roomName) {
+        navigateToDirectChat({
+          peerUserId: callerId,
+          peerName: callerName,
+          incomingCall: { roomName, mode, callerId }
+        });
       }
+    });
+    const responseSub = addNotificationResponseListener((response) => {
+      handleNotificationResponse(response);
     });
     return () => {
       receivedSub.remove();

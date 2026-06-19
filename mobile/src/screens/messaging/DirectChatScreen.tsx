@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
+import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -17,20 +19,104 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { ChatMediaBubble } from "../../components/ChatMediaBubble";
+import { ChatVoiceNoteBubble } from "../../components/ChatVoiceNoteBubble";
 import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
+import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
-import { fetchHomePosts, fetchMessageThread, sendDirectMessage, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, ringDirectCall, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { queueJoinLive } from "../../navigation/liveJoinBridge";
+import {
+  hydrateLiveShareFromFeed,
+  isJoinableLiveShare,
+  parseLiveShareContent,
+  type LiveSharePayload
+} from "./liveShareMessage";
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
+import { DirectCallView, type DirectCallMode } from "./DirectCallView";
+import {
+  buildDmMediaMessage,
+  buildDmVoiceMessage,
+  formatVoiceDuration,
+  parseDmMediaMessage,
+  parseDmVoiceMessage
+} from "./dmMessageFormats";
 
 const BG = "#262626";
 const TEXT = "#f8fafc";
 const MUTED = "#97a0a8";
 const BORDER = "#303842";
 const YELLOW = APP_LIME;
-const BUBBLE_PEER = "#262626";
-const INPUT_BG = "#262626";
+const BUBBLE_PEER = "#3a3f46";
+const COMPOSER_BG = "#303132";
+const COMPOSER_HEIGHT = 59;
+const COMPOSER_PADDING = 12;
+const COMPOSER_GAP = 12;
+const COMPOSER_RADIUS = 8;
+const CAMERA_ICON_SIZE = 35;
+const COMPOSER_ICON = 24;
+
+const CHAT_ASSETS = {
+  camera: require("../../../assets/camera.svg"),
+  mic: require("../../../assets/mic-icon.svg"),
+  gallery: require("../../../assets/gallery-icon.svg"),
+  sticker: require("../../../assets/sticker-icon.svg"),
+  plus: require("../../../assets/plus-icon.svg"),
+  voiceCall: require("../../../assets/voicecal-icon.svg"),
+  videoCall: require("../../../assets/videocal-icon.svg")
+} as const;
+
+const HEADER_CALL_ICON = 34;
+
+function ChatAssetIcon({ source, size = COMPOSER_ICON }: { source: number; size?: number }) {
+  return <Image source={source} style={{ width: size, height: size }} resizeMode="contain" />;
+}
+
+function formatDateSeparator(ts: number) {
+  const d = new Date(ts);
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const time = d
+    .toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", hour12: true })
+    .replace(/\s/g, "")
+    .toUpperCase();
+  const sameDay = (a: Date, b: Date) =>
+    a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+  if (sameDay(d, now)) return `TODAY AT ${time}`;
+  if (sameDay(d, yesterday)) return `YESTERDAY AT ${time}`;
+  const datePart = d
+    .toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+    .toUpperCase();
+  return `${datePart} AT ${time}`;
+}
+
+type ThreadListItem =
+  | { type: "date"; id: string; label: string }
+  | { type: "message"; id: string; message: DirectMessageItem };
+
+function buildThreadListItems(messages: DirectMessageItem[]): ThreadListItem[] {
+  const items: ThreadListItem[] = [];
+  let lastDayKey = "";
+  for (const message of messages) {
+    const d = new Date(message.createdAt);
+    const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (dayKey !== lastDayKey) {
+      items.push({ type: "date", id: `date-${dayKey}`, label: formatDateSeparator(d.getTime()) });
+      lastDayKey = dayKey;
+    }
+    items.push({ type: "message", id: String(message.id), message });
+  }
+  return items;
+}
+
+function formatPeerHandle(peerKey?: string) {
+  const raw = String(peerKey || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("@") ? raw.toLowerCase() : `@${raw.toLowerCase()}`;
+}
 
 function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -143,17 +229,6 @@ function parseSharedProfileContent(body: string): { userId?: number; userName: s
   }
 }
 
-function sharedChatCardThumb(post: HomePost): { uri: string | null; showPlayBadge: boolean } {
-  const v = String(post.videoUrl || "").trim();
-  if (v) {
-    const thumb = String(post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || "").trim();
-    return { uri: thumb || null, showPlayBadge: true };
-  }
-  const first =
-    String(post.imageUrl || "").trim() || String(post.imageUrls?.[0] || "").trim() || String(post.thumbnailUrl || "").trim() || null;
-  return { uri: first, showPlayBadge: false };
-}
-
 function hasRenderableMedia(post: HomePost) {
   return !!(
     String(post.videoUrl || "").trim() ||
@@ -165,8 +240,21 @@ function hasRenderableMedia(post: HomePost) {
 async function hydrateSharedPostFromFeed(post: HomePost, token: string | null): Promise<HomePost> {
   if (!token) return post;
   try {
-    const res = await fetchHomePosts(token);
-    const found = res.posts.find((p) => p.id === post.id);
+    const { post: found } = await fetchHomePost(token, post.id);
+    return { ...post, ...found };
+  } catch {
+    // fall through
+  }
+  try {
+    const feed = await fetchHomePosts(token);
+    const found = feed.posts.find((p) => p.id === post.id);
+    if (found) return { ...post, ...found };
+  } catch {
+    // ignore
+  }
+  try {
+    const mine = await fetchMyHomePosts(token);
+    const found = mine.posts.find((p) => p.id === post.id);
     if (found) return { ...post, ...found };
   } catch {
     // ignore
@@ -174,23 +262,109 @@ async function hydrateSharedPostFromFeed(post: HomePost, token: string | null): 
   return post;
 }
 
+async function hydrateSharedPostsById(postIds: number[], token: string): Promise<Record<number, HomePost>> {
+  const map: Record<number, HomePost> = {};
+  if (!postIds.length) return map;
+  const wanted = new Set(postIds);
+  try {
+    const feed = await fetchHomePosts(token);
+    for (const p of feed.posts) {
+      if (wanted.has(p.id)) map[p.id] = p;
+    }
+  } catch {
+    // ignore
+  }
+  const missing = postIds.filter((id) => !map[id]);
+  if (missing.length) {
+    try {
+      const mine = await fetchMyHomePosts(token);
+      for (const p of mine.posts) {
+        if (missing.includes(p.id)) map[p.id] = p;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const stillMissing = postIds.filter((id) => !map[id]);
+  await Promise.all(
+    stillMissing.map(async (id) => {
+      try {
+        const { post } = await fetchHomePost(token, id);
+        map[id] = post;
+      } catch {
+        // ignore
+      }
+    })
+  );
+  return map;
+}
+
 export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName, peerAvatarUrl } = route.params;
-  const { t } = useLanguage();
+  const { peerUserId, peerName, peerKey, peerAvatarUrl, incomingCall } = route.params;
+  const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
+  const peerHandle = formatPeerHandle(peerKey);
+  const threadItems = useMemo(() => buildThreadListItems(messages), [messages]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
   );
   const [draft, setDraft] = useState("");
-  const [activeCall, setActiveCall] = useState<"voice" | "video" | null>(null);
-  const [isMuted, setMuted] = useState(false);
-  const [isCameraOff, setCameraOff] = useState(false);
+  const [callSession, setCallSession] = useState<{
+    roomName: string;
+    mode: DirectCallMode;
+    connectEnabled: boolean;
+    statusLabel?: string;
+  } | null>(null);
   const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
-  const listRef = useRef<FlatList<DirectMessageItem>>(null);
+  const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
+  const listRef = useRef<FlatList<ThreadListItem>>(null);
+  const voiceRecordingRef = useRef<Audio.Recording | null>(null);
+  const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voiceStartedAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!token || !messages.length) return;
+    const ids = Array.from(
+      new Set(
+        messages
+          .map((m) => parseSharedCropvibeContent(m.body)?.id)
+          .filter((id): id is number => typeof id === "number" && id > 0)
+      )
+    );
+    if (!ids.length) return;
+    let cancelled = false;
+    void hydrateSharedPostsById(ids, token).then((map) => {
+      if (!cancelled && Object.keys(map).length) {
+        setHydratedPostsById((prev) => ({ ...prev, ...map }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, token]);
+
+  const mergeHydratedPost = useCallback(
+    (post: HomePost) => {
+      const hydrated = hydratedPostsById[post.id];
+      return hydrated ? { ...post, ...hydrated } : post;
+    },
+    [hydratedPostsById]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+      void voiceRecordingRef.current?.stopAndUnloadAsync();
+      voiceRecordingRef.current = null;
+    };
+  }, []);
 
   const reload = useCallback(async () => {
     if (!token) {
@@ -217,22 +391,229 @@ export function DirectChatScreen() {
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !token) return;
+    if (!text || !token || attachBusy) return;
     setDraft("");
     await sendDirectMessage(token, peerUserId, text);
     await reload();
   };
 
+  const sendPickedAsset = useCallback(
+    async (asset: ImagePicker.ImagePickerAsset) => {
+      if (!token || attachBusy) return;
+      setAttachBusy(true);
+      try {
+        const { url } = await uploadPickedMedia(asset.uri, asset);
+        const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
+        await sendDirectMessage(
+          token,
+          peerUserId,
+          buildDmMediaMessage({
+            kind: isVideo ? "video" : "image",
+            url,
+            width: asset.width,
+            height: asset.height
+          })
+        );
+        await reload();
+      } catch (error) {
+        Alert.alert(t("sendFailed"), error instanceof Error ? error.message : t("sendFailedReel"));
+      } finally {
+        setAttachBusy(false);
+      }
+    },
+    [attachBusy, peerUserId, reload, t, token]
+  );
+
+  const openGallery = useCallback(async () => {
+    if (!token || attachBusy || isRecordingVoice) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(t("permissionNeeded"), t("galleryPermissionMsg"));
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      quality: 0.85,
+      allowsMultipleSelection: false
+    });
+    if (result.canceled || !result.assets[0]) return;
+    await sendPickedAsset(result.assets[0]);
+  }, [attachBusy, isRecordingVoice, sendPickedAsset, t, token]);
+
+  const openCamera = useCallback(async () => {
+    if (!token || attachBusy || isRecordingVoice) return;
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(t("permissionNeeded"), t("cameraPermissionMsg"));
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      quality: 0.85
+    });
+    if (result.canceled || !result.assets[0]) return;
+    await sendPickedAsset(result.assets[0]);
+  }, [attachBusy, isRecordingVoice, sendPickedAsset, t, token]);
+
+  const startVoiceRecording = useCallback(async () => {
+    if (!token || attachBusy || isRecordingVoice || Platform.OS === "web") {
+      if (Platform.OS === "web") {
+        Alert.alert(t("unavailable"), t("voiceNoteWebUnavailable"));
+      }
+      return;
+    }
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(t("permissionNeeded"), t("micPermissionMsg"));
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        shouldDuckAndroid: true,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        playThroughEarpieceAndroid: false
+      });
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      voiceRecordingRef.current = recording;
+      voiceStartedAtRef.current = Date.now();
+      setVoiceRecordingMs(0);
+      setIsRecordingVoice(true);
+      if (voiceTimerRef.current) clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = setInterval(() => {
+        setVoiceRecordingMs(Date.now() - voiceStartedAtRef.current);
+      }, 200);
+    } catch {
+      Alert.alert(t("sendFailed"), t("voiceRecordFailed"));
+    }
+  }, [attachBusy, isRecordingVoice, t, token]);
+
+  const stopVoiceRecordingAndSend = useCallback(async () => {
+    const recording = voiceRecordingRef.current;
+    if (!recording || !token) return;
+    if (voiceTimerRef.current) {
+      clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+    setIsRecordingVoice(false);
+    voiceRecordingRef.current = null;
+    setAttachBusy(true);
+    try {
+      const statusBefore = await recording.getStatusAsync();
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      const durationMs = statusBefore.isRecording
+        ? statusBefore.durationMillis
+        : Math.max(0, Date.now() - voiceStartedAtRef.current);
+      if (!uri || durationMs < 400) return;
+      const { url } = await uploadAudioFile(uri);
+      await sendDirectMessage(token, peerUserId, buildDmVoiceMessage({ url, durationMs }));
+      await reload();
+    } catch (error) {
+      Alert.alert(t("sendFailed"), error instanceof Error ? error.message : t("voiceRecordFailed"));
+    } finally {
+      setAttachBusy(false);
+      setVoiceRecordingMs(0);
+      void Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+        shouldDuckAndroid: true,
+        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+        playThroughEarpieceAndroid: false
+      });
+    }
+  }, [peerUserId, reload, t, token]);
+
+  const cancelVoiceRecording = useCallback(async () => {
+    const recording = voiceRecordingRef.current;
+    if (!recording) return;
+    if (voiceTimerRef.current) {
+      clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+    setIsRecordingVoice(false);
+    voiceRecordingRef.current = null;
+    setVoiceRecordingMs(0);
+    try {
+      await recording.stopAndUnloadAsync();
+    } catch {
+      // no-op
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!incomingCall?.roomName) return;
+    setCallSession({
+      roomName: incomingCall.roomName,
+      mode: incomingCall.mode,
+      connectEnabled: false,
+      statusLabel: incomingCall.mode === "video" ? "Incoming video call" : "Incoming voice call"
+    });
+  }, [incomingCall?.mode, incomingCall?.roomName]);
+
+  const startCall = async (mode: DirectCallMode) => {
+    if (!token || Platform.OS === "web") {
+      Alert.alert("Unavailable", "Voice and video calls are available in the mobile app.");
+      return;
+    }
+    try {
+      const result = await ringDirectCall(token, { peerUserId, mode });
+      setCallSession({
+        roomName: result.roomName,
+        mode: result.mode,
+        connectEnabled: true,
+        statusLabel: mode === "video" ? "Calling..." : "Calling..."
+      });
+    } catch (error) {
+      Alert.alert("Call failed", error instanceof Error ? error.message : "Could not start call.");
+    }
+  };
+
+  const joinSharedLive = useCallback(
+    async (payload: LiveSharePayload) => {
+      let live = payload;
+      if (token) {
+        try {
+          const feed = await fetchHomePosts(token);
+          live = await hydrateLiveShareFromFeed(payload, feed.posts);
+        } catch {
+          // Use payload as-is.
+        }
+      }
+      if (!isJoinableLiveShare(live)) {
+        Alert.alert("Live ended", "This live stream has already ended.");
+        return;
+      }
+      queueJoinLive(live.postId);
+      navigation.navigate("Main", { screen: "Home" });
+    },
+    [navigation, token]
+  );
+
   const openVoiceCall = () => {
-    setMuted(false);
-    setCameraOff(false);
-    setActiveCall("voice");
+    void startCall("voice");
   };
 
   const openVideoCall = () => {
-    setMuted(false);
-    setCameraOff(false);
-    setActiveCall("video");
+    void startCall("video");
+  };
+
+  const closeCall = () => {
+    setCallSession(null);
+    navigation.setParams({ incomingCall: undefined });
+  };
+
+  const openMoreAttachments = () => {
+    Alert.alert("Attachments", undefined, [
+      { text: "Camera", onPress: () => void openCamera() },
+      { text: "Gallery", onPress: () => void openGallery() },
+      { text: "Cancel", style: "cancel" }
+    ]);
   };
 
   const bottomPad = Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8;
@@ -241,6 +622,7 @@ export function DirectChatScreen() {
     async (body: string) => {
       let post = parseSharedCropvibeContent(body);
       if (!post) return;
+      post = mergeHydratedPost(post);
       post = await hydrateSharedPostFromFeed(post, token ?? null);
       if (!hasRenderableMedia(post)) {
         Alert.alert("Can't open this share", "This post isn't available. Try again after refreshing your feed.");
@@ -248,7 +630,7 @@ export function DirectChatScreen() {
       }
       setSharedReelViewer({ posts: [post], initialIndex: 0 });
     },
-    [token]
+    [mergeHydratedPost, token]
   );
 
   return (
@@ -258,74 +640,117 @@ export function DirectChatScreen() {
       keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
-        <Pressable hitSlop={12} style={styles.headerIcon} onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={28} color={YELLOW} />
+        <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={28} color={TEXT} />
         </Pressable>
-        <View style={styles.headerCenter}>
-          <UserAvatar
-            uri={peerAvatar}
-            name={peerName}
-            size={32}
-            borderRadius={16}
-            style={styles.headerAvatar}
-            fallbackBackgroundColor="#262626"
-            initialsColor={YELLOW}
-          />
+        <UserAvatar
+          uri={peerAvatar}
+          name={peerName}
+          size={40}
+          borderRadius={20}
+          style={styles.headerAvatar}
+          fallbackBackgroundColor="#3a3f46"
+          initialsColor={TEXT}
+        />
+        <View style={styles.headerMeta}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {peerName}
           </Text>
+          {peerHandle ? (
+            <Text style={styles.headerHandle} numberOfLines={1}>
+              {peerHandle}
+            </Text>
+          ) : null}
         </View>
         <View style={styles.headerRight}>
-          <Pressable hitSlop={8} onPress={openVoiceCall}>
-            <Ionicons name="call-outline" size={22} color={YELLOW} />
+          <Pressable hitSlop={8} onPress={openVoiceCall} style={styles.headerAction}>
+            <ChatAssetIcon source={CHAT_ASSETS.voiceCall} size={HEADER_CALL_ICON} />
           </Pressable>
-          <Pressable hitSlop={8} onPress={openVideoCall}>
-            <Ionicons name="videocam-outline" size={24} color={YELLOW} />
+          <Pressable hitSlop={8} onPress={openVideoCall} style={styles.headerAction}>
+            <ChatAssetIcon source={CHAT_ASSETS.videoCall} size={HEADER_CALL_ICON} />
           </Pressable>
         </View>
       </View>
 
       <FlatList
         ref={listRef}
-        data={messages}
-        keyExtractor={(m) => String(m.id)}
+        data={threadItems}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => {
-          const isSelf = Number(item.senderId) === Number(user?.id);
-          const sharedPost = parseSharedCropvibeContent(item.body);
-          const sharedProfile = parseSharedProfileContent(item.body);
-          const thumb = sharedPost ? sharedChatCardThumb(sharedPost) : { uri: null as string | null, showPlayBadge: false };
+          if (item.type === "date") {
+            return (
+              <View style={styles.dateSeparatorWrap}>
+                <Text style={styles.dateSeparatorText}>{item.label}</Text>
+              </View>
+            );
+          }
+
+          const messageItem = item.message;
+          const isSelf = Number(messageItem.senderId) === Number(user?.id);
+          const parsedPost = parseSharedCropvibeContent(messageItem.body);
+          const sharedPost = parsedPost ? mergeHydratedPost(parsedPost) : null;
+          const sharedProfile = parseSharedProfileContent(messageItem.body);
+          const sharedLive = parseLiveShareContent(messageItem.body);
+          const sharedMedia = parseDmMediaMessage(messageItem.body);
+          const sharedVoice = parseDmVoiceMessage(messageItem.body);
+          const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice);
           return (
             <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
-              <View style={sharedPost || sharedProfile ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer]}>
-                {sharedPost ? (
-                  <Pressable style={styles.sharedReelCard} onPress={() => void openSharedCropvibeCard(item.body)}>
-                    <View style={styles.sharedReelThumb}>
-                      {thumb.uri ? (
-                        <Image source={{ uri: thumb.uri }} style={styles.sharedReelMedia} resizeMode="cover" />
+              <View
+                style={[
+                  isRichCard ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer],
+                  isRichCard ? (isSelf ? styles.reelBubbleWrapSelf : styles.reelBubbleWrapPeer) : null
+                ]}
+              >
+                {sharedLive ? (
+                  <Pressable
+                    style={styles.sharedReelCard}
+                    onPress={() => void joinSharedLive(sharedLive)}
+                    disabled={!isJoinableLiveShare(sharedLive)}
+                  >
+                    <View style={styles.sharedLiveMediaWrap}>
+                      {sharedLive.thumbnailUrl || sharedLive.authorAvatarUrl ? (
+                        <Image
+                          source={{ uri: (sharedLive.thumbnailUrl || sharedLive.authorAvatarUrl)! }}
+                          style={styles.sharedLiveMedia}
+                          resizeMode="cover"
+                        />
                       ) : (
-                        <View style={[styles.sharedReelMedia, styles.sharedReelThumbPlaceholder]}>
-                          <Ionicons name="image-outline" size={22} color="#fff" />
+                        <View style={[styles.sharedLiveMedia, styles.sharedReelThumbPlaceholder]}>
+                          <Ionicons name="radio-outline" size={28} color="rgba(255,255,255,0.45)" />
                         </View>
                       )}
-                      {thumb.showPlayBadge ? (
-                        <View style={styles.sharedReelPlayBadge}>
-                          <Ionicons name="play" size={18} color="#111" />
-                        </View>
-                      ) : null}
-                      <View style={styles.sharedReelOverlay}>
+                      <LinearGradient
+                        colors={["transparent", "rgba(0,0,0,0.82)"]}
+                        style={styles.sharedLiveGradient}
+                        pointerEvents="none"
+                      />
+                      <View style={styles.sharedLiveBadge}>
+                        <Text style={styles.sharedLiveBadgeText}>LIVE</Text>
+                      </View>
+                      <View style={styles.sharedLiveMeta}>
                         <Text style={styles.sharedReelAuthor} numberOfLines={1}>
-                          {sharedPost.userName}
+                          {sharedLive.userName}
                         </Text>
-                        {sharedPost.caption ? (
-                          <Text style={styles.sharedReelCaption} numberOfLines={1}>
-                            {sharedPost.caption}
-                          </Text>
-                        ) : null}
+                        <Text style={styles.sharedReelCaption} numberOfLines={1}>
+                          {isJoinableLiveShare(sharedLive) ? sharedLive.title || "Tap to join live" : "Live ended"}
+                        </Text>
                       </View>
                     </View>
                   </Pressable>
+                ) : sharedPost ? (
+                  <SharedReelChatCard
+                    post={sharedPost}
+                    language={language}
+                    t={t}
+                    onPress={() => void openSharedCropvibeCard(messageItem.body)}
+                  />
+                ) : sharedMedia ? (
+                  <ChatMediaBubble media={sharedMedia} isSelf={isSelf} />
+                ) : sharedVoice ? (
+                  <ChatVoiceNoteBubble voice={sharedVoice} isSelf={isSelf} />
                 ) : sharedProfile ? (
                   <Pressable
                     style={styles.sharedProfileCard}
@@ -353,10 +778,10 @@ export function DirectChatScreen() {
                     </View>
                   </Pressable>
                 ) : (
-                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{item.body}</Text>
+                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{messageItem.body}</Text>
                 )}
-                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, sharedPost || sharedProfile ? styles.reelMeta : null]}>
-                  {formatMsgTime(new Date(item.createdAt).getTime())}
+                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, isRichCard ? styles.reelMeta : null]}>
+                  {formatMsgTime(new Date(messageItem.createdAt).getTime())}
                 </Text>
               </View>
             </View>
@@ -371,91 +796,86 @@ export function DirectChatScreen() {
         }
       />
 
-      <View style={[styles.composer, { paddingBottom: bottomPad }]}>
-        <Pressable style={styles.composerIcon} onPress={() => {}}>
-          <Ionicons name="camera-outline" size={26} color={YELLOW} />
-        </Pressable>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={t("messagePlaceholder")}
-          placeholderTextColor={MUTED}
-          style={styles.input}
-          multiline
-          maxLength={2000}
-          onSubmitEditing={send}
-        />
-        <Pressable
-          style={[styles.sendBtn, draft.trim() ? styles.sendBtnActive : null]}
-          onPress={send}
-          disabled={!draft.trim()}
-        >
-          <Ionicons name="send" size={18} color={draft.trim() ? "#111" : MUTED} />
-        </Pressable>
-      </View>
-      <Modal visible={!!activeCall} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setActiveCall(null)}>
-        <View style={[styles.callScreen, activeCall === "video" ? styles.videoCallScreen : null, { paddingTop: Math.max(insets.top, 18) }]}>
-          {activeCall === "video" ? (
-            <View style={styles.videoPreview}>
-              {isCameraOff ? (
-                <View style={styles.videoCameraOff}>
-                  <Ionicons name="videocam-off-outline" size={34} color="#fff" />
-                  <Text style={styles.videoCameraOffText}>Camera off</Text>
-                </View>
+      <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+        <View style={styles.composerBar}>
+          <Pressable
+            style={styles.cameraBtn}
+            onPress={() => void openCamera()}
+            disabled={attachBusy || isRecordingVoice}
+          >
+            <ChatAssetIcon source={CHAT_ASSETS.camera} size={CAMERA_ICON_SIZE} />
+          </Pressable>
+
+          {isRecordingVoice ? (
+            <View style={styles.recordingRow}>
+              <View style={styles.recordingDot} />
+              <Text style={styles.recordingText}>{t("recordingVoice")}</Text>
+              <Text style={styles.recordingTimer}>{formatVoiceDuration(voiceRecordingMs)}</Text>
+              <Pressable hitSlop={10} onPress={() => void cancelVoiceRecording()}>
+                <Ionicons name="close" size={18} color={MUTED} />
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Message"
+                placeholderTextColor={MUTED}
+                style={styles.input}
+                multiline
+                maxLength={2000}
+                onSubmitEditing={send}
+                editable={!attachBusy}
+              />
+              {draft.trim() ? (
+                <Pressable style={styles.inputTrailingBtn} onPress={send} disabled={attachBusy}>
+                  <Ionicons name="send" size={20} color={YELLOW} />
+                </Pressable>
               ) : (
-                <View style={styles.videoAvatarLarge}>
-                  <UserAvatar
-                    uri={peerAvatar}
-                    name={peerName}
-                    size={120}
-                    borderRadius={60}
-                    fallbackBackgroundColor="#262626"
-                    initialsColor="#fff"
-                  />
+                <View style={styles.inputTrailing}>
+                  <Pressable
+                    style={styles.inputTrailingBtn}
+                    disabled={attachBusy}
+                    onPressIn={() => void startVoiceRecording()}
+                    onPressOut={() => void stopVoiceRecordingAndSend()}
+                  >
+                    <ChatAssetIcon source={CHAT_ASSETS.mic} size={COMPOSER_ICON} />
+                  </Pressable>
+                  <Pressable style={styles.inputTrailingBtn} onPress={() => void openGallery()} disabled={attachBusy}>
+                    <ChatAssetIcon source={CHAT_ASSETS.gallery} size={COMPOSER_ICON} />
+                  </Pressable>
+                  <Pressable style={styles.inputTrailingBtn} disabled={attachBusy}>
+                    <ChatAssetIcon source={CHAT_ASSETS.sticker} size={COMPOSER_ICON} />
+                  </Pressable>
+                  <Pressable style={styles.inputTrailingBtn} onPress={openMoreAttachments} disabled={attachBusy}>
+                    <ChatAssetIcon source={CHAT_ASSETS.plus} size={COMPOSER_ICON} />
+                  </Pressable>
                 </View>
               )}
-            </View>
-          ) : null}
-          <View style={styles.callTopBar}>
-            <Pressable style={styles.callTopIcon} onPress={() => setActiveCall(null)}>
-              <Ionicons name="chevron-down" size={28} color="#fff" />
-            </Pressable>
-          </View>
-          <View style={styles.callIdentity}>
-            <UserAvatar
-              uri={peerAvatar}
-              name={peerName}
-              size={activeCall === "video" ? 82 : 118}
-              borderRadius={activeCall === "video" ? 41 : 59}
-              style={[styles.callAvatar, activeCall === "video" ? styles.callAvatarVideo : null]}
-              fallbackBackgroundColor={APP_LIME}
-              initialsColor="#111"
-            />
-            <Text style={styles.callName}>{peerName}</Text>
-            <Text style={styles.callStatus}>{activeCall === "video" ? "Video calling..." : "Calling..."}</Text>
-          </View>
-          <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-            <Pressable style={styles.callControlBtn} onPress={() => setMuted((v) => !v)}>
-              <Ionicons name={isMuted ? "mic-off" : "mic"} size={24} color="#fff" />
-            </Pressable>
-            {activeCall === "video" ? (
-              <Pressable style={styles.callControlBtn} onPress={() => setCameraOff((v) => !v)}>
-                <Ionicons name={isCameraOff ? "videocam-off" : "videocam"} size={24} color="#fff" />
-              </Pressable>
-            ) : (
-              <Pressable style={styles.callControlBtn} onPress={openVideoCall}>
-                <Ionicons name="videocam" size={24} color="#fff" />
-              </Pressable>
-            )}
-            <Pressable style={[styles.callControlBtn, styles.endCallBtn]} onPress={() => setActiveCall(null)}>
-              <Ionicons name="call" size={25} color="#fff" />
-            </Pressable>
-            <Pressable style={styles.callControlBtn}>
-              <Ionicons name={activeCall === "video" ? "camera-reverse" : "volume-high"} size={24} color="#fff" />
-            </Pressable>
-          </View>
+            </>
+          )}
         </View>
-      </Modal>
+      </View>
+      <DirectCallView
+        visible={!!callSession}
+        roomName={callSession?.roomName || ""}
+        mode={callSession?.mode || "voice"}
+        peerName={peerName}
+        peerAvatarUrl={peerAvatar}
+        connectEnabled={callSession?.connectEnabled ?? false}
+        statusLabel={callSession?.statusLabel}
+        onAccept={() => {
+          if (!callSession) return;
+          setCallSession({
+            ...callSession,
+            connectEnabled: true,
+            statusLabel: callSession.mode === "video" ? "Connecting video..." : "Connecting..."
+          });
+        }}
+        onDecline={closeCall}
+        onClose={closeCall}
+      />
 
       <PostsReelViewerModal
         visible={sharedReelViewer != null}
@@ -476,47 +896,81 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 8,
-    paddingBottom: 10,
+    paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: BORDER,
-    backgroundColor: BG
+    backgroundColor: BG,
+    gap: 10
   },
-  headerIcon: { width: 40, alignItems: "flex-start" },
-  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  headerBack: { width: 28, alignItems: "flex-start" },
+  headerMeta: { flex: 1, minWidth: 0, justifyContent: "center" },
   headerAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#262626",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#3a3f46",
     alignItems: "center",
     justifyContent: "center"
   },
-  headerAvatarText: { fontSize: 14, fontWeight: "800", color: YELLOW },
-  headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT, maxWidth: 180 },
-  headerRight: { flexDirection: "row", alignItems: "center", gap: 14, width: 80, justifyContent: "flex-end" },
+  headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT },
+  headerHandle: { marginTop: 2, fontSize: 13, fontWeight: "500", color: MUTED },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 16 },
+  headerAction: { alignItems: "center", justifyContent: "center" },
+  dateSeparatorWrap: { alignItems: "center", marginVertical: 14 },
+  dateSeparatorText: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    color: MUTED,
+    textTransform: "uppercase"
+  },
   listContent: { paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 },
   bubbleRow: { marginBottom: 10, flexDirection: "row" },
   bubbleRowSelf: { justifyContent: "flex-end" },
   bubbleRowPeer: { justifyContent: "flex-start" },
   bubble: { maxWidth: "78%", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleSelf: { backgroundColor: YELLOW },
+  bubbleSelf: { backgroundColor: "#3a3f46" },
   bubblePeer: { backgroundColor: BUBBLE_PEER },
-  reelBubbleWrap: { maxWidth: "84%", alignItems: "flex-end" },
+  reelBubbleWrap: { maxWidth: "84%" },
+  reelBubbleWrapSelf: { alignItems: "flex-end" },
+  reelBubbleWrapPeer: { alignItems: "flex-start" },
   bubbleText: { fontSize: 15, lineHeight: 20 },
-  bubbleTextSelf: { color: "#111" },
+  bubbleTextSelf: { color: TEXT },
   bubbleTextPeer: { color: TEXT },
   bubbleMeta: { marginTop: 4, fontSize: 11, alignSelf: "flex-end" },
-  bubbleMetaSelf: { color: "rgba(0,0,0,0.62)" },
+  bubbleMetaSelf: { color: MUTED },
   bubbleMetaPeer: { color: MUTED },
   reelMeta: { color: MUTED, marginTop: 3, marginRight: 4 },
   sharedReelCard: {
-    width: 176,
-    height: 248,
+    width: 172,
+    height: 306,
     borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "#262626",
+    backgroundColor: "#1a1a1a",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)"
+    borderColor: "rgba(255,255,255,0.1)"
+  },
+  sharedLiveMediaWrap: {
+    flex: 1,
+    position: "relative",
+    backgroundColor: "#111"
+  },
+  sharedLiveMedia: {
+    width: "100%",
+    height: "100%"
+  },
+  sharedLiveGradient: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: "45%"
+  },
+  sharedLiveMeta: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 12
   },
   sharedProfileCard: {
     width: 230,
@@ -534,78 +988,83 @@ const styles = StyleSheet.create({
   sharedProfileName: { color: "#fff", fontSize: 14, fontWeight: "900" },
   sharedProfileHandle: { marginTop: 2, color: APP_LIME, fontSize: 12, fontWeight: "700" },
   sharedProfileBio: { marginTop: 2, color: "rgba(255,255,255,0.8)", fontSize: 11 },
-  sharedReelThumb: {
-    flex: 1,
+  sharedReelThumbPlaceholder: {
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#262626"
   },
-  sharedReelThumbPlaceholder: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2a3038"
-  },
-  sharedReelMedia: { width: "100%", height: "100%" },
-  sharedReelPlayBadge: {
+  sharedLiveBadge: {
     position: "absolute",
+    top: 10,
     left: 10,
-    bottom: 10,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: YELLOW
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "#e53935"
   },
-  sharedReelOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 18,
-    backgroundColor: "rgba(0,0,0,0.18)"
-  },
-  sharedReelAuthor: { color: "#fff", fontSize: 12, fontWeight: "900" },
-  sharedReelCaption: { marginTop: 2, color: "rgba(255,255,255,0.84)", fontSize: 11, fontWeight: "700" },
+  sharedLiveBadgeText: { color: "#fff", fontSize: 10, fontWeight: "900", letterSpacing: 0.6 },
+  sharedReelAuthor: { color: "#fff", fontSize: 13, fontWeight: "900" },
+  sharedReelCaption: { marginTop: 3, color: "rgba(255,255,255,0.88)", fontSize: 12, fontWeight: "700", lineHeight: 16 },
   threadEmpty: { paddingVertical: 48, alignItems: "center" },
   threadEmptyText: { fontSize: 15, color: MUTED },
   threadEmptyBold: { fontWeight: "800", color: TEXT },
-  composer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: 10,
+  composerWrap: {
+    paddingHorizontal: 16,
     paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BORDER,
-    backgroundColor: BG,
-    gap: 8
+    backgroundColor: BG
   },
-  composerIcon: { paddingBottom: 10 },
+  composerBar: {
+    width: "100%",
+    maxWidth: 398,
+    alignSelf: "center",
+    minHeight: COMPOSER_HEIGHT,
+    borderRadius: COMPOSER_RADIUS,
+    padding: COMPOSER_PADDING,
+    backgroundColor: COMPOSER_BG,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: COMPOSER_GAP
+  },
+  cameraBtn: {
+    width: CAMERA_ICON_SIZE,
+    height: CAMERA_ICON_SIZE,
+    alignItems: "center",
+    justifyContent: "center"
+  },
   input: {
     flex: 1,
-    minHeight: 40,
+    minHeight: COMPOSER_HEIGHT - COMPOSER_PADDING * 2,
     maxHeight: 120,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: INPUT_BG,
-    paddingHorizontal: 16,
-    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+    paddingVertical: 0,
     fontSize: 15,
     color: TEXT
   },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#262626",
+  inputTrailing: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 2
+    gap: COMPOSER_GAP
   },
-  sendBtnActive: { backgroundColor: YELLOW },
+  inputTrailingBtn: {
+    width: COMPOSER_ICON,
+    height: COMPOSER_ICON,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  recordingRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: COMPOSER_GAP,
+    minHeight: COMPOSER_HEIGHT - COMPOSER_PADDING * 2
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#ef4444"
+  },
+  recordingText: { flex: 1, color: TEXT, fontSize: 14, fontWeight: "700" },
+  recordingTimer: { color: MUTED, fontSize: 13, fontWeight: "700", marginRight: 4 },
   callScreen: {
     flex: 1,
     backgroundColor: "#121212",

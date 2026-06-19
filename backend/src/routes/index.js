@@ -27,9 +27,12 @@ const {
   isPushConfigured,
   registerPushDeviceToken,
   unregisterPushDeviceToken,
+  sendIncomingCallPush,
   sendSocialPushToUser,
-  sendSocialPushToFollowers
+  sendSocialPushToFollowers,
+  directMessagePushPayload
 } = require("../pushNotifications");
+const { buildShareReelHtml } = require("../shareReelPage");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -2882,6 +2885,46 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
   }
 });
 
+router.post("/v1/calls/ring", authRequired, async (req, res) => {
+  try {
+    const cfg = readLiveKitConfig();
+    if (!cfg.livekitUrl || !cfg.apiKey || !cfg.apiSecret) {
+      res.status(503).json({
+        message: "LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET."
+      });
+      return;
+    }
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.body?.peerUserId);
+    const mode = String(req.body?.mode || "voice").trim() === "video" ? "video" : "voice";
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    const peerRes = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+    const low = Math.min(me, peerUserId);
+    const high = Math.max(me, peerUserId);
+    const roomName = `dmcall-${low}-${high}-${Date.now()}`;
+    const callerName = await actorDisplayName(me);
+    void sendIncomingCallPush({
+      userId: peerUserId,
+      callerName,
+      mode,
+      roomName,
+      callerId: me
+    }).catch((error) => {
+      console.warn("[push] incoming call:", error?.message || error);
+    });
+    res.status(201).json({ roomName, mode, peerUserId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to start call", error: error.message });
+  }
+});
+
 router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => {
   try {
     await ensureDirectMessagesTable();
@@ -2916,11 +2959,26 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       `,
       [me, peerUserId, body]
     );
+    const isLiveShare = String(body).startsWith("[Cropvibe Live]");
+    let livePostId;
+    if (isLiveShare) {
+      try {
+        const parsed = JSON.parse(String(body).slice("[Cropvibe Live]".length).trim());
+        const pid = Number(parsed?.postId);
+        if (Number.isFinite(pid) && pid > 0) livePostId = pid;
+      } catch {
+        // no-op
+      }
+    }
+    const dmPush = directMessagePushPayload(body);
     fireSocialPush({
       userId: peerUserId,
-      type: "direct_message",
+      type: isLiveShare ? "live_share" : "direct_message",
+      actorId: me,
       actorName: await actorDisplayName(me),
-      commentExcerpt: body.length > 120 ? `${body.slice(0, 117)}...` : body
+      postId: livePostId,
+      commentExcerpt: dmPush.excerpt,
+      imageUrl: dmPush.imageUrl
     });
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {
@@ -4190,6 +4248,80 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const viewerId = req.user?.userId ? Number(req.user.userId) : null;
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, u.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        p.live_status AS "liveStatus",
+        p.live_ended_at AS "liveEndedAt",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_likes hpl
+            WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
+          )
+        END AS "viewerHasLiked",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_saves hps
+            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+          )
+        END AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT id, avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) u ON TRUE
+      WHERE p.id = $2
+      LIMIT 1
+      `,
+      [viewerId, postId]
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const posts = await enrichHomePostsLiveState(dedupeHomePostRows(result.rows));
+    res.json({ post: posts[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load post", error: error.message });
+  }
+});
+
 router.get("/v1/home/posts/:postId/likes", async (req, res) => {
   try {
     await ensureHomePostLikesTable();
@@ -5074,6 +5206,50 @@ router.post("/v1/payments/razorpay/verify", (req, res) => {
   }
 
   res.json({ ok: true, mock: false });
+});
+
+router.get("/share/reel/:postId", async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).send("Invalid reel link");
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        p.caption,
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      WHERE p.id = $1
+      LIMIT 1
+      `,
+      [postId]
+    );
+    if (!result.rows[0]) {
+      res.status(404).send("Reel not found");
+      return;
+    }
+    const post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.send(
+      buildShareReelHtml(post, {
+        postId,
+        userAgent: req.headers["user-agent"] || ""
+      })
+    );
+  } catch (error) {
+    res.status(500).send("Failed to load reel");
+  }
 });
 
 module.exports = router;

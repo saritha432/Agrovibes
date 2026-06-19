@@ -405,6 +405,7 @@ export function CreateModal({
   const [liveKitHostRoomName, setLiveKitHostRoomName] = useState("");
   const [liveKitHostTitle, setLiveKitHostTitle] = useState("");
   const [liveKitHostPostId, setLiveKitHostPostId] = useState<number | null>(null);
+  const [liveKitHostSharePost, setLiveKitHostSharePost] = useState<HomePost | null>(null);
   const [liveKitHostOpen, setLiveKitHostOpen] = useState(false);
   const [liveHostCameraFacing, setLiveHostCameraFacing] = useState<"front" | "back">("front");
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
@@ -1164,6 +1165,7 @@ export function CreateModal({
       liveServerPostIdRef.current = post.id;
       liveDraftPostIdRef.current = post.id;
       setLiveKitHostPostId(post.id);
+      setLiveKitHostSharePost(activePost);
       onVideoPosted?.(activePost);
       setLiveKitHostRoomName(activePost.liveRoomName || `agrovibes-live-${post.id}`);
       setLiveKitHostTitle(liveCaption);
@@ -2570,6 +2572,7 @@ export function CreateModal({
         roomName={liveKitHostRoomName}
         isHost
         postId={liveKitHostPostId ?? undefined}
+        sharePost={liveKitHostSharePost}
         title={liveKitHostTitle || "Live stream"}
         initialCameraFacing={liveHostCameraFacing}
         onLiveEnded={handleHostLiveSessionEnded}

@@ -18,6 +18,7 @@ import { LocalVideoTrack, ConnectionState, Room, RoomEvent, Track, type Particip
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LiveShareSheet } from "../../components/LiveShareSheet";
 import { useAuth } from "../../auth/AuthContext";
 import {
   API_BASE_URL,
@@ -46,6 +47,7 @@ type LiveKitRoomViewProps = {
   isHost: boolean;
   title: string;
   postId?: number;
+  sharePost?: HomePost | null;
   initialCameraFacing?: LiveCameraFacing;
   onClose?: () => void;
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
@@ -124,6 +126,7 @@ function LiveRoomContent({
   initialCameraFacing = "front",
   onClose,
   onLiveEnded,
+  onShare,
   errorText,
   status
 }: {
@@ -134,6 +137,7 @@ function LiveRoomContent({
   initialCameraFacing?: LiveCameraFacing;
   onClose?: () => void;
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
+  onShare?: () => void;
   errorText: string;
   status: string;
 }) {
@@ -461,6 +465,11 @@ function LiveRoomContent({
             <Ionicons name="camera-reverse-outline" size={22} color="#fff" />
           </Pressable>
         ) : null}
+        {!liveEnded && onShare ? (
+          <Pressable style={styles.flipBtn} onPress={onShare} accessibilityLabel="Share live">
+            <Ionicons name="paper-plane-outline" size={20} color="#fff" />
+          </Pressable>
+        ) : null}
         {onClose ? (
           <Pressable style={styles.closeBtn} onPress={() => (isHost && !liveEnded ? void handleEndLive() : onClose())}>
             <Ionicons name="close" size={22} color="#fff" />
@@ -548,15 +557,35 @@ export function LiveKitRoomView({
   isHost,
   title,
   postId,
+  sharePost,
   initialCameraFacing = "front",
   onClose,
   onLiveEnded
 }: LiveKitRoomViewProps) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [status, setStatus] = React.useState("Connecting live...");
   const [errorText, setErrorText] = React.useState("");
   const [debugInfo, setDebugInfo] = React.useState("");
+  const [shareOpen, setShareOpen] = React.useState(false);
+
+  const liveSharePost = React.useMemo((): HomePost | null => {
+    if (sharePost) return sharePost;
+    if (!postId) return null;
+    return {
+      id: postId,
+      userId: user?.id ?? null,
+      userName: user?.fullName?.trim() || "Host",
+      location: "",
+      caption: `[LIVE] ${title}`,
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: new Date().toISOString(),
+      liveStatus: "active",
+      liveRoomName: roomName,
+      authorAvatarUrl: user?.avatarUrl ?? null
+    };
+  }, [postId, roomName, sharePost, title, user?.avatarUrl, user?.fullName, user?.id]);
 
   React.useEffect(() => {
     if (!visible || !isHost) return;
@@ -671,35 +700,39 @@ export function LiveKitRoomView({
   }
 
   return (
-    <LiveKitRoom
-      serverUrl={connection.url}
-      token={connection.token}
-      connect
-      audio={false}
-      video={false}
-      options={{
-        adaptiveStream: { pixelDensity: "screen" },
-        dynacast: true,
-        videoCaptureDefaults: { facingMode: initialCameraFacing === "back" ? "environment" : "user" }
-      }}
-      onError={(error) => {
-        const msg = error.message || "";
-        if (!isHost && /insufficient permissions/i.test(msg)) return;
-        setErrorText(formatLiveStreamError(error));
-      }}
-    >
-      <LiveRoomContent
-        isHost={isHost}
-        roomName={roomName}
-        title={title}
-        postId={postId}
-        initialCameraFacing={initialCameraFacing}
-        onClose={onClose}
-        onLiveEnded={onLiveEnded}
-        errorText={errorText}
-        status={status}
-      />
-    </LiveKitRoom>
+    <>
+      <LiveKitRoom
+        serverUrl={connection.url}
+        token={connection.token}
+        connect
+        audio={false}
+        video={false}
+        options={{
+          adaptiveStream: { pixelDensity: "screen" },
+          dynacast: true,
+          videoCaptureDefaults: { facingMode: initialCameraFacing === "back" ? "environment" : "user" }
+        }}
+        onError={(error) => {
+          const msg = error.message || "";
+          if (!isHost && /insufficient permissions/i.test(msg)) return;
+          setErrorText(formatLiveStreamError(error));
+        }}
+      >
+        <LiveRoomContent
+          isHost={isHost}
+          roomName={roomName}
+          title={title}
+          postId={postId}
+          initialCameraFacing={initialCameraFacing}
+          onClose={onClose}
+          onLiveEnded={onLiveEnded}
+          onShare={liveSharePost ? () => setShareOpen(true) : undefined}
+          errorText={errorText}
+          status={status}
+        />
+      </LiveKitRoom>
+      <LiveShareSheet visible={shareOpen} post={liveSharePost} title={title} onClose={() => setShareOpen(false)} />
+    </>
   );
 }
 

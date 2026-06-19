@@ -2,10 +2,21 @@ import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
 import React from "react";
-import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Image,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "../auth/AuthContext";
+import { UserAvatar } from "../components/UserAvatar";
+import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { useLanguage } from "../localization/LanguageContext";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
 type Props = BottomTabBarProps & { onCreatePress: () => void; createFocused?: boolean };
 
@@ -14,26 +25,26 @@ const MUTED = "#b9bec3";
 const BRAND_ACCENT = APP_LIME;
 const TAB_ICON_SIZE = 24;
 
-type SvgIconModule = number | string | { uri?: string; default?: string };
-
-const TAB_SVG_ICONS: Record<"Market" | "Learn" | "Services" | "Create", { active: SvgIconModule; inactive: SvgIconModule }> = {
-  Market: {
-    active: require("../../assets/bottom-icons/market-active.svg"),
-    inactive: require("../../assets/bottom-icons/market.svg")
+const BOTTOM_TAB_ICONS = {
+  search: {
+    active: require("../../assets/bottom-icons/search-active.svg"),
+    inactive: require("../../assets/bottom-icons/search.svg")
   },
-  Learn: {
-    active: require("../../assets/bottom-icons/learn-active.svg"),
-    inactive: require("../../assets/bottom-icons/learn.svg")
+  messages: {
+    active: require("../../assets/bottom-icons/chat-active.svg"),
+    inactive: require("../../assets/bottom-icons/chat.svg")
   },
-  Services: {
-    active: require("../../assets/bottom-icons/community-active.svg"),
-    inactive: require("../../assets/bottom-icons/community.svg")
-  },
-  Create: {
+  create: {
     active: require("../../assets/bottom-icons/create-active.svg"),
     inactive: require("../../assets/bottom-icons/create.svg")
+  },
+  profile: {
+    active: require("../../assets/bottom-icons/profile-active.svg"),
+    inactive: require("../../assets/bottom-icons/profile.svg")
   }
-};
+} as const;
+
+type SvgIconModule = number | string | { uri?: string; default?: string };
 
 function iconModuleToUri(module: SvgIconModule): string | null {
   if (typeof module === "string" && module.length > 0) return module;
@@ -51,26 +62,18 @@ function iconModuleToUri(module: SvgIconModule): string | null {
   return null;
 }
 
-function fallbackIconName(
-  routeName: "Market" | "Learn" | "Services" | "Create",
-  focused: boolean
-): keyof typeof Ionicons.glyphMap {
-  if (routeName === "Market") return focused ? "storefront" : "storefront-outline";
-  if (routeName === "Learn") return focused ? "book" : "book-outline";
-  if (routeName === "Create") return focused ? "add-circle" : "add-circle-outline";
-  return focused ? "grid" : "grid-outline";
-}
-
 function TabSvgIcon({
-  routeName,
   focused,
-  size = 15
+  icons,
+  size = TAB_ICON_SIZE,
+  fallbackName
 }: {
-  routeName: "Market" | "Learn" | "Services" | "Create";
   focused: boolean;
+  icons: { active: SvgIconModule; inactive: SvgIconModule };
   size?: number;
+  fallbackName?: keyof typeof Ionicons.glyphMap;
 }) {
-  const module = focused ? TAB_SVG_ICONS[routeName].active : TAB_SVG_ICONS[routeName].inactive;
+  const module = focused ? icons.active : icons.inactive;
   const [uri, setUri] = React.useState<string | null>(() => iconModuleToUri(module));
   const [failed, setFailed] = React.useState(false);
 
@@ -97,7 +100,13 @@ function TabSvgIcon({
   }, [module]);
 
   if (!uri || failed) {
-    return <Ionicons name={fallbackIconName(routeName, focused)} size={size} color={focused ? BRAND_ACCENT : MUTED} />;
+    return (
+      <Ionicons
+        name={fallbackName ?? (focused ? "ellipse" : "ellipse-outline")}
+        size={size}
+        color={focused ? BRAND_ACCENT : MUTED}
+      />
+    );
   }
 
   if (Platform.OS === "web") {
@@ -113,19 +122,69 @@ function TabSvgIcon({
     const { SvgUri } = require("react-native-svg") as typeof import("react-native-svg");
     return <SvgUri uri={uri} width={size} height={size} onError={() => setFailed(true)} />;
   } catch {
-    return <Ionicons name={fallbackIconName(routeName, focused)} size={size} color={focused ? BRAND_ACCENT : MUTED} />;
+    return (
+      <Ionicons
+        name={fallbackName ?? (focused ? "ellipse" : "ellipse-outline")}
+        size={size}
+        color={focused ? BRAND_ACCENT : MUTED}
+      />
+    );
   }
 }
 
-function tabIcon(routeName: string, focused: boolean): keyof typeof Ionicons.glyphMap {
-  switch (routeName) {
-    case "Home":
-      return focused ? "home" : "home-outline";
-    case "Profile":
-      return focused ? "person" : "person-outline";
-    default:
-      return "ellipse-outline";
+function TabCreateIcon({ focused, size = TAB_ICON_SIZE }: { focused: boolean; size?: number }) {
+  return <TabSvgIcon focused={focused} icons={BOTTOM_TAB_ICONS.create} size={size} fallbackName="add-circle-outline" />;
+}
+
+function TabProfileIcon({ focused }: { focused: boolean }) {
+  const { user } = useAuth();
+  const avatarUri = stripLegacyCloudinaryUrl(user?.avatarUrl) || "";
+  const displayName = user?.fullName || user?.username || "U";
+
+  if (!avatarUri) {
+    return (
+      <TabSvgIcon
+        focused={focused}
+        icons={BOTTOM_TAB_ICONS.profile}
+        size={TAB_ICON_SIZE}
+        fallbackName={focused ? "person-circle" : "person-circle-outline"}
+      />
+    );
   }
+
+  const ringSize = TAB_ICON_SIZE;
+  const photoSize = focused ? ringSize - 4 : ringSize;
+
+  return (
+    <View
+      style={[
+        styles.profileAvatarRing,
+        { width: ringSize, height: ringSize, borderRadius: ringSize / 2 },
+        focused ? styles.profileAvatarRingFocused : styles.profileAvatarRingIdle
+      ]}
+    >
+      <UserAvatar
+        uri={avatarUri}
+        name={displayName}
+        size={photoSize}
+        borderRadius={photoSize / 2}
+        fallbackBackgroundColor="#1f2328"
+        initialsColor={BRAND_ACCENT}
+      />
+    </View>
+  );
+}
+
+function CountBadge({ count }: { count: number }) {
+  const label = String(Math.min(99, count));
+  const wide = label.length > 1;
+  return (
+    <View style={[styles.badge, wide ? styles.badgeWide : styles.badgeRound]}>
+      <Text style={styles.badgeText} allowFontScaling={false}>
+        {label}
+      </Text>
+    </View>
+  );
 }
 
 type TabSlotProps = {
@@ -134,9 +193,19 @@ type TabSlotProps = {
   accessibilityLabel: string;
   label?: string;
   children: React.ReactNode;
+  showBadge?: number;
+  iconVariant?: "default" | "logo";
 };
 
-function TabSlot({ focused, onPress, accessibilityLabel, label, children }: TabSlotProps) {
+function TabSlot({
+  focused,
+  onPress,
+  accessibilityLabel,
+  label,
+  children,
+  showBadge = 0,
+  iconVariant = "default"
+}: TabSlotProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -145,7 +214,10 @@ function TabSlot({ focused, onPress, accessibilityLabel, label, children }: TabS
       accessibilityState={{ selected: focused }}
       accessibilityLabel={accessibilityLabel}
     >
-      {children}
+      <View style={styles.iconWrap}>
+        <View style={iconVariant === "logo" ? styles.logoIconBox : styles.tabIconBox}>{children}</View>
+        {showBadge > 0 ? <CountBadge count={showBadge} /> : null}
+      </View>
       {label ? (
         <Text style={[styles.tabLabel, focused ? styles.tabLabelActive : null]} numberOfLines={1}>
           {label}
@@ -159,6 +231,7 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
+  const { messageUnreadCount } = useNotificationPanel();
 
   const isRouteFocused = (routeName: string) => {
     const route = state.routes.find((r) => r.name === routeName);
@@ -172,48 +245,37 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
     const isFocused = state.index === state.routes.indexOf(route);
     const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
     if (event.defaultPrevented) return;
-    if (route.name === "Learn") {
-      navigation.navigate({
-        name: "Learn",
-        params: { screen: "LearnHome" },
-        merge: false
-      } as never);
-      return;
-    }
-    if (route.name === "Market") {
-      navigation.navigate({
-        name: "Market",
-        params: { screen: "MarketplaceHome" },
-        merge: false
-      } as never);
-      return;
-    }
     if (!isFocused) navigation.navigate(route.name);
   };
 
   const homeFocused = isRouteFocused("Home");
-  const marketFocused = isRouteFocused("Market");
-  const servicesFocused = isRouteFocused("Services");
-  const learnFocused = isRouteFocused("Learn");
+  const searchFocused = isRouteFocused("Search");
+  const messagesFocused = isRouteFocused("Messages");
+  const profileFocused = isRouteFocused("Profile");
 
   return (
     <View style={[styles.wrap, { paddingBottom: bottomPad }]}>
       <View style={styles.row}>
-        <TabSlot focused={homeFocused} onPress={() => pressRoute("Home")} accessibilityLabel="Home">
-          <View style={styles.logoWrap}>
-            <Image
-              source={require("../../assets/crop vibe.png")}
-              style={[styles.logoImage, homeFocused ? styles.logoImageActive : styles.logoImageMuted]}
-              resizeMode="contain"/>
-          </View>
+        <TabSlot
+          focused={homeFocused}
+          onPress={() => pressRoute("Home")}
+          accessibilityLabel="Home"
+          iconVariant="logo"
+        >
+          <Image
+            source={require("../../assets/crop vibe.png")}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </TabSlot>
 
         <TabSlot
-          focused={marketFocused}
-          onPress={() => pressRoute("Market")}
-          accessibilityLabel={t("tabMarket")}
-          label={t("tabMarket")}>
-          <TabSvgIcon routeName="Market" focused={marketFocused} size={TAB_ICON_SIZE} />
+          focused={searchFocused}
+          onPress={() => pressRoute("Search")}
+          accessibilityLabel="Discover"
+          label="Discover"
+        >
+          <TabSvgIcon focused={searchFocused} icons={BOTTOM_TAB_ICONS.search} fallbackName="search-outline" />
         </TabSlot>
 
         <TabSlot
@@ -222,7 +284,32 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           accessibilityLabel={t("tabCreate")}
           label={t("tabCreate")}
         >
-          <TabSvgIcon routeName="Create" focused={createFocused} size={TAB_ICON_SIZE} />
+          <TabCreateIcon focused={createFocused} />
+        </TabSlot>
+
+        <TabSlot
+          focused={messagesFocused}
+          onPress={() => pressRoute("Messages")}
+          accessibilityLabel="Chat"
+          label="Chat"
+          showBadge={messageUnreadCount}
+        >
+          <TabSvgIcon focused={messagesFocused} icons={BOTTOM_TAB_ICONS.messages} fallbackName="chatbubble-outline" />
+        </TabSlot>
+
+        {/* Was Learn */}
+        <TabSlot focused={profileFocused} onPress={() => pressRoute("Profile")} accessibilityLabel="Profile" label="Profile">
+          <TabProfileIcon focused={profileFocused} />
+        </TabSlot>
+
+        {/*
+        <TabSlot
+          focused={marketFocused}
+          onPress={() => pressRoute("Market")}
+          accessibilityLabel={t("tabMarket")}
+          label={t("tabMarket")}
+        >
+          <TabSvgIcon routeName="Market" focused={marketFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
 
         <TabSlot
@@ -242,6 +329,7 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
         >
           <TabSvgIcon routeName="Learn" focused={learnFocused} size={TAB_ICON_SIZE} />
         </TabSlot>
+        */}
       </View>
     </View>
   );
@@ -273,15 +361,41 @@ const styles = StyleSheet.create({
     marginTop: -2,
     paddingTop: 1
   },
-  logoWrap: {
-    width: "100%",
-    minHeight: 18,
+  iconWrap: {
+    position: "relative",
     alignItems: "center",
     justifyContent: "center"
   },
-  logoImage: { height: 12, width: "100%", maxWidth: 52, alignSelf: "center" },
-  logoImageActive: { tintColor: BRAND_ACCENT, opacity: 1 },
-  logoImageMuted: { tintColor: MUTED, opacity: 0.9 },
+  tabIconBox: {
+    width: TAB_ICON_SIZE,
+    height: TAB_ICON_SIZE,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  logoIconBox: {
+    width: 66,
+    height: 17.3271484375,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  logoImage: {
+    width: 66,
+    height: 17.3271484375,
+    opacity: 1
+  },
+  profileAvatarRing: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  profileAvatarRingFocused: {
+    borderWidth: 2,
+    borderColor: BRAND_ACCENT
+  },
+  profileAvatarRingIdle: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)"
+  },
   tabLabel: {
     marginTop: 2,
     fontSize: Platform.OS === "web" ? 8 : 9,
@@ -289,5 +403,32 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: MUTED
   },
-  tabLabelActive: { color: BRAND_ACCENT, fontWeight: "600" }
+  tabLabelActive: { color: BRAND_ACCENT, fontWeight: "600" },
+  badge: {
+    position: "absolute",
+    top: -5,
+    right: -8,
+    minWidth: 14,
+    height: 14,
+    backgroundColor: "#e53935",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: TAB_BG
+  },
+  badgeRound: {
+    width: 14,
+    borderRadius: 7,
+    paddingHorizontal: 0
+  },
+  badgeWide: {
+    borderRadius: 7,
+    paddingHorizontal: 3
+  },
+  badgeText: {
+    color: "#fff",
+    fontSize: 8,
+    fontWeight: "800",
+    lineHeight: 10
+  }
 });

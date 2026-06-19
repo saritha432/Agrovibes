@@ -39,7 +39,7 @@ const MARKET_TABS: { id: MarketTabId; label: string; icon: SvgModule }[] = [
   { id: "Services", label: "Services", icon: require("../../assets/market/services.svg") }
 ];
 
-const SEARCH_ICON = require("../../assets/search-icon.svg");
+const SEARCH_ICON = require("../../assets/bottom-icons/search.svg");
 const MIC_ICON = require("../../assets/market/mic-icon.svg");
 
 export function MarketHomeScreen() {
@@ -54,7 +54,7 @@ export function MarketHomeScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View style={styles.marketChrome}>
-        <AppTopBar showSearch={false} showMessages={false} />
+        <AppTopBar />
 
         <View style={styles.searchRow}>
           <MarketSvgIcon module={SEARCH_ICON} size={20} active={false} fallbackIcon="search-outline" />
