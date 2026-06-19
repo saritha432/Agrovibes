@@ -106,12 +106,8 @@ export function RootNavigator() {
         name="EditProfile"
         component={EditProfileScreen}
         options={{
-          headerShown: true,
-          title: "Edit Profile",
-          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
-          headerTintColor: socialDiscoveryTheme.navTint,
-          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
-          headerShadowVisible: false,
+          headerShown: false,
+          animation: "slide_from_bottom",
           contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
         }}
       />
