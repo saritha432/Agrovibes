@@ -21,6 +21,7 @@ import { ResizeMode, Video } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
@@ -52,16 +53,20 @@ import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache }
 import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { APP_LIME } from "../theme/appColors";
-import { reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A } from "../utils/reelGrid";
+import { reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
 
-const TEAL = APP_LIME;
-const CREAM = "#121212";
-const CARD = "#121212";
+const PAGE_BG = "#262626";
+const SURFACE = "#303132";
+const SURFACE_ALT = "#383838";
 const TEXT = "#ffffff";
-const MUTED = "#9e9e9e";
-const BEIGE_FOLLOW = "#303132";
 const LIME = APP_LIME;
+const PROFILE_HEADER_HEIGHT = 61;
+const PROFILE_HEADER_MAX_WIDTH = 430;
 const PROFILE_TAB_ICON = 32;
+
+const PROFILE_ASSETS = {
+  menu: require("../../assets/menu-icon.svg")
+} as const;
 
 const PROFILE_TAB_ICONS = {
   Posts: {
@@ -666,15 +671,39 @@ export function ProfileScreen({ route }: { route?: any }) {
     setFollowingActionMenuFor((prev) => (prev === rowId ? null : rowId));
   };
 
+  const profileHeaderName = user?.username || user?.fullName || "";
+
   return (
     <>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
+      <SafeAreaView style={styles.safeRoot} edges={["top"]}>
+        {user ? (
+          <View
+            style={[
+              styles.topBar,
+              { maxWidth: Math.min(PROFILE_HEADER_MAX_WIDTH, width) }
+            ]}
+          >
+            <View style={styles.topBarUsernameWrap}>
+              <Text style={styles.topBarUsername}>{profileHeaderName}</Text>
+            </View>
+            <Pressable
+              style={styles.topBarMenuBtn}
+              hitSlop={8}
+              accessibilityLabel="Menu"
+              onPress={() => navigation.navigate("SettingsMenu")}
+            >
+              <Image source={PROFILE_ASSETS.menu} style={styles.menuIcon} resizeMode="contain" />
+            </Pressable>
+          </View>
+        ) : null}
+
+        <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
         {!user ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{t("welcome")}</Text>
             <Text style={styles.cardSub}>{t("welcomeSub")}</Text>
             <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
-              <Ionicons name="log-in-outline" size={18} color="#111" />
+              <Ionicons name="log-in-outline" size={18} color={TEXT} />
               <Text style={styles.primaryBtnText}>{t("getStarted")}</Text>
             </Pressable>
           </View>
@@ -687,15 +716,12 @@ export function ProfileScreen({ route }: { route?: any }) {
                   name={user.fullName || user.username || user.email || "U"}
                   size={88}
                   borderRadius={44}
-                  fallbackBackgroundColor={REEL_GRID_TILE_A}
-                  initialsColor={MUTED}
+                  fallbackBackgroundColor={SURFACE}
+                  initialsColor={TEXT}
                   style={styles.avatar}
                 />
 
                 <View style={styles.headerInfo}>
-                  <Text style={styles.usernameTitle} numberOfLines={1}>
-                    {user.username || user.fullName}
-                  </Text>
                   <View style={styles.statsRow}>
                     <View style={styles.statItem}>
                       <Text style={styles.statValue}>{formatStatCount(profileModel?.posts ?? 0)}</Text>
@@ -726,9 +752,9 @@ export function ProfileScreen({ route }: { route?: any }) {
 
               {isInstructor ? (
                 <Pressable style={styles.studioBtn} onPress={() => navigation.navigate("InstructorStudio")}>
-                  <Ionicons name="school-outline" size={18} color={TEAL} />
+                  <Ionicons name="school-outline" size={18} color={LIME} />
                   <Text style={styles.studioText}>Instructor Studio</Text>
-                  <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                  <Ionicons name="chevron-forward" size={18} color={TEXT} />
                 </Pressable>
               ) : null}
 
@@ -823,7 +849,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                         )}
                         {post.imageUrls && post.imageUrls.length > 1 ? (
                           <View style={styles.gridGalleryBadge} pointerEvents="none">
-                            <Ionicons name="copy" size={12} color="#fff" />
+                            <Ionicons name="copy" size={12} color={TEXT} />
                           </View>
                         ) : null}
                       </Pressable>
@@ -833,12 +859,12 @@ export function ProfileScreen({ route }: { route?: any }) {
                   <View style={styles.placeholderGridRow}>
                     {activeGalleryTab === "Tagged" ? (
                       <View style={styles.emptyWrap}>
-                        <Ionicons name="pricetag-outline" size={22} color={MUTED} />
+                        <Ionicons name="pricetag-outline" size={22} color={TEXT} />
                         <Text style={styles.emptyText}>{t("noTaggedPosts")}</Text>
                       </View>
                     ) : activeGalleryTab === "Saved" ? (
                       <View style={styles.emptyWrap}>
-                        <Ionicons name="bookmark-outline" size={22} color={MUTED} />
+                        <Ionicons name="bookmark-outline" size={22} color={TEXT} />
                         <Text style={styles.emptyText}>{t("savedReelsEmpty")}</Text>
                       </View>
                     ) : (
@@ -865,6 +891,7 @@ export function ProfileScreen({ route }: { route?: any }) {
           </>
         )}
       </ScrollView>
+      </SafeAreaView>
 
       <PostsReelViewerModal
         visible={!!profileReelViewer}
@@ -891,7 +918,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                 value={shareProfileSearch}
                 onChangeText={setShareProfileSearch}
                 placeholder={t("search")}
-                placeholderTextColor={MUTED}
+                placeholderTextColor={SURFACE_ALT}
                 style={styles.profileShareSearchInput}
               />
               <Pressable style={styles.profileShareSearchAction} onPress={onShareProfileSystem}>
@@ -917,7 +944,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                           name={recipient.name}
                           size={52}
                           borderRadius={26}
-                          fallbackBackgroundColor="#29303a"
+                          fallbackBackgroundColor={SURFACE}
                           initialsColor={LIME}
                         />
                       )}
@@ -985,7 +1012,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                   setActiveListType(null);
                 }}
               >
-                <Ionicons name="close" size={22} color={TEAL} />
+                <Ionicons name="close" size={22} color={TEXT} />
               </Pressable>
             </View>
             <ScrollView
@@ -1009,7 +1036,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                         size={40}
                         borderRadius={20}
                         style={styles.personListAvatar}
-                        fallbackBackgroundColor="#29303a"
+                        fallbackBackgroundColor={SURFACE}
                         initialsColor={LIME}
                       />
                       <Text style={styles.personName} numberOfLines={2}>
@@ -1028,7 +1055,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                             accessibilityRole="button"
                             accessibilityLabel={`Remove ${person.name} from followers`}
                           >
-                            <Ionicons name="close" size={16} color="#fff" />
+                            <Ionicons name="close" size={16} color={TEXT} />
                           </TouchableOpacity>
                         </View>
                       ) : (
@@ -1103,65 +1130,70 @@ export function ProfileScreen({ route }: { route?: any }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: CREAM },
+  safeRoot: { flex: 1, backgroundColor: PAGE_BG },
+  screen: { flex: 1, backgroundColor: PAGE_BG },
   scrollBottom: { paddingBottom: 100 },
 
   topBar: {
+    width: "100%",
+    alignSelf: "center",
+    height: PROFILE_HEADER_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
-    backgroundColor: "#262626",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    paddingTop: 10,
-    gap: 6
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: SURFACE_ALT
   },
-  topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconBadgeWrap: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative"
-  },
-  notificationBadge: {
-    position: "absolute",
-    right: -6,
-    top: -4,
-    backgroundColor: LIME,
-    borderRadius: 8,
-    minWidth: 14,
-    height: 14,
-    paddingHorizontal: 3,
-    alignItems: "center",
+  topBarUsernameWrap: {
+    flex: 1,
+    marginRight: 12,
     justifyContent: "center"
   },
-  notificationBadgeText: { color: "#1f2b28", fontSize: 8, fontWeight: "800" },
+  topBarUsername: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: LIME,
+    lineHeight: 20
+  },
+  topBarMenuBtn: {
+    flexShrink: 0
+  },
+  menuIcon: {
+    width: 34,
+    height: 34
+  },
 
-  card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#303842", padding: 16 },
+  card: {
+    margin: 12,
+    borderRadius: 16,
+    backgroundColor: PAGE_BG,
+    borderWidth: 1,
+    borderColor: SURFACE_ALT,
+    padding: 16
+  },
   cardTitle: { fontSize: 20, fontWeight: "900", color: TEXT },
-  cardSub: { marginTop: 6, color: MUTED, fontWeight: "600", lineHeight: 18 },
+  cardSub: { marginTop: 6, color: TEXT, opacity: 0.62, fontWeight: "600", lineHeight: 18 },
   primaryBtn: {
     marginTop: 16,
     borderRadius: 14,
-    backgroundColor: TEAL,
+    backgroundColor: SURFACE,
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8
   },
-  primaryBtnText: { color: "#111", fontWeight: "900" },
+  primaryBtnText: { color: TEXT, fontWeight: "900" },
 
   profileCard: {
     marginHorizontal: 16,
     marginTop: 12,
-    backgroundColor: CREAM,
+    backgroundColor: PAGE_BG,
     paddingBottom: 4
   },
   headerMidRow: { flexDirection: "row", alignItems: "center", gap: 16 },
   headerInfo: { flex: 1, minWidth: 0 },
-  usernameTitle: { fontSize: 16, fontWeight: "800", color: TEXT, marginBottom: 10 },
   avatar: {
     width: 88,
     height: 88,
@@ -1173,7 +1205,8 @@ const styles = StyleSheet.create({
   statValue: { fontWeight: "800", color: TEXT, fontSize: 16, textAlign: "left" },
   statLabel: {
     marginTop: 2,
-    color: MUTED,
+    color: TEXT,
+    opacity: 0.62,
     fontWeight: "600",
     fontSize: 12,
     lineHeight: 14,
@@ -1192,7 +1225,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 40,
     borderRadius: 8,
-    backgroundColor: BEIGE_FOLLOW,
+    backgroundColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
@@ -1207,11 +1240,11 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderColor: "#303842"
+    borderColor: SURFACE_ALT
   },
-  studioText: { flex: 1, fontWeight: "900", color: TEAL, fontSize: 14 },
+  studioText: { flex: 1, fontWeight: "900", color: TEXT, fontSize: 14 },
   logoutLink: { marginTop: 10, alignSelf: "center", paddingVertical: 6 },
-  logoutLinkText: { color: MUTED, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
+  logoutLinkText: { color: TEXT, opacity: 0.62, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
 
   gallerySection: { marginTop: 18, marginBottom: 16 },
   galleryLoadingWrap: { width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 48 },
@@ -1219,7 +1252,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2a2a2a",
+    borderColor: SURFACE_ALT,
     paddingBottom: 4,
     marginHorizontal: 16
   },
@@ -1238,11 +1271,11 @@ const styles = StyleSheet.create({
   },
   gridVideoIcon: { width: 20, height: 20 },
   gridPlaceholder: {},
-  gridVideoBg: { backgroundColor: "#262626" },
+  gridVideoBg: { backgroundColor: PAGE_BG },
   gridVideoPlaceholder: { alignItems: "center", justifyContent: "center" },
-  gridPastelA: { backgroundColor: "#262626" },
-  gridPastelB: { backgroundColor: "#262626" },
-  gridPastelC: { backgroundColor: "#262626" },
+  gridPastelA: { backgroundColor: SURFACE },
+  gridPastelB: { backgroundColor: SURFACE_ALT },
+  gridPastelC: { backgroundColor: SURFACE },
   placeholderGridRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
 
   emptyWrap: {
@@ -1251,10 +1284,10 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     gap: 8
   },
-  emptyText: { color: MUTED, fontWeight: "700", textAlign: "center" },
+  emptyText: { color: TEXT, opacity: 0.62, fontWeight: "700", textAlign: "center" },
 
   reelPlayerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_A },
-  imageViewerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_A },
+  imageViewerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_B },
   gridGalleryBadge: {
     position: "absolute",
     top: 6,
@@ -1262,9 +1295,9 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
+    borderColor: SURFACE_ALT,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -1275,11 +1308,11 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: SURFACE_ALT,
     zIndex: 10
   },
   reelDeleteBtn: {
@@ -1289,11 +1322,11 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: SURFACE_ALT,
     zIndex: 10
   },
   reelCaptionWrap: {
@@ -1303,12 +1336,12 @@ const styles = StyleSheet.create({
     bottom: 28,
     gap: 4
   },
-  reelCaptionAuthor: { color: "#fff", fontWeight: "900", fontSize: 15 },
-  reelCaptionText: { color: "#e5e7eb", fontWeight: "600", fontSize: 13 },
+  reelCaptionAuthor: { color: TEXT, fontWeight: "900", fontSize: 15 },
+  reelCaptionText: { color: TEXT, opacity: 0.72, fontWeight: "600", fontSize: 13 },
 
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)"
+    backgroundColor: "rgba(38,38,38,0.72)"
   },
   /** Only the dimmed area above the sheet — does not stack under the sheet, so row buttons receive touches. */
   overlayTapAboveSheet: {
@@ -1316,7 +1349,7 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   sheet: {
-    backgroundColor: CARD,
+    backgroundColor: PAGE_BG,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     maxHeight: "72%",
@@ -1325,7 +1358,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     borderTopWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     elevation: 12
   },
   sheetScroll: {
@@ -1334,17 +1367,17 @@ const styles = StyleSheet.create({
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sheetTitle: { color: TEXT, fontWeight: "900", fontSize: 17 },
   sheetBody: { paddingTop: 12, gap: 10 },
-  sheetEmpty: { color: MUTED, fontWeight: "700" },
+  sheetEmpty: { color: TEXT, opacity: 0.62, fontWeight: "700" },
   personRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: "#262626"
+    backgroundColor: SURFACE
   },
   personRowMenuOpen: { zIndex: 40 },
   personListAvatar: { marginRight: 10 },
@@ -1364,15 +1397,15 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 4
   },
-  messageBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  messageBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
+  messageBtn: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  messageBtnText: { color: TEXT, fontWeight: "900", fontSize: 12 },
   iconDangerBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#6b1f1f",
+    backgroundColor: SURFACE_ALT,
     borderWidth: 1,
-    borderColor: "#a93838",
+    borderColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 6
@@ -1381,9 +1414,9 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#111827",
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: "#374151",
+    borderColor: SURFACE_ALT,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 2
@@ -1394,9 +1427,9 @@ const styles = StyleSheet.create({
     top: 2,
     minWidth: 132,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: SURFACE_ALT,
     overflow: "hidden",
     zIndex: 20
   },
@@ -1405,18 +1438,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   followingMenuItemText: {
-    color: "#fff",
+    color: TEXT,
     fontWeight: "800",
     fontSize: 12
   },
-  followBackBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  followBackBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
-  requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  requestedPillText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followingPill: { backgroundColor: "rgba(201,255,53,0.18)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  followingPillText: { color: LIME, fontWeight: "800", fontSize: 12 },
-  unfollowBtn: { backgroundColor: "#111827", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+  followBackBtn: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  followBackBtnText: { color: TEXT, fontWeight: "900", fontSize: 12 },
+  requestedPill: { backgroundColor: SURFACE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  requestedPillText: { color: TEXT, opacity: 0.72, fontWeight: "800", fontSize: 12 },
+  followingPill: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followingPillText: { color: TEXT, fontWeight: "800", fontSize: 12 },
+  unfollowBtn: { backgroundColor: SURFACE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  unfollowBtnText: { color: TEXT, fontWeight: "800", fontSize: 12 },
 
   confirmOverlayRoot: {
     flex: 1,
@@ -1426,15 +1459,15 @@ const styles = StyleSheet.create({
   },
   confirmBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.62)"
+    backgroundColor: "rgba(38,38,38,0.82)"
   },
   confirmCard: {
     width: "100%",
     maxWidth: 340,
-    backgroundColor: CARD,
+    backgroundColor: PAGE_BG,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     padding: 22,
     zIndex: 2,
     elevation: 16
@@ -1447,7 +1480,8 @@ const styles = StyleSheet.create({
     marginBottom: 12
   },
   confirmBody: {
-    color: MUTED,
+    color: TEXT,
+    opacity: 0.62,
     fontSize: 15,
     fontWeight: "600",
     lineHeight: 22,
@@ -1455,30 +1489,30 @@ const styles = StyleSheet.create({
     marginBottom: 22
   },
   confirmName: { color: LIME, fontWeight: "800" },
-  confirmBodyMuted: { color: MUTED, fontWeight: "600" },
+  confirmBodyMuted: { color: TEXT, opacity: 0.62, fontWeight: "600" },
   confirmActions: { flexDirection: "row", gap: 12, justifyContent: "center" },
   confirmBtnSecondary: {
     flex: 1,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: LIME,
+    borderColor: SURFACE_ALT,
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent"
+    backgroundColor: SURFACE
   },
-  confirmBtnSecondaryText: { color: LIME, fontWeight: "900", fontSize: 15 },
+  confirmBtnSecondaryText: { color: TEXT, fontWeight: "900", fontSize: 15 },
   confirmBtnDanger: {
     flex: 1,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#7f1d1d",
+    backgroundColor: SURFACE_ALT,
     borderWidth: 1,
-    borderColor: "#b91c1c"
+    borderColor: SURFACE
   },
-  confirmBtnDangerText: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  confirmBtnDangerText: { color: TEXT, fontWeight: "900", fontSize: 15 },
   confirmBtnDisabled: { opacity: 0.55 },
 
   profileShareHandle: {
@@ -1486,7 +1520,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#3a434f",
+    backgroundColor: SURFACE_ALT,
     marginBottom: 10
   },
   profileShareSearchRow: {
@@ -1495,8 +1529,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#303842",
-    backgroundColor: "#1f2937",
+    borderColor: SURFACE_ALT,
+    backgroundColor: SURFACE,
     paddingHorizontal: 10,
     gap: 8
   },
@@ -1507,7 +1541,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#111827"
+    backgroundColor: SURFACE_ALT
   },
   profileSharePeopleRow: {
     gap: 10,
@@ -1521,13 +1555,13 @@ const styles = StyleSheet.create({
     borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2f3741"
+    backgroundColor: SURFACE
   },
-  profileSharePersonName: { marginTop: 6, color: "#e5edf5", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  profileSharePersonName: { marginTop: 6, color: TEXT, fontSize: 11, fontWeight: "700", textAlign: "center" },
   profileShareFooterRow: {
     marginTop: 6,
     borderTopWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     paddingTop: 12,
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1542,8 +1576,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#374151",
-    backgroundColor: "#1f2937"
+    borderColor: SURFACE_ALT,
+    backgroundColor: SURFACE
   },
-  profileShareFooterText: { color: MUTED, fontSize: 9, fontWeight: "700", textAlign: "center" }
+  profileShareFooterText: { color: TEXT, opacity: 0.62, fontSize: 9, fontWeight: "700", textAlign: "center" }
 });
