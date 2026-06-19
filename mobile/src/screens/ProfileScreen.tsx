@@ -21,7 +21,7 @@ import { ResizeMode, Video } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
@@ -54,6 +54,7 @@ import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { APP_LIME } from "../theme/appColors";
 import { reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
 const PAGE_BG = "#262626";
 const SURFACE = "#303132";
@@ -109,6 +110,7 @@ type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 export function ProfileScreen({ route }: { route?: any }) {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { width, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { user, token, signOut } = useAuth();
   const { t } = useLanguage();
   const [userPosts, setUserPosts] = useState<HomePost[]>([]);
@@ -143,7 +145,11 @@ export function ProfileScreen({ route }: { route?: any }) {
   const [shareBusyByUserId, setShareBusyByUserId] = useState<Record<number, boolean>>({});
   const [shareProfileSearch, setShareProfileSearch] = useState("");
   const [profileReelViewer, setProfileReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+  const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
   const isMountedRef = useRef(true);
+
+  const displayAvatarUrl = useMemo(() => stripLegacyCloudinaryUrl(user?.avatarUrl), [user?.avatarUrl]);
+  const avatarPreviewSize = Math.min(320, Math.max(200, Math.min(width, windowHeight) * 0.68));
 
   const gridGap = 2;
   const gridTileSize = (width - gridGap * 2) / 3;
@@ -711,15 +717,23 @@ export function ProfileScreen({ route }: { route?: any }) {
           <>
             <View style={styles.profileCard}>
               <View style={styles.headerMidRow}>
-                <UserAvatar
-                  uri={user.avatarUrl}
-                  name={user.fullName || user.username || user.email || "U"}
-                  size={88}
-                  borderRadius={44}
-                  fallbackBackgroundColor={SURFACE}
-                  initialsColor={TEXT}
-                  style={styles.avatar}
-                />
+                <Pressable
+                  onPress={() => displayAvatarUrl && setAvatarPreviewOpen(true)}
+                  disabled={!displayAvatarUrl}
+                  style={({ pressed }) => [styles.avatarPressable, pressed && displayAvatarUrl ? { opacity: 0.85 } : null]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("viewProfilePhoto")}
+                >
+                  <UserAvatar
+                    uri={user.avatarUrl}
+                    name={user.fullName || user.username || user.email || "U"}
+                    size={88}
+                    borderRadius={44}
+                    fallbackBackgroundColor={SURFACE}
+                    initialsColor={TEXT}
+                    style={styles.avatar}
+                  />
+                </Pressable>
 
                 <View style={styles.headerInfo}>
                   <View style={styles.statsRow}>
@@ -1125,6 +1139,44 @@ export function ProfileScreen({ route }: { route?: any }) {
         </View>
       </Modal>
 
+      <Modal
+        visible={avatarPreviewOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAvatarPreviewOpen(false)}
+      >
+        <View style={styles.avatarPreviewRoot}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setAvatarPreviewOpen(false)} accessibilityLabel="Close preview" />
+          <View style={styles.avatarPreviewLayer} pointerEvents="box-none">
+            <View
+              style={[
+                styles.avatarPreviewCircle,
+                {
+                  width: avatarPreviewSize,
+                  height: avatarPreviewSize,
+                  borderRadius: avatarPreviewSize / 2
+                }
+              ]}
+            >
+              {displayAvatarUrl ? (
+                <Image
+                  source={{ uri: displayAvatarUrl }}
+                  style={{ width: avatarPreviewSize, height: avatarPreviewSize }}
+                  resizeMode="cover"
+                />
+              ) : null}
+            </View>
+            <Pressable
+              onPress={() => setAvatarPreviewOpen(false)}
+              style={[styles.avatarPreviewClose, { top: insets.top + 8 }]}
+              hitSlop={12}
+            >
+              <Ionicons name="close-circle" size={44} color="rgba(255,255,255,0.92)" />
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </>
   );
 }
@@ -1199,6 +1251,19 @@ const styles = StyleSheet.create({
     height: 88,
     borderRadius: 44
   },
+  avatarPressable: { borderRadius: 44 },
+  avatarPreviewRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)" },
+  avatarPreviewLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  avatarPreviewCircle: {
+    overflow: "hidden",
+    borderWidth: 3,
+    borderColor: LIME
+  },
+  avatarPreviewClose: { position: "absolute", right: 14, zIndex: 4 },
 
   statsRow: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
   statItem: { flex: 1, alignItems: "flex-start", minWidth: 0 },
