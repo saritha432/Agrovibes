@@ -22,7 +22,7 @@ import { InitialSetupScreen } from "../screens/InitialSetupScreen";
 import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
 import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
 import { EditProfileScreen } from "../screens/EditProfileScreen";
-import { PublicProfileScreen } from "../screens/PublicProfileScreen";
+import { ProfileScreen } from "../screens/ProfileScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
@@ -68,6 +68,7 @@ export type RootStackParamList = {
     peerUserId: number;
     peerName: string;
     peerKey?: string;
+    peerUsername?: string;
     peerAvatarUrl?: string | null;
     incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number };
   };
@@ -116,15 +117,10 @@ export function RootNavigator() {
       />
       <Stack.Screen
         name="PublicProfile"
-        component={PublicProfileScreen}
+        component={ProfileScreen}
         options={{
-          headerShown: true,
-          title: "Profile",
-          headerStyle: { backgroundColor: socialDiscoveryTheme.navBg },
-          headerTintColor: socialDiscoveryTheme.navTint,
-          headerTitleStyle: { fontWeight: "800", color: socialDiscoveryTheme.navTint },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          headerShown: false,
+          contentStyle: { backgroundColor: "#262626" }
         }}
       />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />

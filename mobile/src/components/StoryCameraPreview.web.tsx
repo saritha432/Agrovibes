@@ -27,25 +27,32 @@ async function applyWebCameraControls(
   const track = stream?.getVideoTracks()[0];
   if (!track?.getCapabilities) return;
   const caps = track.getCapabilities() as VideoTrackCaps;
-  const next: MediaTrackConstraints & { torch?: boolean; zoom?: number } = {};
 
   if (caps.zoom && typeof caps.zoom === "object") {
     const min = caps.zoom.min ?? 1;
     const max = caps.zoom.max ?? min;
-    next.zoom = options.zoomLevel === 2 ? Math.min(max, Math.max(min, min * 2)) : min;
+    const zoom = options.zoomLevel === 2 ? Math.min(max, Math.max(min, min * 2)) : min;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom }] });
+    } catch {
+      try {
+        await track.applyConstraints({ zoom });
+      } catch {
+        // Hardware zoom may be unavailable; CSS preview zoom still applies.
+      }
+    }
   }
 
-  if (caps.torch && options.flashOn && options.facing === "back") {
-    next.torch = true;
-  } else if (caps.torch) {
-    next.torch = false;
-  }
-
-  if (!Object.keys(next).length) return;
+  if (!caps.torch) return;
+  const torchOn = options.flashOn && options.facing === "back";
   try {
-    await track.applyConstraints(next);
+    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
   } catch {
-    // Hardware zoom/torch may be unavailable; CSS preview zoom still applies.
+    try {
+      await track.applyConstraints({ torch: torchOn });
+    } catch {
+      // Torch is unsupported on most desktop browsers.
+    }
   }
 }
 

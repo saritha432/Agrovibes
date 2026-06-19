@@ -25,7 +25,7 @@ import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
 import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
-import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, ringDirectCall, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import {
   hydrateLiveShareFromFeed,
@@ -112,9 +112,19 @@ function buildThreadListItems(messages: DirectMessageItem[]): ThreadListItem[] {
   return items;
 }
 
-function formatPeerHandle(peerKey?: string) {
+function formatPeerHandle(username?: string | null, peerKey?: string) {
+  const normalizedUsername = String(username || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+  if (normalizedUsername && !normalizedUsername.includes("@")) {
+    return `@${normalizedUsername}`;
+  }
+
   const raw = String(peerKey || "").trim();
   if (!raw) return "";
+  if (raw.includes("@")) return "";
+  if (/^\d+$/.test(raw)) return "";
   return raw.startsWith("@") ? raw.toLowerCase() : `@${raw.toLowerCase()}`;
 }
 
@@ -303,11 +313,12 @@ export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName, peerKey, peerAvatarUrl, incomingCall } = route.params;
+  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall } = route.params;
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
-  const peerHandle = formatPeerHandle(peerKey);
+  const [peerUsername, setPeerUsername] = useState(peerUsernameParam || "");
+  const peerHandle = formatPeerHandle(peerUsername, peerKey);
   const threadItems = useMemo(() => buildThreadListItems(messages), [messages]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
@@ -328,6 +339,27 @@ export function DirectChatScreen() {
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceStartedAtRef = useRef(0);
+
+  useEffect(() => {
+    if (peerUsernameParam) {
+      setPeerUsername(peerUsernameParam);
+      return;
+    }
+    if (!token || !peerUserId) return;
+    let mounted = true;
+    fetchProfileStats(token, peerUserId)
+      .then((stats) => {
+        if (!mounted) return;
+        setPeerUsername(String(stats.username || "").trim());
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setPeerUsername("");
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [peerUserId, peerUsernameParam, token]);
 
   useEffect(() => {
     if (!token || !messages.length) return;

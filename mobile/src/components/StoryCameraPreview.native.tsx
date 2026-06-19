@@ -141,6 +141,9 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
 
   const torchOn = flashOn && facing === "back" && ready;
   const cameraZoom = storyZoomToExpoRatio(zoomLevel);
+  // Torch is reliable in video mode on many Android devices.
+  const cameraViewMode: "picture" | "video" =
+    mode === "video" || recording || torchOn ? "video" : "picture";
 
   useImperativeHandle(
     ref,
@@ -169,11 +172,10 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
     );
   }
 
-  const cameraViewMode: "picture" | "video" = mode === "video" || recording ? "video" : "picture";
-
   return (
     <View style={styles.wrap}>
       <CameraView
+        key={torchOn ? "torch-on" : "torch-off"}
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing={facing}
