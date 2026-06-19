@@ -29,8 +29,10 @@ const {
   unregisterPushDeviceToken,
   sendIncomingCallPush,
   sendSocialPushToUser,
-  sendSocialPushToFollowers
+  sendSocialPushToFollowers,
+  directMessagePushPayload
 } = require("../pushNotifications");
+const { buildShareReelHtml } = require("../shareReelPage");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -2968,17 +2970,15 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
         // no-op
       }
     }
+    const dmPush = directMessagePushPayload(body);
     fireSocialPush({
       userId: peerUserId,
       type: isLiveShare ? "live_share" : "direct_message",
       actorId: me,
       actorName: await actorDisplayName(me),
       postId: livePostId,
-      commentExcerpt: isLiveShare
-        ? "Shared a live video"
-        : body.length > 120
-          ? `${body.slice(0, 117)}...`
-          : body
+      commentExcerpt: dmPush.excerpt,
+      imageUrl: dmPush.imageUrl
     });
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {
@@ -5206,6 +5206,50 @@ router.post("/v1/payments/razorpay/verify", (req, res) => {
   }
 
   res.json({ ok: true, mock: false });
+});
+
+router.get("/share/reel/:postId", async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).send("Invalid reel link");
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        p.caption,
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      WHERE p.id = $1
+      LIMIT 1
+      `,
+      [postId]
+    );
+    if (!result.rows[0]) {
+      res.status(404).send("Reel not found");
+      return;
+    }
+    const post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.send(
+      buildShareReelHtml(post, {
+        postId,
+        userAgent: req.headers["user-agent"] || ""
+      })
+    );
+  } catch (error) {
+    res.status(500).send("Failed to load reel");
+  }
 });
 
 module.exports = router;

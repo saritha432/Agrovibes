@@ -10,6 +10,7 @@ import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { EditProfilePage } from "../pages/EditProfilePage";
 import { ProfilePage } from "../pages/ProfilePage";
 import { ReelsPage } from "../pages/ReelsPage";
+import { ReelWatchPage } from "../pages/ReelWatchPage";
 import { SearchPage } from "../pages/SearchPage";
 
 function ProtectedLayout() {
@@ -29,6 +30,7 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/watch/:postId" element={<ReelWatchPage />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<HomePage />} />
         <Route path="search" element={<SearchPage />} />

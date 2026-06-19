@@ -1,5 +1,18 @@
 import type { HomePost } from "../services/api";
 
+export const REEL_GRID_TILE_A = "#303132";
+export const REEL_GRID_TILE_B = "#383838";
+
+export function reelGridTileBackground(index: number, columns = 3) {
+  const row = Math.floor(index / columns);
+  const col = index % columns;
+  return (row + col) % 2 === 0 ? REEL_GRID_TILE_A : REEL_GRID_TILE_B;
+}
+
+export function reelPlayerBackground(index: number) {
+  return index % 2 === 0 ? REEL_GRID_TILE_A : REEL_GRID_TILE_B;
+}
+
 export function isReelPost(post: HomePost): boolean {
   return Boolean(String(post.videoUrl || "").trim());
 }

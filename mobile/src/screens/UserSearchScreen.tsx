@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,44 +13,76 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
-import type { RootStackParamList } from "../navigation/RootNavigator";
-import { fetchHomePosts, type HomePost } from "../services/api";
-import { socialDiscoveryTheme as T } from "../theme/socialDiscoveryTheme";
+import { UserAvatar } from "../components/UserAvatar";
+import { formatDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
-import { isReelPost, postMatchesExploreQuery, reelGridStillUri } from "../utils/reelGrid";
+import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { fetchHomePosts, fetchUsers, type HomePost } from "../services/api";
+import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
+import { APP_LIME } from "../theme/appColors";
+import { isReelPost, reelGridStillUri, reelGridTileBackground } from "../utils/reelGrid";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { ResizeMode, Video } from "expo-av";
 
 const GRID_GAP = 2;
 const GRID_PAD = 2;
+const BG = "#121212";
+const SEARCH_BG = "#303132";
+const ROW_BORDER = "#2a2a2a";
+const MUTED = "#9e9e9e";
+const TEXT = "#ffffff";
+
+const EXPLORE_ASSETS = {
+  search: require("../../assets/searchY-icon.svg"),
+  video: require("../../assets/video-icon.svg")
+} as const;
+
+type SearchUser = {
+  id?: number;
+  key?: string;
+  name: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+};
+
+function tileBackground(index: number) {
+  return reelGridTileBackground(index, 3);
+}
+
+function normalizeName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
 
 export function UserSearchScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { width } = useWindowDimensions();
-  const { t } = useLanguage();
-  const { token } = useAuth();
+  const { t, language } = useLanguage();
+  const { token, user } = useAuth();
 
   const [query, setQuery] = useState("");
   const [posts, setPosts] = useState<HomePost[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingReels, setLoadingReels] = useState(true);
+  const [users, setUsers] = useState<SearchUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [reelViewer, setReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
 
   const gridTileSize = (width - GRID_PAD * 2 - GRID_GAP * 2) / 3;
   const reelTileHeight = Math.round(gridTileSize * (16 / 9));
 
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: t("search") });
-  }, [navigation, t]);
+  const trimmedQuery = query.trim();
+  const isUserSearchMode = trimmedQuery.length > 0;
 
   useFocusEffect(
     useCallback(() => {
       StatusBar.setBarStyle("light-content");
       if (Platform.OS === "android") {
-        StatusBar.setBackgroundColor(T.navBg);
+        StatusBar.setBackgroundColor(BG);
       }
       return () => {
         StatusBar.setBarStyle("dark-content");
@@ -62,14 +94,14 @@ export function UserSearchScreen() {
   );
 
   const loadExploreReels = useCallback(async () => {
-    setLoading(true);
+    setLoadingReels(true);
     try {
       const data = await fetchHomePosts(token);
       setPosts((data.posts || []).filter(isReelPost));
     } catch {
       setPosts([]);
     } finally {
-      setLoading(false);
+      setLoadingReels(false);
     }
   }, [token]);
 
@@ -79,24 +111,112 @@ export function UserSearchScreen() {
     }, [loadExploreReels])
   );
 
-  const trimmedQuery = query.trim();
-  const visibleReels = useMemo(
-    () => posts.filter((post) => postMatchesExploreQuery(post, trimmedQuery)),
-    [posts, trimmedQuery]
+  const loadUsers = useCallback(
+    async (searchText: string) => {
+      const needle = searchText.trim();
+      if (!needle) {
+        setUsers([]);
+        return;
+      }
+
+      setLoadingUsers(true);
+      const list: SearchUser[] = [];
+      const seen = new Set<string>();
+      const selfId = Number(user?.id) || 0;
+      const selfName = normalizeName(user?.fullName || user?.username || "");
+      const identity = { name: user?.fullName || "", key: user?.email || String(user?.id || "") };
+
+      try {
+        if (token) {
+          try {
+            const { users: remoteUsers } = await fetchUsers(token, { search: needle, limit: 50 });
+            for (const remoteUser of remoteUsers) {
+              if (remoteUser.id === selfId) continue;
+              const displayName = remoteUser.fullName || remoteUser.username || "";
+              const n = normalizeName(displayName);
+              if (!n || n === selfName || seen.has(String(remoteUser.id))) continue;
+              seen.add(String(remoteUser.id));
+              list.push({
+                id: remoteUser.id,
+                key: String(remoteUser.id),
+                name: displayName,
+                username: remoteUser.username,
+                avatarUrl: remoteUser.avatarUrl
+              });
+            }
+            setUsers(list.sort((a, b) => a.name.localeCompare(b.name)));
+            return;
+          } catch {
+            /* fall through to local network */
+          }
+        }
+
+        const { followers, following } = await getLocalFollowNetworkByIdentity(identity);
+        const q = normalizeName(needle);
+        for (const person of [...following, ...followers]) {
+          const key = normalizeName(person.name);
+          if (!key || key === selfName || seen.has(key)) continue;
+          if (!key.includes(q)) continue;
+          seen.add(key);
+          list.push({ name: person.name, key: person.key });
+        }
+        setUsers(list.sort((a, b) => a.name.localeCompare(b.name)));
+      } catch {
+        setUsers([]);
+      } finally {
+        setLoadingUsers(false);
+      }
+    },
+    [token, user?.email, user?.fullName, user?.id, user?.username]
   );
+
+  useEffect(() => {
+    if (!isUserSearchMode) {
+      setUsers([]);
+      setLoadingUsers(false);
+      return;
+    }
+    const handle = setTimeout(() => {
+      void loadUsers(trimmedQuery);
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [isUserSearchMode, loadUsers, trimmedQuery]);
+
+  const exploreReels = useMemo(() => posts, [posts]);
 
   const openReelViewer = useCallback(
     (post: HomePost) => {
-      const index = visibleReels.findIndex((p) => p.id === post.id);
-      setReelViewer({ posts: visibleReels, initialIndex: index >= 0 ? index : 0 });
+      const index = exploreReels.findIndex((p) => p.id === post.id);
+      setReelViewer({ posts: exploreReels, initialIndex: index >= 0 ? index : 0 });
     },
-    [visibleReels]
+    [exploreReels]
+  );
+
+  const openUserProfile = useCallback(
+    (person: SearchUser) => {
+      const selfId = Number(user?.id) || 0;
+      if (person.id && person.id === selfId) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: person.id,
+        userName: person.name,
+        userKey: person.key,
+        avatarUrl: person.avatarUrl ?? null
+      });
+    },
+    [user?.id]
   );
 
   const renderGridItem = useCallback(
-    ({ item }: { item: HomePost }) => {
+    ({ item, index }: { item: HomePost; index: number }) => {
       const stillUri = reelGridStillUri(item);
-      const tileStyle = [styles.gridTile, { width: gridTileSize, height: reelTileHeight }];
+      const tileBg = tileBackground(index);
+      const tileStyle = [
+        styles.gridTile,
+        { width: gridTileSize, height: reelTileHeight, backgroundColor: tileBg }
+      ];
 
       return (
         <Pressable style={tileStyle} onPress={() => openReelViewer(item)}>
@@ -112,11 +232,9 @@ export function UserSearchScreen() {
               isMuted
               useNativeControls={false}
             />
-          ) : (
-            <View style={[styles.gridImage, styles.gridPlaceholder]} />
-          )}
-          <View style={styles.gridPlayBadge} pointerEvents="none">
-            <Ionicons name="play" size={12} color="#111" />
+          ) : null}
+          <View style={styles.gridVideoBadge} pointerEvents="none">
+            <Image source={EXPLORE_ASSETS.video} style={styles.gridVideoIcon} resizeMode="contain" />
           </View>
         </Pressable>
       );
@@ -124,15 +242,47 @@ export function UserSearchScreen() {
     [gridTileSize, openReelViewer, reelTileHeight]
   );
 
+  const renderUserRow = useCallback(
+    ({ item }: { item: SearchUser }) => {
+      const displayName = formatDisplayName(item.name, language, t);
+      const handle = item.username ? `@${item.username.replace(/^@/, "")}` : null;
+
+      return (
+        <Pressable style={styles.userRow} onPress={() => openUserProfile(item)}>
+          <UserAvatar
+            uri={item.avatarUrl}
+            name={item.name}
+            size={48}
+            borderRadius={24}
+            fallbackBackgroundColor={SEARCH_BG}
+            initialsColor={MUTED}
+          />
+          <View style={styles.userMeta}>
+            <Text style={styles.userName} numberOfLines={1}>
+              {handle || displayName}
+            </Text>
+            {handle ? (
+              <Text style={styles.userSub} numberOfLines={1}>
+                {displayName}
+              </Text>
+            ) : null}
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={MUTED} />
+        </Pressable>
+      );
+    },
+    [language, openUserProfile, t]
+  );
+
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.searchWrap}>
-        <Image source={require("../../assets/search.png")} style={styles.searchIcon} resizeMode="contain" />
+        <Image source={EXPLORE_ASSETS.search} style={styles.searchIcon} resizeMode="contain" />
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder={t("search")}
-          placeholderTextColor={T.muted}
+          placeholder={t("searchUsers")}
+          placeholderTextColor={MUTED}
           style={styles.input}
           autoCapitalize="none"
           autoCorrect={false}
@@ -140,23 +290,42 @@ export function UserSearchScreen() {
         />
         {query.length > 0 ? (
           <Pressable hitSlop={8} onPress={() => setQuery("")}>
-            <Ionicons name="close-circle" size={18} color={T.muted} />
+            <Ionicons name="close-circle" size={18} color={MUTED} />
           </Pressable>
         ) : null}
       </View>
 
-      {loading ? (
+      {isUserSearchMode ? (
+        loadingUsers ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color={APP_LIME} />
+          </View>
+        ) : users.length === 0 ? (
+          <View style={styles.centered}>
+            <Text style={styles.emptyTitle}>{t("noUsersFound")}</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={users}
+            keyExtractor={(item) => `${item.key || item.id || item.name}`}
+            renderItem={renderUserRow}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.userList}
+          />
+        )
+      ) : loadingReels ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={T.accent} />
+          <ActivityIndicator color={APP_LIME} />
         </View>
-      ) : visibleReels.length === 0 ? (
+      ) : exploreReels.length === 0 ? (
         <View style={styles.centered}>
-          <Text style={styles.emptyTitle}>{trimmedQuery ? t("emptyNothingTitle") : t("emptyReelsTitle")}</Text>
-          {!trimmedQuery ? <Text style={styles.emptySub}>{t("emptyReelsSub")}</Text> : null}
+          <Text style={styles.emptyTitle}>{t("emptyReelsTitle")}</Text>
+          <Text style={styles.emptySub}>{t("emptyReelsSub")}</Text>
         </View>
       ) : (
         <FlatList
-          data={visibleReels}
+          data={exploreReels}
           keyExtractor={(item) => String(item.id)}
           numColumns={3}
           renderItem={renderGridItem}
@@ -184,50 +353,56 @@ export function UserSearchScreen() {
           });
         }}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: T.bg },
+  root: { flex: 1, backgroundColor: BG },
   searchWrap: {
-    marginHorizontal: 14,
+    marginHorizontal: 16,
     marginTop: 10,
     marginBottom: 8,
-    backgroundColor: T.searchBarBg,
+    backgroundColor: SEARCH_BG,
     borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: T.border,
     paddingHorizontal: 12,
     height: 40,
     alignItems: "center",
     flexDirection: "row",
     gap: 8
   },
-  searchIcon: { width: 18, height: 18, tintColor: T.muted },
-  input: { flex: 1, color: T.text, fontSize: 15, paddingVertical: 0 },
+  searchIcon: { width: 20, height: 20 },
+  input: { flex: 1, color: TEXT, fontSize: 15, paddingVertical: 0 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  emptyTitle: { color: T.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
-  emptySub: { color: T.muted, fontSize: 14, textAlign: "center", marginTop: 8 },
+  emptyTitle: { color: TEXT, fontSize: 16, fontWeight: "700", textAlign: "center" },
+  emptySub: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 8 },
+  userList: { paddingBottom: 16 },
+  userRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: ROW_BORDER
+  },
+  userMeta: { flex: 1, minWidth: 0 },
+  userName: { color: TEXT, fontSize: 15, fontWeight: "700" },
+  userSub: { color: MUTED, fontSize: 13, marginTop: 2, fontWeight: "500" },
   gridList: { paddingHorizontal: GRID_PAD, paddingBottom: 16 },
   gridRow: { gap: GRID_GAP, marginBottom: GRID_GAP },
   gridTile: {
-    borderRadius: 4,
     overflow: "hidden",
-    backgroundColor: "#1a1a1a",
     position: "relative"
   },
   gridImage: { width: "100%", height: "100%" },
-  gridPlaceholder: { backgroundColor: "#262626" },
-  gridPlayBadge: {
+  gridVideoBadge: {
     position: "absolute",
-    top: 6,
-    right: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    alignItems: "center",
-    justifyContent: "center"
+    top: 8,
+    right: 8
+  },
+  gridVideoIcon: {
+    width: 20,
+    height: 20
   }
 });

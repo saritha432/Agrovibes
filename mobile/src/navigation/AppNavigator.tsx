@@ -7,6 +7,8 @@ import type { HomePost } from "../services/api";
 import { MarketStackNavigator } from "./MarketStackNavigator";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { ServicesScreen } from "../screens/ServicesScreen";
+import { UserSearchScreen } from "../screens/UserSearchScreen";
+import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
 import type { OpenCreateOptions } from "../screens/HomeScreen";
@@ -76,9 +78,11 @@ export function AppNavigator() {
             />
           )}
         />
+        <Tab.Screen name="Search" component={UserSearchScreen} />
         <Tab.Screen name="Market" component={MarketStackNavigator} />
         <Tab.Screen name="Learn" component={LearnStackNavigator} />
         <Tab.Screen name="Services" component={ServicesScreen} />
+        <Tab.Screen name="Messages" component={DirectInboxScreen} />
         <Tab.Screen name="Profile" component={ProfileScreen} />
       </Tab.Navigator>
       {isCreateOpen ? (

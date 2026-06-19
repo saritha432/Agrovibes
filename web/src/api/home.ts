@@ -14,6 +14,15 @@ export async function fetchHomePosts(token?: string | null) {
   return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
 }
 
+export async function fetchHomePost(token: string | null | undefined, postId: number) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, {
+    headers
+  });
+  return (await parseJsonOrThrow(response)) as { post: HomePost };
+}
+
 export async function likeHomePost(token: string, postId: number) {
   return (await fetchWithAuth(
     `${API_BASE_URL}/v1/home/posts/${postId}/like`,

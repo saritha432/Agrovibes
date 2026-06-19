@@ -5,10 +5,35 @@ import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
 
+const API_FETCH_TIMEOUT_MS = 45_000;
+const API_FETCH_RETRIES = 2;
+
+function isPrivateOrLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (!host || host === "localhost" || host === "127.0.0.1" || host === "10.0.2.2") return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  return false;
+}
+
+function isPrivateOrLocalApiUrl(url: string): boolean {
+  try {
+    return isPrivateOrLocalHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function resolveApiBaseUrl() {
   const envUrl = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_API_BASE_URL;
   if (envUrl && envUrl.trim().length > 0) {
-    return envUrl.trim().replace(/\/$/, "");
+    const trimmed = envUrl.trim().replace(/\/$/, "");
+    // Release builds must not call a LAN/dev API — mobile data cannot reach 192.168.x.x etc.
+    if (!__DEV__ && isPrivateOrLocalApiUrl(trimmed)) {
+      return PRODUCTION_API_BASE_URL;
+    }
+    return trimmed;
   }
 
   const webLocation = (globalThis as { location?: { hostname?: string } }).location;
@@ -20,9 +45,34 @@ function resolveApiBaseUrl() {
     return PRODUCTION_API_BASE_URL;
   }
 
-  // Native (dev + release): default to production so real devices use Render egress.
-  // Local backend on emulator: EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:5000/api in mobile/.env
+  // Native release + dev default: public HTTPS API (works on Wi‑Fi and mobile data).
   return PRODUCTION_API_BASE_URL;
+}
+
+async function fetchWithRetry(url: string, init: RequestInit = {}, timeoutMs = API_FETCH_TIMEOUT_MS): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= API_FETCH_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      clearTimeout(timer);
+      if (attempt < API_FETCH_RETRIES && [502, 503, 504].includes(response.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 1800 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      clearTimeout(timer);
+      lastError = error;
+      if (attempt < API_FETCH_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 1800 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  if (lastError instanceof Error) throw lastError;
+  throw new Error("Network request failed");
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
@@ -163,6 +213,9 @@ export function formatAuthError(error: unknown, fallback = "Something went wrong
   if (status === 502 || status === 503 || status === 504) {
     return "Server is temporarily unavailable. Please try again in a moment.";
   }
+  if (/network request failed|failed to fetch|aborted|timed out|network error/i.test(msg)) {
+    return "No internet connection. Turn on mobile data or Wi‑Fi and try again.";
+  }
   if (status != null && status >= 500) {
     return "Something went wrong on our side. Please try again.";
   }
@@ -185,7 +238,7 @@ export async function authRegister(payload: {
   username?: string;
   phone?: string;
 }) {
-  const response = await fetch(`${API_BASE_URL}/v1/auth/register`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -194,7 +247,7 @@ export async function authRegister(payload: {
 }
 
 export async function authLogin(payload: { email?: string; identifier?: string; password: string }) {
-  const response = await fetch(`${API_BASE_URL}/v1/auth/login`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -203,7 +256,7 @@ export async function authLogin(payload: { email?: string; identifier?: string; 
 }
 
 export async function sendPhoneOtp(payload: { phone: string }) {
-  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -212,7 +265,7 @@ export async function sendPhoneOtp(payload: { phone: string }) {
 }
 
 export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
-  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -267,7 +320,7 @@ export async function fetchUsers(token: string, params: { search?: string; limit
 }
 
 export async function resetPasswordWithOtp(payload: { phone: string; code: string; newPassword: string }) {
-  const response = await fetch(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -278,7 +331,7 @@ export async function resetPasswordWithOtp(payload: { phone: string; code: strin
 export async function fetchWithAuth(url: string, token: string | null, init: RequestInit = {}) {
   const headers: any = { ...(init.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(url, { ...init, headers });
+  const response = await fetchWithRetry(url, { ...init, headers });
   return await parseJsonOrThrow(response);
 }
 
@@ -469,7 +522,7 @@ export interface Course {
 }
 
 export async function fetchMarketplaceListings() {
-  const response = await fetch(`${API_BASE_URL}/v1/marketplace/listings`);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/marketplace/listings`);
   if (!response.ok) {
     throw new Error("Failed to load marketplace listings");
   }
@@ -477,7 +530,7 @@ export async function fetchMarketplaceListings() {
 }
 
 export async function fetchCommunityQuestions() {
-  const response = await fetch(`${API_BASE_URL}/v1/community/questions`);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/community/questions`);
   if (!response.ok) {
     throw new Error("Failed to load community questions");
   }
@@ -485,7 +538,7 @@ export async function fetchCommunityQuestions() {
 }
 
 export async function fetchHomeStories() {
-  const response = await fetch(`${API_BASE_URL}/v1/home/stories`);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`);
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }
@@ -499,7 +552,7 @@ export async function createHomeStory(
 ) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/stories`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload)
@@ -513,7 +566,7 @@ export async function createHomeStory(
 export async function fetchHomePosts(token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts`, { headers });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load home posts");
   }
@@ -530,7 +583,7 @@ export async function fetchMyHomePosts(token: string) {
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, { headers });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load post");
   }
@@ -550,7 +603,7 @@ export async function fetchHomePostLikes(postId: number, token?: string | null) 
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   try {
-    const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/likes`, {
+    const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/likes`, {
       headers
     });
     if (!response.ok) {
@@ -586,7 +639,7 @@ export async function fetchSavedHomePosts(token: string) {
  */
 export async function fetchTaggedHomePosts(token: string) {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts/tagged`, { headers });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/tagged`, { headers });
   if (response.status === 404) {
     return { posts: [] as HomePost[] };
   }
@@ -631,7 +684,7 @@ export async function reportHomePost(token: string, postId: number, reason?: str
 export async function fetchHomePostComments(postId: number, token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, { headers });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load comments");
   }
@@ -687,7 +740,7 @@ export async function deleteHomePostComment(token: string, postId: number, comme
 }
 
 export async function fetchLearnCourses() {
-  const response = await fetch(`${API_BASE_URL}/v1/learn/courses`);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/learn/courses`);
   if (!response.ok) {
     throw new Error("Failed to load courses");
   }
@@ -695,7 +748,7 @@ export async function fetchLearnCourses() {
 }
 
 export async function fetchLearnCourseById(courseId: string) {
-  const response = await fetch(`${API_BASE_URL}/v1/learn/courses/${encodeURIComponent(courseId)}`);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/learn/courses/${encodeURIComponent(courseId)}`);
   if (!response.ok) {
     throw new Error("Failed to load course");
   }
@@ -766,7 +819,7 @@ export async function createHomePost(payload: {
 }, token?: string | null) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts`, {
     method: "POST",
     headers,
     body: JSON.stringify(payload)
@@ -1190,10 +1243,14 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
     );
   }
 
-  const uploadRes = await fetch(`${API_BASE_URL}/v1/media/upload`, {
-    method: "POST",
-    body: form as any
-  });
+  const uploadRes = await fetchWithRetry(
+    `${API_BASE_URL}/v1/media/upload`,
+    {
+      method: "POST",
+      body: form as any
+    },
+    120_000
+  );
   if (!uploadRes.ok) {
     let detail = `Upload failed (${uploadRes.status})`;
     try {
@@ -1254,7 +1311,7 @@ export type RazorpayCreateOrderResult =
   | { mock: false; keyId: string; order: RazorpayOrderPayload };
 
 export async function createRazorpayOrder(payload: { amountPaise: number; receipt?: string }) {
-  const response = await fetch(`${API_BASE_URL}/v1/payments/razorpay/create-order`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/payments/razorpay/create-order`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ amountPaise: payload.amountPaise, receipt: payload.receipt })
@@ -1267,7 +1324,7 @@ export async function verifyRazorpayPayment(body: {
   razorpay_payment_id: string;
   razorpay_signature: string;
 }) {
-  const response = await fetch(`${API_BASE_URL}/v1/payments/razorpay/verify`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/payments/razorpay/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

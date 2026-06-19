@@ -29,6 +29,36 @@ ios/
 # Local inspect/export trees (backend uploads, videos) — not used by the app build
 eas-inspect-out/
 
+# Unused bulky market SVG exports (app uses PNG icons; Metro only bundles require()'d files)
+assets/market/seeds.svg
+assets/market/crop.svg
+assets/market/daily-essentials.svg
+assets/market/freshproduce.svg
+assets/market/new-equiptment.svg
+assets/market/dairy-products.svg
+assets/market/season-items.svg
+assets/market/seeds-saplings.svg
+assets/market/oder_spare_ parts.svg
+assets/market/field_mappimg.svg
+assets/market/greenhouse.svg
+assets/market/apply-for-loan.svg
+assets/market/essentials.svg
+assets/market/low-price-veggies.svg
+assets/market/used-refurbished.svg
+assets/market/find-a-dealer.svg
+assets/market/fertilizers-nutrients.svg
+assets/market/fertilizers.svg
+assets/market/check-subsidies.svg
+assets/market/bulk-orders.svg
+
+# Unused root assets
+assets/splash.mp4
+assets/cropvibe2.png
+assets/Cropvibe1.png
+assets/freepik--background-complete--inject-25.png
+assets/Frame (14).png
+assets/icon-preview-android.png
+
 # Legacy duplicate asset name (conflicts with cropvibe.gif on Android)
 assets/cropvibe.png
 assets/cropvibe-intro.png

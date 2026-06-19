@@ -87,6 +87,7 @@ import {
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
+import { reelPlayerBackground } from "../utils/reelGrid";
 
 export type OpenCreateOptions = {
   liveTopic?: string;
@@ -2943,7 +2944,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const renderFullScreenReel = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
-      const reelContentWidth = reelViewerOpen ? windowWidth : reelFrameWidth > 0 ? reelFrameWidth : windowWidth - 20;
+      const reelContentWidth = reelViewerOpen ? windowWidth : reelFrameWidth > 0 ? reelFrameWidth : windowWidth;
       const pageH = reelViewerOpen
         ? windowHeight
         : reelSlotHeight > 0
@@ -3000,7 +3001,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
       return (
-        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth }]}>
+        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && (isActive || isNearActive) ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
@@ -3012,7 +3013,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
-                fit={reelViewerOpen ? "contain" : "cover"}
+                fit="cover"
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
                 useNativeControls={false}
@@ -3071,7 +3072,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Pressable>
           ) : (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
+              <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
           {isCarousel ? (
@@ -3549,9 +3550,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
-          <View style={[styles.reelSlot, isReelSurfaceTab ? styles.reelSlotCardGap : null]}>
+          <View style={styles.reelSlot}>
             <View
-              style={[styles.reelFrame, isReelSurfaceTab ? styles.reelFrameCard : null]}
+              style={styles.reelFrame}
               onLayout={(e) => {
                 const { width, height } = e.nativeEvent.layout;
                 setReelFrameWidth(Math.round(width));
@@ -4273,29 +4274,18 @@ const styles = StyleSheet.create({
   },
   reelSlot: {
     flex: 1,
-    minHeight: 0,
-    paddingHorizontal: 10,
-    paddingBottom: 12
-  },
-  reelSlotCardGap: {
-    paddingTop: 12
+    minHeight: 0
   },
   reelFrame: {
     flex: 1,
-    borderRadius: 22,
     overflow: "hidden",
     backgroundColor: APP_DARK_BG
-  },
-  reelFrameCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.12)"
   },
   reelFramePlaceholder: { flex: 1, backgroundColor: APP_DARK_BG },
   reelFrameList: { flex: 1 },
   reelPage: {
     backgroundColor: APP_DARK_BG,
-    overflow: "hidden",
-    borderRadius: 22
+    overflow: "hidden"
   },
   reelViewerTopChrome: {
     position: "absolute",

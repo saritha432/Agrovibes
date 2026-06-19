@@ -4,7 +4,6 @@ import { Asset } from "expo-asset";
 import React from "react";
 import {
   Image,
-  ImageSourcePropType,
   Platform,
   Pressable,
   StyleSheet,
@@ -16,7 +15,6 @@ import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { useLanguage } from "../localization/LanguageContext";
-import { navigateToDirectInbox, navigateToUserSearch } from "../navigation/navigationRef";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
@@ -27,22 +25,26 @@ const MUTED = "#b9bec3";
 const BRAND_ACCENT = APP_LIME;
 const TAB_ICON_SIZE = 24;
 
-const TAB_PNG_ICONS = {
-  search: require("../../assets/search.png"),
-  messages: require("../../assets/messages.png")
+const BOTTOM_TAB_ICONS = {
+  search: {
+    active: require("../../assets/bottom-icons/search-active.svg"),
+    inactive: require("../../assets/bottom-icons/search.svg")
+  },
+  messages: {
+    active: require("../../assets/bottom-icons/chat-active.svg"),
+    inactive: require("../../assets/bottom-icons/chat.svg")
+  },
+  create: {
+    active: require("../../assets/bottom-icons/create-active.svg"),
+    inactive: require("../../assets/bottom-icons/create.svg")
+  },
+  profile: {
+    active: require("../../assets/bottom-icons/profile-active.svg"),
+    inactive: require("../../assets/bottom-icons/profile.svg")
+  }
 } as const;
 
 type SvgIconModule = number | string | { uri?: string; default?: string };
-
-const CREATE_SVG_ICONS = {
-  active: require("../../assets/bottom-icons/create-active.svg"),
-  inactive: require("../../assets/bottom-icons/create.svg")
-};
-
-// Market, Learn, Community icons kept for reference:
-// Market: bottom-icons/market-active.svg + market.svg
-// Learn: bottom-icons/learn-active.svg + learn.svg
-// Services: bottom-icons/community-active.svg + community.svg
 
 function iconModuleToUri(module: SvgIconModule): string | null {
   if (typeof module === "string" && module.length > 0) return module;
@@ -60,18 +62,18 @@ function iconModuleToUri(module: SvgIconModule): string | null {
   return null;
 }
 
-function TabPngIcon({ source, size = TAB_ICON_SIZE }: { source: ImageSourcePropType; size?: number }) {
-  return (
-    <Image
-      source={source}
-      style={{ width: size, height: size }}
-      resizeMode="contain"
-    />
-  );
-}
-
-function TabCreateIcon({ focused, size = TAB_ICON_SIZE }: { focused: boolean; size?: number }) {
-  const module = focused ? CREATE_SVG_ICONS.active : CREATE_SVG_ICONS.inactive;
+function TabSvgIcon({
+  focused,
+  icons,
+  size = TAB_ICON_SIZE,
+  fallbackName
+}: {
+  focused: boolean;
+  icons: { active: SvgIconModule; inactive: SvgIconModule };
+  size?: number;
+  fallbackName?: keyof typeof Ionicons.glyphMap;
+}) {
+  const module = focused ? icons.active : icons.inactive;
   const [uri, setUri] = React.useState<string | null>(() => iconModuleToUri(module));
   const [failed, setFailed] = React.useState(false);
 
@@ -100,7 +102,7 @@ function TabCreateIcon({ focused, size = TAB_ICON_SIZE }: { focused: boolean; si
   if (!uri || failed) {
     return (
       <Ionicons
-        name={focused ? "add-circle" : "add-circle-outline"}
+        name={fallbackName ?? (focused ? "ellipse" : "ellipse-outline")}
         size={size}
         color={focused ? BRAND_ACCENT : MUTED}
       />
@@ -122,12 +124,16 @@ function TabCreateIcon({ focused, size = TAB_ICON_SIZE }: { focused: boolean; si
   } catch {
     return (
       <Ionicons
-        name={focused ? "add-circle" : "add-circle-outline"}
+        name={fallbackName ?? (focused ? "ellipse" : "ellipse-outline")}
         size={size}
         color={focused ? BRAND_ACCENT : MUTED}
       />
     );
   }
+}
+
+function TabCreateIcon({ focused, size = TAB_ICON_SIZE }: { focused: boolean; size?: number }) {
+  return <TabSvgIcon focused={focused} icons={BOTTOM_TAB_ICONS.create} size={size} fallbackName="add-circle-outline" />;
 }
 
 function TabProfileIcon({ focused }: { focused: boolean }) {
@@ -137,10 +143,11 @@ function TabProfileIcon({ focused }: { focused: boolean }) {
 
   if (!avatarUri) {
     return (
-      <Ionicons
-        name={focused ? "person-circle" : "person-circle-outline"}
+      <TabSvgIcon
+        focused={focused}
+        icons={BOTTOM_TAB_ICONS.profile}
         size={TAB_ICON_SIZE}
-        color={focused ? BRAND_ACCENT : MUTED}
+        fallbackName={focused ? "person-circle" : "person-circle-outline"}
       />
     );
   }
@@ -242,6 +249,8 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
   };
 
   const homeFocused = isRouteFocused("Home");
+  const searchFocused = isRouteFocused("Search");
+  const messagesFocused = isRouteFocused("Messages");
   const profileFocused = isRouteFocused("Profile");
 
   return (
@@ -260,9 +269,13 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           />
         </TabSlot>
 
-        {/* Was Market */}
-        <TabSlot focused={false} onPress={navigateToUserSearch} accessibilityLabel="Search" label="Search">
-          <TabPngIcon source={TAB_PNG_ICONS.search} />
+        <TabSlot
+          focused={searchFocused}
+          onPress={() => pressRoute("Search")}
+          accessibilityLabel="Discover"
+          label="Discover"
+        >
+          <TabSvgIcon focused={searchFocused} icons={BOTTOM_TAB_ICONS.search} fallbackName="search-outline" />
         </TabSlot>
 
         <TabSlot
@@ -274,15 +287,14 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           <TabCreateIcon focused={createFocused} />
         </TabSlot>
 
-        {/* Was Community / Services */}
         <TabSlot
-          focused={false}
-          onPress={navigateToDirectInbox}
-          accessibilityLabel="Messages"
-          label="Messages"
+          focused={messagesFocused}
+          onPress={() => pressRoute("Messages")}
+          accessibilityLabel="Chat"
+          label="Chat"
           showBadge={messageUnreadCount}
         >
-          <TabPngIcon source={TAB_PNG_ICONS.messages} />
+          <TabSvgIcon focused={messagesFocused} icons={BOTTOM_TAB_ICONS.messages} fallbackName="chatbubble-outline" />
         </TabSlot>
 
         {/* Was Learn */}

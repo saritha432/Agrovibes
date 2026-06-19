@@ -1,6 +1,4 @@
 /** Poppins font family names (loaded via @expo-google-fonts/poppins). */
-export const FONT_THIN = "Poppins_100Thin";
-export const FONT_LIGHT = "Poppins_300Light";
 export const FONT_REGULAR = "Poppins_400Regular";
 export const FONT_MEDIUM = "Poppins_500Medium";
 export const FONT_SEMIBOLD = "Poppins_600SemiBold";
@@ -12,9 +10,9 @@ export const FONT_BLACK = "Poppins_900Black";
 export const APP_FONT_FAMILY = FONT_REGULAR;
 
 const NUMERIC_WEIGHT: Record<number, string> = {
-  100: FONT_THIN,
-  200: FONT_LIGHT,
-  300: FONT_LIGHT,
+  100: FONT_REGULAR,
+  200: FONT_REGULAR,
+  300: FONT_REGULAR,
   400: FONT_REGULAR,
   500: FONT_MEDIUM,
   600: FONT_SEMIBOLD,
@@ -30,9 +28,9 @@ export function fontFamilyForWeight(weight?: string | number | null): string {
     const named: Record<string, string> = {
       normal: FONT_REGULAR,
       bold: FONT_BOLD,
-      "100": FONT_THIN,
-      "200": FONT_LIGHT,
-      "300": FONT_LIGHT,
+      "100": FONT_REGULAR,
+      "200": FONT_REGULAR,
+      "300": FONT_REGULAR,
       "400": FONT_REGULAR,
       "500": FONT_MEDIUM,
       "600": FONT_SEMIBOLD,

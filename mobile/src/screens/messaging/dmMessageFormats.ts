@@ -62,3 +62,28 @@ export function formatVoiceDuration(ms?: number) {
   const s = totalSec % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+/** Inbox + notification-style preview for structured chat payloads (WhatsApp / Instagram). */
+export function formatDmInboxPreview(body: string, t: (key: string) => string): string {
+  const text = String(body || "").trim();
+  if (!text) return "";
+
+  const media = parseDmMediaMessage(text);
+  if (media) {
+    return media.kind === "video" ? t("sharedVideo") : t("sharedMedia");
+  }
+
+  const voice = parseDmVoiceMessage(text);
+  if (voice) {
+    if (voice.durationMs) {
+      return `${t("voiceMessage")} (${formatVoiceDuration(voice.durationMs)})`;
+    }
+    return t("voiceMessage");
+  }
+
+  if (text.startsWith("[Cropvibe Live]")) return t("sharedLive");
+  if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return t("sharedReel");
+  if (text.startsWith("[Cropvibe Profile]")) return t("sharedProfile");
+
+  return text;
+}

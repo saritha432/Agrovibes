@@ -21,6 +21,7 @@ import { ResizeMode, Video } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
@@ -49,17 +50,46 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
-import { navigateToEditProfile, navigateToUserSearch } from "../navigation/navigationRef";
+import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
-import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
+import { APP_LIME } from "../theme/appColors";
+import { reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
 
-const TEAL = APP_LIME;
-const CREAM = APP_BLACK;
-const CARD = APP_SURFACE;
-const TEXT = "#f8fafc";
-const MUTED = "#97a0a8";
-const BEIGE_FOLLOW = APP_BLACK;
+const PAGE_BG = "#262626";
+const SURFACE = "#303132";
+const SURFACE_ALT = "#383838";
+const TEXT = "#ffffff";
 const LIME = APP_LIME;
+const PROFILE_HEADER_HEIGHT = 61;
+const PROFILE_HEADER_MAX_WIDTH = 430;
+const PROFILE_TAB_ICON = 32;
+
+const PROFILE_ASSETS = {
+  menu: require("../../assets/menu-icon.svg")
+} as const;
+
+const PROFILE_TAB_ICONS = {
+  Posts: {
+    inactive: require("../../assets/feed.svg"),
+    active: require("../../assets/feed-active.svg")
+  },
+  Reels: {
+    inactive: require("../../assets/reels.svg"),
+    active: require("../../assets/reels-active.svg")
+  },
+  Saved: {
+    inactive: require("../../assets/reshare.svg"),
+    active: require("../../assets/reshare-active.svg")
+  },
+  Tagged: {
+    inactive: require("../../assets/tag.svg"),
+    active: require("../../assets/tag-active.svg")
+  }
+} as const;
+
+function profileTileBackground(index: number) {
+  return reelGridTileBackground(index, 3);
+}
 
 function safeHandle(name: string) {
   const base = String(name || "user")
@@ -70,15 +100,8 @@ function safeHandle(name: string) {
   return `@${base || "user_farmer"}`;
 }
 
-/** Prefer a still image in the profile reel grid — many tiny playing videos cause GPU decode noise ("dots") especially on web. */
-function reelGridStillUri(post: HomePost): string | null {
-  const th = post.thumbnailUrl?.trim();
-  if (th) return th;
-  const img = post.imageUrl?.trim();
-  if (img) return img;
-  const carousel0 = post.imageUrls?.find((u) => typeof u === "string" && u.trim())?.trim();
-  if (carousel0) return carousel0;
-  return null;
+function formatStatCount(value: number) {
+  return String(Math.max(0, value)).padStart(2, "0");
 }
 
 type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
@@ -108,9 +131,11 @@ export function ProfileScreen({ route }: { route?: any }) {
   const [followingActionMenuFor, setFollowingActionMenuFor] = useState<string | null>(null);
   const [followerRemoveConfirm, setFollowerRemoveConfirm] = useState<{ name: string; key?: string } | null>(null);
   const [removeFollowerBusy, setRemoveFollowerBusy] = useState(false);
-  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>(
-    route?.params?.initialTab === "Saved" ? "Saved" : "Reels"
-  );
+  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>(() => {
+    const tab = route?.params?.initialTab;
+    if (tab === "Saved" || tab === "Tagged" || tab === "Reels" || tab === "Posts") return tab;
+    return "Posts";
+  });
   const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
   const [playingReelId, setPlayingReelId] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
@@ -120,8 +145,8 @@ export function ProfileScreen({ route }: { route?: any }) {
   const [profileReelViewer, setProfileReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const isMountedRef = useRef(true);
 
-  const gridGap = 6;
-  const gridTileSize = (width - 24 - gridGap * 2) / 3;
+  const gridGap = 2;
+  const gridTileSize = (width - gridGap * 2) / 3;
   const reelTileHeight = Math.round(gridTileSize * (16 / 9));
   const isReelTab =
     activeGalleryTab === "Reels" || activeGalleryTab === "Saved" || activeGalleryTab === "Tagged";
@@ -646,118 +671,90 @@ export function ProfileScreen({ route }: { route?: any }) {
     setFollowingActionMenuFor((prev) => (prev === rowId ? null : rowId));
   };
 
+  const profileHeaderName = user?.username || user?.fullName || "";
+
   return (
     <>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
-        <View style={styles.topBar}>
-          <View style={styles.topBarIcons}>
-            <Pressable hitSlop={8} onPress={navigateToUserSearch}>
-              <Ionicons name="search-outline" size={18} color={LIME} />
-            </Pressable>
-            <Pressable hitSlop={8} onPress={() => navigation.navigate("SettingsMenu" as any)}>
-              <Ionicons name="menu-outline" size={22} color={LIME} />
+      <SafeAreaView style={styles.safeRoot} edges={["top"]}>
+        {user ? (
+          <View
+            style={[
+              styles.topBar,
+              { maxWidth: Math.min(PROFILE_HEADER_MAX_WIDTH, width) }
+            ]}
+          >
+            <View style={styles.topBarUsernameWrap}>
+              <Text style={styles.topBarUsername}>{profileHeaderName}</Text>
+            </View>
+            <Pressable
+              style={styles.topBarMenuBtn}
+              hitSlop={8}
+              accessibilityLabel="Menu"
+              onPress={() => navigation.navigate("SettingsMenu")}
+            >
+              <Image source={PROFILE_ASSETS.menu} style={styles.menuIcon} resizeMode="contain" />
             </Pressable>
           </View>
-        </View>
+        ) : null}
 
+        <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
         {!user ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{t("welcome")}</Text>
             <Text style={styles.cardSub}>{t("welcomeSub")}</Text>
             <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
-              <Ionicons name="log-in-outline" size={18} color="#111" />
+              <Ionicons name="log-in-outline" size={18} color={TEXT} />
               <Text style={styles.primaryBtnText}>{t("getStarted")}</Text>
             </Pressable>
           </View>
         ) : (
           <>
             <View style={styles.profileCard}>
-              <View style={styles.handleRow}>
-                <Text style={styles.handleText}>{profileModel?.handle}</Text>
-              </View>
-
               <View style={styles.headerMidRow}>
-                <View style={styles.avatarWrap}>
-                  <UserAvatar
-                    uri={user.avatarUrl}
-                    name={user.fullName || user.username || user.email || "U"}
-                    size={86}
-                    borderRadius={43}
-                    fallbackBackgroundColor={LIME}
-                    initialsColor="#1a2412"
-                    style={styles.avatar}
-                  />
-                  <View style={styles.shieldBadge}>
-                    <Ionicons name="shield-checkmark" size={12} color="#1a1a1a" />
-                  </View>
-                </View>
+                <UserAvatar
+                  uri={user.avatarUrl}
+                  name={user.fullName || user.username || user.email || "U"}
+                  size={88}
+                  borderRadius={44}
+                  fallbackBackgroundColor={SURFACE}
+                  initialsColor={TEXT}
+                  style={styles.avatar}
+                />
 
-                <View style={styles.statsRow}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>{profileModel?.posts}</Text>
-                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
-                      {t("posts")}
-                    </Text>
+                <View style={styles.headerInfo}>
+                  <View style={styles.statsRow}>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.posts ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("posts")}</Text>
+                    </View>
+                    <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("followers")}</Text>
+                    </Pressable>
+                    <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
+                    </Pressable>
                   </View>
-                  <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
-                    <Text style={styles.statValue}>{profileModel?.followers}</Text>
-                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
-                      {t("followers")}
-                    </Text>
-                  </Pressable>
-                  <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
-                    <Text style={styles.statValue}>{profileModel?.following}</Text>
-                    <Text style={styles.statLabel} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.72}>
-                      {t("profileFollowing")}
-                    </Text>
-                  </Pressable>
                 </View>
               </View>
 
-              <View style={styles.nameRow}>
-                <Text style={styles.fullName}>{user.fullName}</Text>
-                <View style={styles.kycPill}>
-                  <Ionicons name="checkmark-circle" size={14} color={TEAL} />
-                  <Text style={styles.kycText}>{t("kycVerified")}</Text>
-                </View>
-              </View>
-
-              <Text style={styles.roleLine}>
-                {roleLabel} <Text style={styles.wheatEmoji}>🌾</Text>
-              </Text>
               <Text style={styles.bio}>{bioText}</Text>
-              {user.website ? <Text style={styles.websiteText}>{user.website}</Text> : null}
-              <View style={styles.locRow}>
-                <Ionicons name="location-outline" size={14} color={MUTED} />
-                <Text style={styles.locText}>{locationDisplay}</Text>
-              </View>
-              <View style={styles.ratingRow}>
-                <View style={styles.starsRow}>
-                  {([0, 1, 2, 3] as const).map((i) => (
-                    <Ionicons key={i} name="star" size={17} color={LIME} style={styles.starIcon} />
-                  ))}
-                  <Ionicons name="star-outline" size={17} color={TEXT} style={[styles.starIcon, styles.starOutline]} />
-                </View>
-                <Text style={styles.ratingNum}>4.8</Text>
-              </View>
 
               <View style={styles.profileActionsRow}>
-                <Pressable style={styles.editProfileBtnCompact} onPress={navigateToEditProfile}>
-                  <Ionicons name="create-outline" size={18} color="#111" />
-                  <Text style={styles.editProfileBtnText} numberOfLines={1}>
-                    {t("editProfile")}
-                  </Text>
+                <Pressable style={styles.profileActionBtn} onPress={navigateToEditProfile}>
+                  <Text style={styles.profileActionBtnText}>{t("editProfile")}</Text>
                 </Pressable>
-                <Pressable style={styles.iconActionSquare} onPress={handleShareProfile}>
-                  <Ionicons name="share-outline" size={20} color={TEXT} />
+                <Pressable style={styles.profileActionBtn} onPress={handleShareProfile}>
+                  <Text style={styles.profileActionBtnText}>Share Profile</Text>
                 </Pressable>
               </View>
 
               {isInstructor ? (
                 <Pressable style={styles.studioBtn} onPress={() => navigation.navigate("InstructorStudio")}>
-                  <Ionicons name="school-outline" size={18} color={TEAL} />
+                  <Ionicons name="school-outline" size={18} color={LIME} />
                   <Text style={styles.studioText}>Instructor Studio</Text>
-                  <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                  <Ionicons name="chevron-forward" size={18} color={TEXT} />
                 </Pressable>
               ) : null}
 
@@ -765,19 +762,20 @@ export function ProfileScreen({ route }: { route?: any }) {
 
             <View style={styles.gallerySection}>
               <View style={styles.iconTabsRow}>
-                {(
-                  [
-                    { key: "Posts" as const, icon: "grid-outline" as const },
-                    { key: "Reels" as const, icon: "play-circle-outline" as const },
-                    { key: "Saved" as const, icon: "bookmark-outline" as const },
-                    { key: "Tagged" as const, icon: "pricetag-outline" as const }
-                  ] as const
-                ).map((t) => (
-                  <Pressable key={t.key} style={styles.iconTab} onPress={() => setActiveGalleryTab(t.key)}>
-                    <Ionicons name={t.icon} size={22} color={activeGalleryTab === t.key ? TEXT : MUTED} />
-                    {activeGalleryTab === t.key ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
-                  </Pressable>
-                ))}
+                {(["Posts", "Reels", "Saved", "Tagged"] as const).map((tabKey) => {
+                  const icons = PROFILE_TAB_ICONS[tabKey];
+                  const active = activeGalleryTab === tabKey;
+                  return (
+                    <Pressable key={tabKey} style={styles.iconTab} onPress={() => setActiveGalleryTab(tabKey)}>
+                      <Image
+                        source={active ? icons.active : icons.inactive}
+                        style={styles.profileTabIcon}
+                        resizeMode="contain"
+                      />
+                      {active ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
+                    </Pressable>
+                  );
+                })}
               </View>
 
               <View style={[styles.grid, { gap: gridGap }]}>
@@ -786,9 +784,12 @@ export function ProfileScreen({ route }: { route?: any }) {
                     <ActivityIndicator size="small" color={LIME} />
                   </View>
                 ) : visiblePosts.length ? (
-                  visiblePosts.map((post) => {
+                  visiblePosts.map((post, index) => {
                     const tileHeight = isReelTab ? reelTileHeight : gridTileSize;
-                    const tileStyle = [styles.gridTile, { width: gridTileSize, height: tileHeight }];
+                    const tileStyle = [
+                      styles.gridTile,
+                      { width: gridTileSize, height: tileHeight, backgroundColor: profileTileBackground(index) }
+                    ];
                     if (post.videoUrl) {
                       const stillUri = reelGridStillUri(post);
                       if (stillUri) {
@@ -801,7 +802,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                           >
                             <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
                             <View style={styles.gridPlayBadge} pointerEvents="none">
-                              <Ionicons name="play" size={12} color="#111" />
+                              <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
                             </View>
                           </Pressable>
                         );
@@ -826,7 +827,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                             progressUpdateIntervalMillis={2000}
                           />
                           <View style={styles.gridPlayBadge} pointerEvents="none">
-                            <Ionicons name="play" size={12} color="#111" />
+                            <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
                           </View>
                         </Pressable>
                       );
@@ -844,13 +845,11 @@ export function ProfileScreen({ route }: { route?: any }) {
                         {cover ? (
                           <Image source={{ uri: cover }} style={styles.gridImage} resizeMode="cover" />
                         ) : (
-                          <View style={[styles.gridPlaceholder, styles.gridPastelA]}>
-                            <Ionicons name="leaf-outline" size={28} color={LIME} />
-                          </View>
+                          <View style={[styles.gridPlaceholder, { flex: 1, backgroundColor: profileTileBackground(index) }]} />
                         )}
                         {post.imageUrls && post.imageUrls.length > 1 ? (
                           <View style={styles.gridGalleryBadge} pointerEvents="none">
-                            <Ionicons name="copy" size={12} color="#fff" />
+                            <Ionicons name="copy" size={12} color={TEXT} />
                           </View>
                         ) : null}
                       </Pressable>
@@ -860,25 +859,29 @@ export function ProfileScreen({ route }: { route?: any }) {
                   <View style={styles.placeholderGridRow}>
                     {activeGalleryTab === "Tagged" ? (
                       <View style={styles.emptyWrap}>
-                        <Ionicons name="pricetag-outline" size={22} color={MUTED} />
+                        <Ionicons name="pricetag-outline" size={22} color={TEXT} />
                         <Text style={styles.emptyText}>{t("noTaggedPosts")}</Text>
                       </View>
                     ) : activeGalleryTab === "Saved" ? (
                       <View style={styles.emptyWrap}>
-                        <Ionicons name="bookmark-outline" size={22} color={MUTED} />
+                        <Ionicons name="bookmark-outline" size={22} color={TEXT} />
                         <Text style={styles.emptyText}>{t("savedReelsEmpty")}</Text>
                       </View>
                     ) : (
                       <>
-                        <View style={[styles.gridPlaceholder, styles.gridPastelA, { width: gridTileSize, height: gridTileSize }]}>
-                          <Ionicons name="leaf-outline" size={32} color={LIME} />
-                        </View>
-                        <View style={[styles.gridPlaceholder, styles.gridPastelB, { width: gridTileSize, height: gridTileSize }]}>
-                          <Ionicons name="nutrition-outline" size={32} color={LIME} />
-                        </View>
-                        <View style={[styles.gridPlaceholder, styles.gridPastelC, { width: gridTileSize, height: gridTileSize }]}>
-                          <Ionicons name="rose-outline" size={32} color={LIME} />
-                        </View>
+                        {Array.from({ length: 9 }).map((_, index) => (
+                          <View
+                            key={`placeholder-${index}`}
+                            style={[
+                              styles.gridPlaceholder,
+                              {
+                                width: gridTileSize,
+                                height: gridTileSize,
+                                backgroundColor: profileTileBackground(index)
+                              }
+                            ]}
+                          />
+                        ))}
                       </>
                     )}
                   </View>
@@ -888,6 +891,7 @@ export function ProfileScreen({ route }: { route?: any }) {
           </>
         )}
       </ScrollView>
+      </SafeAreaView>
 
       <PostsReelViewerModal
         visible={!!profileReelViewer}
@@ -914,7 +918,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                 value={shareProfileSearch}
                 onChangeText={setShareProfileSearch}
                 placeholder={t("search")}
-                placeholderTextColor={MUTED}
+                placeholderTextColor={SURFACE_ALT}
                 style={styles.profileShareSearchInput}
               />
               <Pressable style={styles.profileShareSearchAction} onPress={onShareProfileSystem}>
@@ -940,7 +944,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                           name={recipient.name}
                           size={52}
                           borderRadius={26}
-                          fallbackBackgroundColor="#29303a"
+                          fallbackBackgroundColor={SURFACE}
                           initialsColor={LIME}
                         />
                       )}
@@ -1008,7 +1012,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                   setActiveListType(null);
                 }}
               >
-                <Ionicons name="close" size={22} color={TEAL} />
+                <Ionicons name="close" size={22} color={TEXT} />
               </Pressable>
             </View>
             <ScrollView
@@ -1032,7 +1036,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                         size={40}
                         borderRadius={20}
                         style={styles.personListAvatar}
-                        fallbackBackgroundColor="#29303a"
+                        fallbackBackgroundColor={SURFACE}
                         initialsColor={LIME}
                       />
                       <Text style={styles.personName} numberOfLines={2}>
@@ -1051,7 +1055,7 @@ export function ProfileScreen({ route }: { route?: any }) {
                             accessibilityRole="button"
                             accessibilityLabel={`Remove ${person.name} from followers`}
                           >
-                            <Ionicons name="close" size={16} color="#fff" />
+                            <Ionicons name="close" size={16} color={TEXT} />
                           </TouchableOpacity>
                         </View>
                       ) : (
@@ -1126,166 +1130,108 @@ export function ProfileScreen({ route }: { route?: any }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: CREAM },
+  safeRoot: { flex: 1, backgroundColor: PAGE_BG },
+  screen: { flex: 1, backgroundColor: PAGE_BG },
   scrollBottom: { paddingBottom: 100 },
 
   topBar: {
+    width: "100%",
+    alignSelf: "center",
+    height: PROFILE_HEADER_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
-    backgroundColor: "#262626",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    paddingTop: 10,
-    gap: 6
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: SURFACE_ALT
   },
-  topBarIcons: { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconBadgeWrap: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative"
-  },
-  notificationBadge: {
-    position: "absolute",
-    right: -6,
-    top: -4,
-    backgroundColor: LIME,
-    borderRadius: 8,
-    minWidth: 14,
-    height: 14,
-    paddingHorizontal: 3,
-    alignItems: "center",
+  topBarUsernameWrap: {
+    flex: 1,
+    marginRight: 12,
     justifyContent: "center"
   },
-  notificationBadgeText: { color: "#1f2b28", fontSize: 8, fontWeight: "800" },
+  topBarUsername: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: LIME,
+    lineHeight: 20
+  },
+  topBarMenuBtn: {
+    flexShrink: 0
+  },
+  menuIcon: {
+    width: 34,
+    height: 34
+  },
 
-  card: { margin: 12, borderRadius: 16, backgroundColor: CARD, borderWidth: 1, borderColor: "#303842", padding: 16 },
+  card: {
+    margin: 12,
+    borderRadius: 16,
+    backgroundColor: PAGE_BG,
+    borderWidth: 1,
+    borderColor: SURFACE_ALT,
+    padding: 16
+  },
   cardTitle: { fontSize: 20, fontWeight: "900", color: TEXT },
-  cardSub: { marginTop: 6, color: MUTED, fontWeight: "600", lineHeight: 18 },
+  cardSub: { marginTop: 6, color: TEXT, opacity: 0.62, fontWeight: "600", lineHeight: 18 },
   primaryBtn: {
     marginTop: 16,
     borderRadius: 14,
-    backgroundColor: TEAL,
+    backgroundColor: SURFACE,
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8
   },
-  primaryBtnText: { color: "#111", fontWeight: "900" },
+  primaryBtnText: { color: TEXT, fontWeight: "900" },
 
   profileCard: {
-    marginHorizontal: 12,
-    marginTop: 10,
-    borderRadius: 18,
-    backgroundColor: CARD,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#303842",
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: PAGE_BG,
+    paddingBottom: 4
   },
-  handleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  handleText: { fontWeight: "900", color: TEXT, fontSize: 15 },
-
-  headerMidRow: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: 12 },
-  avatarWrap: { position: "relative" },
+  headerMidRow: { flexDirection: "row", alignItems: "center", gap: 16 },
+  headerInfo: { flex: 1, minWidth: 0 },
   avatar: {
-    borderWidth: 2,
-    borderColor: LIME
-  },
-  shieldBadge: {
-    position: "absolute",
-    right: -2,
-    bottom: 2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: LIME,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: CARD
+    width: 88,
+    height: 88,
+    borderRadius: 44
   },
 
-  statsRow: { flex: 1, flexDirection: "row", justifyContent: "space-between", paddingLeft: 2, gap: 0 },
-  statItem: { flex: 1, alignItems: "center", minWidth: 0, paddingHorizontal: 1 },
-  statValue: { fontWeight: "900", color: TEXT, fontSize: 17, textAlign: "center" },
+  statsRow: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  statItem: { flex: 1, alignItems: "flex-start", minWidth: 0 },
+  statValue: { fontWeight: "800", color: TEXT, fontSize: 16, textAlign: "left" },
   statLabel: {
-    marginTop: 1,
-    color: MUTED,
-    fontWeight: "700",
-    fontSize: 10,
-    lineHeight: 12,
-    textAlign: "center",
-    width: "100%"
+    marginTop: 2,
+    color: TEXT,
+    opacity: 0.62,
+    fontWeight: "600",
+    fontSize: 12,
+    lineHeight: 14,
+    textAlign: "left"
   },
 
-  nameRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 14 },
-  fullName: { fontSize: 17, fontWeight: "900", color: TEXT },
-  kycPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#262626",
-    borderWidth: 1,
-    borderColor: "#303842",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999
-  },
-  kycText: { color: TEAL, fontWeight: "800", fontSize: 11 },
-  roleLine: { marginTop: 6, color: MUTED, fontWeight: "700", fontSize: 13 },
-  wheatEmoji: { fontSize: 13 },
-  bio: { marginTop: 8, color: TEXT, fontWeight: "600", fontSize: 13, lineHeight: 19 },
-  websiteText: { marginTop: 5, color: TEAL, fontWeight: "800", fontSize: 12 },
-  locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
-  locText: { color: MUTED, fontWeight: "700", fontSize: 12 },
-  ratingRow: {
-    marginTop: 10,
+  bio: { marginTop: 14, color: TEXT, fontWeight: "500", fontSize: 13, lineHeight: 19 },
+
+  profileActionsRow: {
+    marginTop: 14,
     flexDirection: "row",
     alignItems: "center",
     gap: 10
   },
-  starsRow: { flexDirection: "row", alignItems: "center" },
-  starIcon: { marginRight: 2 },
-  starOutline: { opacity: 0.45 },
-  ratingNum: { color: TEXT, fontWeight: "900", fontSize: 15 },
-
-  profileActionsRow: {
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8
-  },
-  editProfileBtnCompact: {
-    flex: 1.35,
-    minWidth: 0,
-    backgroundColor: TEAL,
-    borderRadius: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 10,
-    flexDirection: "row",
+  profileActionBtn: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 8,
+    backgroundColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6
+    paddingHorizontal: 12,
+    paddingVertical: 10
   },
-  editProfileBtnText: { color: "#111", fontWeight: "900", fontSize: 14 },
-  iconActionSquare: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: BEIGE_FOLLOW,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#303842"
-  },
+  profileActionBtnText: { color: TEXT, fontWeight: "700", fontSize: 14 },
 
   studioBtn: {
     marginTop: 12,
@@ -1294,43 +1240,42 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderColor: "#303842"
+    borderColor: SURFACE_ALT
   },
-  studioText: { flex: 1, fontWeight: "900", color: TEAL, fontSize: 14 },
+  studioText: { flex: 1, fontWeight: "900", color: TEXT, fontSize: 14 },
   logoutLink: { marginTop: 10, alignSelf: "center", paddingVertical: 6 },
-  logoutLinkText: { color: MUTED, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
+  logoutLinkText: { color: TEXT, opacity: 0.62, fontWeight: "700", fontSize: 13, textDecorationLine: "underline" },
 
-  gallerySection: { marginHorizontal: 12, marginBottom: 16 },
+  gallerySection: { marginTop: 18, marginBottom: 16 },
   galleryLoadingWrap: { width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 48 },
-  iconTabsRow: { flexDirection: "row", justifyContent: "space-around", borderBottomWidth: 1, borderColor: "#303842", paddingBottom: 4 },
-  iconTab: { alignItems: "center", minWidth: 56, paddingVertical: 6 },
-  iconTabUnderline: { marginTop: 6, height: 2, width: 28, backgroundColor: LIME, borderRadius: 2 },
-  iconTabSpacer: { marginTop: 6, height: 2, width: 28 },
+  iconTabsRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACE_ALT,
+    paddingBottom: 4,
+    marginHorizontal: 16
+  },
+  iconTab: { alignItems: "center", minWidth: 56, paddingVertical: 8 },
+  profileTabIcon: { width: PROFILE_TAB_ICON, height: PROFILE_TAB_ICON },
+  iconTabUnderline: { marginTop: 8, height: 2, width: 32, backgroundColor: LIME, borderRadius: 2 },
+  iconTabSpacer: { marginTop: 8, height: 2, width: 32 },
 
-  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 10 },
-  gridTile: { borderRadius: 12, overflow: "hidden", backgroundColor: "#262626", borderWidth: 1, borderColor: "#303842", position: "relative" },
+  grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 2, paddingHorizontal: 0 },
+  gridTile: { overflow: "hidden", position: "relative" },
   gridImage: { width: "100%", height: "100%" },
   gridPlayBadge: {
     position: "absolute",
-    top: 6,
-    right: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: LIME,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 }
+    top: 8,
+    right: 8
   },
-  gridPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center", borderRadius: 12 },
-  gridVideoBg: { backgroundColor: "#262626" },
+  gridVideoIcon: { width: 20, height: 20 },
+  gridPlaceholder: {},
+  gridVideoBg: { backgroundColor: PAGE_BG },
   gridVideoPlaceholder: { alignItems: "center", justifyContent: "center" },
-  gridPastelA: { backgroundColor: "#262626" },
-  gridPastelB: { backgroundColor: "#262626" },
-  gridPastelC: { backgroundColor: "#262626" },
+  gridPastelA: { backgroundColor: SURFACE },
+  gridPastelB: { backgroundColor: SURFACE_ALT },
+  gridPastelC: { backgroundColor: SURFACE },
   placeholderGridRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, width: "100%" },
 
   emptyWrap: {
@@ -1339,10 +1284,10 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     gap: 8
   },
-  emptyText: { color: MUTED, fontWeight: "700", textAlign: "center" },
+  emptyText: { color: TEXT, opacity: 0.62, fontWeight: "700", textAlign: "center" },
 
-  reelPlayerRoot: { flex: 1, backgroundColor: "#262626" },
-  imageViewerRoot: { flex: 1, backgroundColor: "#262626" },
+  reelPlayerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_A },
+  imageViewerRoot: { flex: 1, backgroundColor: REEL_GRID_TILE_B },
   gridGalleryBadge: {
     position: "absolute",
     top: 6,
@@ -1350,9 +1295,9 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
+    borderColor: SURFACE_ALT,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -1363,11 +1308,11 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: SURFACE_ALT,
     zIndex: 10
   },
   reelDeleteBtn: {
@@ -1377,11 +1322,11 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: SURFACE_ALT,
     zIndex: 10
   },
   reelCaptionWrap: {
@@ -1391,12 +1336,12 @@ const styles = StyleSheet.create({
     bottom: 28,
     gap: 4
   },
-  reelCaptionAuthor: { color: "#fff", fontWeight: "900", fontSize: 15 },
-  reelCaptionText: { color: "#e5e7eb", fontWeight: "600", fontSize: 13 },
+  reelCaptionAuthor: { color: TEXT, fontWeight: "900", fontSize: 15 },
+  reelCaptionText: { color: TEXT, opacity: 0.72, fontWeight: "600", fontSize: 13 },
 
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)"
+    backgroundColor: "rgba(38,38,38,0.72)"
   },
   /** Only the dimmed area above the sheet — does not stack under the sheet, so row buttons receive touches. */
   overlayTapAboveSheet: {
@@ -1404,7 +1349,7 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   sheet: {
-    backgroundColor: CARD,
+    backgroundColor: PAGE_BG,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     maxHeight: "72%",
@@ -1413,7 +1358,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     borderTopWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     elevation: 12
   },
   sheetScroll: {
@@ -1422,17 +1367,17 @@ const styles = StyleSheet.create({
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sheetTitle: { color: TEXT, fontWeight: "900", fontSize: 17 },
   sheetBody: { paddingTop: 12, gap: 10 },
-  sheetEmpty: { color: MUTED, fontWeight: "700" },
+  sheetEmpty: { color: TEXT, opacity: 0.62, fontWeight: "700" },
   personRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: "#262626"
+    backgroundColor: SURFACE
   },
   personRowMenuOpen: { zIndex: 40 },
   personListAvatar: { marginRight: 10 },
@@ -1452,15 +1397,15 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 4
   },
-  messageBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  messageBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
+  messageBtn: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  messageBtnText: { color: TEXT, fontWeight: "900", fontSize: 12 },
   iconDangerBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#6b1f1f",
+    backgroundColor: SURFACE_ALT,
     borderWidth: 1,
-    borderColor: "#a93838",
+    borderColor: SURFACE,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 6
@@ -1469,9 +1414,9 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#111827",
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: "#374151",
+    borderColor: SURFACE_ALT,
     alignItems: "center",
     justifyContent: "center",
     zIndex: 2
@@ -1482,9 +1427,9 @@ const styles = StyleSheet.create({
     top: 2,
     minWidth: 132,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: SURFACE_ALT,
     overflow: "hidden",
     zIndex: 20
   },
@@ -1493,18 +1438,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   followingMenuItemText: {
-    color: "#fff",
+    color: TEXT,
     fontWeight: "800",
     fontSize: 12
   },
-  followBackBtn: { backgroundColor: TEAL, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  followBackBtnText: { color: "#111", fontWeight: "900", fontSize: 12 },
-  requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  requestedPillText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followingPill: { backgroundColor: "rgba(201,255,53,0.18)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  followingPillText: { color: LIME, fontWeight: "800", fontSize: 12 },
-  unfollowBtn: { backgroundColor: "#111827", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  unfollowBtnText: { color: "#fff", fontWeight: "800", fontSize: 12 },
+  followBackBtn: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  followBackBtnText: { color: TEXT, fontWeight: "900", fontSize: 12 },
+  requestedPill: { backgroundColor: SURFACE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  requestedPillText: { color: TEXT, opacity: 0.72, fontWeight: "800", fontSize: 12 },
+  followingPill: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followingPillText: { color: TEXT, fontWeight: "800", fontSize: 12 },
+  unfollowBtn: { backgroundColor: SURFACE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  unfollowBtnText: { color: TEXT, fontWeight: "800", fontSize: 12 },
 
   confirmOverlayRoot: {
     flex: 1,
@@ -1514,15 +1459,15 @@ const styles = StyleSheet.create({
   },
   confirmBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.62)"
+    backgroundColor: "rgba(38,38,38,0.82)"
   },
   confirmCard: {
     width: "100%",
     maxWidth: 340,
-    backgroundColor: CARD,
+    backgroundColor: PAGE_BG,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     padding: 22,
     zIndex: 2,
     elevation: 16
@@ -1535,7 +1480,8 @@ const styles = StyleSheet.create({
     marginBottom: 12
   },
   confirmBody: {
-    color: MUTED,
+    color: TEXT,
+    opacity: 0.62,
     fontSize: 15,
     fontWeight: "600",
     lineHeight: 22,
@@ -1543,30 +1489,30 @@ const styles = StyleSheet.create({
     marginBottom: 22
   },
   confirmName: { color: LIME, fontWeight: "800" },
-  confirmBodyMuted: { color: MUTED, fontWeight: "600" },
+  confirmBodyMuted: { color: TEXT, opacity: 0.62, fontWeight: "600" },
   confirmActions: { flexDirection: "row", gap: 12, justifyContent: "center" },
   confirmBtnSecondary: {
     flex: 1,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: LIME,
+    borderColor: SURFACE_ALT,
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent"
+    backgroundColor: SURFACE
   },
-  confirmBtnSecondaryText: { color: LIME, fontWeight: "900", fontSize: 15 },
+  confirmBtnSecondaryText: { color: TEXT, fontWeight: "900", fontSize: 15 },
   confirmBtnDanger: {
     flex: 1,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#7f1d1d",
+    backgroundColor: SURFACE_ALT,
     borderWidth: 1,
-    borderColor: "#b91c1c"
+    borderColor: SURFACE
   },
-  confirmBtnDangerText: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  confirmBtnDangerText: { color: TEXT, fontWeight: "900", fontSize: 15 },
   confirmBtnDisabled: { opacity: 0.55 },
 
   profileShareHandle: {
@@ -1574,7 +1520,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#3a434f",
+    backgroundColor: SURFACE_ALT,
     marginBottom: 10
   },
   profileShareSearchRow: {
@@ -1583,8 +1529,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#303842",
-    backgroundColor: "#1f2937",
+    borderColor: SURFACE_ALT,
+    backgroundColor: SURFACE,
     paddingHorizontal: 10,
     gap: 8
   },
@@ -1595,7 +1541,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#111827"
+    backgroundColor: SURFACE_ALT
   },
   profileSharePeopleRow: {
     gap: 10,
@@ -1609,13 +1555,13 @@ const styles = StyleSheet.create({
     borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2f3741"
+    backgroundColor: SURFACE
   },
-  profileSharePersonName: { marginTop: 6, color: "#e5edf5", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  profileSharePersonName: { marginTop: 6, color: TEXT, fontSize: 11, fontWeight: "700", textAlign: "center" },
   profileShareFooterRow: {
     marginTop: 6,
     borderTopWidth: 1,
-    borderColor: "#303842",
+    borderColor: SURFACE_ALT,
     paddingTop: 12,
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1630,8 +1576,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#374151",
-    backgroundColor: "#1f2937"
+    borderColor: SURFACE_ALT,
+    backgroundColor: SURFACE
   },
-  profileShareFooterText: { color: MUTED, fontSize: 9, fontWeight: "700", textAlign: "center" }
+  profileShareFooterText: { color: TEXT, opacity: 0.62, fontSize: 9, fontWeight: "700", textAlign: "center" }
 });

@@ -1,6 +1,4 @@
 import {
-  Poppins_100Thin,
-  Poppins_300Light,
   Poppins_400Regular,
   Poppins_500Medium,
   Poppins_600SemiBold,
@@ -15,8 +13,6 @@ let fontsInstalled = false;
 
 export function useAppFonts(): { ready: boolean } {
   const [loaded] = useFonts({
-    Poppins_100Thin,
-    Poppins_300Light,
     Poppins_400Regular,
     Poppins_500Medium,
     Poppins_600SemiBold,
