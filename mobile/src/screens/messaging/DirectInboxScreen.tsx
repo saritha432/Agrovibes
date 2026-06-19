@@ -93,6 +93,7 @@ export function DirectInboxScreen() {
       peerUserId: thread.peerUserId,
       peerName: thread.peerName,
       peerKey: thread.peerEmail,
+      peerUsername: thread.peerUsername || undefined,
       peerAvatarUrl: thread.peerAvatarUrl
     });
   };
