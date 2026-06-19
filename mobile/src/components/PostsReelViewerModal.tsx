@@ -51,7 +51,7 @@ import {
 } from "../social/localEngagementStore";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
-const postTints = ["#8a5b00", APP_LIME, "#8b3a62", "#105f75"];
+import { reelPlayerBackground } from "../utils/reelGrid";
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
@@ -829,7 +829,7 @@ export function PostsReelViewerModal({
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
 
       return (
-        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth }]}>
+        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && (isActive || isNearActive) ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
@@ -880,7 +880,7 @@ export function PostsReelViewerModal({
             </Pressable>
           ) : (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
+              <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}

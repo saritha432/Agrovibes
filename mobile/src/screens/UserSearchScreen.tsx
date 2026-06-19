@@ -20,7 +20,7 @@ import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { fetchHomePosts, type HomePost } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
-import { isReelPost, postMatchesExploreQuery, reelGridStillUri } from "../utils/reelGrid";
+import { isReelPost, postMatchesExploreQuery, reelGridStillUri, reelGridTileBackground } from "../utils/reelGrid";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { ResizeMode, Video } from "expo-av";
 
@@ -28,8 +28,6 @@ const GRID_GAP = 2;
 const GRID_PAD = 2;
 const BG = "#121212";
 const SEARCH_BG = "#303132";
-const TILE_A = "#303132";
-const TILE_B = "#383838";
 const MUTED = "#9e9e9e";
 const TEXT = "#ffffff";
 
@@ -39,9 +37,7 @@ const EXPLORE_ASSETS = {
 } as const;
 
 function tileBackground(index: number) {
-  const row = Math.floor(index / 3);
-  const col = index % 3;
-  return (row + col) % 2 === 0 ? TILE_A : TILE_B;
+  return reelGridTileBackground(index, 3);
 }
 
 export function UserSearchScreen() {

@@ -87,6 +87,7 @@ import {
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
+import { reelPlayerBackground } from "../utils/reelGrid";
 
 export type OpenCreateOptions = {
   liveTopic?: string;
@@ -3000,7 +3001,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
       return (
-        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth }]}>
+        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && (isActive || isNearActive) ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
@@ -3071,7 +3072,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Pressable>
           ) : (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: postTints[index % postTints.length] }]} />
+              <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
           {isCarousel ? (
