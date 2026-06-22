@@ -18,6 +18,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ResizeMode, Video } from "expo-av";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { UserAvatar } from "../components/UserAvatar";
@@ -31,6 +32,8 @@ import {
   type HomePost
 } from "../services/api";
 import { isReelPost, reelGridStillUri, reelGridTileBackground } from "../utils/reelGrid";
+import { resolveReelPreviewUri } from "../utils/reelPreviewThumb";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
 
@@ -128,10 +131,6 @@ function buildSearchUserList(
   return list.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function isExplorePost(post: HomePost) {
-  return Boolean(reelGridStillUri(post) || String(post.videoUrl || "").trim());
-}
-
 function accountPrimaryLabel(person: SearchUser, language: AppLanguage, t: (key: string) => string) {
   const username = String(person.username || "").replace(/^@+/, "").trim();
   if (username) return username;
@@ -209,6 +208,7 @@ export function UserSearchScreen() {
   const [recentUsers, setRecentUsers] = useState<SearchUser[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [explorePosts, setExplorePosts] = useState<HomePost[]>([]);
+  const [previewUriByPostId, setPreviewUriByPostId] = useState<Record<number, string>>({});
   const [loadingExplore, setLoadingExplore] = useState(false);
   const [exploreViewer, setExploreViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
 
@@ -217,6 +217,7 @@ export function UserSearchScreen() {
   const showSearchChrome = searchFocused || isTyping;
   const showTypeahead = isTyping;
   const gridTileSize = (width - GRID_GAP * 2) / GRID_COLUMNS;
+  const reelTileHeight = Math.round(gridTileSize * (16 / 9));
 
   useFocusEffect(
     useCallback(() => {
@@ -329,20 +330,37 @@ export function UserSearchScreen() {
     setLoadingExplore(true);
     try {
       const { posts } = await fetchHomePosts(token);
-      const explore = posts
-        .filter((post) => isExplorePost(post))
+      const reels = posts
+        .filter((post) => isReelPost(post))
         .sort((a, b) => {
           const aTime = Date.parse(String(a.createdAt || "")) || 0;
           const bTime = Date.parse(String(b.createdAt || "")) || 0;
           return bTime - aTime || b.id - a.id;
         });
-      setExplorePosts(explore);
+      setExplorePosts(reels);
     } catch {
       setExplorePosts([]);
     } finally {
       setLoadingExplore(false);
     }
   }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const hydratePreviews = async () => {
+      for (const post of explorePosts) {
+        if (cancelled || !isReelPost(post)) continue;
+        if (reelGridStillUri(post)) continue;
+        const uri = await resolveReelPreviewUri(post);
+        if (cancelled || !uri) continue;
+        setPreviewUriByPostId((prev) => (prev[post.id] === uri ? prev : { ...prev, [post.id]: uri }));
+      }
+    };
+    void hydratePreviews();
+    return () => {
+      cancelled = true;
+    };
+  }, [explorePosts]);
 
   const persistRecentUsers = useCallback(async (list: SearchUser[]) => {
     try {
@@ -545,28 +563,37 @@ export function UserSearchScreen() {
         styles.gridTile,
         {
           width: gridTileSize,
-          height: gridTileSize,
+          height: reelTileHeight,
           backgroundColor: reelGridTileBackground(index, GRID_COLUMNS)
         }
       ];
-      const stillUri = reelGridStillUri(post);
-      const isVideo = isReelPost(post);
+      const coverUri = reelGridStillUri(post) || previewUriByPostId[post.id] || null;
+      const playbackUri = post.videoUrl ? videoPlaybackUrl(post.videoUrl) : null;
+
       return (
         <Pressable style={tileStyle} onPress={() => openExplorePost(post)}>
-          {stillUri ? (
-            <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
+          {coverUri ? (
+            <Image source={{ uri: coverUri }} style={styles.gridImage} resizeMode="cover" />
+          ) : playbackUri ? (
+            <Video
+              style={styles.gridImage}
+              source={{ uri: playbackUri }}
+              resizeMode={ResizeMode.COVER}
+              shouldPlay={false}
+              isMuted
+              isLooping={false}
+              useNativeControls={false}
+            />
           ) : (
             <View style={[styles.gridImage, styles.gridPlaceholder]} />
           )}
-          {isVideo ? (
-            <View style={styles.gridPlayBadge} pointerEvents="none">
-              <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
-            </View>
-          ) : null}
+          <View style={styles.gridPlayBadge} pointerEvents="none">
+            <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
+          </View>
         </Pressable>
       );
     },
-    [gridTileSize, openExplorePost]
+    [gridTileSize, openExplorePost, previewUriByPostId, reelTileHeight]
   );
 
   const renderTypeaheadPanel = () => (
@@ -665,10 +692,18 @@ export function UserSearchScreen() {
             numColumns={GRID_COLUMNS}
             renderItem={renderExploreTile}
             columnWrapperStyle={styles.gridRow}
-            contentContainerStyle={styles.gridList}
+            contentContainerStyle={explorePosts.length ? styles.gridList : styles.gridListEmpty}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             scrollEnabled={!showTypeahead}
+            ListEmptyComponent={
+              !loadingExplore ? (
+                <View style={styles.exploreEmpty}>
+                  <Ionicons name="film-outline" size={40} color={MUTED} />
+                  <Text style={styles.emptyTitle}>No reels yet</Text>
+                </View>
+              ) : null
+            }
           />
         )}
 
@@ -861,6 +896,14 @@ const styles = StyleSheet.create({
     color: TEXT
   },
   gridList: { paddingBottom: 16 },
+  gridListEmpty: { flexGrow: 1, paddingBottom: 16 },
+  exploreEmpty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 80,
+    gap: 10
+  },
   gridRow: { gap: GRID_GAP, marginBottom: GRID_GAP },
   gridTile: { overflow: "hidden", position: "relative" },
   gridImage: { width: "100%", height: "100%" },
