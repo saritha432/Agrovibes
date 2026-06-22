@@ -18,6 +18,7 @@
     "vercel-build": "node ./node_modules/expo/bin/cli export --platform web",
     "eas-build-pre-install": "node scripts/eas-build-pre-install.js",
     "build:android:preview": "node scripts/eas.js build --platform android --profile preview",
+    "build:android:dev": "node scripts/eas.js build --platform android --profile development",
     "prebuild:android": "node scripts/prebuild-android-release.js",
     "prebuild:android:dev": "npx expo prebuild --platform android --clean",
     "build:android:local": "cd android && gradlew.bat assembleRelease",
