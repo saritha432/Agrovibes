@@ -24,7 +24,8 @@ import {
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
@@ -724,9 +725,20 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
 
 function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
   const activeUri = videoPlaybackUrl(uri);
+  const videoRef = useRef<Video | null>(null);
+
+  useEffect(() => {
+    return () => {
+      void videoRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
+
   return (
     <Video
       key={activeUri}
+      ref={(r) => {
+        videoRef.current = r;
+      }}
       style={style}
       source={{ uri: activeUri }}
       resizeMode={ResizeMode.COVER}
@@ -815,6 +827,12 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       ref.pauseAsync().catch(() => {});
     }
   }, [shouldPlay, activeUri]);
+
+  useEffect(() => {
+    return () => {
+      void videoRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
 
   React.useImperativeHandle(
     ref,
@@ -1001,6 +1019,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
   const { token, user } = useAuth();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
+  const appIsActive = useAppIsActive();
+  const canPlayMedia = appIsActive && isFocused;
   /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
   const reelTopInset = useMemo(() => {
     const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
@@ -1353,15 +1374,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const activeLivePosts = useMemo(() => buildLiveFeed(posts), [posts]);
 
-  useEffect(() => {
-    if (!token) return;
-    const timer = setInterval(() => {
-      void fetchHomePosts(token)
-        .then((data) => setPosts(data.posts))
-        .catch(() => {});
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [token]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!token || !appIsActive) return;
+      const poll = () => {
+        void fetchHomePosts(token)
+          .then((data) => setPosts(data.posts))
+          .catch(() => {});
+      };
+      poll();
+      const timer = setInterval(poll, 10000);
+      return () => clearInterval(timer);
+    }, [token, appIsActive])
+  );
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
   useFocusEffect(
@@ -2030,6 +2055,28 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, []);
 
   useEffect(() => {
+    if (playingPostId == null) return;
+    setReelProgressByPostId((prev) => {
+      const keep = new Set<number>([playingPostId]);
+      const activeIdx = tabPosts.findIndex((p) => p.id === playingPostId);
+      if (activeIdx > 0) keep.add(tabPosts[activeIdx - 1]!.id);
+      if (activeIdx >= 0 && activeIdx < tabPosts.length - 1) keep.add(tabPosts[activeIdx + 1]!.id);
+      const next: Record<number, { position: number; duration: number }> = {};
+      for (const id of keep) {
+        if (prev[id]) next[id] = prev[id];
+      }
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+    const activeIds = new Set(tabPosts.map((p) => p.id));
+    activeIds.add(playingPostId);
+    for (const id of Object.keys(reelVideoHandlesRef.current)) {
+      if (!activeIds.has(Number(id))) {
+        delete reelVideoHandlesRef.current[Number(id)];
+      }
+    }
+  }, [playingPostId, tabPosts]);
+
+  useEffect(() => {
     let cancelled = false;
     const run = async () => {
       const existing = reelBackgroundMusicRef.current;
@@ -2042,7 +2089,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         reelBackgroundMusicRef.current = null;
         setActiveReelMusicPostId((cur) => (cur === existing.postId ? null : cur));
       }
-      if (playingPostId == null) return;
+      if (playingPostId == null || !canPlayMedia) return;
       const post =
         postsRef.current.find((p) => p.id === playingPostId) ?? reelViewerOpen?.posts.find((p) => p.id === playingPostId);
       const musicUrl = post?.musicAudioUrl?.trim();
@@ -2072,7 +2119,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       }
       setActiveReelMusicPostId(null);
     };
-  }, [isReelMuted, playingPostId, reelViewerOpen]);
+  }, [canPlayMedia, isReelMuted, playingPostId, reelViewerOpen]);
 
   useEffect(() => {
     const cur = reelBackgroundMusicRef.current;
@@ -2951,6 +2998,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           ? reelSlotHeight
           : Math.max(420, windowHeight * 0.62);
       const isActive = playingPostId === post.id && !!post.videoUrl;
+      const shouldPlayReel = isActive && canPlayMedia;
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -3002,15 +3050,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
-          {post.videoUrl && (isActive || isNearActive) ? (
+          {post.videoUrl && shouldPlayReel ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
-                shouldPlay={isActive}
-                preloadOnly={!isActive}
+                shouldPlay
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
                 fit="cover"
@@ -3019,6 +3066,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
+            </Pressable>
+          ) : post.videoUrl ? (
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+              {reelPoster ? (
+                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+              ) : (
+                <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
+              )}
+              {isActive || isNearActive ? (
+                <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
+                  <Ionicons name="play" size={28} color="#fff" />
+                </View>
+              ) : null}
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -3245,6 +3305,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       );
     },
     [
+      canPlayMedia,
       carouselPageByPostId,
       commentsByPost,
       followBusyByUserId,
@@ -3291,6 +3352,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const feedDisplayName = displayPersonName(post.userName);
       const feedCaption = displayPostCaption(post.caption);
       const isActive = playingPostId === post.id && !!post.videoUrl;
+      const shouldPlayReel = isActive && canPlayMedia;
       const gallery = postImageGallery(post);
       const isCarousel = !post.videoUrl && gallery.length > 1;
       const postComments = commentsByPost[post.id] ?? [];
@@ -3352,7 +3414,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
-                {isActive ? (
+                {shouldPlayReel ? (
                   <FeedPostVideo uri={post.videoUrl} style={styles.video} />
                 ) : (
                   <>
@@ -3482,6 +3544,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       activeHomeTab,
       carouselPageByPostId,
       commentsByPost,
+      canPlayMedia,
       feedMediaWidth,
       followBusyByUserId,
       legacyFollowStateByName,
@@ -3818,7 +3881,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               viewabilityConfig={reelViewabilityConfig}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               extraData={`${playingPostId}-${windowHeight}-${reelViewerOpen.posts.length}`}
-              initialNumToRender={Math.min(7, reelViewerOpen.posts.length || 1)}
+              initialNumToRender={Math.min(3, reelViewerOpen.posts.length || 1)}
+              maxToRenderPerBatch={2}
+              windowSize={3}
               removeClippedSubviews={false}
             />
           ) : null}

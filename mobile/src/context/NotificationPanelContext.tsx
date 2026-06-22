@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useAppIsActive } from "../hooks/useAppIsActive";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -51,6 +52,7 @@ export function useNotificationPanel(): NotificationPanelContextValue {
 export function NotificationPanelProvider({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuth();
   const { t } = useLanguage();
+  const appIsActive = useAppIsActive();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pending, setPending] = useState<any[]>([]);
   const [accepted, setAccepted] = useState<any[]>([]);
@@ -258,10 +260,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   }, [filterDismissedNotifications, token, user?.email, user?.fullName, user?.id, viewerUserId]);
 
   useEffect(() => {
+    if (!appIsActive) return;
     loadNotifications();
     const timer = setInterval(loadNotifications, 4000);
     return () => clearInterval(timer);
-  }, [loadNotifications]);
+  }, [appIsActive, loadNotifications]);
 
   useEffect(() => {
     let mounted = true;
