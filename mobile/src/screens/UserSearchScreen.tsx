@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ResizeMode, Video } from "expo-av";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
+import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { UserAvatar } from "../components/UserAvatar";
 import { formatDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
@@ -49,6 +50,7 @@ const RECENT_USERS_KEY = "discover.recentUsers.v1";
 const RECENT_SEARCHES_KEY = "discover.recentSearches.v1";
 const MAX_RECENT_USERS = 12;
 const MAX_RECENT_SEARCHES = 10;
+const VIDEO_GRID_ICON = require("../../assets/video-icon.svg");
 
 type SearchUser = {
   id?: number;
@@ -588,7 +590,7 @@ export function UserSearchScreen() {
             <View style={[styles.gridImage, styles.gridPlaceholder]} />
           )}
           <View style={styles.gridPlayBadge} pointerEvents="none">
-            <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
+            <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={SEARCH_ICON} fallbackName="videocam" />
           </View>
         </Pressable>
       );

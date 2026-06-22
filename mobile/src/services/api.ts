@@ -581,6 +581,26 @@ export async function fetchMyHomePosts(token: string) {
   return { posts: data.posts.map(sanitizeHomePost) };
 }
 
+/** Any user's profile posts (public profile view). */
+export async function fetchUserHomePosts(
+  token: string | null | undefined,
+  userId: number,
+  userName?: string
+) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const qs = userName?.trim() ? `?userName=${encodeURIComponent(userName.trim())}` : "";
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/home/posts/user/${encodeURIComponent(String(userId))}${qs}`,
+    { headers }
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load user posts");
+  }
+  const data = (await response.json()) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

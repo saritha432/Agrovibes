@@ -523,9 +523,14 @@ export function PostsReelViewerModal({
     setViewerPosts(nextPosts);
     const ix = Math.max(0, Math.min(initialIndex, Math.max(0, nextPosts.length - 1)));
     const post = nextPosts[ix];
-    setPlayingPostId(post?.id ?? null);
+    const nextPlayingId = post?.id ?? null;
+    setPlayingPostId(nextPlayingId);
     setIsReelMuted(Platform.OS === "web");
     setReelMuteFeedback(null);
+    if (Platform.OS !== "web" && nextPlayingId) {
+      const timer = setTimeout(() => setPlayingPostId(nextPlayingId), 80);
+      return () => clearTimeout(timer);
+    }
   }, [visible, posts, initialIndex]);
 
   useEffect(() => {
@@ -766,10 +771,7 @@ export function PostsReelViewerModal({
       .filter((v) => v.isViewable && v.item != null)
       .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
       .sort((a, b) => a.index - b.index);
-    if (!ordered.length) {
-      setPlayingPostId(null);
-      return;
-    }
+    if (!ordered.length) return;
     setPlayingPostId(ordered[ordered.length - 1].post.id);
   }, []);
 
@@ -837,7 +839,7 @@ export function PostsReelViewerModal({
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
-                uri={post.videoUrl}
+                uri={videoPlaybackUrl(post.videoUrl)}
                 shouldPlay={isActive}
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}

@@ -27,11 +27,13 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuth } from "../auth/AuthContext";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
+import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   fetchHomePosts,
   fetchSavedHomePosts,
   fetchMyHomePosts,
+  fetchUserHomePosts,
   fetchProfileStats,
   fetchSocialNetwork,
   fetchTaggedHomePosts,
@@ -91,6 +93,20 @@ const PROFILE_TAB_ICONS = {
   }
 } as const;
 
+const PROFILE_TAB_FALLBACKS: Record<
+  GalleryTab,
+  { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }
+> = {
+  Posts: { active: "grid", inactive: "grid-outline" },
+  Reels: { active: "film", inactive: "film-outline" },
+  Saved: { active: "bookmark", inactive: "bookmark-outline" },
+  Tagged: { active: "person", inactive: "person-outline" }
+};
+
+const VIDEO_GRID_ICON = require("../../assets/video-icon.svg");
+
+type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
+
 function profileTileBackground(index: number) {
   return reelGridTileBackground(index, 3);
 }
@@ -133,8 +149,6 @@ function safeHandle(name: string) {
 function formatStatCount(value: number) {
   return String(Math.max(0, value)).padStart(2, "0");
 }
-
-type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
 export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -220,11 +234,31 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (isPublicProfileView) {
       setPostsLoading(true);
       try {
-        const home = await fetchHomePosts(token ?? undefined);
-        const byName = normalizeProfileName(publicUserName);
-        const posts = (home.posts || []).filter((post) =>
-          publicUserId ? Number(post.userId) === Number(publicUserId) : normalizeProfileName(post.userName || "") === byName
-        );
+        const profileUser = {
+          id: publicUserId,
+          fullName: publicUserName,
+          username: publicUsername ?? undefined
+        };
+        let posts: HomePost[] = [];
+
+        if (publicUserId) {
+          try {
+            const data = await fetchUserHomePosts(token ?? undefined, publicUserId, publicUserName);
+            posts = data.posts || [];
+          } catch {
+            // Dedicated endpoint may be unavailable on older backends; fall back below.
+          }
+        }
+
+        if (!posts.length) {
+          try {
+            const home = await fetchHomePosts(token ?? undefined);
+            posts = (home.posts || []).filter((post) => postBelongsToProfileUser(post, profileUser));
+          } catch {
+            posts = [];
+          }
+        }
+
         if (!isMountedRef.current) return;
         setUserPosts(posts);
       } catch {
@@ -265,7 +299,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     } finally {
       if (isMountedRef.current) setPostsLoading(false);
     }
-  }, [isPublicProfileView, publicUserId, publicUserName, token, user]);
+  }, [isPublicProfileView, publicUserId, publicUserName, publicUsername, token, user]);
 
   const loadSavedPosts = useCallback(async () => {
     if (!token || !user?.id) {
@@ -540,6 +574,12 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const openProfilePostsViewer = useCallback(
     (post: HomePost) => {
+      const reelPosts = visiblePosts.filter((p) => isReelPost(p));
+      if (isReelPost(post) && reelPosts.length > 0) {
+        const reelIndex = reelPosts.findIndex((p) => p.id === post.id);
+        setProfileReelViewer({ posts: reelPosts, initialIndex: reelIndex >= 0 ? reelIndex : 0 });
+        return;
+      }
       const ix = visiblePosts.findIndex((p) => p.id === post.id);
       setProfileReelViewer({ posts: visiblePosts, initialIndex: ix >= 0 ? ix : 0 });
     },
@@ -622,7 +662,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             >
               <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
               <View style={styles.gridPlayBadge} pointerEvents="none">
-                <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
+                <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={LIME} fallbackName="videocam" />
               </View>
             </Pressable>
           );
@@ -646,7 +686,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
               progressUpdateIntervalMillis={2000}
             />
             <View style={styles.gridPlayBadge} pointerEvents="none">
-              <Image source={require("../../assets/video-icon.svg")} style={styles.gridVideoIcon} resizeMode="contain" />
+              <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={LIME} fallbackName="videocam" />
             </View>
           </Pressable>
         );
@@ -989,7 +1029,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                 accessibilityLabel="Menu"
                 onPress={() => navigation.navigate("SettingsMenu")}
               >
-                <Image source={PROFILE_ASSETS.menu} style={styles.menuIcon} resizeMode="contain" />
+                <SvgAssetIcon module={PROFILE_ASSETS.menu} size={34} color={TEXT} fallbackName="menu-outline" />
               </Pressable>
             )}
           </View>
@@ -1105,10 +1145,13 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                   const active = activeGalleryTab === tabKey;
                   return (
                     <Pressable key={tabKey} style={styles.iconTab} onPress={() => handleGalleryTabPress(tabKey)}>
-                      <Image
-                        source={active ? icons.active : icons.inactive}
-                        style={styles.profileTabIcon}
-                        resizeMode="contain"
+                      <SvgAssetIcon
+                        module={active ? icons.active : icons.inactive}
+                        size={PROFILE_TAB_ICON}
+                        color={active ? LIME : TEXT}
+                        fallbackName={
+                          active ? PROFILE_TAB_FALLBACKS[tabKey].active : PROFILE_TAB_FALLBACKS[tabKey].inactive
+                        }
                       />
                       {active ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
                     </Pressable>
@@ -1131,7 +1174,16 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                   columnWrapperStyle={styles.gridRow}
                   contentContainerStyle={styles.gridList}
                 />
-              ) : null}
+              ) : (
+                <View style={styles.galleryEmptyWrap}>
+                  <Text style={styles.galleryEmptyTitle}>
+                    {isReelTab ? t("emptyReelsTitle") : t("emptyNothingTitle")}
+                  </Text>
+                  <Text style={styles.galleryEmptySub}>
+                    {isReelTab ? t("emptyReelsSub") : t("emptyDefaultSub")}
+                  </Text>
+                </View>
+              )}
             </View>
           </>
         ) : null}
@@ -1554,6 +1606,16 @@ const styles = StyleSheet.create({
 
   gallerySection: { marginTop: 18, marginBottom: 16 },
   galleryLoadingWrap: { width: "100%", alignItems: "center", justifyContent: "center", paddingVertical: 48 },
+  galleryEmptyWrap: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 48,
+    gap: 8
+  },
+  galleryEmptyTitle: { color: TEXT, fontSize: 16, fontWeight: "700", textAlign: "center" },
+  galleryEmptySub: { color: "#a8a8a8", fontSize: 14, textAlign: "center", lineHeight: 20 },
   iconTabsRow: {
     flexDirection: "row",
     justifyContent: "space-around",
