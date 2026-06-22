@@ -19,6 +19,7 @@ import {
   useWindowDimensions,
   View,
   type ViewStyle,
+  type ImageStyle,
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
@@ -36,6 +37,7 @@ import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
 import { UserAvatar } from "../components/UserAvatar";
+import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
@@ -89,6 +91,7 @@ import {
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { reelPlayerBackground } from "../utils/reelGrid";
+import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 
 export type OpenCreateOptions = {
   liveTopic?: string;
@@ -723,15 +726,45 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
       } as ViewStyle)
     : ({} as ViewStyle);
 
-function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
+function FeedPostVideo({ uri, style, posterUri }: { uri: string; style: ViewStyle; posterUri?: string }) {
   const activeUri = videoPlaybackUrl(uri);
   const videoRef = useRef<Video | null>(null);
+  const [blocked, setBlocked] = useState(false);
+
+  useEffect(() => {
+    setBlocked(false);
+  }, [activeUri]);
 
   useEffect(() => {
     return () => {
       void videoRef.current?.unloadAsync().catch(() => {});
     };
   }, []);
+
+  const onStatus = useCallback((status: AVPlaybackStatus) => {
+    if (status.isLoaded) {
+      const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
+      if (isOversizedFeedVideo(w, h)) {
+        setBlocked(true);
+        void videoRef.current?.pauseAsync().catch(() => {});
+        void videoRef.current?.unloadAsync().catch(() => {});
+      }
+      return;
+    }
+    if ("error" in status && status.error) {
+      console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+      setBlocked(true);
+      void videoRef.current?.unloadAsync().catch(() => {});
+    }
+  }, [activeUri]);
+
+  if (blocked) {
+    return posterUri ? (
+      <Image source={{ uri: posterUri }} style={style as ImageStyle} resizeMode="cover" />
+    ) : (
+      <View style={[style, { backgroundColor: "#111" }]} />
+    );
+  }
 
   return (
     <Video
@@ -746,11 +779,7 @@ function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
       isLooping
       isMuted
       useNativeControls={false}
-      onPlaybackStatusUpdate={(status) => {
-        if (!status.isLoaded && "error" in status && status.error) {
-          console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-        }
-      }}
+      onPlaybackStatusUpdate={onStatus}
     />
   );
 }
@@ -790,12 +819,14 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const isWeb = Platform.OS === "web";
   const isCover = fit === "cover";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
   const activeUri = useMemo(() => videoPlaybackUrl(uri), [uri]);
 
   useEffect(() => {
     setNatural(null);
+    setPlaybackBlocked(false);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -856,6 +887,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         ...(!isCover ? { justifyContent: "center", alignItems: "center" } : {})
       }}
     >
+      {playbackBlocked ? (
+        posterUri ? (
+          <Image source={{ uri: posterUri }} style={videoOuterStyle as ImageStyle} resizeMode={isCover ? "cover" : "contain"} />
+        ) : (
+          <View style={[videoOuterStyle, { backgroundColor: "#111" }]} />
+        )
+      ) : (
       <Video
         key={activeUri}
         ref={(r) => {
@@ -875,8 +913,17 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           onStatusUpdate?.(status);
           if (status.isLoaded) {
             durationRef.current = Number(status.durationMillis || 0);
+            const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
+            if (isOversizedFeedVideo(w, h)) {
+              setPlaybackBlocked(true);
+              void videoRef.current?.pauseAsync().catch(() => {});
+              void videoRef.current?.unloadAsync().catch(() => {});
+              return;
+            }
           } else if ("error" in status && status.error) {
             console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+            setPlaybackBlocked(true);
+            void videoRef.current?.unloadAsync().catch(() => {});
           }
         }}
         onReadyForDisplay={
@@ -889,6 +936,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         }
         progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
       />
+      )}
     </View>
   );
 });
@@ -3057,6 +3105,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
+                posterUri={reelPoster || undefined}
                 shouldPlay
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
@@ -3415,7 +3464,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 {shouldPlayReel ? (
-                  <FeedPostVideo uri={post.videoUrl} style={styles.video} />
+                  <FeedPostVideo
+                    uri={post.videoUrl}
+                    style={styles.video}
+                    posterUri={post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined}
+                  />
                 ) : (
                   <>
                     <Image
@@ -4012,8 +4065,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                             uri={c.avatarUrl}
                             name={c.user}
                             size={36}
-                            borderRadius={10}
-                            style={styles.commentAvatarSq}
+                            borderRadius={18}
+                            style={styles.commentAvatar}
                             fallbackBackgroundColor="#3f3f46"
                             initialsColor="#fafafa"
                           />
@@ -4110,42 +4163,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </View>
               ) : null}
 
-              <View style={styles.emojiRow}>
-                {["😀", "😍", "🔥", "👏", "💯", "😅", "😎", "🥳"].map((emoji) => (
-                  <Pressable key={emoji} onPress={() => setCommentDraft((v) => `${v}${emoji}`)}>
-                    <Text style={styles.emojiText}>{emoji}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <View style={styles.commentInputRow}>
-                <UserAvatar
-                  uri={user?.avatarUrl}
-                  name={user?.fullName || "You"}
-                  size={28}
-                  borderRadius={14}
-                  style={styles.commentInputAvatar}
-                  fallbackBackgroundColor="#d1d5db"
-                  initialsColor="#0f172a"
-                />
-                <TextInput
-                  value={commentDraft}
-                  onChangeText={setCommentDraft}
-                  placeholder={replyingTo ? t("writeReply") : t("addCommentPlaceholder")}
-                  placeholderTextColor="#6b7280"
-                  style={styles.commentInput}
-                  multiline
-                  textAlignVertical="top"
-                  maxLength={2000}
-                />
-                <Pressable
-                  style={[styles.commentSendBtn, commentSubmitting ? styles.commentSendBtnDisabled : null]}
-                  onPress={submitComment}
-                  disabled={commentSubmitting || !commentDraft.trim()}
-                >
-                  <Ionicons name="send" size={16} color="#111827" />
-                </Pressable>
-              </View>
+              <CommentComposerBar
+                value={commentDraft}
+                onChangeText={setCommentDraft}
+                onSubmit={submitComment}
+                placeholder={commentPlaceholderForPost(
+                  activeCommentsPost,
+                  replyingTo ? String(replyingTo.user || "") : null,
+                  t
+                )}
+                avatarUri={user?.avatarUrl}
+                avatarName={user?.fullName || "You"}
+                submitting={commentSubmitting}
+              />
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -4943,16 +4973,9 @@ const styles = StyleSheet.create({
   noCommentsText: { color: "#C9FF35", textAlign: "center", marginTop: 16, fontWeight: "700" },
   commentBlock: { marginBottom: 2 },
   commentRowInsta: { flexDirection: "row", alignItems: "flex-start" },
-  commentAvatarSq: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#3f3f46",
-    alignItems: "center",
-    justifyContent: "center",
+  commentAvatar: {
     marginRight: 10
   },
-  commentAvatarSqText: { color: "#fafafa", fontSize: 14, fontWeight: "800" },
   commentMainCol: { flex: 1, minWidth: 0, paddingRight: 6 },
   commentHeaderRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
   commentUserName: { color: "#fafafa", fontSize: 13, fontWeight: "800", maxWidth: "70%" },

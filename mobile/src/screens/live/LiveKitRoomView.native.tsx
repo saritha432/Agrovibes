@@ -3,6 +3,7 @@ import { Audio } from "expo-av";
 import { Camera } from "expo-camera";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
+import { LIVEKIT_LIVE_ROOM_OPTIONS } from "../../utils/liveKitMobileOptions";
 import {
   AndroidAudioTypePresets,
   AudioSession,
@@ -176,7 +177,8 @@ function LiveRoomContent({
       try {
         setPublishError("");
         await room.localParticipant.setCameraEnabled(true, {
-          facingMode: initialCameraFacing === "back" ? "environment" : "user"
+          facingMode: initialCameraFacing === "back" ? "environment" : "user",
+          resolution: LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults?.resolution
         });
         if (cancelled) return;
         await room.localParticipant.setMicrophoneEnabled(true);
@@ -708,9 +710,11 @@ export function LiveKitRoomView({
         audio={false}
         video={false}
         options={{
-          adaptiveStream: { pixelDensity: "screen" },
-          dynacast: true,
-          videoCaptureDefaults: { facingMode: initialCameraFacing === "back" ? "environment" : "user" }
+          ...LIVEKIT_LIVE_ROOM_OPTIONS,
+          videoCaptureDefaults: {
+            ...LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults,
+            facingMode: initialCameraFacing === "back" ? "environment" : "user"
+          }
         }}
         onError={(error) => {
           const msg = error.message || "";

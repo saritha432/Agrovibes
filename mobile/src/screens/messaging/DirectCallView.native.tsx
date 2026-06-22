@@ -12,13 +12,14 @@ import {
   useRoomContext,
   useTracks
 } from "@livekit/react-native";
-import { ConnectionState, Track, type Participant } from "livekit-client";
+import { ConnectionState, RoomEvent, Track, type Participant, type Room } from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
 import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
 import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
+import { LIVEKIT_CALL_ROOM_OPTIONS } from "../../utils/liveKitMobileOptions";
 import { APP_LIME } from "../../theme/appColors";
 import { UserAvatar } from "../../components/UserAvatar";
 
@@ -39,6 +40,34 @@ type DirectCallViewProps = {
 
 function remoteParticipant(participants: Participant[], localIdentity: string) {
   return participants.find((p) => p.identity !== localIdentity) || null;
+}
+
+async function releaseCallMedia(room: Room) {
+  try {
+    await room.localParticipant.setCameraEnabled(false);
+    await room.localParticipant.setMicrophoneEnabled(false);
+  } catch {
+    // no-op
+  }
+  for (const pub of room.localParticipant.trackPublications.values()) {
+    const track = pub.track;
+    if (!track) continue;
+    try {
+      track.stop();
+    } catch {
+      // no-op
+    }
+    try {
+      await room.localParticipant.unpublishTrack(track, false);
+    } catch {
+      // no-op
+    }
+  }
+  try {
+    room.disconnect();
+  } catch {
+    // no-op
+  }
 }
 
 function PreConnectVideoPreview({
@@ -105,6 +134,7 @@ function CallRoomContent({
   const [cameraOff, setCameraOff] = React.useState(mode === "voice");
   const [facingFront, setFacingFront] = React.useState(true);
   const [status, setStatus] = React.useState(statusLabel || "Connecting...");
+  const [tracksReady, setTracksReady] = React.useState(false);
   const localIdentity = room.localParticipant.identity;
   const peer = remoteParticipant(participants, localIdentity);
   const localVideo = cameraTracks.find(
@@ -121,26 +151,47 @@ function CallRoomContent({
     room.state === ConnectionState.Connected &&
     !!peer;
   const showLocalVideo =
-    mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo);
+    mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo) && tracksReady;
 
   React.useEffect(() => {
     let cancelled = false;
-    void (async () => {
+    const publishTracks = async () => {
+      if (room.state !== ConnectionState.Connected) return;
       try {
+        // Let expo-camera preview release the lens before WebRTC grabs it (Android).
+        if (mode === "video") {
+          await new Promise((resolve) => setTimeout(resolve, 450));
+        }
+        if (cancelled || room.state !== ConnectionState.Connected) return;
         await room.localParticipant.setMicrophoneEnabled(true);
         if (mode === "video") {
-          await room.localParticipant.setCameraEnabled(true, { facingMode: "user" });
-          if (!cancelled) setCameraOff(false);
+          await room.localParticipant.setCameraEnabled(true, {
+            facingMode: "user",
+            resolution: LIVEKIT_CALL_ROOM_OPTIONS.videoCaptureDefaults?.resolution
+          });
+          if (!cancelled) {
+            setCameraOff(false);
+            setTracksReady(true);
+          }
         } else {
           await room.localParticipant.setCameraEnabled(false);
-          if (!cancelled) setCameraOff(true);
+          if (!cancelled) {
+            setCameraOff(true);
+            setTracksReady(true);
+          }
         }
       } catch {
         if (!cancelled) setStatus("Could not start microphone");
       }
-    })();
+    };
+    const onConnected = () => void publishTracks();
+    room.on(RoomEvent.Connected, onConnected);
+    room.on(RoomEvent.Reconnected, onConnected);
+    if (room.state === ConnectionState.Connected) void publishTracks();
     return () => {
       cancelled = true;
+      room.off(RoomEvent.Connected, onConnected);
+      room.off(RoomEvent.Reconnected, onConnected);
     };
   }, [mode, room]);
 
@@ -163,25 +214,30 @@ function CallRoomContent({
   const toggleCamera = async () => {
     const next = !cameraOff;
     setCameraOff(next);
-    await room.localParticipant.setCameraEnabled(!next, { facingMode: facingFront ? "user" : "environment" });
+    await room.localParticipant.setCameraEnabled(!next, {
+      facingMode: facingFront ? "user" : "environment",
+      resolution: LIVEKIT_CALL_ROOM_OPTIONS.videoCaptureDefaults?.resolution
+    });
   };
 
   const flipCamera = async () => {
     const nextFront = !facingFront;
     setFacingFront(nextFront);
     if (!cameraOff) {
-      await room.localParticipant.setCameraEnabled(true, { facingMode: nextFront ? "user" : "environment" });
+      await room.localParticipant.setCameraEnabled(true, {
+        facingMode: nextFront ? "user" : "environment",
+        resolution: LIVEKIT_CALL_ROOM_OPTIONS.videoCaptureDefaults?.resolution
+      });
     }
   };
 
   const endCall = async () => {
     try {
-      await room.localParticipant.setCameraEnabled(false);
-      await room.localParticipant.setMicrophoneEnabled(false);
-      room.disconnect();
+      await releaseCallMedia(room);
     } catch {
       // no-op
     }
+    void AudioSession.stopAudioSession().catch(() => undefined);
     onClose();
   };
 
@@ -196,6 +252,11 @@ function CallRoomContent({
           objectFit="cover"
           mirror={facingFront}
         />
+      ) : mode === "video" && !tracksReady ? (
+        <View style={styles.videoPreview}>
+          <ActivityIndicator size="large" color={APP_LIME} />
+          <Text style={styles.connectingVideoText}>{statusLabel || "Starting camera..."}</Text>
+        </View>
       ) : (
         <View style={styles.videoPreview}>
           <UserAvatar
@@ -274,12 +335,20 @@ export function DirectCallView({
   const insets = useSafeAreaInsets();
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [errorText, setErrorText] = React.useState("");
+  const endedByUserRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      endedByUserRef.current = false;
+      setConnection(null);
+      setErrorText("");
+      void AudioSession.stopAudioSession().catch(() => undefined);
+      return;
+    }
     void activateKeepAwakeAsync().catch(() => undefined);
     return () => {
       void deactivateKeepAwake().catch(() => undefined);
+      void AudioSession.stopAudioSession().catch(() => undefined);
     };
   }, [visible]);
 
@@ -373,16 +442,22 @@ export function DirectCallView({
           serverUrl={connection.url}
           token={connection.token}
           connect
-          audio
-          video={mode === "video"}
-          onDisconnected={onClose}
+          audio={false}
+          video={false}
+          options={LIVEKIT_CALL_ROOM_OPTIONS}
+          onDisconnected={() => {
+            if (!endedByUserRef.current) onClose();
+          }}
         >
           <CallRoomContent
             mode={mode}
             peerName={peerName}
             peerAvatarUrl={peerAvatarUrl}
             statusLabel={statusLabel}
-            onClose={onClose}
+            onClose={() => {
+              endedByUserRef.current = true;
+              onClose();
+            }}
           />
         </LiveKitRoom>
       )}
@@ -416,6 +491,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#111"
+  },
+  connectingVideoText: {
+    marginTop: 12,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 14,
+    fontWeight: "600"
   },
   callTopBar: { zIndex: 2, paddingHorizontal: 18 },
   callTopIcon: {

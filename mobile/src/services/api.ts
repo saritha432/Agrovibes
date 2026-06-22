@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
-import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
+import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -578,6 +578,26 @@ export async function fetchHomePosts(token?: string | null) {
 /** Current user's posts only — lighter than loading the full home feed for profile. */
 export async function fetchMyHomePosts(token: string) {
   const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
+/** Any user's profile posts (public profile view). */
+export async function fetchUserHomePosts(
+  token: string | null | undefined,
+  userId: number,
+  userName?: string
+) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const qs = userName?.trim() ? `?userName=${encodeURIComponent(userName.trim())}` : "";
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/home/posts/user/${encodeURIComponent(String(userId))}${qs}`,
+    { headers }
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load user posts");
+  }
+  const data = (await response.json()) as { posts: HomePost[] };
   return { posts: data.posts.map(sanitizeHomePost) };
 }
 
@@ -1163,6 +1183,8 @@ export type PickerAssetMeta = {
   mimeType?: string | null;
   uri?: string | null;
   fileName?: string | null;
+  width?: number | null;
+  height?: number | null;
   /** Expo: video duration in ms; images often 0 or undefined */
   duration?: number | null;
 };
@@ -1273,8 +1295,9 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
   return { url: uploaded.url };
 }
 
-export async function uploadVideoFile(fileUri: string) {
+export async function uploadVideoFile(fileUri: string, asset?: PickerAssetMeta | null) {
   await assertVideoUnderUploadLimit(fileUri);
+  assertVideoResolutionWithinLimit(asset?.width, asset?.height);
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
   const mime =
@@ -1297,7 +1320,7 @@ export async function uploadAudioFile(fileUri: string) {
 
 /** Single entry: picks image vs video upload from picker metadata (avoids JPEG → /video/upload). */
 export async function uploadPickedMedia(uri: string, asset?: PickerAssetMeta | null) {
-  return shouldUseImageUpload(uri, asset) ? uploadImageFile(uri) : uploadVideoFile(uri);
+  return shouldUseImageUpload(uri, asset) ? uploadImageFile(uri) : uploadVideoFile(uri, asset);
 }
 
 export type RazorpayOrderPayload = {

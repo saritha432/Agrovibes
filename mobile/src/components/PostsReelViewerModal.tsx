@@ -28,6 +28,7 @@ import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navi
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
+import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet } from "./PostShareSheet";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -522,9 +523,14 @@ export function PostsReelViewerModal({
     setViewerPosts(nextPosts);
     const ix = Math.max(0, Math.min(initialIndex, Math.max(0, nextPosts.length - 1)));
     const post = nextPosts[ix];
-    setPlayingPostId(post?.id ?? null);
+    const nextPlayingId = post?.id ?? null;
+    setPlayingPostId(nextPlayingId);
     setIsReelMuted(Platform.OS === "web");
     setReelMuteFeedback(null);
+    if (Platform.OS !== "web" && nextPlayingId) {
+      const timer = setTimeout(() => setPlayingPostId(nextPlayingId), 80);
+      return () => clearTimeout(timer);
+    }
   }, [visible, posts, initialIndex]);
 
   useEffect(() => {
@@ -765,10 +771,7 @@ export function PostsReelViewerModal({
       .filter((v) => v.isViewable && v.item != null)
       .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
       .sort((a, b) => a.index - b.index);
-    if (!ordered.length) {
-      setPlayingPostId(null);
-      return;
-    }
+    if (!ordered.length) return;
     setPlayingPostId(ordered[ordered.length - 1].post.id);
   }, []);
 
@@ -836,7 +839,7 @@ export function PostsReelViewerModal({
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
-                uri={post.videoUrl}
+                uri={videoPlaybackUrl(post.videoUrl)}
                 shouldPlay={isActive}
                 preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
@@ -1104,24 +1107,16 @@ export function PostsReelViewerModal({
                   )}
                 </ScrollView>
               )}
-              <View style={styles.commentInputRow}>
-                <TextInput
+              <View style={styles.commentComposerWrap}>
+                <CommentComposerBar
                   value={commentDraft}
                   onChangeText={setCommentDraft}
-                  placeholder={t("addCommentPlaceholder")}
-                  placeholderTextColor="#6b7280"
-                  style={styles.commentInput}
-                  multiline
-                  textAlignVertical="top"
-                  maxLength={2000}
+                  onSubmit={() => void submitComment()}
+                  placeholder={commentPlaceholderForPost(activeCommentsPost, null, t)}
+                  avatarUri={user?.avatarUrl}
+                  avatarName={user?.fullName || "You"}
+                  submitting={commentSubmitting}
                 />
-                <Pressable
-                  style={[styles.commentSendBtn, commentSubmitting ? styles.commentSendBtnDisabled : null]}
-                  onPress={() => void submitComment()}
-                  disabled={commentSubmitting || !commentDraft.trim()}
-                >
-                  <Ionicons name="send" size={16} color="#111827" />
-                </Pressable>
               </View>
             </View>
           </KeyboardAvoidingView>
@@ -1242,21 +1237,7 @@ const styles = StyleSheet.create({
   commentBody: { flex: 1 },
   commentUser: { color: "#C9FF35", fontWeight: "800", fontSize: 13 },
   commentText: { color: "#e5e7eb", marginTop: 2, lineHeight: 18 },
-  commentInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
-  commentInput: {
-    flex: 1,
-    minHeight: 72,
-    maxHeight: 140,
-    backgroundColor: "#1f2937",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: "#fff",
-    fontSize: 14,
-    lineHeight: 20
-  },
-  commentSendBtnDisabled: { opacity: 0.45 },
-  commentSendBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#C9FF35", alignItems: "center", justifyContent: "center" },
+  commentComposerWrap: { paddingHorizontal: 16 },
   reelOptionsModalRoot: { flex: 1, justifyContent: "flex-end" },
   reelOptionsDimTap: { backgroundColor: "rgba(0,0,0,0.45)" },
   reelOptionsSheet: { backgroundColor: "#111827", borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 16, paddingTop: 8 },

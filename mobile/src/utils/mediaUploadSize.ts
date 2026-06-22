@@ -1,10 +1,24 @@
 import * as FileSystem from "expo-file-system";
 import { Platform } from "react-native";
 import { MAX_MEDIA_UPLOAD_BYTES, MAX_MEDIA_UPLOAD_MB } from "../constants/uploadLimits";
+import { isOversizedUploadVideo } from "./feedVideoLimits";
 
 export function videoTooLargeError(actualBytes: number) {
   const mb = actualBytes / (1024 * 1024);
   return `Video is ${mb.toFixed(1)}MB. Maximum upload size is ${MAX_MEDIA_UPLOAD_MB}MB.`;
+}
+
+export function videoResolutionTooLargeError(width: number, height: number) {
+  return `Video is ${width}×${height}. Maximum allowed is 1920px on the longest side — use 1080p or lower.`;
+}
+
+/** Reject 4K+ uploads before they reach the feed (prevents decoder OOM on viewers). */
+export function assertVideoResolutionWithinLimit(width?: number, height?: number): void {
+  const w = Number(width) || 0;
+  const h = Number(height) || 0;
+  if (w > 0 && h > 0 && isOversizedUploadVideo(w, h)) {
+    throw new Error(videoResolutionTooLargeError(w, h));
+  }
 }
 
 /** Blocks upload before calling Supabase when the file is over the limit. */

@@ -320,6 +320,7 @@ export function InAppCameraCapture({
               style={StyleSheet.absoluteFill}
               facing={facing}
               mode={cameraViewMode}
+              videoQuality="720p"
               active={visible}
               onCameraReady={() => setCameraReady(true)}
               onMountError={() => {
