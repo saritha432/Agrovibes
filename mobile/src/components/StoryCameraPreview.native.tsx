@@ -180,6 +180,7 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         style={StyleSheet.absoluteFill}
         facing={facing}
         mode={cameraViewMode}
+        videoQuality="720p"
         active={active}
         zoom={cameraZoom}
         enableTorch={torchOn}

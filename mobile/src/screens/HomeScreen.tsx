@@ -19,6 +19,7 @@ import {
   useWindowDimensions,
   View,
   type ViewStyle,
+  type ImageStyle,
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
@@ -89,6 +90,7 @@ import {
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { reelPlayerBackground } from "../utils/reelGrid";
+import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 
 export type OpenCreateOptions = {
   liveTopic?: string;
@@ -723,15 +725,45 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
       } as ViewStyle)
     : ({} as ViewStyle);
 
-function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
+function FeedPostVideo({ uri, style, posterUri }: { uri: string; style: ViewStyle; posterUri?: string }) {
   const activeUri = videoPlaybackUrl(uri);
   const videoRef = useRef<Video | null>(null);
+  const [blocked, setBlocked] = useState(false);
+
+  useEffect(() => {
+    setBlocked(false);
+  }, [activeUri]);
 
   useEffect(() => {
     return () => {
       void videoRef.current?.unloadAsync().catch(() => {});
     };
   }, []);
+
+  const onStatus = useCallback((status: AVPlaybackStatus) => {
+    if (status.isLoaded) {
+      const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
+      if (isOversizedFeedVideo(w, h)) {
+        setBlocked(true);
+        void videoRef.current?.pauseAsync().catch(() => {});
+        void videoRef.current?.unloadAsync().catch(() => {});
+      }
+      return;
+    }
+    if ("error" in status && status.error) {
+      console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+      setBlocked(true);
+      void videoRef.current?.unloadAsync().catch(() => {});
+    }
+  }, [activeUri]);
+
+  if (blocked) {
+    return posterUri ? (
+      <Image source={{ uri: posterUri }} style={style as ImageStyle} resizeMode="cover" />
+    ) : (
+      <View style={[style, { backgroundColor: "#111" }]} />
+    );
+  }
 
   return (
     <Video
@@ -746,11 +778,7 @@ function FeedPostVideo({ uri, style }: { uri: string; style: ViewStyle }) {
       isLooping
       isMuted
       useNativeControls={false}
-      onPlaybackStatusUpdate={(status) => {
-        if (!status.isLoaded && "error" in status && status.error) {
-          console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-        }
-      }}
+      onPlaybackStatusUpdate={onStatus}
     />
   );
 }
@@ -790,12 +818,14 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const isWeb = Platform.OS === "web";
   const isCover = fit === "cover";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
   const activeUri = useMemo(() => videoPlaybackUrl(uri), [uri]);
 
   useEffect(() => {
     setNatural(null);
+    setPlaybackBlocked(false);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -856,6 +886,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         ...(!isCover ? { justifyContent: "center", alignItems: "center" } : {})
       }}
     >
+      {playbackBlocked ? (
+        posterUri ? (
+          <Image source={{ uri: posterUri }} style={videoOuterStyle as ImageStyle} resizeMode={isCover ? "cover" : "contain"} />
+        ) : (
+          <View style={[videoOuterStyle, { backgroundColor: "#111" }]} />
+        )
+      ) : (
       <Video
         key={activeUri}
         ref={(r) => {
@@ -875,8 +912,17 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           onStatusUpdate?.(status);
           if (status.isLoaded) {
             durationRef.current = Number(status.durationMillis || 0);
+            const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
+            if (isOversizedFeedVideo(w, h)) {
+              setPlaybackBlocked(true);
+              void videoRef.current?.pauseAsync().catch(() => {});
+              void videoRef.current?.unloadAsync().catch(() => {});
+              return;
+            }
           } else if ("error" in status && status.error) {
             console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+            setPlaybackBlocked(true);
+            void videoRef.current?.unloadAsync().catch(() => {});
           }
         }}
         onReadyForDisplay={
@@ -889,6 +935,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         }
         progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
       />
+      )}
     </View>
   );
 });
@@ -3057,6 +3104,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
+                posterUri={reelPoster || undefined}
                 shouldPlay
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
@@ -3415,7 +3463,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             {post.videoUrl ? (
               <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
                 {shouldPlayReel ? (
-                  <FeedPostVideo uri={post.videoUrl} style={styles.video} />
+                  <FeedPostVideo
+                    uri={post.videoUrl}
+                    style={styles.video}
+                    posterUri={post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined}
+                  />
                 ) : (
                   <>
                     <Image
