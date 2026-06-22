@@ -190,7 +190,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const isMountedRef = useRef(true);
   const profileInitialTabRef = useRef<GalleryTab | undefined>(route?.params?.initialTab);
 
-  const displayAvatarUrl = useMemo(() => stripLegacyCloudinaryUrl(user?.avatarUrl), [user?.avatarUrl]);
+  const displayAvatarUrl = useMemo(
+    () => stripLegacyCloudinaryUrl(isPublicProfileView ? publicAvatarUrl : user?.avatarUrl),
+    [isPublicProfileView, publicAvatarUrl, user?.avatarUrl]
+  );
   const avatarPreviewSize = Math.min(320, Math.max(200, Math.min(width, windowHeight) * 0.68));
 
   const gridGap = 2;
@@ -1014,8 +1017,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                   accessibilityLabel={t("viewProfilePhoto")}
                 >
                   <UserAvatar
-                    uri={user.avatarUrl}
-                    name={user.fullName || user.username || user.email || "U"}
+                    uri={profileSubject.avatarUrl}
+                    name={profileSubject.fullName || profileSubject.username || "U"}
                     size={88}
                     borderRadius={44}
                     fallbackBackgroundColor={SURFACE}
