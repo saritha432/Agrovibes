@@ -2,39 +2,34 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
-  Image,
   Platform,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { UserAvatar } from "../components/UserAvatar";
 import { formatDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
-import { fetchHomePosts, fetchUsers, type HomePost } from "../services/api";
-import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
+import { fetchRelationships, fetchUsers, sendFollowRequest, type FollowStatus } from "../services/api";
+import { getLocalFollowNetworkByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
-import { isReelPost, reelGridStillUri, reelGridTileBackground } from "../utils/reelGrid";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
-import { ResizeMode, Video } from "expo-av";
 
-const GRID_GAP = 2;
-const GRID_PAD = 2;
 const BG = "#121212";
 const SEARCH_BG = "#303132";
 const ROW_BORDER = "#2a2a2a";
 const MUTED = "#9e9e9e";
 const TEXT = "#ffffff";
+const SEARCH_ICON = APP_LIME;
 
 type SearchUser = {
   id?: number;
@@ -44,10 +39,6 @@ type SearchUser = {
   avatarUrl?: string | null;
 };
 
-function tileBackground(index: number) {
-  return reelGridTileBackground(index, 3);
-}
-
 function normalizeName(value: string) {
   return String(value || "")
     .toLowerCase()
@@ -56,19 +47,17 @@ function normalizeName(value: string) {
 }
 
 export function UserSearchScreen() {
-  const { width } = useWindowDimensions();
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
 
   const [query, setQuery] = useState("");
-  const [posts, setPosts] = useState<HomePost[]>([]);
-  const [loadingReels, setLoadingReels] = useState(true);
   const [users, setUsers] = useState<SearchUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [reelViewer, setReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
-
-  const gridTileSize = (width - GRID_PAD * 2 - GRID_GAP * 2) / 3;
-  const reelTileHeight = Math.round(gridTileSize * (16 / 9));
+  const [suggestedUsers, setSuggestedUsers] = useState<SearchUser[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [recentUsers, setRecentUsers] = useState<SearchUser[]>([]);
+  const [followStatusByUserId, setFollowStatusByUserId] = useState<Record<number, FollowStatus>>({});
+  const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
 
   const trimmedQuery = query.trim();
   const isUserSearchMode = trimmedQuery.length > 0;
@@ -86,24 +75,6 @@ export function UserSearchScreen() {
         }
       };
     }, [])
-  );
-
-  const loadExploreReels = useCallback(async () => {
-    setLoadingReels(true);
-    try {
-      const data = await fetchHomePosts(token);
-      setPosts((data.posts || []).filter(isReelPost));
-    } catch {
-      setPosts([]);
-    } finally {
-      setLoadingReels(false);
-    }
-  }, [token]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void loadExploreReels();
-    }, [loadExploreReels])
   );
 
   const loadUsers = useCallback(
@@ -165,6 +136,63 @@ export function UserSearchScreen() {
     [token, user?.email, user?.fullName, user?.id, user?.username]
   );
 
+  const loadSuggestedUsers = useCallback(async () => {
+    setLoadingSuggestions(true);
+    const list: SearchUser[] = [];
+    const seen = new Set<string>();
+    const selfId = Number(user?.id) || 0;
+    const selfName = normalizeName(user?.fullName || user?.username || "");
+    const identity = { name: user?.fullName || "", key: user?.email || String(user?.id || "") };
+    try {
+      if (token) {
+        try {
+          const { users: remoteUsers } = await fetchUsers(token, { limit: 20 });
+          for (const remoteUser of remoteUsers) {
+            if (remoteUser.id === selfId) continue;
+            const displayName = remoteUser.fullName || remoteUser.username || "";
+            const n = normalizeName(displayName);
+            if (!n || n === selfName || seen.has(String(remoteUser.id))) continue;
+            seen.add(String(remoteUser.id));
+            list.push({
+              id: remoteUser.id,
+              key: String(remoteUser.id),
+              name: displayName,
+              username: remoteUser.username,
+              avatarUrl: remoteUser.avatarUrl
+            });
+          }
+          setSuggestedUsers(list.sort((a, b) => a.name.localeCompare(b.name)));
+          return;
+        } catch {
+          /* fall through to local network */
+        }
+      }
+      const { followers, following } = await getLocalFollowNetworkByIdentity(identity);
+      for (const person of [...following, ...followers]) {
+        const key = normalizeName(person.name);
+        if (!key || key === selfName || seen.has(key)) continue;
+        seen.add(key);
+        list.push({ name: person.name, key: person.key });
+      }
+      setSuggestedUsers(list.sort((a, b) => a.name.localeCompare(b.name)).slice(0, 20));
+    } catch {
+      setSuggestedUsers([]);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, [token, user?.email, user?.fullName, user?.id, user?.username]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadSuggestedUsers();
+    }, [loadSuggestedUsers])
+  );
+
+  const suggestionRows = useMemo(() => {
+    const recentKeys = new Set(recentUsers.map((u) => String(u.id || u.key || normalizeName(u.name))));
+    return suggestedUsers.filter((u) => !recentKeys.has(String(u.id || u.key || normalizeName(u.name))));
+  }, [recentUsers, suggestedUsers]);
+
   useEffect(() => {
     if (!isUserSearchMode) {
       setUsers([]);
@@ -177,18 +205,60 @@ export function UserSearchScreen() {
     return () => clearTimeout(handle);
   }, [isUserSearchMode, loadUsers, trimmedQuery]);
 
-  const exploreReels = useMemo(() => posts, [posts]);
+  useEffect(() => {
+    if (!token) return;
+    const ids = suggestionRows
+      .map((person) => Number(person.id) || 0)
+      .filter((id) => id > 0);
+    if (!ids.length) return;
+    void fetchRelationships(token, ids)
+      .then(({ relationships }) => {
+        const next: Record<number, FollowStatus> = {};
+        for (const [idStr, rel] of Object.entries(relationships)) {
+          const id = Number(idStr);
+          if (rel.viewerStatus === "accepted" || rel.viewerStatus === "pending") {
+            next[id] = rel.viewerStatus;
+          }
+        }
+        setFollowStatusByUserId((prev) => ({ ...prev, ...next }));
+      })
+      .catch(() => {});
+  }, [suggestionRows, token]);
 
-  const openReelViewer = useCallback(
-    (post: HomePost) => {
-      const index = exploreReels.findIndex((p) => p.id === post.id);
-      setReelViewer({ posts: exploreReels, initialIndex: index >= 0 ? index : 0 });
+  const handleFollowSuggestion = useCallback(
+    async (person: SearchUser) => {
+      const targetUserId = Number(person.id) || 0;
+      if (targetUserId && followBusyByUserId[targetUserId]) return;
+
+      if (!targetUserId) {
+        await sendLocalFollowRequestByIdentity(
+          { name: user?.fullName || "Farmer", key: user?.email || String(user?.id || "") },
+          { name: person.name, key: person.key }
+        );
+        return;
+      }
+
+      if (!token) return;
+      setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
+      try {
+        const data = await sendFollowRequest(token, targetUserId);
+        setFollowStatusByUserId((prev) => ({ ...prev, [targetUserId]: data.follow.status }));
+      } catch (error: any) {
+        Alert.alert(t("followFailed"), error?.message || t("followFailedMessage"));
+      } finally {
+        setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: false }));
+      }
     },
-    [exploreReels]
+    [followBusyByUserId, t, token, user?.email, user?.fullName, user?.id]
   );
 
   const openUserProfile = useCallback(
     (person: SearchUser) => {
+      setRecentUsers((prev) => {
+        const id = String(person.id || person.key || normalizeName(person.name));
+        const deduped = prev.filter((u) => String(u.id || u.key || normalizeName(u.name)) !== id);
+        return [person, ...deduped].slice(0, 4);
+      });
       const selfId = Number(user?.id) || 0;
       if (person.id && person.id === selfId) {
         navigateToMyProfile();
@@ -204,41 +274,8 @@ export function UserSearchScreen() {
     [user?.id]
   );
 
-  const renderGridItem = useCallback(
-    ({ item, index }: { item: HomePost; index: number }) => {
-      const stillUri = reelGridStillUri(item);
-      const tileBg = tileBackground(index);
-      const tileStyle = [
-        styles.gridTile,
-        { width: gridTileSize, height: reelTileHeight, backgroundColor: tileBg }
-      ];
-
-      return (
-        <Pressable style={tileStyle} onPress={() => openReelViewer(item)}>
-          {stillUri ? (
-            <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
-          ) : item.videoUrl ? (
-            <Video
-              style={styles.gridImage}
-              source={{ uri: videoPlaybackUrl(item.videoUrl) }}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={false}
-              isLooping
-              isMuted
-              useNativeControls={false}
-            />
-          ) : null}
-          <View style={styles.gridVideoBadge} pointerEvents="none">
-            <Ionicons name="videocam" size={18} color={TEXT} />
-          </View>
-        </Pressable>
-      );
-    },
-    [gridTileSize, openReelViewer, reelTileHeight]
-  );
-
   const renderUserRow = useCallback(
-    ({ item }: { item: SearchUser }) => {
+    ({ item, showDot }: { item: SearchUser; showDot?: boolean }) => {
       const displayName = formatDisplayName(item.name, language, t);
       const handle = item.username ? `@${item.username.replace(/^@/, "")}` : null;
 
@@ -254,25 +291,76 @@ export function UserSearchScreen() {
           />
           <View style={styles.userMeta}>
             <Text style={styles.userName} numberOfLines={1}>
-              {handle || displayName}
+              {displayName}
             </Text>
-            {handle ? (
-              <Text style={styles.userSub} numberOfLines={1}>
-                {displayName}
-              </Text>
-            ) : null}
+            <Text style={styles.userSub} numberOfLines={1}>
+              {handle || "Farmer"} {showDot ? "  ·  New Post" : ""}
+            </Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={MUTED} />
+          {showDot ? <View style={styles.newDot} /> : null}
         </Pressable>
       );
     },
     [language, openUserProfile, t]
   );
 
+  const renderSuggestionRow = useCallback(
+    (item: SearchUser) => {
+      const displayName = formatDisplayName(item.name, language, t);
+      const handle = item.username ? `@${item.username.replace(/^@/, "")}` : null;
+      const targetUserId = Number(item.id) || 0;
+      const followStatus = targetUserId ? followStatusByUserId[targetUserId] : undefined;
+      const isPending = followStatus === "pending";
+      const isFollowing = followStatus === "accepted";
+      const followLocked = isPending || isFollowing;
+      const isBusy = targetUserId ? followBusyByUserId[targetUserId] : false;
+
+      const followLabel = isBusy
+        ? t("followBusy")
+        : isPending
+          ? t("requested")
+          : isFollowing
+            ? t("following")
+            : t("follow");
+
+      return (
+        <View style={styles.userRow}>
+          <Pressable style={styles.userRowMain} onPress={() => openUserProfile(item)}>
+            <UserAvatar
+              uri={item.avatarUrl}
+              name={item.name}
+              size={48}
+              borderRadius={24}
+              fallbackBackgroundColor={SEARCH_BG}
+              initialsColor={MUTED}
+            />
+            <View style={styles.userMeta}>
+              <Text style={styles.userName} numberOfLines={1}>
+                {displayName}
+              </Text>
+              <Text style={styles.userSub} numberOfLines={1}>
+                {handle || "Farmer"}
+              </Text>
+            </View>
+          </Pressable>
+          <Pressable
+            style={[styles.followBtn, followLocked ? styles.followBtnMuted : null]}
+            onPress={() => void handleFollowSuggestion(item)}
+            disabled={followLocked || isBusy}
+            hitSlop={6}
+          >
+            <Text style={[styles.followBtnText, followLocked ? styles.followBtnTextMuted : null]}>{followLabel}</Text>
+          </Pressable>
+        </View>
+      );
+    },
+    [followBusyByUserId, followStatusByUserId, handleFollowSuggestion, language, openUserProfile, t]
+  );
+
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.searchWrap}>
-        <Ionicons name="search" size={18} color={MUTED} />
+        <Ionicons name="search" size={18} color={SEARCH_ICON} />
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -310,46 +398,34 @@ export function UserSearchScreen() {
             contentContainerStyle={styles.userList}
           />
         )
-      ) : loadingReels ? (
+      ) : loadingSuggestions ? (
         <View style={styles.centered}>
           <ActivityIndicator color={APP_LIME} />
         </View>
-      ) : exploreReels.length === 0 ? (
+      ) : recentUsers.length === 0 && suggestionRows.length === 0 ? (
         <View style={styles.centered}>
-          <Text style={styles.emptyTitle}>{t("emptyReelsTitle")}</Text>
-          <Text style={styles.emptySub}>{t("emptyReelsSub")}</Text>
+          <Text style={styles.emptyTitle}>{t("noUsersFound")}</Text>
         </View>
       ) : (
-        <FlatList
-          key="explore-reels"
-          data={exploreReels}
-          keyExtractor={(item) => String(item.id)}
-          numColumns={3}
-          renderItem={renderGridItem}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.gridList}
-          columnWrapperStyle={styles.gridRow}
-        />
+        <ScrollView style={styles.defaultList} contentContainerStyle={styles.defaultListInner} keyboardShouldPersistTaps="handled">
+          {recentUsers.length > 0 ? (
+            <>
+              <Text style={styles.sectionTitle}>Recent</Text>
+              {recentUsers.map((item, index) => (
+                <View key={`recent-${item.id || item.key || item.name}-${index}`}>{renderUserRow({ item, showDot: index === 0 })}</View>
+              ))}
+            </>
+          ) : null}
+          {suggestionRows.length > 0 ? (
+            <>
+              <Text style={[styles.sectionTitle, recentUsers.length > 0 ? styles.sectionTitleSpaced : null]}>Suggestion</Text>
+              {suggestionRows.map((item, index) => (
+                <View key={`suggested-${item.id || item.key || item.name}-${index}`}>{renderSuggestionRow(item)}</View>
+              ))}
+            </>
+          ) : null}
+        </ScrollView>
       )}
-
-      <PostsReelViewerModal
-        visible={!!reelViewer}
-        posts={reelViewer?.posts ?? []}
-        initialIndex={reelViewer?.initialIndex ?? 0}
-        onClose={() => setReelViewer(null)}
-        onPostsChange={(nextPosts) => {
-          setPosts(nextPosts);
-          setReelViewer((current) => {
-            if (!current) return current;
-            if (!nextPosts.length) return null;
-            return {
-              posts: nextPosts,
-              initialIndex: Math.min(current.initialIndex, nextPosts.length - 1)
-            };
-          });
-        }}
-      />
     </SafeAreaView>
   );
 }
@@ -372,29 +448,63 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   emptyTitle: { color: TEXT, fontSize: 16, fontWeight: "700", textAlign: "center" },
   emptySub: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 8 },
-  userList: { paddingBottom: 16 },
+  userList: { paddingBottom: 16, paddingTop: 6 },
+  defaultList: { flex: 1 },
+  defaultListInner: { paddingBottom: 16, paddingTop: 4 },
+  sectionTitle: {
+    color: "#e5e7eb",
+    fontSize: 18,
+    fontWeight: "700",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6
+  },
+  sectionTitleSpaced: { marginTop: 8 },
   userRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: ROW_BORDER
   },
-  userMeta: { flex: 1, minWidth: 0 },
-  userName: { color: TEXT, fontSize: 15, fontWeight: "700" },
-  userSub: { color: MUTED, fontSize: 13, marginTop: 2, fontWeight: "500" },
-  gridList: { paddingHorizontal: GRID_PAD, paddingBottom: 16 },
-  gridRow: { gap: GRID_GAP, marginBottom: GRID_GAP },
-  gridTile: {
-    overflow: "hidden",
-    position: "relative"
+  userRowMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
   },
-  gridImage: { width: "100%", height: "100%" },
-  gridVideoBadge: {
-    position: "absolute",
-    top: 8,
-    right: 8
+  userMeta: { flex: 1, minWidth: 0 },
+  userName: { color: TEXT, fontSize: 30 / 2, fontWeight: "700" },
+  userSub: { color: MUTED, fontSize: 12.5, marginTop: 2, fontWeight: "500" },
+  newDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: APP_LIME
+  },
+  followBtn: {
+    minWidth: 88,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12
+  },
+  followBtnMuted: {
+    backgroundColor: SEARCH_BG,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: ROW_BORDER
+  },
+  followBtnText: {
+    color: "#111827",
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  followBtnTextMuted: {
+    color: TEXT
   }
 });
