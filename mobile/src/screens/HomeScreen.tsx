@@ -37,6 +37,7 @@ import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
 import { UserAvatar } from "../components/UserAvatar";
+import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
@@ -4064,8 +4065,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                             uri={c.avatarUrl}
                             name={c.user}
                             size={36}
-                            borderRadius={10}
-                            style={styles.commentAvatarSq}
+                            borderRadius={18}
+                            style={styles.commentAvatar}
                             fallbackBackgroundColor="#3f3f46"
                             initialsColor="#fafafa"
                           />
@@ -4162,42 +4163,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </View>
               ) : null}
 
-              <View style={styles.emojiRow}>
-                {["😀", "😍", "🔥", "👏", "💯", "😅", "😎", "🥳"].map((emoji) => (
-                  <Pressable key={emoji} onPress={() => setCommentDraft((v) => `${v}${emoji}`)}>
-                    <Text style={styles.emojiText}>{emoji}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <View style={styles.commentInputRow}>
-                <UserAvatar
-                  uri={user?.avatarUrl}
-                  name={user?.fullName || "You"}
-                  size={28}
-                  borderRadius={14}
-                  style={styles.commentInputAvatar}
-                  fallbackBackgroundColor="#d1d5db"
-                  initialsColor="#0f172a"
-                />
-                <TextInput
-                  value={commentDraft}
-                  onChangeText={setCommentDraft}
-                  placeholder={replyingTo ? t("writeReply") : t("addCommentPlaceholder")}
-                  placeholderTextColor="#6b7280"
-                  style={styles.commentInput}
-                  multiline
-                  textAlignVertical="top"
-                  maxLength={2000}
-                />
-                <Pressable
-                  style={[styles.commentSendBtn, commentSubmitting ? styles.commentSendBtnDisabled : null]}
-                  onPress={submitComment}
-                  disabled={commentSubmitting || !commentDraft.trim()}
-                >
-                  <Ionicons name="send" size={16} color="#111827" />
-                </Pressable>
-              </View>
+              <CommentComposerBar
+                value={commentDraft}
+                onChangeText={setCommentDraft}
+                onSubmit={submitComment}
+                placeholder={commentPlaceholderForPost(
+                  activeCommentsPost,
+                  replyingTo ? String(replyingTo.user || "") : null,
+                  t
+                )}
+                avatarUri={user?.avatarUrl}
+                avatarName={user?.fullName || "You"}
+                submitting={commentSubmitting}
+              />
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -4995,16 +4973,9 @@ const styles = StyleSheet.create({
   noCommentsText: { color: "#C9FF35", textAlign: "center", marginTop: 16, fontWeight: "700" },
   commentBlock: { marginBottom: 2 },
   commentRowInsta: { flexDirection: "row", alignItems: "flex-start" },
-  commentAvatarSq: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#3f3f46",
-    alignItems: "center",
-    justifyContent: "center",
+  commentAvatar: {
     marginRight: 10
   },
-  commentAvatarSqText: { color: "#fafafa", fontSize: 14, fontWeight: "800" },
   commentMainCol: { flex: 1, minWidth: 0, paddingRight: 6 },
   commentHeaderRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
   commentUserName: { color: "#fafafa", fontSize: 13, fontWeight: "800", maxWidth: "70%" },
