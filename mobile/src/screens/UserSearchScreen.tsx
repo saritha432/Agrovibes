@@ -36,11 +36,6 @@ const ROW_BORDER = "#2a2a2a";
 const MUTED = "#9e9e9e";
 const TEXT = "#ffffff";
 
-const EXPLORE_ASSETS = {
-  search: require("../../assets/searchY-icon.svg"),
-  video: require("../../assets/video-icon.svg")
-} as const;
-
 type SearchUser = {
   id?: number;
   key?: string;
@@ -234,7 +229,7 @@ export function UserSearchScreen() {
             />
           ) : null}
           <View style={styles.gridVideoBadge} pointerEvents="none">
-            <Image source={EXPLORE_ASSETS.video} style={styles.gridVideoIcon} resizeMode="contain" />
+            <Ionicons name="videocam" size={18} color={TEXT} />
           </View>
         </Pressable>
       );
@@ -277,7 +272,7 @@ export function UserSearchScreen() {
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.searchWrap}>
-        <Image source={EXPLORE_ASSETS.search} style={styles.searchIcon} resizeMode="contain" />
+        <Ionicons name="search" size={18} color={MUTED} />
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -306,6 +301,7 @@ export function UserSearchScreen() {
           </View>
         ) : (
           <FlatList
+            key="search-users"
             data={users}
             keyExtractor={(item) => `${item.key || item.id || item.name}`}
             renderItem={renderUserRow}
@@ -325,6 +321,7 @@ export function UserSearchScreen() {
         </View>
       ) : (
         <FlatList
+          key="explore-reels"
           data={exploreReels}
           keyExtractor={(item) => String(item.id)}
           numColumns={3}
@@ -371,7 +368,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8
   },
-  searchIcon: { width: 20, height: 20 },
   input: { flex: 1, color: TEXT, fontSize: 15, paddingVertical: 0 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   emptyTitle: { color: TEXT, fontSize: 16, fontWeight: "700", textAlign: "center" },
@@ -400,9 +396,5 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 8,
     right: 8
-  },
-  gridVideoIcon: {
-    width: 20,
-    height: 20
   }
 });

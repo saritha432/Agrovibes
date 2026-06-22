@@ -25,6 +25,7 @@ import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
 import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
+import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import {
@@ -70,8 +71,22 @@ const CHAT_ASSETS = {
 
 const HEADER_CALL_ICON = 34;
 
-function ChatAssetIcon({ source, size = COMPOSER_ICON }: { source: number; size?: number }) {
-  return <Image source={source} style={{ width: size, height: size }} resizeMode="contain" />;
+type ChatIconKey = keyof typeof CHAT_ASSETS;
+
+const CHAT_ICON_NAMES: Record<ChatIconKey, keyof typeof Ionicons.glyphMap> = {
+  camera: "camera-outline",
+  mic: "mic-outline",
+  gallery: "image-outline",
+  sticker: "happy-outline",
+  plus: "add-circle-outline",
+  voiceCall: "call-outline",
+  videoCall: "videocam-outline"
+};
+
+function ChatAssetIcon({ icon, size = COMPOSER_ICON, color = TEXT }: { icon: ChatIconKey; size?: number; color?: string }) {
+  return (
+    <SvgAssetIcon module={CHAT_ASSETS[icon]} size={size} color={color} fallbackName={CHAT_ICON_NAMES[icon]} />
+  );
 }
 
 function formatDateSeparator(ts: number) {
@@ -696,10 +711,10 @@ export function DirectChatScreen() {
         </View>
         <View style={styles.headerRight}>
           <Pressable hitSlop={8} onPress={openVoiceCall} style={styles.headerAction}>
-            <ChatAssetIcon source={CHAT_ASSETS.voiceCall} size={HEADER_CALL_ICON} />
+            <ChatAssetIcon icon="voiceCall" size={HEADER_CALL_ICON} />
           </Pressable>
           <Pressable hitSlop={8} onPress={openVideoCall} style={styles.headerAction}>
-            <ChatAssetIcon source={CHAT_ASSETS.videoCall} size={HEADER_CALL_ICON} />
+            <ChatAssetIcon icon="videoCall" size={HEADER_CALL_ICON} />
           </Pressable>
         </View>
       </View>
@@ -835,7 +850,7 @@ export function DirectChatScreen() {
             onPress={() => void openCamera()}
             disabled={attachBusy || isRecordingVoice}
           >
-            <ChatAssetIcon source={CHAT_ASSETS.camera} size={CAMERA_ICON_SIZE} />
+            <ChatAssetIcon icon="camera" size={CAMERA_ICON_SIZE} />
           </Pressable>
 
           {isRecordingVoice ? (
@@ -872,16 +887,16 @@ export function DirectChatScreen() {
                     onPressIn={() => void startVoiceRecording()}
                     onPressOut={() => void stopVoiceRecordingAndSend()}
                   >
-                    <ChatAssetIcon source={CHAT_ASSETS.mic} size={COMPOSER_ICON} />
+                    <ChatAssetIcon icon="mic" size={COMPOSER_ICON} />
                   </Pressable>
                   <Pressable style={styles.inputTrailingBtn} onPress={() => void openGallery()} disabled={attachBusy}>
-                    <ChatAssetIcon source={CHAT_ASSETS.gallery} size={COMPOSER_ICON} />
+                    <ChatAssetIcon icon="gallery" size={COMPOSER_ICON} />
                   </Pressable>
                   <Pressable style={styles.inputTrailingBtn} disabled={attachBusy}>
-                    <ChatAssetIcon source={CHAT_ASSETS.sticker} size={COMPOSER_ICON} />
+                    <ChatAssetIcon icon="sticker" size={COMPOSER_ICON} />
                   </Pressable>
                   <Pressable style={styles.inputTrailingBtn} onPress={openMoreAttachments} disabled={attachBusy}>
-                    <ChatAssetIcon source={CHAT_ASSETS.plus} size={COMPOSER_ICON} />
+                    <ChatAssetIcon icon="plus" size={COMPOSER_ICON} />
                   </Pressable>
                 </View>
               )}

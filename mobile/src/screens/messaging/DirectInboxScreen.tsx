@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useState } from "react";
 import {
   FlatList,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
+import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
 import { fetchMessageThreads, type MessageThread } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
@@ -27,10 +27,7 @@ const SEARCH_BG = "#303132";
 const AVATAR_BG = "#3a3f46";
 const LIME = APP_LIME;
 
-const INBOX_ASSETS = {
-  searchActive: require("../../../assets/bottom-icons/search-active.svg"),
-  edit: require("../../../assets/edit-icon.svg")
-} as const;
+const SEARCH_ICON = require("../../../assets/bottom-icons/search.svg");
 
 function formatShortRelativeTime(ts: number) {
   const diffMs = Date.now() - ts;
@@ -114,12 +111,14 @@ export function DirectInboxScreen() {
           {displayName}
         </Text>
         <Pressable hitSlop={8} accessibilityLabel="New message">
-          <Image source={INBOX_ASSETS.edit} style={styles.editIcon} resizeMode="contain" />
+          <Ionicons name="create-outline" size={28} color={TEXT} />
         </Pressable>
       </View>
 
       <View style={styles.searchWrap}>
-        <Image source={INBOX_ASSETS.searchActive} style={styles.searchIconImage} resizeMode="contain" />
+        <View style={styles.searchIconImage}>
+          <SvgAssetIcon module={SEARCH_ICON} size={18} color={MUTED} fallbackName="search" />
+        </View>
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -198,10 +197,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: LIME
   },
-  editIcon: {
-    width: 34,
-    height: 34
-  },
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -212,7 +207,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: SEARCH_BG
   },
-  searchIconImage: { width: 18, height: 18, marginRight: 8 },
+  searchIconImage: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15, color: TEXT, paddingVertical: 0 },
   sectionHeader: {
     flexDirection: "row",
