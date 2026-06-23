@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -15,6 +15,12 @@ import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
 import { fetchMessageThreads, type MessageThread } from "../../services/api";
+import {
+  isSocketChatConnected,
+  onDirectRead,
+  onDirectThreadUpdate,
+  onSocketConnectionChange
+} from "../../services/socketChat";
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatDmInboxPreview } from "./dmMessageFormats";
@@ -51,6 +57,7 @@ export function DirectInboxScreen() {
   const { user, token } = useAuth();
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
+  const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
 
   const displayName = user?.username || user?.fullName || "You";
 
@@ -70,12 +77,48 @@ export function DirectInboxScreen() {
   useFocusEffect(
     useCallback(() => {
       void load();
+      if (socketConnected) return;
       const timer = setInterval(() => {
         void load();
-      }, 4000);
+      }, 20000);
       return () => clearInterval(timer);
-    }, [load])
+    }, [load, socketConnected])
   );
+
+  useEffect(() => {
+    return onSocketConnectionChange(setSocketConnected);
+  }, []);
+
+  useEffect(() => {
+    return onDirectThreadUpdate((update) => {
+      setThreads((prev) => {
+        const idx = prev.findIndex((thread) => thread.peerUserId === update.peerUserId);
+        if (idx < 0) {
+          void load();
+          return prev;
+        }
+        const next = [...prev];
+        const current = next[idx];
+        const unreadDelta = Number(update.unreadDelta || 0);
+        next[idx] = {
+          ...current,
+          lastMessage: update.lastMessage,
+          lastAt: update.lastAt,
+          lastSenderId: update.lastSenderId,
+          lastReceiverId: update.lastReceiverId,
+          unreadCount: Math.max(0, Number(current.unreadCount || 0) + unreadDelta)
+        };
+        next.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+        return next;
+      });
+    });
+  }, [load]);
+
+  useEffect(() => {
+    return onDirectRead(() => {
+      void load();
+    });
+  }, [load]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const filtered = trimmedQuery

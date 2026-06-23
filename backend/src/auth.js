@@ -58,8 +58,13 @@ function requireRole(roles) {
   };
 }
 
+function verifyJwt(token) {
+  return jwt.verify(token, JWT_SECRET, { issuer: JWT_ISSUER });
+}
+
 module.exports = {
   signJwt,
+  verifyJwt,
   authOptional,
   authRequired,
   requireRole

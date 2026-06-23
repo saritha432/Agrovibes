@@ -29,6 +29,13 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import {
+  joinDirectThread,
+  leaveDirectThread,
+  onDirectMessage,
+  onSocketConnectionChange,
+  isSocketChatConnected
+} from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import {
   hydrateLiveShareFromFeed,
@@ -414,6 +421,7 @@ export function DirectChatScreen() {
   const [actionMessage, setActionMessage] = useState<DirectMessageItem | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
+  const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
 
   useEffect(() => {
     if (peerUsernameParam) {
@@ -490,11 +498,41 @@ export function DirectChatScreen() {
   }, [reload]);
 
   useEffect(() => {
+    if (!token || !peerUserId) return;
+    joinDirectThread(peerUserId);
+    return () => leaveDirectThread(peerUserId);
+  }, [token, peerUserId]);
+
+  useEffect(() => {
+    return onSocketConnectionChange(setSocketConnected);
+  }, []);
+
+  useEffect(() => {
+    return onDirectMessage((payload) => {
+      if (payload.peerUserId !== peerUserId) return;
+      setMessages((prev) => {
+        if (prev.some((item) => item.id === payload.message.id)) return prev;
+        return [...prev, payload.message];
+      });
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    });
+  }, [peerUserId]);
+
+  useEffect(() => {
+    if (socketConnected) return;
     const timer = setInterval(() => {
       void reload();
-    }, 2500);
+    }, 15000);
     return () => clearInterval(timer);
-  }, [reload]);
+  }, [reload, socketConnected]);
+
+  const appendSentMessage = useCallback((message: DirectMessageItem) => {
+    setMessages((prev) => {
+      if (prev.some((item) => item.id === message.id)) return prev;
+      return [...prev, message];
+    });
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  }, []);
 
   const isComposerSingleLine = !draft.includes("\n") && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT + 2;
 
@@ -526,6 +564,8 @@ export function DirectChatScreen() {
       : text;
     await sendDirectMessage(token, peerUserId, body);
     await reload();
+    const result = await sendDirectMessage(token, peerUserId, text);
+    if (result.message) appendSentMessage(result.message);
   };
 
   const startReplyToMessage = useCallback(
@@ -578,7 +618,7 @@ export function DirectChatScreen() {
       try {
         const { url } = await uploadPickedMedia(asset.uri, asset);
         const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
-        await sendDirectMessage(
+        const result = await sendDirectMessage(
           token,
           peerUserId,
           buildDmMediaMessage({
@@ -588,14 +628,15 @@ export function DirectChatScreen() {
             height: asset.height
           })
         );
-        await reload();
+        if (result.message) appendSentMessage(result.message);
+        else if (!socketConnected) await reload();
       } catch (error) {
         Alert.alert(t("sendFailed"), error instanceof Error ? error.message : t("sendFailedReel"));
       } finally {
         setAttachBusy(false);
       }
     },
-    [attachBusy, peerUserId, reload, t, token]
+    [attachBusy, appendSentMessage, peerUserId, reload, socketConnected, t, token]
   );
 
   const openGallery = useCallback(async () => {
@@ -685,8 +726,9 @@ export function DirectChatScreen() {
         : Math.max(0, Date.now() - voiceStartedAtRef.current);
       if (!uri || durationMs < 400) return;
       const { url } = await uploadAudioFile(uri);
-      await sendDirectMessage(token, peerUserId, buildDmVoiceMessage({ url, durationMs }));
-      await reload();
+      const result = await sendDirectMessage(token, peerUserId, buildDmVoiceMessage({ url, durationMs }));
+      if (result.message) appendSentMessage(result.message);
+      else if (!socketConnected) await reload();
     } catch (error) {
       Alert.alert(t("sendFailed"), error instanceof Error ? error.message : t("voiceRecordFailed"));
     } finally {
@@ -701,7 +743,7 @@ export function DirectChatScreen() {
         playThroughEarpieceAndroid: false
       });
     }
-  }, [peerUserId, reload, t, token]);
+  }, [appendSentMessage, peerUserId, reload, socketConnected, t, token]);
 
   const cancelVoiceRecording = useCallback(async () => {
     const recording = voiceRecordingRef.current;
@@ -787,7 +829,7 @@ export function DirectChatScreen() {
   };
 
   const handleCallEnded = useCallback(
-    async (result: CallEndResult) => {
+    async (callResult: CallEndResult) => {
       if (callHistorySentRef.current) {
         closeCall();
         return;
@@ -797,22 +839,23 @@ export function DirectChatScreen() {
       if (!token || !session) return;
       callHistorySentRef.current = true;
       try {
-        await sendDirectMessage(
+        const sent = await sendDirectMessage(
           token,
           peerUserId,
           buildDmCallMessage({
             mode: session.mode,
-            status: result.status,
-            durationSec: result.durationSec,
+            status: callResult.status,
+            durationSec: callResult.durationSec,
             direction: session.direction
           })
         );
-        await reload();
+        if (sent.message) appendSentMessage(sent.message);
+        else if (!socketConnected) await reload();
       } catch {
         // keep chat usable even if history message fails
       }
     },
-    [callSession, peerUserId, reload, token]
+    [appendSentMessage, callSession, peerUserId, reload, socketConnected, token]
   );
 
   const openMoreAttachments = () => {
