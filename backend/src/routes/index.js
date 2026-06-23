@@ -1349,7 +1349,9 @@ router.get("/health", async (_req, res) => {
         images: mediaProvider === "s3" ? "s3" : mediaProvider === "supabase" ? "supabase" : "none",
         cdn: mediaProvider === "s3" && isCloudFrontConfigured() ? "cloudfront" : null,
         notifications: "fcm",
-        chat: "socket.io"
+        chat: "socket.io",
+        analytics: "firebase",
+        crashTracking: "firebase-crashlytics"
       },
       db: "connected",
       redis,
@@ -1372,7 +1374,9 @@ router.get("/v1/bootstrap", (_req, res) => {
       images: mediaProvider === "s3" ? "s3" : mediaProvider || "none",
       cdn: mediaProvider === "s3" && isCloudFrontConfigured() ? "cloudfront" : null,
       notifications: "fcm",
-      chat: "socket.io"
+      chat: "socket.io",
+      analytics: "firebase",
+      crashTracking: "firebase-crashlytics"
     }
   });
 });

@@ -14,7 +14,9 @@ import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK, APP_LIME } from "./src/theme/appColors";
 import { PushNotificationBootstrap } from "./src/push/PushNotificationBootstrap";
 import { SocketChatBootstrap } from "./src/messaging/SocketChatBootstrap";
+import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
 import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
+import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 
 export default function App() {
   const { ready: fontsReady } = useAppFonts();
@@ -34,10 +36,15 @@ export default function App() {
           <LanguageSync />
           <PushNotificationBootstrap />
           <SocketChatBootstrap />
+          <FirebaseBootstrap />
           <ReelDeepLinkBootstrap />
           <OnboardingProvider>
             <CartProvider>
-              <NavigationContainer ref={navigationRef}>
+              <NavigationContainer
+                ref={navigationRef}
+                onReady={() => trackNavigationScreen()}
+                onStateChange={() => trackNavigationScreen()}
+              >
                 <RootNavigator />
               </NavigationContainer>
             </CartProvider>

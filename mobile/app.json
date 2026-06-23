@@ -81,6 +81,9 @@
       "policy": "appVersion"
     },
     "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/crashlytics",
+      "@react-native-firebase/analytics",
       [
         "expo-build-properties",
         {
@@ -90,6 +93,9 @@
             "abiFilters": ["arm64-v8a"],
             "useLegacyPackaging": false,
             "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*"
+          },
+          "ios": {
+            "useFrameworks": "static"
           }
         }
       ],
