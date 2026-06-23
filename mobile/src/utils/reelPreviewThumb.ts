@@ -1,9 +1,10 @@
 import { Platform } from "react-native";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import type { HomePost } from "../services/api";
+import { getNativeVideoThumbnail } from "./safeVideoThumbnail";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
 
 const previewCache = new Map<string, string>();
+const skippedPreviewKeys = new Set<string>();
 
 export function staticReelPreviewUri(post: HomePost): string | null {
   const thumb = String(post.thumbnailUrl || "").trim();
@@ -22,17 +23,17 @@ export async function resolveReelPreviewUri(post: HomePost): Promise<string | nu
   const cacheKey = `post:${post.id}:${video}`;
   const cached = previewCache.get(cacheKey);
   if (cached) return cached;
+  if (skippedPreviewKeys.has(cacheKey)) return null;
 
   if (Platform.OS === "web") return null;
 
-  try {
-    const { uri } = await VideoThumbnails.getThumbnailAsync(videoPlaybackUrl(video), {
-      time: 600,
-      quality: 0.78
-    });
-    previewCache.set(cacheKey, uri);
-    return uri;
-  } catch {
+  const playbackSource = videoPlaybackUrl(video);
+  const thumb = await getNativeVideoThumbnail(playbackSource, { time: 600, quality: 0.78 });
+  if (!thumb?.uri) {
+    skippedPreviewKeys.add(cacheKey);
     return null;
   }
+
+  previewCache.set(cacheKey, thumb.uri);
+  return thumb.uri;
 }

@@ -1,5 +1,16 @@
 export const DM_MEDIA_PREFIX = "[Cropvibe Media]";
 export const DM_VOICE_PREFIX = "[Cropvibe Voice]";
+export const DM_CALL_PREFIX = "[Cropvibe Call]";
+
+export type DmCallStatus = "completed" | "missed" | "declined" | "cancelled";
+export type DmCallMode = "voice" | "video";
+
+export type DmCallPayload = {
+  mode: DmCallMode;
+  status: DmCallStatus;
+  durationSec?: number;
+  direction: "outgoing" | "incoming";
+};
 
 export type DmMediaPayload = {
   kind: "image" | "video";
@@ -63,6 +74,56 @@ export function formatVoiceDuration(ms?: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+export function formatCallDuration(sec?: number) {
+  const totalSec = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+export function buildDmCallMessage(payload: DmCallPayload) {
+  return `${DM_CALL_PREFIX}\n${JSON.stringify(payload)}`;
+}
+
+export function parseDmCallMessage(body: string): DmCallPayload | null {
+  if (!String(body || "").startsWith(DM_CALL_PREFIX)) return null;
+  const jsonText = String(body).slice(DM_CALL_PREFIX.length).trim();
+  if (!jsonText.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const mode = parsed.mode === "video" ? "video" : parsed.mode === "voice" ? "voice" : null;
+    const status =
+      parsed.status === "completed" ||
+      parsed.status === "missed" ||
+      parsed.status === "declined" ||
+      parsed.status === "cancelled"
+        ? parsed.status
+        : null;
+    const direction = parsed.direction === "incoming" ? "incoming" : parsed.direction === "outgoing" ? "outgoing" : null;
+    if (!mode || !status || !direction) return null;
+    const durationSec = Number(parsed.durationSec);
+    return {
+      mode,
+      status,
+      direction,
+      durationSec: Number.isFinite(durationSec) && durationSec >= 0 ? durationSec : undefined
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function formatDmCallLabel(call: DmCallPayload, t: (key: string) => string) {
+  const kind = call.mode === "video" ? t("videoCall") : t("audioCall");
+  if (call.status === "completed") {
+    const dur = formatCallDuration(call.durationSec);
+    return dur !== "0:00" ? `${kind} · ${dur}` : kind;
+  }
+  if (call.status === "missed") return t("missedCall").replace("{{kind}}", kind);
+  if (call.status === "declined") return t("declinedCall").replace("{{kind}}", kind);
+  return t("cancelledCall").replace("{{kind}}", kind);
+}
+
 /** Inbox + notification-style preview for structured chat payloads (WhatsApp / Instagram). */
 export function formatDmInboxPreview(body: string, t: (key: string) => string): string {
   const text = String(body || "").trim();
@@ -80,6 +141,9 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
     }
     return t("voiceMessage");
   }
+
+  const call = parseDmCallMessage(text);
+  if (call) return formatDmCallLabel(call, t);
 
   if (text.startsWith("[Cropvibe Live]")) return t("sharedLive");
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return t("sharedReel");

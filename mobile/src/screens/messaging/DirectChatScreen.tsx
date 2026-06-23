@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { CallHistoryBubble } from "../../components/CallHistoryBubble";
 import { ChatMediaBubble } from "../../components/ChatMediaBubble";
 import { ChatVoiceNoteBubble } from "../../components/ChatVoiceNoteBubble";
 import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
@@ -36,11 +37,13 @@ import {
 } from "./liveShareMessage";
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
-import { DirectCallView, type DirectCallMode } from "./DirectCallView";
+import { DirectCallView, type CallDirection, type CallEndResult, type DirectCallMode } from "./DirectCallView";
 import {
+  buildDmCallMessage,
   buildDmMediaMessage,
   buildDmVoiceMessage,
   formatVoiceDuration,
+  parseDmCallMessage,
   parseDmMediaMessage,
   parseDmVoiceMessage
 } from "./dmMessageFormats";
@@ -69,7 +72,7 @@ const CHAT_ASSETS = {
   videoCall: require("../../../assets/videocal-icon.svg")
 } as const;
 
-const HEADER_CALL_ICON = 34;
+const HEADER_CALL_ICON = 22;
 
 type ChatIconKey = keyof typeof CHAT_ASSETS;
 
@@ -343,8 +346,10 @@ export function DirectChatScreen() {
     roomName: string;
     mode: DirectCallMode;
     connectEnabled: boolean;
+    direction: CallDirection;
     statusLabel?: string;
   } | null>(null);
+  const callHistorySentRef = useRef(false);
   const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
   const [attachBusy, setAttachBusy] = useState(false);
@@ -595,10 +600,12 @@ export function DirectChatScreen() {
 
   useEffect(() => {
     if (!incomingCall?.roomName) return;
+    callHistorySentRef.current = false;
     setCallSession({
       roomName: incomingCall.roomName,
       mode: incomingCall.mode,
       connectEnabled: false,
+      direction: "incoming",
       statusLabel: incomingCall.mode === "video" ? "Incoming video call" : "Incoming voice call"
     });
   }, [incomingCall?.mode, incomingCall?.roomName]);
@@ -609,11 +616,13 @@ export function DirectChatScreen() {
       return;
     }
     try {
+      callHistorySentRef.current = false;
       const result = await ringDirectCall(token, { peerUserId, mode });
       setCallSession({
         roomName: result.roomName,
         mode: result.mode,
         connectEnabled: true,
+        direction: "outgoing",
         statusLabel: mode === "video" ? "Calling..." : "Calling..."
       });
     } catch (error) {
@@ -654,6 +663,35 @@ export function DirectChatScreen() {
     setCallSession(null);
     navigation.setParams({ incomingCall: undefined });
   };
+
+  const handleCallEnded = useCallback(
+    async (result: CallEndResult) => {
+      if (callHistorySentRef.current) {
+        closeCall();
+        return;
+      }
+      const session = callSession;
+      closeCall();
+      if (!token || !session) return;
+      callHistorySentRef.current = true;
+      try {
+        await sendDirectMessage(
+          token,
+          peerUserId,
+          buildDmCallMessage({
+            mode: session.mode,
+            status: result.status,
+            durationSec: result.durationSec,
+            direction: session.direction
+          })
+        );
+        await reload();
+      } catch {
+        // keep chat usable even if history message fails
+      }
+    },
+    [callSession, peerUserId, reload, token]
+  );
 
   const openMoreAttachments = () => {
     Alert.alert("Attachments", undefined, [
@@ -742,7 +780,8 @@ export function DirectChatScreen() {
           const sharedLive = parseLiveShareContent(messageItem.body);
           const sharedMedia = parseDmMediaMessage(messageItem.body);
           const sharedVoice = parseDmVoiceMessage(messageItem.body);
-          const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice);
+          const sharedCall = parseDmCallMessage(messageItem.body);
+          const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice || sharedCall);
           return (
             <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
               <View
@@ -798,6 +837,8 @@ export function DirectChatScreen() {
                   <ChatMediaBubble media={sharedMedia} isSelf={isSelf} />
                 ) : sharedVoice ? (
                   <ChatVoiceNoteBubble voice={sharedVoice} isSelf={isSelf} />
+                ) : sharedCall ? (
+                  <CallHistoryBubble call={sharedCall} isSelf={isSelf} t={t} />
                 ) : sharedProfile ? (
                   <Pressable
                     style={styles.sharedProfileCard}
@@ -908,6 +949,7 @@ export function DirectChatScreen() {
         visible={!!callSession}
         roomName={callSession?.roomName || ""}
         mode={callSession?.mode || "voice"}
+        direction={callSession?.direction || "outgoing"}
         peerName={peerName}
         peerAvatarUrl={peerAvatar}
         connectEnabled={callSession?.connectEnabled ?? false}
@@ -920,7 +962,9 @@ export function DirectChatScreen() {
             statusLabel: callSession.mode === "video" ? "Connecting video..." : "Connecting..."
           });
         }}
-        onDecline={closeCall}
+        onCallEnded={(result) => {
+          void handleCallEnded(result);
+        }}
         onClose={closeCall}
       />
 
@@ -961,8 +1005,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT },
   headerHandle: { marginTop: 2, fontSize: 13, fontWeight: "500", color: MUTED },
-  headerRight: { flexDirection: "row", alignItems: "center", gap: 16 },
-  headerAction: { alignItems: "center", justifyContent: "center" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerAction: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   dateSeparatorWrap: { alignItems: "center", marginVertical: 14 },
   dateSeparatorText: {
     fontSize: 11,
