@@ -88,9 +88,13 @@ async function releaseCallMedia(room: Room) {
     }
   }
   try {
-    room.disconnect();
+    room.disconnect(true);
   } catch {
-    // no-op
+    try {
+      room.disconnect();
+    } catch {
+      // no-op
+    }
   }
 }
 

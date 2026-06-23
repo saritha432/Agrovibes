@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
+import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import { CallHistoryBubble } from "../../components/CallHistoryBubble";
@@ -409,9 +409,11 @@ export function DirectChatScreen() {
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
   const listRef = useRef<FlatList<ThreadListItem>>(null);
+  const threadItemCountRef = useRef(0);
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceStartedAtRef = useRef(0);
+  const sendingRef = useRef(false);
   const [replyTarget, setReplyTarget] = useState<{
     messageId: number;
     preview: string;
@@ -497,6 +499,14 @@ export function DirectChatScreen() {
     void reload();
   }, [reload]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+      if (!token || !peerUserId) return;
+      joinDirectThread(peerUserId);
+    }, [peerUserId, reload, token])
+  );
+
   useEffect(() => {
     if (!token || !peerUserId) return;
     joinDirectThread(peerUserId);
@@ -504,8 +514,11 @@ export function DirectChatScreen() {
   }, [token, peerUserId]);
 
   useEffect(() => {
-    return onSocketConnectionChange(setSocketConnected);
-  }, []);
+    return onSocketConnectionChange((connected) => {
+      setSocketConnected(connected);
+      if (connected && peerUserId) joinDirectThread(peerUserId);
+    });
+  }, [peerUserId]);
 
   useEffect(() => {
     return onDirectMessage((payload) => {
@@ -522,7 +535,7 @@ export function DirectChatScreen() {
     if (socketConnected) return;
     const timer = setInterval(() => {
       void reload();
-    }, 15000);
+    }, 5000);
     return () => clearInterval(timer);
   }, [reload, socketConnected]);
 
@@ -549,7 +562,8 @@ export function DirectChatScreen() {
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !token || attachBusy) return;
+    if (!text || !token || attachBusy || sendingRef.current) return;
+    sendingRef.current = true;
     setDraft("");
     setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
     const reply = replyTarget;
@@ -562,10 +576,13 @@ export function DirectChatScreen() {
           text
         })
       : text;
-    await sendDirectMessage(token, peerUserId, body);
-    await reload();
-    const result = await sendDirectMessage(token, peerUserId, text);
-    if (result.message) appendSentMessage(result.message);
+    try {
+      const result = await sendDirectMessage(token, peerUserId, body);
+      if (result.message) appendSentMessage(result.message);
+      else await reload();
+    } finally {
+      sendingRef.current = false;
+    }
   };
 
   const startReplyToMessage = useCallback(
@@ -601,10 +618,11 @@ export function DirectChatScreen() {
   const reactToMessage = useCallback(
     async (item: DirectMessageItem, emoji: string) => {
       if (!token) return;
-      await sendDirectMessage(token, peerUserId, buildDmReactMessage({ targetId: item.id, emoji }));
-      await reload();
+      const result = await sendDirectMessage(token, peerUserId, buildDmReactMessage({ targetId: item.id, emoji }));
+      if (result.message) appendSentMessage(result.message);
+      else await reload();
     },
-    [peerUserId, reload, token]
+    [appendSentMessage, peerUserId, reload, token]
   );
 
   const canInteractWithMessage = useCallback((body: string) => {
@@ -927,7 +945,18 @@ export function DirectChatScreen() {
         data={threadItems}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        initialNumToRender={18}
+        maxToRenderPerBatch={12}
+        windowSize={9}
+        removeClippedSubviews={Platform.OS === "android"}
+        onContentSizeChange={() => {
+          if (threadItems.length <= threadItemCountRef.current) return;
+          threadItemCountRef.current = threadItems.length;
+          listRef.current?.scrollToEnd({ animated: true });
+        }}
+        onLayout={() => {
+          threadItemCountRef.current = threadItems.length;
+        }}
         renderItem={({ item }) => {
           if (item.type === "date") {
             return (

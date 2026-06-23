@@ -28,6 +28,11 @@ const AUTH_FLOW_ROUTES = new Set([
 ]);
 
 let pendingAction: (() => void) | null = null;
+const replyInFlight = new Set<string>();
+
+function isReplyAction(actionId: string) {
+  return actionId === "REPLY" || actionId.endsWith(":REPLY") || actionId.endsWith(".REPLY");
+}
 
 function isAppReadyForNotificationNavigation() {
   if (!navigationRef.isReady()) return false;
@@ -70,6 +75,47 @@ async function resolveAuthToken(explicit?: string | null) {
   }
 }
 
+async function clearNotificationReplyUi(response: Notifications.NotificationResponse) {
+  const identifier = String(response.notification.request.identifier || "").trim();
+  if (!identifier) return;
+  try {
+    await Notifications.dismissNotificationAsync(identifier);
+  } catch {
+    // no-op
+  }
+}
+
+async function handleInlineReply(
+  response: Notifications.NotificationResponse,
+  options?: { authToken?: string | null }
+) {
+  const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
+  const title = String(response.notification.request.content.title || "").trim() || "Someone";
+  const type = String(data.type || "");
+  const senderId = peerIdFromData(data);
+  const text = String(response.userText || "").trim();
+
+  await clearNotificationReplyUi(response);
+
+  if (type !== "direct_message" || !senderId || !text) return;
+
+  const dedupeKey = `${senderId}:${text}:${response.notification.request.identifier}`;
+  if (replyInFlight.has(dedupeKey)) return;
+  replyInFlight.add(dedupeKey);
+  try {
+    const authToken = await resolveAuthToken(options?.authToken);
+    if (!authToken) return;
+    await sendDirectMessage(authToken, senderId, text);
+    if (isAppReadyForNotificationNavigation()) {
+      navigateToDirectChat({ peerUserId: senderId, peerName: title });
+    }
+  } catch {
+    // Reply already cleared from shade; message may retry from chat.
+  } finally {
+    replyInFlight.delete(dedupeKey);
+  }
+}
+
 export async function handleNotificationResponse(
   response: Notifications.NotificationResponse,
   options?: { authToken?: string | null }
@@ -79,13 +125,8 @@ export async function handleNotificationResponse(
   const type = String(data.type || "");
   const actionId = response.actionIdentifier;
 
-  if (actionId === "REPLY") {
-    if (type !== "direct_message") return;
-    const senderId = peerIdFromData(data);
-    const text = String(response.userText || "").trim();
-    const authToken = await resolveAuthToken(options?.authToken);
-    if (!senderId || !text || !authToken) return;
-    void sendDirectMessage(authToken, senderId, text).catch(() => undefined);
+  if (isReplyAction(actionId)) {
+    await handleInlineReply(response, options);
     return;
   }
 
