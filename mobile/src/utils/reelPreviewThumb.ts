@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import type { HomePost } from "../services/api";
+import { getNativeVideoThumbnail } from "./safeVideoThumbnail";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
 
 const PREVIEW_CACHE_MAX = 80;
@@ -27,6 +27,7 @@ export function clearReelPreviewCache() {
   previewCache.clear();
   inFlight.clear();
 }
+const skippedPreviewKeys = new Set<string>();
 
 export function staticReelPreviewUri(post: HomePost): string | null {
   const thumb = String(post.thumbnailUrl || "").trim();
@@ -45,6 +46,7 @@ export async function resolveReelPreviewUri(post: HomePost): Promise<string | nu
   const cacheKey = `post:${post.id}:${video}`;
   const cached = previewCache.get(cacheKey);
   if (cached) return cached;
+  if (skippedPreviewKeys.has(cacheKey)) return null;
 
   const pending = inFlight.get(cacheKey);
   if (pending) return pending;
@@ -95,4 +97,13 @@ export async function hydrateReelPreviews(
   };
 
   await Promise.all(Array.from({ length: Math.min(maxConcurrent, queue.length || 1) }, () => worker()));
+  const playbackSource = videoPlaybackUrl(video);
+  const thumb = await getNativeVideoThumbnail(playbackSource, { time: 600, quality: 0.78 });
+  if (!thumb?.uri) {
+    skippedPreviewKeys.add(cacheKey);
+    return null;
+  }
+
+  previewCache.set(cacheKey, thumb.uri);
+  return thumb.uri;
 }

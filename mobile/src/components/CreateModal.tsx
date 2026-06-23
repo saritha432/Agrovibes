@@ -23,7 +23,7 @@ import { Audio, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
-import * as VideoThumbnails from "expo-video-thumbnails";
+import { getNativeVideoThumbnail } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
 import {
   createHomePost,
@@ -1101,9 +1101,11 @@ export function CreateModal({
       await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
       try {
-        const thumb = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 400, quality: 0.72 });
-        const { url } = await uploadImageFile(thumb.uri);
-        derivedThumb = url;
+        const thumb = await getNativeVideoThumbnail(asset.uri, { time: 400, quality: 0.72 });
+        if (thumb?.uri) {
+          const { url } = await uploadImageFile(thumb.uri);
+          derivedThumb = url;
+        }
       } catch {
         /* Optional thumbnail; live grid can still show a placeholder. */
       }
@@ -1652,12 +1654,14 @@ export function CreateModal({
           let derivedThumb: string | undefined;
           if (!thumbnailUrl.trim()) {
             try {
-              const thumb = await VideoThumbnails.getThumbnailAsync(v.uri, {
+              const thumb = await getNativeVideoThumbnail(v.uri, {
                 time: 400,
                 quality: 0.72
               });
-              const { url } = await uploadImageFile(thumb.uri);
-              derivedThumb = url;
+              if (thumb?.uri) {
+                const { url } = await uploadImageFile(thumb.uri);
+                derivedThumb = url;
+              }
             } catch {
               /* grid can fall back to muted video preview on device */
             }
@@ -1781,16 +1785,16 @@ export function CreateModal({
 
   const storyLeftRailPrimary = React.useMemo(
     () => [
-      { key: "audio", asset: CREATE_CAMERA_ASSETS.audio, label: "Audio", onPress: () => setShowAudioPanel(true) },
-      { key: "effects", asset: CREATE_CAMERA_ASSETS.effects, label: "Effects", onPress: () => setShowCreativeFilterPanel(true) },
-      { key: "length", asset: CREATE_CAMERA_ASSETS.length, label: "Length", onPress: () => Alert.alert("Length", "Story length options coming soon.") },
+      { key: "audio", icon: "musical-notes-outline" as const, label: "Audio", onPress: () => setShowAudioPanel(true) },
+      { key: "effects", icon: "sparkles-outline" as const, label: "Effects", onPress: () => setShowCreativeFilterPanel(true) },
+      { key: "length", icon: "time-outline" as const, label: "Length", onPress: () => Alert.alert("Length", "Story length options coming soon.") },
       {
         key: "teleprompter",
-        asset: CREATE_CAMERA_ASSETS.teleprompter,
+        icon: "document-text-outline" as const,
         label: "Teleprompter",
         onPress: () => Alert.alert("Teleprompter", "Teleprompter coming soon.")
       },
-      { key: "touchup", asset: CREATE_CAMERA_ASSETS.touchup, label: "Touch up", onPress: () => setShowEditPanel(true) }
+      { key: "touchup", icon: "color-wand-outline" as const, label: "Touch up", onPress: () => setShowEditPanel(true) }
     ],
     []
   );
@@ -2202,7 +2206,7 @@ export function CreateModal({
                       : storyLeftRailPrimary.map((tool) => (
                           <Pressable key={tool.key} style={styles.igCamRailRow} onPress={tool.onPress} hitSlop={6}>
                             <View style={styles.igCamRailIcon}>
-                              <CreateCameraSvgIcon module={tool.asset} size={18} fallbackName="ellipse-outline" />
+                              <Ionicons name={tool.icon} size={18} color="#C9FF35" />
                             </View>
                             <Text style={styles.igCamRailLabel}>{tool.label}</Text>
                           </Pressable>

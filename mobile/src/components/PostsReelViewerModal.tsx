@@ -288,6 +288,15 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     setSourceIndex((idx) => (idx + 1 < playbackSources.length ? idx + 1 : idx));
   }, [playbackSources.length]);
 
+  React.useImperativeHandle(ref, () => ({
+    seekToRatio: async (ratio: number) => {
+      const target = Math.max(0, Math.min(1, ratio));
+      const dur = durationRef.current;
+      if (!dur || !Number.isFinite(dur)) return;
+      await videoRef.current?.setPositionAsync(Math.round(dur * target));
+    }
+  }));
+
   if (blocked) {
     return (
       <View
@@ -305,15 +314,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       </View>
     );
   }
-
-  React.useImperativeHandle(ref, () => ({
-    seekToRatio: async (ratio: number) => {
-      const target = Math.max(0, Math.min(1, ratio));
-      const dur = durationRef.current;
-      if (!dur || !Number.isFinite(dur)) return;
-      await videoRef.current?.setPositionAsync(Math.round(dur * target));
-    }
-  }));
 
   return (
     <View

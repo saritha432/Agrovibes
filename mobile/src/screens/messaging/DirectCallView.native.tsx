@@ -14,7 +14,7 @@ import {
 } from "@livekit/react-native";
 import { ConnectionState, RoomEvent, Track, type Participant, type Room } from "livekit-client";
 import React from "react";
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
 import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
@@ -22,19 +22,30 @@ import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
 import { LIVEKIT_CALL_ROOM_OPTIONS } from "../../utils/liveKitMobileOptions";
 import { APP_LIME } from "../../theme/appColors";
 import { UserAvatar } from "../../components/UserAvatar";
+import type { DmCallStatus } from "./dmMessageFormats";
+import { formatCallDuration } from "./dmMessageFormats";
+import { startIncomingRingtone, startOutgoingRingtone, stopCallSounds } from "./callSounds";
 
 export type DirectCallMode = "voice" | "video";
+export type CallDirection = "outgoing" | "incoming";
+
+export type CallEndResult = {
+  status: DmCallStatus;
+  durationSec: number;
+};
 
 type DirectCallViewProps = {
   visible: boolean;
   roomName: string;
   mode: DirectCallMode;
+  direction: CallDirection;
   peerName: string;
   peerAvatarUrl?: string | null;
   connectEnabled: boolean;
   statusLabel?: string;
   onAccept?: () => void;
   onDecline?: () => void;
+  onCallEnded?: (result: CallEndResult) => void;
   onClose: () => void;
 };
 
@@ -115,25 +126,36 @@ function PreConnectVideoPreview({
 
 function CallRoomContent({
   mode,
+  direction,
   peerName,
   peerAvatarUrl,
   statusLabel,
-  onClose
+  onCallEnded,
+  onClose,
+  endedRef
 }: {
   mode: DirectCallMode;
+  direction: CallDirection;
   peerName: string;
   peerAvatarUrl?: string | null;
   statusLabel?: string;
+  onCallEnded?: (result: CallEndResult) => void;
   onClose: () => void;
+  endedRef: React.MutableRefObject<boolean>;
 }) {
   const insets = useSafeAreaInsets();
   const room = useRoomContext();
   const participants = useParticipants();
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const [muted, setMuted] = React.useState(false);
+  const [speakerOn, setSpeakerOn] = React.useState(mode === "voice" ? true : true);
   const [cameraOff, setCameraOff] = React.useState(mode === "voice");
   const [facingFront, setFacingFront] = React.useState(true);
   const [status, setStatus] = React.useState(statusLabel || "Connecting...");
+  const [durationSec, setDurationSec] = React.useState(0);
+  const [callActive, setCallActive] = React.useState(false);
+  const connectedAtRef = React.useRef<number | null>(null);
+  const hadPeerRef = React.useRef(false);
   const [tracksReady, setTracksReady] = React.useState(false);
   const localIdentity = room.localParticipant.identity;
   const peer = remoteParticipant(participants, localIdentity);
@@ -150,8 +172,32 @@ function CallRoomContent({
     isTrackReference(remoteVideo) &&
     room.state === ConnectionState.Connected &&
     !!peer;
-  const showLocalVideo =
-    mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo) && tracksReady;
+  const showLocalVideo = mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo);
+
+  const finishCall = React.useCallback(
+    async (status: DmCallStatus) => {
+      if (endedRef.current) return;
+      endedRef.current = true;
+      const duration = connectedAtRef.current
+        ? Math.max(0, Math.floor((Date.now() - connectedAtRef.current) / 1000))
+        : 0;
+      try {
+        await room.localParticipant.setCameraEnabled(false);
+        await room.localParticipant.setMicrophoneEnabled(false);
+        room.disconnect();
+      } catch {
+        // no-op
+      }
+      await stopCallSounds();
+      await AudioSession.stopAudioSession().catch(() => undefined);
+      onCallEnded?.({
+        status,
+        durationSec: status === "completed" ? duration : 0
+      });
+      onClose();
+    },
+    [onCallEnded, onClose, room]
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -180,6 +226,7 @@ function CallRoomContent({
             setTracksReady(true);
           }
         }
+        if (!cancelled) setMuted(false);
       } catch {
         if (!cancelled) setStatus("Could not start microphone");
       }
@@ -197,6 +244,12 @@ function CallRoomContent({
 
   React.useEffect(() => {
     if (room.state === ConnectionState.Connected && peer) {
+      if (!hadPeerRef.current) {
+        hadPeerRef.current = true;
+        connectedAtRef.current = Date.now();
+        setCallActive(true);
+        void stopCallSounds();
+      }
       setStatus(mode === "video" ? "Connected" : "On call");
       return;
     }
@@ -205,10 +258,41 @@ function CallRoomContent({
     }
   }, [mode, peer, room.state, statusLabel]);
 
+  React.useEffect(() => {
+    if (!callActive || !connectedAtRef.current) return;
+    const timer = setInterval(() => {
+      if (!connectedAtRef.current) return;
+      setDurationSec(Math.max(0, Math.floor((Date.now() - connectedAtRef.current) / 1000)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [callActive]);
+
   const toggleMute = async () => {
     const next = !muted;
     setMuted(next);
-    await room.localParticipant.setMicrophoneEnabled(!next);
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!next);
+    } catch {
+      setMuted(!next);
+    }
+  };
+
+  const toggleSpeaker = async () => {
+    const next = !speakerOn;
+    try {
+      if (Platform.OS === "ios") {
+        await AudioSession.selectAudioOutput(next ? "force_speaker" : "default");
+      } else {
+        const outputs = await AudioSession.getAudioOutputs();
+        const target = next
+          ? outputs.find((o) => o === "speaker") || outputs[outputs.length - 1]
+          : outputs.find((o) => o === "earpiece") || outputs[0];
+        if (target) await AudioSession.selectAudioOutput(target);
+      }
+      setSpeakerOn(next);
+    } catch {
+      // keep previous state
+    }
   };
 
   const toggleCamera = async () => {
@@ -232,6 +316,8 @@ function CallRoomContent({
   };
 
   const endCall = async () => {
+    const status: DmCallStatus = hadPeerRef.current ? "completed" : direction === "outgoing" ? "cancelled" : "missed";
+    await finishCall(status);
     try {
       await releaseCallMedia(room);
     } catch {
@@ -240,6 +326,8 @@ function CallRoomContent({
     void AudioSession.stopAudioSession().catch(() => undefined);
     onClose();
   };
+
+  const statusLine = hadPeerRef.current ? formatCallDuration(durationSec) : status;
 
   return (
     <View style={[styles.callScreen, mode === "video" ? styles.videoCallScreen : null]}>
@@ -283,22 +371,25 @@ function CallRoomContent({
       ) : null}
 
       <View style={[styles.callTopBar, { paddingTop: Math.max(insets.top, 12) }]}>
-        <Pressable style={styles.callTopIcon} onPress={endCall}>
+        <Pressable style={styles.callTopIcon} onPress={() => void endCall()}>
           <Ionicons name="chevron-down" size={28} color="#fff" />
         </Pressable>
       </View>
 
       <View style={styles.callIdentity}>
         <Text style={styles.callName}>{peerName}</Text>
-        <Text style={styles.callStatus}>{status}</Text>
+        <Text style={styles.callStatus}>{statusLine}</Text>
       </View>
 
       <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-        <Pressable style={styles.callControlBtn} onPress={() => void toggleMute()}>
+        <Pressable
+          style={[styles.callControlBtn, muted ? styles.callControlBtnActive : null]}
+          onPress={() => void toggleMute()}
+        >
           <Ionicons name={muted ? "mic-off" : "mic"} size={24} color="#fff" />
         </Pressable>
         {mode === "video" ? (
-          <Pressable style={styles.callControlBtn} onPress={() => void toggleCamera()}>
+          <Pressable style={[styles.callControlBtn, cameraOff ? styles.callControlBtnActive : null]} onPress={() => void toggleCamera()}>
             <Ionicons name={cameraOff ? "videocam-off" : "videocam"} size={24} color="#fff" />
           </Pressable>
         ) : null}
@@ -309,11 +400,13 @@ function CallRoomContent({
           <Pressable style={styles.callControlBtn} onPress={() => void flipCamera()}>
             <Ionicons name="camera-reverse" size={24} color="#fff" />
           </Pressable>
-        ) : (
-          <Pressable style={styles.callControlBtn}>
-            <Ionicons name="volume-high" size={24} color="#fff" />
-          </Pressable>
-        )}
+        ) : null}
+        <Pressable
+          style={[styles.callControlBtn, speakerOn ? styles.callControlBtnActive : null]}
+          onPress={() => void toggleSpeaker()}
+        >
+          <Ionicons name={speakerOn ? "volume-high" : "volume-mute"} size={24} color="#fff" />
+        </Pressable>
       </View>
     </View>
   );
@@ -323,23 +416,37 @@ export function DirectCallView({
   visible,
   roomName,
   mode,
+  direction,
   peerName,
   peerAvatarUrl,
   connectEnabled,
   statusLabel,
   onAccept,
   onDecline,
+  onCallEnded,
   onClose
 }: DirectCallViewProps) {
   const { token } = useAuth();
   const insets = useSafeAreaInsets();
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [errorText, setErrorText] = React.useState("");
-  const endedByUserRef = React.useRef(false);
+  const endedRef = React.useRef(false);
 
+  const finishWithoutRoom = React.useCallback(
+    async (status: DmCallStatus) => {
+      if (endedRef.current) return;
+      endedRef.current = true;
+      await stopCallSounds();
+      await AudioSession.stopAudioSession().catch(() => undefined);
+      onCallEnded?.({ status, durationSec: 0 });
+      onClose();
+    },
+    [onCallEnded, onClose]
+  );
+  const endedByUserRef = React.useRef(false);
   React.useEffect(() => {
     if (!visible) {
-      endedByUserRef.current = false;
+      endedRef.current = false;
       setConnection(null);
       setErrorText("");
       void AudioSession.stopAudioSession().catch(() => undefined);
@@ -351,6 +458,21 @@ export function DirectCallView({
       void AudioSession.stopAudioSession().catch(() => undefined);
     };
   }, [visible]);
+
+  React.useEffect(() => {
+    if (!visible) {
+      void stopCallSounds();
+      return;
+    }
+    if (!connectEnabled) {
+      void startIncomingRingtone();
+      return;
+    }
+    void startOutgoingRingtone();
+    return () => {
+      void stopCallSounds();
+    };
+  }, [connectEnabled, visible]);
 
   React.useEffect(() => {
     if (!visible || !connectEnabled) {
@@ -399,7 +521,7 @@ export function DirectCallView({
   if (!visible) return null;
 
   return (
-    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => void finishWithoutRoom("cancelled")}>
       {!connectEnabled ? (
         <View style={[styles.incomingScreen, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 24) }]}>
           <UserAvatar
@@ -413,10 +535,23 @@ export function DirectCallView({
           <Text style={styles.incomingName}>{peerName}</Text>
           <Text style={styles.incomingStatus}>{mode === "video" ? "Incoming video call" : "Incoming voice call"}</Text>
           <View style={styles.incomingActions}>
-            <Pressable style={[styles.incomingBtn, styles.declineBtn]} onPress={onDecline || onClose}>
+            <Pressable
+              style={[styles.incomingBtn, styles.declineBtn]}
+              onPress={() => {
+                void stopCallSounds();
+                onDecline?.();
+                void finishWithoutRoom("declined");
+              }}
+            >
               <Ionicons name="close" size={28} color="#fff" />
             </Pressable>
-            <Pressable style={[styles.incomingBtn, styles.acceptBtn]} onPress={onAccept}>
+            <Pressable
+              style={[styles.incomingBtn, styles.acceptBtn]}
+              onPress={() => {
+                void stopCallSounds();
+                onAccept?.();
+              }}
+            >
               <Ionicons name={mode === "video" ? "videocam" : "call"} size={26} color="#fff" />
             </Pressable>
           </View>
@@ -424,17 +559,24 @@ export function DirectCallView({
       ) : errorText && !connection ? (
         <View style={styles.loadingScreen}>
           <Text style={styles.errorText}>{errorText}</Text>
-          <Pressable style={styles.retryBtn} onPress={onClose}>
+          <Pressable style={styles.retryBtn} onPress={() => void finishWithoutRoom("cancelled")}>
             <Text style={styles.retryText}>Close</Text>
           </Pressable>
         </View>
       ) : !connection ? (
         mode === "video" ? (
-          <PreConnectVideoPreview peerName={peerName} statusLabel={statusLabel} onClose={onClose} />
+          <PreConnectVideoPreview
+            peerName={peerName}
+            statusLabel={statusLabel}
+            onClose={() => void finishWithoutRoom(direction === "outgoing" ? "cancelled" : "missed")}
+          />
         ) : (
           <View style={styles.loadingScreen}>
             <ActivityIndicator size="large" color={APP_LIME} />
             <Text style={styles.loadingText}>{statusLabel || "Connecting call..."}</Text>
+            <Pressable style={styles.retryBtn} onPress={() => void finishWithoutRoom(direction === "outgoing" ? "cancelled" : "missed")}>
+              <Text style={styles.retryText}>End call</Text>
+            </Pressable>
           </View>
         )
       ) : (
@@ -442,22 +584,36 @@ export function DirectCallView({
           serverUrl={connection.url}
           token={connection.token}
           connect
+<<<<<<< HEAD
+          audio
+          video={mode === "video"}
+          onDisconnected={() => {
+            if (!endedRef.current) void finishWithoutRoom("completed");
+=======
           audio={false}
           video={false}
           options={LIVEKIT_CALL_ROOM_OPTIONS}
           onDisconnected={() => {
             if (!endedByUserRef.current) onClose();
+>>>>>>> aefdebb77f985539151ce298892cbf5575acde91
           }}
         >
           <CallRoomContent
             mode={mode}
+            direction={direction}
             peerName={peerName}
             peerAvatarUrl={peerAvatarUrl}
             statusLabel={statusLabel}
+<<<<<<< HEAD
+            onCallEnded={onCallEnded}
+            onClose={onClose}
+            endedRef={endedRef}
+=======
             onClose={() => {
               endedByUserRef.current = true;
               onClose();
             }}
+>>>>>>> aefdebb77f985539151ce298892cbf5575acde91
           />
         </LiveKitRoom>
       )}
@@ -526,6 +682,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.16)"
   },
+  callControlBtnActive: { backgroundColor: "rgba(255,255,255,0.34)" },
   endCallBtn: { backgroundColor: "#e53935", transform: [{ rotate: "135deg" }] },
   loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#121212", gap: 14 },
   loadingText: { color: "#fff", fontSize: 15, fontWeight: "600" },

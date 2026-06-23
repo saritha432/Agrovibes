@@ -160,6 +160,30 @@ function directMessagePushPayload(body) {
     return { excerpt, imageUrl: null };
   }
 
+  if (text.startsWith("[Cropvibe Call]")) {
+    const jsonText = text.slice("[Cropvibe Call]".length).trim();
+    let excerpt = "Call";
+    if (jsonText.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        const kind = parsed?.mode === "video" ? "Video call" : "Audio call";
+        const status = String(parsed?.status || "");
+        if (status === "completed") {
+          const durationSec = Number(parsed?.durationSec);
+          excerpt =
+            Number.isFinite(durationSec) && durationSec > 0
+              ? `${kind} (${formatVoiceDuration(durationSec * 1000)})`
+              : kind;
+        } else if (status === "missed") excerpt = `Missed ${kind.toLowerCase()}`;
+        else if (status === "declined") excerpt = `Declined ${kind.toLowerCase()}`;
+        else excerpt = `Cancelled ${kind.toLowerCase()}`;
+      } catch {
+        // fall through
+      }
+    }
+    return { excerpt, imageUrl: null };
+  }
+
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) {
     return { excerpt: "Reel", imageUrl: null };
   }
