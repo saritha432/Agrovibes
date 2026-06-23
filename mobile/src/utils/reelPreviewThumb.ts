@@ -3,7 +3,30 @@ import type { HomePost } from "../services/api";
 import { getNativeVideoThumbnail } from "./safeVideoThumbnail";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
 
+const PREVIEW_CACHE_MAX = 80;
 const previewCache = new Map<string, string>();
+const inFlight = new Map<string, Promise<string | null>>();
+
+function canGenerateVideoThumbnail(uri: string): boolean {
+  const trimmed = String(uri || "").trim();
+  if (!trimmed) return false;
+  // Android MediaMetadataRetriever often native-crashes on remote URLs (setDataSource 0x80000000).
+  if (Platform.OS === "android" && /^https?:\/\//i.test(trimmed)) return false;
+  return trimmed.startsWith("file://") || trimmed.startsWith("content://");
+}
+
+function cacheSet(key: string, uri: string) {
+  if (previewCache.size >= PREVIEW_CACHE_MAX && !previewCache.has(key)) {
+    const oldest = previewCache.keys().next().value;
+    if (oldest) previewCache.delete(oldest);
+  }
+  previewCache.set(key, uri);
+}
+
+export function clearReelPreviewCache() {
+  previewCache.clear();
+  inFlight.clear();
+}
 const skippedPreviewKeys = new Set<string>();
 
 export function staticReelPreviewUri(post: HomePost): string | null {
@@ -25,8 +48,55 @@ export async function resolveReelPreviewUri(post: HomePost): Promise<string | nu
   if (cached) return cached;
   if (skippedPreviewKeys.has(cacheKey)) return null;
 
+  const pending = inFlight.get(cacheKey);
+  if (pending) return pending;
+
   if (Platform.OS === "web") return null;
 
+  const playbackUri = videoPlaybackUrl(video);
+  if (!canGenerateVideoThumbnail(playbackUri)) return null;
+
+  const task = (async () => {
+    try {
+      const { uri } = await VideoThumbnails.getThumbnailAsync(playbackUri, {
+        time: 600,
+        quality: 0.78
+      });
+      cacheSet(cacheKey, uri);
+      return uri;
+    } catch {
+      return null;
+    } finally {
+      inFlight.delete(cacheKey);
+    }
+  })();
+
+  inFlight.set(cacheKey, task);
+  return task;
+}
+
+/** Generate missing reel stills with a small concurrency cap (grid screens). */
+export async function hydrateReelPreviews(
+  posts: HomePost[],
+  onResolved: (postId: number, uri: string) => void,
+  options?: { maxConcurrent?: number; isCancelled?: () => boolean }
+): Promise<void> {
+  const maxConcurrent = Math.max(1, options?.maxConcurrent ?? 2);
+  const isCancelled = options?.isCancelled ?? (() => false);
+  const queue = posts.filter((post) => String(post.videoUrl || "").trim() && !staticReelPreviewUri(post));
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      if (isCancelled()) return;
+      const post = queue[cursor++];
+      const uri = await resolveReelPreviewUri(post);
+      if (!uri || isCancelled()) continue;
+      onResolved(post.id, uri);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(maxConcurrent, queue.length || 1) }, () => worker()));
   const playbackSource = videoPlaybackUrl(video);
   const thumb = await getNativeVideoThumbnail(playbackSource, { time: 600, quality: 0.78 });
   if (!thumb?.uri) {

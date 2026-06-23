@@ -1421,19 +1421,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, []);
 
   const activeLivePosts = useMemo(() => buildLiveFeed(posts), [posts]);
+  const feedPollInFlightRef = useRef(false);
 
   useFocusEffect(
     useCallback(() => {
       if (!token || !appIsActive) return;
+      const mediaBusy = !!(reelViewerOpen || watchingLivePost || playingPostId != null);
+      const pollMs = mediaBusy ? 30000 : 20000;
       const poll = () => {
+        if (feedPollInFlightRef.current) return;
+        feedPollInFlightRef.current = true;
         void fetchHomePosts(token)
           .then((data) => setPosts(data.posts))
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => {
+            feedPollInFlightRef.current = false;
+          });
       };
       poll();
-      const timer = setInterval(poll, 10000);
+      const timer = setInterval(poll, pollMs);
       return () => clearInterval(timer);
-    }, [token, appIsActive])
+    }, [appIsActive, playingPostId, reelViewerOpen, token, watchingLivePost])
   );
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
@@ -1784,6 +1792,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     };
   }, [refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
 
+  const relationshipAuthorKey = useMemo(() => {
+    if (!user?.id) return "";
+    return [
+      ...new Set(
+        posts
+          .map((p) => Number(p.userId))
+          .filter((v) => Number.isFinite(v) && v > 0 && v !== user.id)
+      )
+    ]
+      .sort((a, b) => a - b)
+      .join(",");
+  }, [posts, user?.id]);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -1791,7 +1812,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (mounted) setRelationships({});
         return;
       }
-      const targetIds = [...new Set(posts.map((p) => Number(p.userId)).filter((v) => Number.isFinite(v) && v > 0 && v !== user.id))];
+      const targetIds = relationshipAuthorKey
+        ? relationshipAuthorKey.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+        : [];
       if (!targetIds.length) {
         if (mounted) setRelationships({});
         return;
@@ -1808,7 +1831,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return () => {
       mounted = false;
     };
-  }, [posts, token, user?.id]);
+  }, [relationshipAuthorKey, token, user?.id]);
 
   /** Populates the set of user ids the current user follows — used by the Friends tab to show reels from those users. */
   useEffect(() => {

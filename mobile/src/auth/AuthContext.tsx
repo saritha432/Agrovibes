@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { clearReelPreviewCache } from "../utils/reelPreviewThumb";
 import React from "react";
 
 export type UserRole = "student" | "instructor" | "admin";
@@ -74,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = React.useCallback(async () => {
+    clearReelPreviewCache();
     setToken(null);
     setUser(null);
     await AsyncStorage.removeItem(STORAGE_KEY);

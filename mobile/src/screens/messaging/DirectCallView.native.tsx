@@ -584,8 +584,9 @@ export function DirectCallView({
           serverUrl={connection.url}
           token={connection.token}
           connect
-          audio
-          video={mode === "video"}
+          audio={false}
+          video={false}
+          options={LIVEKIT_CALL_ROOM_OPTIONS}
           onDisconnected={() => {
             if (!endedRef.current) void finishWithoutRoom("completed");
           }}
@@ -597,8 +598,11 @@ export function DirectCallView({
             peerAvatarUrl={peerAvatarUrl}
             statusLabel={statusLabel}
             onCallEnded={onCallEnded}
-            onClose={onClose}
             endedRef={endedRef}
+            onClose={() => {
+              endedByUserRef.current = true;
+              onClose();
+            }}
           />
         </LiveKitRoom>
       )}

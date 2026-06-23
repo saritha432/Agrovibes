@@ -27,6 +27,7 @@ import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import { UserAvatar } from "./UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet } from "./PostShareSheet";
@@ -243,6 +244,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const isWeb = Platform.OS === "web";
   const isCover = fit === "cover";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const [blocked, setBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
   const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
@@ -252,6 +254,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   useEffect(() => {
     setNatural(null);
     setSourceIndex(0);
+    setBlocked(false);
+  }, [uri]);
+
+  useEffect(() => {
+    return () => {
+      void videoRef.current?.unloadAsync().catch(() => {});
+    };
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -288,6 +297,24 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     }
   }));
 
+  if (blocked) {
+    return (
+      <View
+        style={{
+          width: containerWidth,
+          height: containerHeight,
+          backgroundColor: APP_DARK_BG,
+          justifyContent: "center",
+          alignItems: "center"
+        }}
+      >
+        {posterUri ? (
+          <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View
       style={{
@@ -314,8 +341,15 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
         onPlaybackStatusUpdate={(status) => {
           onStatusUpdate?.(status);
-          if (status.isLoaded) durationRef.current = Number(status.durationMillis || 0);
-          else if ("error" in status && status.error && sourceIndex + 1 < playbackSources.length) {
+          if (status.isLoaded) {
+            durationRef.current = Number(status.durationMillis || 0);
+            const { width, height } = readVideoSizeFromPlaybackStatus(status);
+            if (isOversizedFeedVideo(width, height)) {
+              setBlocked(true);
+              void videoRef.current?.pauseAsync().catch(() => {});
+              void videoRef.current?.unloadAsync().catch(() => {});
+            }
+          } else if ("error" in status && status.error && sourceIndex + 1 < playbackSources.length) {
             tryNextPlaybackSource();
           }
         }}
@@ -807,8 +841,6 @@ export function PostsReelViewerModal({
       const pageH = windowHeight;
       const reelContentWidth = windowWidth;
       const isActive = effectivePlayingId === post.id && !!post.videoUrl;
-      const activeIndex = viewerPosts.findIndex((p) => p.id === effectivePlayingId);
-      const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
       const nextPost = viewerPosts[index + 1];
@@ -833,7 +865,7 @@ export function PostsReelViewerModal({
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
-          {post.videoUrl && (isActive || isNearActive) ? (
+          {post.videoUrl && isActive ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
@@ -841,7 +873,6 @@ export function PostsReelViewerModal({
                 }}
                 uri={videoPlaybackUrl(post.videoUrl)}
                 shouldPlay={isActive}
-                preloadOnly={!isActive}
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
                 fit="cover"
@@ -850,6 +881,10 @@ export function PostsReelViewerModal({
                 isMuted={isReelMuted}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
+            </Pressable>
+          ) : post.videoUrl && reelPoster ? (
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+              <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -1065,7 +1100,9 @@ export function PostsReelViewerModal({
                 });
               }}
               extraData={`${effectivePlayingId}-${windowHeight}-${viewerPosts.length}`}
-              initialNumToRender={Math.min(5, viewerPosts.length || 1)}
+              initialNumToRender={Math.min(3, viewerPosts.length || 1)}
+              maxToRenderPerBatch={2}
+              windowSize={3}
               removeClippedSubviews={false}
             />
           ) : null}

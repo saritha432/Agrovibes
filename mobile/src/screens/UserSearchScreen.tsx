@@ -18,7 +18,6 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ResizeMode, Video } from "expo-av";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
@@ -33,11 +32,11 @@ import {
   type HomePost
 } from "../services/api";
 import { isReelPost, reelGridStillUri, reelGridTileBackground } from "../utils/reelGrid";
-import { resolveReelPreviewUri } from "../utils/reelPreviewThumb";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
 
+const EXPLORE_REELS_LIMIT = 60;
 const BG = "#121212";
 const SEARCH_BG = "#303132";
 const ROW_BORDER = "#2a2a2a";
@@ -338,7 +337,8 @@ export function UserSearchScreen() {
           const aTime = Date.parse(String(a.createdAt || "")) || 0;
           const bTime = Date.parse(String(b.createdAt || "")) || 0;
           return bTime - aTime || b.id - a.id;
-        });
+        })
+        .slice(0, EXPLORE_REELS_LIMIT);
       setExplorePosts(reels);
     } catch {
       setExplorePosts([]);
@@ -347,22 +347,27 @@ export function UserSearchScreen() {
     }
   }, [token]);
 
+  const explorePreviewKey = useMemo(
+    () => explorePosts.map((post) => post.id).join(","),
+    [explorePosts]
+  );
+
   useEffect(() => {
     let cancelled = false;
-    const hydratePreviews = async () => {
-      for (const post of explorePosts) {
-        if (cancelled || !isReelPost(post)) continue;
-        if (reelGridStillUri(post)) continue;
-        const uri = await resolveReelPreviewUri(post);
-        if (cancelled || !uri) continue;
-        setPreviewUriByPostId((prev) => (prev[post.id] === uri ? prev : { ...prev, [post.id]: uri }));
-      }
-    };
-    void hydratePreviews();
+    const batch = explorePosts.slice(0, 24);
+    if (!batch.length) return;
+    void hydrateReelPreviews(
+      batch,
+      (postId, uri) => {
+        if (cancelled) return;
+        setPreviewUriByPostId((prev) => (prev[postId] === uri ? prev : { ...prev, [postId]: uri }));
+      },
+      { maxConcurrent: 2, isCancelled: () => cancelled }
+    );
     return () => {
       cancelled = true;
     };
-  }, [explorePosts]);
+  }, [explorePreviewKey, explorePosts]);
 
   const persistRecentUsers = useCallback(async (list: SearchUser[]) => {
     try {
@@ -570,22 +575,11 @@ export function UserSearchScreen() {
         }
       ];
       const coverUri = reelGridStillUri(post) || previewUriByPostId[post.id] || null;
-      const playbackUri = post.videoUrl ? videoPlaybackUrl(post.videoUrl) : null;
 
       return (
         <Pressable style={tileStyle} onPress={() => openExplorePost(post)}>
           {coverUri ? (
             <Image source={{ uri: coverUri }} style={styles.gridImage} resizeMode="cover" />
-          ) : playbackUri ? (
-            <Video
-              style={styles.gridImage}
-              source={{ uri: playbackUri }}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={false}
-              isMuted
-              isLooping={false}
-              useNativeControls={false}
-            />
           ) : (
             <View style={[styles.gridImage, styles.gridPlaceholder]} />
           )}
@@ -698,6 +692,10 @@ export function UserSearchScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             scrollEnabled={!showTypeahead}
+            initialNumToRender={12}
+            maxToRenderPerBatch={9}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === "android"}
             ListEmptyComponent={
               !loadingExplore ? (
                 <View style={styles.exploreEmpty}>
