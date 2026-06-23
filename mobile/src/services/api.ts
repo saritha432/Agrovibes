@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
+import { prepareImageForUpload, prepareProfileImageForUpload } from "../utils/mediaUpload";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -1305,10 +1306,11 @@ export async function uploadVideoFile(fileUri: string, asset?: PickerAssetMeta |
   return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, mime);
 }
 
-export async function uploadImageFile(fileUri: string) {
-  const filename = imageFilenameFromUri(fileUri);
-  const mime = mimeFromUri(fileUri, "image/jpeg");
-  return uploadToSupabaseServer(fileUri, filename, mime);
+export async function uploadImageFile(fileUri: string, options?: { profile?: boolean }) {
+  const prepared = options?.profile
+    ? await prepareProfileImageForUpload(fileUri)
+    : await prepareImageForUpload(fileUri);
+  return uploadToSupabaseServer(prepared.uri, prepared.filename, prepared.mime);
 }
 
 export async function uploadAudioFile(fileUri: string) {

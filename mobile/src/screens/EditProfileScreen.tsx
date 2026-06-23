@@ -198,7 +198,7 @@ export function EditProfileScreen() {
       finalAvatarUrl = undefined;
     } else if (pendingAvatarUri) {
       try {
-        const uploaded = await uploadImageFile(pendingAvatarUri);
+        const uploaded = await uploadImageFile(pendingAvatarUri, { profile: true });
         finalAvatarUrl = uploaded.url;
       } catch {
         finalAvatarUrl = pendingAvatarUri;

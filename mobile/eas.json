@@ -9,7 +9,10 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "android": { "buildType": "apk" },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
       "ios": { "simulator": false }
     },
     "preview-simulator": {
@@ -18,7 +21,10 @@
     },
     "production": {
       "channel": "production",
-      "android": { "buildType": "app-bundle" },
+      "android": {
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease"
+      },
       "ios": { "autoIncrement": true }
     }
   },
