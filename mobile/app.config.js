@@ -1,13 +1,17 @@
 const appJson = require("./app.json");
 
-const FIREBASE_PLUGINS = ["@react-native-firebase/app", "@react-native-firebase/crashlytics"];
+const FIREBASE_PLUGINS = ["./plugins/withFirebase.js"];
 
 function isFirebasePlugin(entry) {
   if (typeof entry === "string") {
-    return entry.startsWith("@react-native-firebase/");
+    return (
+      entry.startsWith("@react-native-firebase/") ||
+      entry.includes("withFirebase")
+    );
   }
   if (Array.isArray(entry) && typeof entry[0] === "string") {
-    return entry[0].startsWith("@react-native-firebase/");
+    const id = entry[0];
+    return id.startsWith("@react-native-firebase/") || id.includes("withFirebase");
   }
   return false;
 }
