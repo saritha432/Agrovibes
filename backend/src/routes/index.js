@@ -1238,15 +1238,40 @@ async function ensureHomeStoriesTable() {
   homeStoriesTableReady = true;
 }
 
+async function findLearnUserIdForPostAuthor(displayName) {
+  const trimmed = String(displayName || "").trim();
+  if (!trimmed) return null;
+  const normalizedName = trimmed.toLowerCase();
+  const slug = slugUsernameFromName(trimmed) || null;
+  const matchRes = await query(
+    `
+    SELECT id
+    FROM learn_users
+    WHERE
+      LOWER(TRIM(username)) = $1
+      OR LOWER(TRIM(full_name)) = $1
+      OR LOWER(TRIM(SPLIT_PART(full_name, ' ', 1))) = $1
+      OR ($2::text IS NOT NULL AND $2 <> '' AND LOWER(TRIM(username)) = $2)
+    ORDER BY
+      CASE WHEN email LIKE 'legacy_post_%' THEN 1 ELSE 0 END ASC,
+      id ASC
+    LIMIT 1
+    `,
+    [normalizedName, slug]
+  );
+  return matchRes.rows[0]?.id || null;
+}
+
 async function backfillHomePostUserIds() {
   await ensureHomePostsTable();
   await ensureLearnUsersTable();
   const legacyPosts = await query(
     `
-    SELECT id, user_name AS "userName"
-    FROM home_posts
-    WHERE user_id IS NULL
-    ORDER BY id ASC
+    SELECT p.id, p.user_name AS "userName", p.user_id AS "userId"
+    FROM home_posts p
+    LEFT JOIN learn_users u ON u.id = p.user_id
+    WHERE p.user_id IS NULL OR u.email LIKE 'legacy_post_%'
+    ORDER BY p.id ASC
     `
   );
   if (!legacyPosts.rows.length) return;
@@ -1254,41 +1279,9 @@ async function backfillHomePostUserIds() {
   const fallbackPasswordHash = await bcrypt.hash(`legacy-${Date.now()}-${Math.random()}`, 10);
   for (const post of legacyPosts.rows) {
     const displayName = String(post.userName || "").trim() || "Farmer";
-    const normalizedName = displayName.toLowerCase();
-    let userId = null;
+    let userId = await findLearnUserIdForPostAuthor(displayName);
 
-    const existingByName = await query(
-      `
-      SELECT id
-      FROM learn_users
-      WHERE LOWER(TRIM(full_name)) = $1
-      LIMIT 1
-      `,
-      [normalizedName]
-    );
-    if (existingByName.rows[0]?.id) {
-      userId = existingByName.rows[0].id;
-    }
-
-    if (!userId) {
-      const maybeUsername = slugUsernameFromName(displayName) || null;
-      if (maybeUsername) {
-        const existingByUsername = await query(
-          `
-          SELECT id
-          FROM learn_users
-          WHERE LOWER(TRIM(username)) = $1
-          LIMIT 1
-          `,
-          [maybeUsername]
-        );
-        if (existingByUsername.rows[0]?.id) {
-          userId = existingByUsername.rows[0].id;
-        }
-      }
-    }
-
-    if (!userId) {
+    if (!userId && post.userId == null) {
       const syntheticEmail = `legacy_post_${post.id}@phone.agrovibes`;
       const created = await query(
         `
@@ -1301,7 +1294,7 @@ async function backfillHomePostUserIds() {
       userId = created.rows[0]?.id || null;
     }
 
-    if (userId) {
+    if (userId && Number(post.userId) !== Number(userId)) {
       await query(`UPDATE home_posts SET user_id = $2 WHERE id = $1`, [post.id, userId]);
     }
   }
@@ -1911,9 +1904,19 @@ router.get("/v1/admin/users", authRequired, requireRole("admin"), async (req, re
       LEFT JOIN LATERAL (
         SELECT
           COUNT(*)::INT AS posts_count,
-          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL AND TRIM(video_url) <> '')::INT AS reels_count
         FROM home_posts p
-        WHERE p.user_id = u.id
+        WHERE
+          p.user_id = u.id
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.full_name))
+          OR (
+            u.username IS NOT NULL AND TRIM(u.username) <> ''
+            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.username))
+          )
+          OR (
+            u.email IS NOT NULL AND TRIM(u.email) <> ''
+            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(SPLIT_PART(u.email, '@', 1)))
+          )
       ) posts ON TRUE
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::INT AS followers_count
@@ -1995,9 +1998,19 @@ router.get("/v1/users", authRequired, async (req, res) => {
       LEFT JOIN LATERAL (
         SELECT
           COUNT(*)::INT AS posts_count,
-          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL AND TRIM(video_url) <> '')::INT AS reels_count
         FROM home_posts p
-        WHERE p.user_id = u.id
+        WHERE
+          p.user_id = u.id
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.full_name))
+          OR (
+            u.username IS NOT NULL AND TRIM(u.username) <> ''
+            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.username))
+          )
+          OR (
+            u.email IS NOT NULL AND TRIM(u.email) <> ''
+            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(SPLIT_PART(u.email, '@', 1)))
+          )
       ) posts ON TRUE
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::INT AS followers_count
@@ -2119,9 +2132,19 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
       LEFT JOIN LATERAL (
         SELECT
           COUNT(*)::INT AS posts_count,
-          COUNT(*) FILTER (WHERE video_url IS NOT NULL)::INT AS reels_count
+          COUNT(*) FILTER (WHERE video_url IS NOT NULL AND TRIM(video_url) <> '')::INT AS reels_count
         FROM home_posts p
-        WHERE p.user_id = u.id
+        WHERE
+          p.user_id = u.id
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.full_name))
+          OR (
+            u.username IS NOT NULL AND TRIM(u.username) <> ''
+            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.username))
+          )
+          OR (
+            u.email IS NOT NULL AND TRIM(u.email) <> ''
+            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(SPLIT_PART(u.email, '@', 1)))
+          )
       ) posts ON TRUE
       WHERE u.id = $1
       LIMIT 1
@@ -4246,6 +4269,102 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
     res.json({ saved: false });
   } catch (error) {
     res.status(500).json({ message: "Failed to unsave post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
+  try {
+    await backfillHomePostUserIds();
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
+
+    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [targetUserId]);
+    if (!userRes.rows.length) {
+      res.json({ posts: [] });
+      return;
+    }
+
+    const fullName = String(userRes.rows[0]?.full_name || "").trim();
+    const username = String(userRes.rows[0]?.username || "").trim();
+    const emailLocal = String(userRes.rows[0]?.email || "")
+      .split("@")[0]
+      .trim();
+    const userNameParam = String(req.query.userName || "").trim();
+
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        p.live_status AS "liveStatus",
+        p.live_ended_at AS "liveEndedAt",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_likes hpl
+            WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
+          )
+        END AS "viewerHasLiked",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_saves hps
+            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+          )
+        END AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE
+        p.user_id = $2
+        OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($3))
+        OR LOWER(TRIM(SPLIT_PART(p.user_name, ' ', 1))) = LOWER(TRIM(SPLIT_PART($3, ' ', 1)))
+        OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+        OR ($5::text IS NOT NULL AND $5 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($5)))
+        OR ($6::text IS NOT NULL AND $6 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($6)))
+      ORDER BY p.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId, targetUserId, fullName, username || null, emailLocal || null, userNameParam || null]
+    );
+
+    const body = { posts: await enrichHomePostsLiveState(dedupeHomePostRows(result.rows)) };
+    res.json(body);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load user posts", error: error.message });
   }
 });
 

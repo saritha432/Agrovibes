@@ -28,6 +28,9 @@ ios/
 
 # Local inspect/export trees (backend uploads, videos) — not used by the app build
 eas-inspect-out/
+.tmp-android-export/
+.tmp-web-export/
+dist/
 
 # Unused bulky market SVG exports (app uses PNG icons; Metro only bundles require()'d files)
 assets/market/seeds.svg
