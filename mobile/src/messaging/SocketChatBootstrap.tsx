@@ -11,9 +11,6 @@ export function SocketChatBootstrap() {
       return;
     }
     connectSocketChat(token);
-    return () => {
-      disconnectSocketChat();
-    };
   }, [token]);
 
   return null;

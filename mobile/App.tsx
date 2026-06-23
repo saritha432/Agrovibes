@@ -1,4 +1,5 @@
 import "fast-text-encoding";
+import "./src/push/registerNotificationHandlers";
 import React from "react";
 import { ActivityIndicator, View } from "react-native";
 import { setupDirectMessageNotificationCategory } from "./src/push/pushNotifications";

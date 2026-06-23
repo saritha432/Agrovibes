@@ -29,6 +29,7 @@ type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
 let authToken: string | null = null;
+const joinedThreadPeers = new Set<number>();
 const messageHandlers = new Set<DmMessageHandler>();
 const threadHandlers = new Set<DmThreadHandler>();
 const typingHandlers = new Set<DmTypingHandler>();
@@ -47,8 +48,18 @@ function notifyConnection(connected: boolean) {
   connectionHandlers.forEach((handler) => handler(connected));
 }
 
+function rejoinActiveThreads() {
+  if (!socket?.connected) return;
+  joinedThreadPeers.forEach((peerUserId) => {
+    socket?.emit("dm:join", { peerUserId });
+  });
+}
+
 function bindSocketEvents(sock: Socket) {
-  sock.on("connect", () => notifyConnection(true));
+  sock.on("connect", () => {
+    rejoinActiveThreads();
+    notifyConnection(true);
+  });
   sock.on("disconnect", () => notifyConnection(false));
   sock.on("dm:message", (payload: DmMessageSocketPayload) => {
     messageHandlers.forEach((handler) => handler(payload));
@@ -90,6 +101,7 @@ export function connectSocketChat(token: string) {
 
 export function disconnectSocketChat() {
   authToken = null;
+  joinedThreadPeers.clear();
   if (!socket) return;
   socket.removeAllListeners();
   socket.disconnect();
@@ -102,10 +114,14 @@ export function isSocketChatConnected() {
 }
 
 export function joinDirectThread(peerUserId: number) {
+  if (!Number.isFinite(peerUserId) || peerUserId <= 0) return;
+  joinedThreadPeers.add(peerUserId);
   socket?.emit("dm:join", { peerUserId });
 }
 
 export function leaveDirectThread(peerUserId: number) {
+  if (!Number.isFinite(peerUserId) || peerUserId <= 0) return;
+  joinedThreadPeers.delete(peerUserId);
   socket?.emit("dm:leave", { peerUserId });
 }
 

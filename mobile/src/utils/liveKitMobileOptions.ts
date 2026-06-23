@@ -28,6 +28,7 @@ export const LIVEKIT_CALL_ROOM_OPTIONS: RoomOptions = {
   adaptiveStream: true,
   dynacast: true,
   stopLocalTrackOnUnpublish: true,
+  disconnectOnPageLeave: true,
   videoCaptureDefaults: {
     resolution: VideoPresets.h360.resolution,
     facingMode: "user"

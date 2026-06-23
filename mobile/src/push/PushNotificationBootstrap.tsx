@@ -6,12 +6,12 @@ import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { navigateToDirectChat, navigateToJoinLive } from "../navigation/navigationRef";
 import {
   addNotificationReceivedListener,
-  addNotificationResponseListener,
   registerPushNotifications,
   setupDirectMessageNotificationCategory,
   unregisterPushNotifications
 } from "./pushNotifications";
 import { handleNotificationResponse } from "./notificationNavigation";
+import { registerNotificationResponseHandler } from "./registerNotificationHandlers";
 
 export function PushNotificationBootstrap() {
   const { token, user } = useAuth();
@@ -38,6 +38,7 @@ export function PushNotificationBootstrap() {
     if (Platform.OS === "web") return;
 
     void setupDirectMessageNotificationCategory();
+    registerNotificationResponseHandler();
 
     void Notifications.getLastNotificationResponseAsync().then((response) => {
       if (response) void handleNotificationResponse(response, { authToken: authTokenRef.current });
@@ -67,12 +68,8 @@ export function PushNotificationBootstrap() {
         });
       }
     });
-    const responseSub = addNotificationResponseListener((response) => {
-      void handleNotificationResponse(response, { authToken: authTokenRef.current });
-    });
     return () => {
       receivedSub.remove();
-      responseSub.remove();
     };
   }, []);
 

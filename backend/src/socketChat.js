@@ -87,8 +87,8 @@ function getSocketIo() {
 function emitDirectMessage({ senderId, receiverId, message }) {
   if (!io || !message) return;
   const payload = { message, peerUserId: senderId };
+  // Deliver once per recipient — user room covers inbox + open chat.
   io.to(userRoom(receiverId)).emit("dm:message", payload);
-  io.to(threadRoom(receiverId, senderId)).emit("dm:message", payload);
 
   const threadBase = {
     lastMessage: message.body,
