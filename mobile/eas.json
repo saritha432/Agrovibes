@@ -9,6 +9,9 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
+      "env": {
+        "INCLUDE_FIREBASE_PLUGINS": "1"
+      },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
@@ -21,6 +24,9 @@
     },
     "production": {
       "channel": "production",
+      "env": {
+        "INCLUDE_FIREBASE_PLUGINS": "1"
+      },
       "android": {
         "buildType": "app-bundle",
         "gradleCommand": ":app:bundleRelease"
