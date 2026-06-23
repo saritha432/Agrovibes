@@ -1,21 +1,23 @@
 import React from "react";
 import { Platform, Text, View } from "react-native";
-import type { DirectCallMode } from "./DirectCallView.native";
+import type { CallDirection, CallEndResult, DirectCallMode } from "./DirectCallView.native";
 
 type DirectCallViewProps = {
   visible: boolean;
   roomName: string;
   mode: DirectCallMode;
+  direction: CallDirection;
   peerName: string;
   peerAvatarUrl?: string | null;
   connectEnabled: boolean;
   statusLabel?: string;
   onAccept?: () => void;
   onDecline?: () => void;
+  onCallEnded?: (result: CallEndResult) => void;
   onClose: () => void;
 };
 
-export type { DirectCallMode };
+export type { CallDirection, CallEndResult, DirectCallMode };
 
 export function DirectCallView(props: DirectCallViewProps) {
   if (Platform.OS === "web") {

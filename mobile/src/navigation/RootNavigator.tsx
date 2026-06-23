@@ -120,7 +120,7 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="SettingsMenu" component={SettingsMenuScreen} options={{ headerShown: false, animation: "slide_from_bottom" }} />
+      <Stack.Screen name="SettingsMenu" component={SettingsMenuScreen} options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ headerShown: false }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
