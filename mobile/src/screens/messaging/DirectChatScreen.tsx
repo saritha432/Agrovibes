@@ -15,6 +15,7 @@ import {
   TextInput,
   View
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -45,13 +46,22 @@ import {
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { DirectCallView, type CallDirection, type CallEndResult, type DirectCallMode } from "./DirectCallView";
+import { ChatMessageActionSheet } from "./ChatMessageActionSheet";
+import { ForwardMessageModal } from "./ForwardMessageModal";
+import { SwipeReplyMessageRow } from "./SwipeReplyMessageRow";
 import {
   buildDmCallMessage,
   buildDmMediaMessage,
+  buildDmReactMessage,
+  buildDmReplyMessage,
   buildDmVoiceMessage,
+  dmMessageCopyText,
+  formatDmInboxPreview,
   formatVoiceDuration,
   parseDmCallMessage,
   parseDmMediaMessage,
+  parseDmReactMessage,
+  parseDmReplyMessage,
   parseDmVoiceMessage
 } from "./dmMessageFormats";
 
@@ -66,6 +76,9 @@ const COMPOSER_HEIGHT = 59;
 const COMPOSER_PADDING = 12;
 const COMPOSER_GAP = 12;
 const COMPOSER_RADIUS = 8;
+const COMPOSER_INPUT_MIN_HEIGHT = COMPOSER_HEIGHT - COMPOSER_PADDING * 2;
+const COMPOSER_LINE_HEIGHT = 20;
+const COMPOSER_INPUT_MAX_HEIGHT = 120;
 const CAMERA_ICON_SIZE = 35;
 const COMPOSER_ICON = 24;
 
@@ -120,21 +133,54 @@ function formatDateSeparator(ts: number) {
 
 type ThreadListItem =
   | { type: "date"; id: string; label: string }
-  | { type: "message"; id: string; message: DirectMessageItem };
+  | { type: "message"; id: string; message: DirectMessageItem; reactions: string[] };
 
 function buildThreadListItems(messages: DirectMessageItem[]): ThreadListItem[] {
+  const reactionsByTarget = new Map<number, string[]>();
+  for (const message of messages) {
+    const react = parseDmReactMessage(message.body);
+    if (!react) continue;
+    const list = reactionsByTarget.get(react.targetId) || [];
+    list.push(react.emoji);
+    reactionsByTarget.set(react.targetId, list);
+  }
+
   const items: ThreadListItem[] = [];
   let lastDayKey = "";
   for (const message of messages) {
+    if (parseDmReactMessage(message.body)) continue;
+
     const d = new Date(message.createdAt);
     const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
     if (dayKey !== lastDayKey) {
       items.push({ type: "date", id: `date-${dayKey}`, label: formatDateSeparator(d.getTime()) });
       lastDayKey = dayKey;
     }
-    items.push({ type: "message", id: String(message.id), message });
+    items.push({
+      type: "message",
+      id: String(message.id),
+      message,
+      reactions: reactionsByTarget.get(message.id) || []
+    });
   }
   return items;
+}
+
+function formatActionSheetTimestamp(ts: number) {
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday =
+    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate();
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }).toUpperCase();
+  if (isToday) return `TODAY ${time}`;
+  if (isYesterday) return `YESTERDAY ${time}`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }).toUpperCase() + ` ${time}`;
 }
 
 function formatPeerHandle(username?: string | null, peerKey?: string) {
@@ -366,6 +412,15 @@ export function DirectChatScreen() {
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceStartedAtRef = useRef(0);
+  const [replyTarget, setReplyTarget] = useState<{
+    messageId: number;
+    preview: string;
+    authorName: string;
+    replyLabel: string;
+  } | null>(null);
+  const [actionMessage, setActionMessage] = useState<DirectMessageItem | null>(null);
+  const [forwardBody, setForwardBody] = useState<string | null>(null);
+  const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
 
   useEffect(() => {
@@ -479,13 +534,82 @@ export function DirectChatScreen() {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, []);
 
+  const isComposerSingleLine = !draft.includes("\n") && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT + 2;
+
+  const handleDraftChange = useCallback((text: string) => {
+    setDraft(text);
+    if (!text.trim()) {
+      setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+      return;
+    }
+    if (!text.includes("\n") && text.length > 42 && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT) {
+      setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT + COMPOSER_LINE_HEIGHT);
+    }
+  }, [composerInputHeight]);
+
   const send = async () => {
     const text = draft.trim();
     if (!text || !token || attachBusy) return;
     setDraft("");
+    setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+    const reply = replyTarget;
+    setReplyTarget(null);
+    const body = reply
+      ? buildDmReplyMessage({
+          replyToId: reply.messageId,
+          replyPreview: reply.preview,
+          replyAuthor: reply.authorName,
+          text
+        })
+      : text;
+    await sendDirectMessage(token, peerUserId, body);
+    await reload();
     const result = await sendDirectMessage(token, peerUserId, text);
     if (result.message) appendSentMessage(result.message);
   };
+
+  const startReplyToMessage = useCallback(
+    (item: DirectMessageItem) => {
+      const isSelf = item.senderId === user?.id;
+      setReplyTarget({
+        messageId: item.id,
+        preview: formatDmInboxPreview(item.body, t) || "Message",
+        authorName: isSelf ? "You" : peerName,
+        replyLabel: isSelf ? "yourself" : peerName
+      });
+    },
+    [peerName, t, user?.id]
+  );
+
+  const openMessageActions = useCallback((item: DirectMessageItem) => {
+    if (parseDmCallMessage(item.body) || parseDmReactMessage(item.body)) return;
+    setActionMessage(item);
+  }, []);
+
+  const copyMessage = useCallback(
+    async (item: DirectMessageItem) => {
+      const text = dmMessageCopyText(item.body, t);
+      if (!text.trim()) {
+        Alert.alert("Copy", "This message cannot be copied as text.");
+        return;
+      }
+      await Clipboard.setStringAsync(text);
+    },
+    [t]
+  );
+
+  const reactToMessage = useCallback(
+    async (item: DirectMessageItem, emoji: string) => {
+      if (!token) return;
+      await sendDirectMessage(token, peerUserId, buildDmReactMessage({ targetId: item.id, emoji }));
+      await reload();
+    },
+    [peerUserId, reload, token]
+  );
+
+  const canInteractWithMessage = useCallback((body: string) => {
+    return !parseDmCallMessage(body) && !parseDmReactMessage(body);
+  }, []);
 
   const sendPickedAsset = useCallback(
     async (asset: ImagePicker.ImagePickerAsset) => {
@@ -814,7 +938,9 @@ export function DirectChatScreen() {
           }
 
           const messageItem = item.message;
+          const messageReactions = item.reactions;
           const isSelf = Number(messageItem.senderId) === Number(user?.id);
+          const interactable = canInteractWithMessage(messageItem.body);
           const parsedPost = parseSharedCropvibeContent(messageItem.body);
           const sharedPost = parsedPost ? mergeHydratedPost(parsedPost) : null;
           const sharedProfile = parseSharedProfileContent(messageItem.body);
@@ -822,9 +948,26 @@ export function DirectChatScreen() {
           const sharedMedia = parseDmMediaMessage(messageItem.body);
           const sharedVoice = parseDmVoiceMessage(messageItem.body);
           const sharedCall = parseDmCallMessage(messageItem.body);
+          const sharedReply = parseDmReplyMessage(messageItem.body);
           const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice || sharedCall);
           return (
-            <View style={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}>
+            <SwipeReplyMessageRow
+              rowStyle={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}
+              contentStyle={[
+                styles.bubbleWrap,
+                isSelf ? styles.bubbleWrapSelf : styles.bubbleWrapPeer
+              ]}
+              enabled={interactable}
+              onReply={() => startReplyToMessage(messageItem)}
+              onLongPress={() => openMessageActions(messageItem)}
+            >
+              {sharedReply ? (
+                <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
+                  {isSelf
+                    ? "You replied"
+                    : `${sharedReply.replyAuthor === "You" ? peerName : sharedReply.replyAuthor} replied`}
+                </Text>
+              ) : null}
               <View
                 style={[
                   isRichCard ? styles.reelBubbleWrap : [styles.bubble, isSelf ? styles.bubbleSelf : styles.bubblePeer],
@@ -880,6 +1023,20 @@ export function DirectChatScreen() {
                   <ChatVoiceNoteBubble voice={sharedVoice} isSelf={isSelf} />
                 ) : sharedCall ? (
                   <CallHistoryBubble call={sharedCall} isSelf={isSelf} t={t} />
+                ) : sharedReply ? (
+                  <>
+                    <View style={[styles.replyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}>
+                      <Text
+                        style={[styles.replyQuoteText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}
+                        numberOfLines={2}
+                      >
+                        {sharedReply.replyPreview}
+                      </Text>
+                    </View>
+                    <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
+                      {sharedReply.text}
+                    </Text>
+                  </>
                 ) : sharedProfile ? (
                   <Pressable
                     style={styles.sharedProfileCard}
@@ -913,7 +1070,16 @@ export function DirectChatScreen() {
                   {formatMsgTime(new Date(messageItem.createdAt).getTime())}
                 </Text>
               </View>
-            </View>
+              {messageReactions.length ? (
+                <View style={[styles.reactionRow, isSelf ? styles.reactionRowSelf : styles.reactionRowPeer]}>
+                  {messageReactions.map((emoji, index) => (
+                    <Text key={`${emoji}-${index}`} style={styles.reactionEmoji}>
+                      {emoji}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+            </SwipeReplyMessageRow>
           );
         }}
         ListEmptyComponent={
@@ -926,6 +1092,19 @@ export function DirectChatScreen() {
       />
 
       <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+        {replyTarget ? (
+          <View style={styles.replyComposerBanner}>
+            <View style={styles.replyComposerMeta}>
+              <Text style={styles.replyComposerLabel}>Replying to {replyTarget.replyLabel}</Text>
+              <Text style={styles.replyComposerQuote} numberOfLines={2}>
+                {replyTarget.preview}
+              </Text>
+            </View>
+            <Pressable hitSlop={8} onPress={() => setReplyTarget(null)}>
+              <Ionicons name="close" size={20} color={MUTED} />
+            </Pressable>
+          </View>
+        ) : null}
         <View style={styles.composerBar}>
           <Pressable
             style={styles.cameraBtn}
@@ -940,19 +1119,47 @@ export function DirectChatScreen() {
               <View style={styles.recordingDot} />
               <Text style={styles.recordingText}>{t("recordingVoice")}</Text>
               <Text style={styles.recordingTimer}>{formatVoiceDuration(voiceRecordingMs)}</Text>
-              <Pressable hitSlop={10} onPress={() => void cancelVoiceRecording()}>
-                <Ionicons name="close" size={18} color={MUTED} />
+              <Pressable hitSlop={10} onPress={() => void cancelVoiceRecording()} style={styles.recordingActionBtn}>
+                <Ionicons name="trash-outline" size={20} color={MUTED} />
+              </Pressable>
+              <Pressable
+                hitSlop={10}
+                onPress={() => void stopVoiceRecordingAndSend()}
+                style={[styles.recordingActionBtn, styles.recordingSendBtn]}
+              >
+                <Ionicons name="send" size={20} color={YELLOW} />
               </Pressable>
             </View>
           ) : (
-            <>
+            <View style={styles.inputArea}>
               <TextInput
                 value={draft}
-                onChangeText={setDraft}
+                onChangeText={handleDraftChange}
                 placeholder="Message"
                 placeholderTextColor={MUTED}
-                style={styles.input}
-                multiline
+                style={[
+                  styles.input,
+                  {
+                    height: composerInputHeight,
+                    lineHeight: COMPOSER_LINE_HEIGHT,
+                    paddingTop: isComposerSingleLine ? 0 : 6,
+                    paddingBottom: isComposerSingleLine ? 0 : 6,
+                    textAlignVertical: isComposerSingleLine ? "center" : "top"
+                  }
+                ]}
+                multiline={!isComposerSingleLine}
+                scrollEnabled={!isComposerSingleLine && composerInputHeight >= COMPOSER_INPUT_MAX_HEIGHT}
+                onContentSizeChange={
+                  isComposerSingleLine
+                    ? undefined
+                    : (event) => {
+                        const next = Math.min(
+                          COMPOSER_INPUT_MAX_HEIGHT,
+                          Math.max(COMPOSER_INPUT_MIN_HEIGHT, Math.ceil(event.nativeEvent.contentSize.height))
+                        );
+                        setComposerInputHeight(next);
+                      }
+                }
                 maxLength={2000}
                 onSubmitEditing={send}
                 editable={!attachBusy}
@@ -966,8 +1173,7 @@ export function DirectChatScreen() {
                   <Pressable
                     style={styles.inputTrailingBtn}
                     disabled={attachBusy}
-                    onPressIn={() => void startVoiceRecording()}
-                    onPressOut={() => void stopVoiceRecordingAndSend()}
+                    onPress={() => void startVoiceRecording()}
                   >
                     <ChatAssetIcon icon="mic" size={COMPOSER_ICON} />
                   </Pressable>
@@ -982,10 +1188,38 @@ export function DirectChatScreen() {
                   </Pressable>
                 </View>
               )}
-            </>
+            </View>
           )}
         </View>
       </View>
+      <ChatMessageActionSheet
+        visible={actionMessage != null}
+        timestampLabel={
+          actionMessage ? formatActionSheetTimestamp(new Date(actionMessage.createdAt).getTime()) : undefined
+        }
+        onClose={() => setActionMessage(null)}
+        onReply={() => {
+          if (actionMessage) startReplyToMessage(actionMessage);
+        }}
+        onCopy={() => {
+          if (actionMessage) void copyMessage(actionMessage);
+        }}
+        onForward={() => {
+          if (actionMessage) setForwardBody(actionMessage.body);
+        }}
+        onReact={(emoji) => {
+          if (actionMessage) void reactToMessage(actionMessage, emoji);
+        }}
+      />
+
+      <ForwardMessageModal
+        visible={forwardBody != null}
+        messageBody={forwardBody || ""}
+        excludeUserId={peerUserId}
+        onClose={() => setForwardBody(null)}
+        onSent={() => Alert.alert("Forwarded", "Message sent.")}
+      />
+
       <DirectCallView
         visible={!!callSession}
         roomName={callSession?.roomName || ""}
@@ -1057,10 +1291,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase"
   },
   listContent: { paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 },
-  bubbleRow: { marginBottom: 10, flexDirection: "row" },
+  bubbleRow: { marginBottom: 10, flexDirection: "row", width: "100%" },
   bubbleRowSelf: { justifyContent: "flex-end" },
   bubbleRowPeer: { justifyContent: "flex-start" },
-  bubble: { maxWidth: "78%", borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleWrap: { maxWidth: "78%" },
+  bubbleWrapSelf: { alignSelf: "flex-end" },
+  bubbleWrapPeer: { alignSelf: "flex-start" },
+  bubble: { borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleSelf: { backgroundColor: "#3a3f46" },
   bubblePeer: { backgroundColor: BUBBLE_PEER },
   reelBubbleWrap: { maxWidth: "84%" },
@@ -1145,6 +1382,44 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     backgroundColor: BG
   },
+  replyComposerBanner: {
+    width: "100%",
+    maxWidth: 398,
+    alignSelf: "center",
+    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: BORDER
+  },
+  replyComposerMeta: { flex: 1, minWidth: 0 },
+  replyComposerLabel: { color: MUTED, fontSize: 12, fontWeight: "600" },
+  replyComposerQuote: { marginTop: 4, color: TEXT, fontSize: 15, fontWeight: "800", lineHeight: 20 },
+  repliedToLabel: { fontSize: 11, fontWeight: "600", marginBottom: 4, color: MUTED },
+  repliedToLabelSelf: { textAlign: "right" },
+  repliedToLabelPeer: { textAlign: "left" },
+  replyQuote: {
+    borderLeftWidth: 2,
+    paddingLeft: 8,
+    marginBottom: 6,
+    opacity: 0.9
+  },
+  replyQuoteSelf: { borderLeftColor: YELLOW },
+  replyQuotePeer: { borderLeftColor: "rgba(255,255,255,0.45)" },
+  replyQuoteText: { fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  reactionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    marginTop: -2,
+    marginBottom: 2
+  },
+  reactionRowSelf: { justifyContent: "flex-end" },
+  reactionRowPeer: { justifyContent: "flex-start" },
+  reactionEmoji: { fontSize: 15 },
   composerBar: {
     width: "100%",
     maxWidth: 398,
@@ -1155,7 +1430,15 @@ const styles = StyleSheet.create({
     backgroundColor: COMPOSER_BG,
     flexDirection: "row",
     alignItems: "center",
-    gap: COMPOSER_GAP
+    gap: COMPOSER_GAP,
+    overflow: "hidden"
+  },
+  inputArea: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
   },
   cameraBtn: {
     width: CAMERA_ICON_SIZE,
@@ -1165,16 +1448,20 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    minHeight: COMPOSER_HEIGHT - COMPOSER_PADDING * 2,
-    maxHeight: 120,
+    minWidth: 0,
+    flexShrink: 1,
+    maxHeight: COMPOSER_INPUT_MAX_HEIGHT,
+    paddingHorizontal: 0,
     paddingVertical: 0,
+    includeFontPadding: false,
     fontSize: 15,
     color: TEXT
   },
   inputTrailing: {
     flexDirection: "row",
     alignItems: "center",
-    gap: COMPOSER_GAP
+    flexShrink: 0,
+    gap: 6
   },
   inputTrailingBtn: {
     width: COMPOSER_ICON,
@@ -1197,6 +1484,15 @@ const styles = StyleSheet.create({
   },
   recordingText: { flex: 1, color: TEXT, fontSize: 14, fontWeight: "700" },
   recordingTimer: { color: MUTED, fontSize: 13, fontWeight: "700", marginRight: 4 },
+  recordingActionBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  recordingSendBtn: {
+    marginLeft: 2
+  },
   callScreen: {
     flex: 1,
     backgroundColor: "#121212",

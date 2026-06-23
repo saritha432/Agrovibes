@@ -12,7 +12,14 @@ import {
   useRoomContext,
   useTracks
 } from "@livekit/react-native";
-import { ConnectionState, RoomEvent, Track, type Participant, type Room } from "livekit-client";
+import {
+  ConnectionState,
+  LocalVideoTrack,
+  RoomEvent,
+  Track,
+  type Participant,
+  type Room
+} from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,6 +31,12 @@ import { APP_LIME } from "../../theme/appColors";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { DmCallStatus } from "./dmMessageFormats";
 import { formatCallDuration } from "./dmMessageFormats";
+import {
+  applyInitialCallAudioRoute,
+  callAudioRouteIcon,
+  toggleCallAudioRoute,
+  type CallAudioRoute
+} from "./callAudioRoute";
 import { startIncomingRingtone, startOutgoingRingtone, stopCallSounds } from "./callSounds";
 
 export type DirectCallMode = "voice" | "video";
@@ -131,6 +144,7 @@ function CallRoomContent({
   peerAvatarUrl,
   statusLabel,
   onCallEnded,
+  onCallAnswered,
   onClose,
   endedRef
 }: {
@@ -140,15 +154,17 @@ function CallRoomContent({
   peerAvatarUrl?: string | null;
   statusLabel?: string;
   onCallEnded?: (result: CallEndResult) => void;
+  onCallAnswered?: () => void;
   onClose: () => void;
   endedRef: React.MutableRefObject<boolean>;
 }) {
   const insets = useSafeAreaInsets();
   const room = useRoomContext();
   const participants = useParticipants();
-  const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  const remoteCameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
+  const localCameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
   const [muted, setMuted] = React.useState(false);
-  const [speakerOn, setSpeakerOn] = React.useState(mode === "voice" ? true : true);
+  const [audioRoute, setAudioRoute] = React.useState<CallAudioRoute>("earpiece");
   const [cameraOff, setCameraOff] = React.useState(mode === "voice");
   const [facingFront, setFacingFront] = React.useState(true);
   const [status, setStatus] = React.useState(statusLabel || "Connecting...");
@@ -159,20 +175,22 @@ function CallRoomContent({
   const [tracksReady, setTracksReady] = React.useState(false);
   const localIdentity = room.localParticipant.identity;
   const peer = remoteParticipant(participants, localIdentity);
-  const localVideo = cameraTracks.find(
-    (track) => isTrackReference(track) && track.participant.identity === localIdentity
-  );
-  const remoteVideo = cameraTracks.find(
+  const remoteVideo = remoteCameraTracks.find(
     (track) => isTrackReference(track) && track.participant.identity !== localIdentity
   );
+  const localVideo = localCameraTracks.find(
+    (track) => isTrackReference(track) && track.participant.identity === localIdentity
+  );
+  const remoteVideoSid = remoteVideo && isTrackReference(remoteVideo) ? remoteVideo.publication.trackSid : "";
+  const localVideoSid = localVideo && isTrackReference(localVideo) ? localVideo.publication.trackSid : "";
   const showRemoteVideo =
     mode === "video" &&
-    !cameraOff &&
     remoteVideo &&
     isTrackReference(remoteVideo) &&
     room.state === ConnectionState.Connected &&
     !!peer;
-  const showLocalVideo = mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo);
+  const showLocalPip =
+    mode === "video" && !cameraOff && localVideo && isTrackReference(localVideo) && tracksReady;
 
   const finishCall = React.useCallback(
     async (status: DmCallStatus) => {
@@ -181,14 +199,12 @@ function CallRoomContent({
       const duration = connectedAtRef.current
         ? Math.max(0, Math.floor((Date.now() - connectedAtRef.current) / 1000))
         : 0;
+      await stopCallSounds();
       try {
-        await room.localParticipant.setCameraEnabled(false);
-        await room.localParticipant.setMicrophoneEnabled(false);
-        room.disconnect();
+        await releaseCallMedia(room);
       } catch {
         // no-op
       }
-      await stopCallSounds();
       await AudioSession.stopAudioSession().catch(() => undefined);
       onCallEnded?.({
         status,
@@ -196,15 +212,18 @@ function CallRoomContent({
       });
       onClose();
     },
-    [onCallEnded, onClose, room]
+    [endedRef, onCallEnded, onClose, room]
   );
+
+  React.useEffect(() => {
+    void applyInitialCallAudioRoute().then(setAudioRoute).catch(() => undefined);
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
     const publishTracks = async () => {
       if (room.state !== ConnectionState.Connected) return;
       try {
-        // Let expo-camera preview release the lens before WebRTC grabs it (Android).
         if (mode === "video") {
           await new Promise((resolve) => setTimeout(resolve, 450));
         }
@@ -243,12 +262,37 @@ function CallRoomContent({
   }, [mode, room]);
 
   React.useEffect(() => {
+    const endWhenPeerLeft = () => {
+      if (!hadPeerRef.current || endedRef.current) return;
+      if (room.remoteParticipants.size === 0) {
+        void finishCall("completed");
+      }
+    };
+    const onParticipantDisconnected = () => endWhenPeerLeft();
+    const onTrackUnsubscribed = (
+      _track: unknown,
+      _publication: unknown,
+      participant: { identity: string }
+    ) => {
+      if (participant.identity === localIdentity || !hadPeerRef.current || endedRef.current) return;
+      setTimeout(endWhenPeerLeft, 300);
+    };
+    room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+    room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+    return () => {
+      room.off(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+      room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+    };
+  }, [finishCall, localIdentity, room]);
+
+  React.useEffect(() => {
     if (room.state === ConnectionState.Connected && peer) {
       if (!hadPeerRef.current) {
         hadPeerRef.current = true;
         connectedAtRef.current = Date.now();
         setCallActive(true);
         void stopCallSounds();
+        onCallAnswered?.();
       }
       setStatus(mode === "video" ? "Connected" : "On call");
       return;
@@ -256,7 +300,7 @@ function CallRoomContent({
     if (room.state === ConnectionState.Connected) {
       setStatus(statusLabel || (mode === "video" ? "Calling..." : "Ringing..."));
     }
-  }, [mode, peer, room.state, statusLabel]);
+  }, [mode, onCallAnswered, peer, room.state, statusLabel]);
 
   React.useEffect(() => {
     if (!callActive || !connectedAtRef.current) return;
@@ -277,21 +321,12 @@ function CallRoomContent({
     }
   };
 
-  const toggleSpeaker = async () => {
-    const next = !speakerOn;
+  const cycleAudioRoute = async () => {
     try {
-      if (Platform.OS === "ios") {
-        await AudioSession.selectAudioOutput(next ? "force_speaker" : "default");
-      } else {
-        const outputs = await AudioSession.getAudioOutputs();
-        const target = next
-          ? outputs.find((o) => o === "speaker") || outputs[outputs.length - 1]
-          : outputs.find((o) => o === "earpiece") || outputs[0];
-        if (target) await AudioSession.selectAudioOutput(target);
-      }
-      setSpeakerOn(next);
+      const next = await toggleCallAudioRoute(audioRoute);
+      setAudioRoute(next);
     } catch {
-      // keep previous state
+      // keep previous route
     }
   };
 
@@ -305,45 +340,46 @@ function CallRoomContent({
   };
 
   const flipCamera = async () => {
-    const nextFront = !facingFront;
-    setFacingFront(nextFront);
-    if (!cameraOff) {
-      await room.localParticipant.setCameraEnabled(true, {
+    if (cameraOff) return;
+    try {
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+      const track = pub?.track;
+      if (!track || track.kind !== Track.Kind.Video) return;
+      const nextFront = !facingFront;
+      await (track as LocalVideoTrack).restartTrack({
         facingMode: nextFront ? "user" : "environment",
         resolution: LIVEKIT_CALL_ROOM_OPTIONS.videoCaptureDefaults?.resolution
       });
+      setFacingFront(nextFront);
+    } catch {
+      // no-op
     }
   };
 
   const endCall = async () => {
     const status: DmCallStatus = hadPeerRef.current ? "completed" : direction === "outgoing" ? "cancelled" : "missed";
     await finishCall(status);
-    try {
-      await releaseCallMedia(room);
-    } catch {
-      // no-op
-    }
-    void AudioSession.stopAudioSession().catch(() => undefined);
-    onClose();
   };
 
-  const statusLine = hadPeerRef.current ? formatCallDuration(durationSec) : status;
+  const statusLine = hadPeerRef.current
+    ? formatCallDuration(durationSec)
+    : statusLabel?.trim() || status || (mode === "video" ? "Calling..." : "Ringing...");
+  const speakerActive = audioRoute === "speaker";
 
   return (
     <View style={[styles.callScreen, mode === "video" ? styles.videoCallScreen : null]}>
       {showRemoteVideo ? (
-        <VideoTrack trackRef={remoteVideo} style={styles.remoteVideo} objectFit="cover" />
-      ) : showLocalVideo ? (
         <VideoTrack
-          trackRef={localVideo}
+          key={`remote-${remoteVideoSid}`}
+          trackRef={remoteVideo}
           style={styles.remoteVideo}
           objectFit="cover"
-          mirror={facingFront}
+          zOrder={0}
         />
       ) : mode === "video" && !tracksReady ? (
         <View style={styles.videoPreview}>
           <ActivityIndicator size="large" color={APP_LIME} />
-          <Text style={styles.connectingVideoText}>{statusLabel || "Starting camera..."}</Text>
+          <Text style={styles.connectingVideoText}>Starting camera...</Text>
         </View>
       ) : (
         <View style={styles.videoPreview}>
@@ -358,14 +394,15 @@ function CallRoomContent({
         </View>
       )}
 
-      {showRemoteVideo && showLocalVideo ? (
+      {showLocalPip ? (
         <View style={styles.localPip}>
           <VideoTrack
+            key={`local-${localVideoSid}`}
             trackRef={localVideo}
             style={styles.localPipVideo}
             objectFit="cover"
             mirror={facingFront}
-            zOrder={1}
+            zOrder={2}
           />
         </View>
       ) : null}
@@ -378,7 +415,9 @@ function CallRoomContent({
 
       <View style={styles.callIdentity}>
         <Text style={styles.callName}>{peerName}</Text>
-        <Text style={styles.callStatus}>{statusLine}</Text>
+        {!(mode === "video" && !tracksReady) ? (
+          <Text style={styles.callStatus}>{statusLine}</Text>
+        ) : null}
       </View>
 
       <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
@@ -389,7 +428,10 @@ function CallRoomContent({
           <Ionicons name={muted ? "mic-off" : "mic"} size={24} color="#fff" />
         </Pressable>
         {mode === "video" ? (
-          <Pressable style={[styles.callControlBtn, cameraOff ? styles.callControlBtnActive : null]} onPress={() => void toggleCamera()}>
+          <Pressable
+            style={[styles.callControlBtn, cameraOff ? styles.callControlBtnActive : null]}
+            onPress={() => void toggleCamera()}
+          >
             <Ionicons name={cameraOff ? "videocam-off" : "videocam"} size={24} color="#fff" />
           </Pressable>
         ) : null}
@@ -402,10 +444,17 @@ function CallRoomContent({
           </Pressable>
         ) : null}
         <Pressable
-          style={[styles.callControlBtn, speakerOn ? styles.callControlBtnActive : null]}
-          onPress={() => void toggleSpeaker()}
+          style={[
+            styles.callControlBtn,
+            speakerActive ? styles.callControlBtnSpeakerOn : null
+          ]}
+          onPress={() => void cycleAudioRoute()}
         >
-          <Ionicons name={speakerOn ? "volume-high" : "volume-mute"} size={24} color="#fff" />
+          <Ionicons
+            name={callAudioRouteIcon(audioRoute)}
+            size={24}
+            color={speakerActive ? "#111" : "#fff"}
+          />
         </Pressable>
       </View>
     </View>
@@ -431,11 +480,18 @@ export function DirectCallView({
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [errorText, setErrorText] = React.useState("");
   const endedRef = React.useRef(false);
+  const [ringSilenced, setRingSilenced] = React.useState(false);
+
+  const silenceRingtone = React.useCallback(() => {
+    setRingSilenced(true);
+    void stopCallSounds();
+  }, []);
 
   const finishWithoutRoom = React.useCallback(
     async (status: DmCallStatus) => {
       if (endedRef.current) return;
       endedRef.current = true;
+      setRingSilenced(true);
       await stopCallSounds();
       await AudioSession.stopAudioSession().catch(() => undefined);
       onCallEnded?.({ status, durationSec: 0 });
@@ -443,36 +499,44 @@ export function DirectCallView({
     },
     [onCallEnded, onClose]
   );
-  const endedByUserRef = React.useRef(false);
+
   React.useEffect(() => {
     if (!visible) {
       endedRef.current = false;
+      setRingSilenced(false);
       setConnection(null);
       setErrorText("");
+      void stopCallSounds();
       void AudioSession.stopAudioSession().catch(() => undefined);
       return;
     }
     void activateKeepAwakeAsync().catch(() => undefined);
     return () => {
       void deactivateKeepAwake().catch(() => undefined);
+      void stopCallSounds();
       void AudioSession.stopAudioSession().catch(() => undefined);
     };
   }, [visible]);
 
   React.useEffect(() => {
-    if (!visible) {
+    if (!visible || ringSilenced) {
       void stopCallSounds();
       return;
     }
     if (!connectEnabled) {
       void startIncomingRingtone();
-      return;
+      return () => {
+        void stopCallSounds();
+      };
     }
-    void startOutgoingRingtone();
-    return () => {
-      void stopCallSounds();
-    };
-  }, [connectEnabled, visible]);
+    if (direction === "outgoing") {
+      void startOutgoingRingtone();
+      return () => {
+        void stopCallSounds();
+      };
+    }
+    void stopCallSounds();
+  }, [connectEnabled, direction, ringSilenced, visible]);
 
   React.useEffect(() => {
     if (!visible || !connectEnabled) {
@@ -486,10 +550,10 @@ export function DirectCallView({
       try {
         await AudioSession.configureAudio({
           android: {
-            preferredOutputList: ["bluetooth", "headset", "speaker"],
+            preferredOutputList: ["bluetooth", "headset", "earpiece", "speaker"],
             audioTypeOptions: AndroidAudioTypePresets.communication
           },
-          ios: { defaultOutput: "speaker" }
+          ios: { defaultOutput: "earpiece" }
         });
         await AudioSession.startAudioSession();
         const [cameraPerm, micPerm] = await Promise.all([
@@ -538,7 +602,7 @@ export function DirectCallView({
             <Pressable
               style={[styles.incomingBtn, styles.declineBtn]}
               onPress={() => {
-                void stopCallSounds();
+                silenceRingtone();
                 onDecline?.();
                 void finishWithoutRoom("declined");
               }}
@@ -548,7 +612,7 @@ export function DirectCallView({
             <Pressable
               style={[styles.incomingBtn, styles.acceptBtn]}
               onPress={() => {
-                void stopCallSounds();
+                silenceRingtone();
                 onAccept?.();
               }}
             >
@@ -598,9 +662,10 @@ export function DirectCallView({
             peerAvatarUrl={peerAvatarUrl}
             statusLabel={statusLabel}
             onCallEnded={onCallEnded}
+            onCallAnswered={silenceRingtone}
             endedRef={endedRef}
             onClose={() => {
-              endedByUserRef.current = true;
+              silenceRingtone();
               onClose();
             }}
           />
@@ -628,7 +693,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 2,
     borderColor: "rgba(255,255,255,0.35)",
-    zIndex: 3
+    zIndex: 3,
+    elevation: 6,
+    backgroundColor: "#000"
   },
   localPipVideo: { width: "100%", height: "100%" },
   videoPreview: {
@@ -643,7 +710,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600"
   },
-  callTopBar: { zIndex: 2, paddingHorizontal: 18 },
+  callTopBar: { zIndex: 4, paddingHorizontal: 18 },
   callTopIcon: {
     width: 42,
     height: 42,
@@ -652,11 +719,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.14)"
   },
-  callIdentity: { zIndex: 2, alignItems: "center", paddingHorizontal: 24 },
+  callIdentity: { zIndex: 4, alignItems: "center", paddingHorizontal: 24 },
   callName: { color: "#fff", fontSize: 24, fontWeight: "800" },
   callStatus: { marginTop: 8, color: "rgba(255,255,255,0.72)", fontSize: 15, fontWeight: "600" },
   callControls: {
-    zIndex: 2,
+    zIndex: 4,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -672,6 +739,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.16)"
   },
   callControlBtnActive: { backgroundColor: "rgba(255,255,255,0.34)" },
+  callControlBtnSpeakerOn: { backgroundColor: APP_LIME },
   endCallBtn: { backgroundColor: "#e53935", transform: [{ rotate: "135deg" }] },
   loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#121212", gap: 14 },
   loadingText: { color: "#fff", fontSize: 15, fontWeight: "600" },

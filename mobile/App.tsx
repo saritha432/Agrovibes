@@ -1,6 +1,9 @@
 import "fast-text-encoding";
 import React from "react";
 import { ActivityIndicator, View } from "react-native";
+import { setupDirectMessageNotificationCategory } from "./src/push/pushNotifications";
+
+void setupDirectMessageNotificationCategory();
 import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
