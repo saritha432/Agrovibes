@@ -1,12 +1,10 @@
 import Constants from "expo-constants";
-import { Platform } from "react-native";
-
-/** Native Firebase modules are unavailable in Expo Go and on web. */
-export const isNativeFirebaseAvailable =
-  Platform.OS !== "web" && Constants.appOwnership !== "expo";
 
 type AnalyticsModule = typeof import("@react-native-firebase/analytics").default;
 type CrashlyticsModule = typeof import("@react-native-firebase/crashlytics").default;
+
+/** Available in EAS/dev-client builds; not in Expo Go. */
+export const isNativeFirebaseAvailable = Constants.appOwnership !== "expo";
 
 let analytics: AnalyticsModule | null = null;
 let crashlytics: CrashlyticsModule | null = null;
