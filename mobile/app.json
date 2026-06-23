@@ -81,9 +81,6 @@
       "policy": "appVersion"
     },
     "plugins": [
-      "@react-native-firebase/app",
-      "@react-native-firebase/crashlytics",
-      "@react-native-firebase/analytics",
       [
         "expo-build-properties",
         {
