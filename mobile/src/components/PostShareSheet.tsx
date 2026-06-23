@@ -70,7 +70,13 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { token, user } = useAuth();
-  const { t } = useLanguage();
+  const langCtx = useLanguage();
+  const appLanguage = langCtx.language;
+  const t = React.useCallback(
+    (key: string, params?: Record<string, string | number>) =>
+      typeof langCtx?.t === "function" ? langCtx.t(key, params) : key,
+    [langCtx]
+  );
   const [search, setSearch] = React.useState("");
   const [busyUserId, setBusyUserId] = React.useState<number | null>(null);
   const [recipients, setRecipients] = React.useState<SharePeer[]>([]);
@@ -145,10 +151,10 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
 
   const shareText = React.useMemo(() => {
     if (!post) return "";
-    const caption = formatReelCaption(stripInternalCaptionPrefix(post.caption || ""), t);
-    const intro = t("shareReelMessage", { name: formatDisplayName(post.userName, t) });
+    const caption = formatReelCaption(stripInternalCaptionPrefix(post.caption || ""), appLanguage, t);
+    const intro = t("shareReelMessage", { name: formatDisplayName(post.userName, appLanguage, t) });
     return buildPostShareMessage(post, { intro, caption });
-  }, [post, t]);
+  }, [appLanguage, post, t]);
 
   const shareLink = React.useMemo(() => (post ? buildPostShareLink(post) : ""), [post]);
 
@@ -166,7 +172,7 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
       await sendDirectMessage(token, recipient.id, buildReelChatMessage(post));
       onClose();
       setSearch("");
-      Alert.alert(t("sentTitle"), t("reelSentTo", { name: formatDisplayName(recipient.name, t) }));
+      Alert.alert(t("sentTitle"), t("reelSentTo", { name: formatDisplayName(recipient.name, appLanguage, t) }));
     } catch {
       Alert.alert(t("sendFailed"), t("sendFailedReel"));
     } finally {

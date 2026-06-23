@@ -101,7 +101,7 @@ async function cropImageUri(sourceUri: string, naturalSize: { width: number; hei
   const result = await ImageManipulator.manipulateAsync(
     sourceUri,
     [{ crop: { originX, originY, width: side, height: side } }],
-    { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG }
+    { compress: 0.88, format: ImageManipulator.SaveFormat.WEBP }
   );
   return result.uri;
 }
@@ -344,7 +344,7 @@ export function ProfilePhotoAdjustModal({ visible, sourceUri, onCancel, onDone }
       } else {
         const result = await ImageManipulator.manipulateAsync(workingUri, [{ rotate: 90 }], {
           compress: 0.92,
-          format: ImageManipulator.SaveFormat.JPEG
+          format: ImageManipulator.SaveFormat.WEBP
         });
         setWorkingUri(result.uri);
         Image.getSize(

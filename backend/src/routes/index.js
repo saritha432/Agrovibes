@@ -16,7 +16,7 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
-const { isMediaStorageConfigured, uploadMediaBuffer, checkMediaStorageHealth } = require("../mediaStorage");
+const { isMediaStorageConfigured, uploadMediaBuffer, checkMediaStorageHealth, getMediaStorageProvider } = require("../mediaStorage");
 const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 const {
   isEgressConfigured,
@@ -33,6 +33,8 @@ const {
   directMessagePushPayload
 } = require("../pushNotifications");
 const { buildShareReelHtml } = require("../shareReelPage");
+const { emitDirectMessage, emitMessagesRead, getSocketIo } = require("../socketChat");
+const { isCloudFrontConfigured } = require("../s3Storage");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -1339,16 +1341,39 @@ router.get("/health", async (_req, res) => {
   try {
     await query("SELECT 1");
     const redis = isRedisConfigured() ? await cachePing() : { ok: false, skipped: true };
-    res.json({ status: "ok", db: "connected", redis });
+    const mediaProvider = getMediaStorageProvider();
+    res.json({
+      status: "ok",
+      stack: {
+        database: "postgresql",
+        images: mediaProvider === "s3" ? "s3" : mediaProvider === "supabase" ? "supabase" : "none",
+        cdn: mediaProvider === "s3" && isCloudFrontConfigured() ? "cloudfront" : null,
+        notifications: "fcm",
+        chat: "socket.io"
+      },
+      db: "connected",
+      redis,
+      media: { provider: mediaProvider, cloudFront: isCloudFrontConfigured() },
+      push: { provider: "fcm", configured: isPushConfigured() },
+      socket: { enabled: Boolean(getSocketIo()) }
+    });
   } catch (error) {
     res.status(500).json({ status: "error", db: "disconnected", message: error.message });
   }
 });
 
 router.get("/v1/bootstrap", (_req, res) => {
+  const mediaProvider = getMediaStorageProvider();
   res.json({
     app: "Cropvibe",
-    modules: ["home", "marketplace", "create", "services", "community", "profile", "wallet", "escrow"]
+    modules: ["home", "marketplace", "create", "services", "community", "profile", "wallet", "escrow"],
+    stack: {
+      database: "postgresql",
+      images: mediaProvider === "s3" ? "s3" : mediaProvider || "none",
+      cdn: mediaProvider === "s3" && isCloudFrontConfigured() ? "cloudfront" : null,
+      notifications: "fcm",
+      chat: "socket.io"
+    }
   });
 });
 
@@ -2876,6 +2901,7 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     }
 
     await query(`UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`, [peerUserId, me]);
+    emitMessagesRead({ readerId: me, peerUserId });
 
     const rows = await query(
       `
@@ -3003,6 +3029,11 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       postId: livePostId,
       commentExcerpt: dmPush.excerpt,
       imageUrl: dmPush.imageUrl
+    });
+    emitDirectMessage({
+      senderId: me,
+      receiverId: peerUserId,
+      message: ins.rows[0]
     });
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {

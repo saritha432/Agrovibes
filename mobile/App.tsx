@@ -13,6 +13,7 @@ import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK, APP_LIME } from "./src/theme/appColors";
 import { PushNotificationBootstrap } from "./src/push/PushNotificationBootstrap";
+import { SocketChatBootstrap } from "./src/messaging/SocketChatBootstrap";
 import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
         <AuthProvider>
           <LanguageSync />
           <PushNotificationBootstrap />
+          <SocketChatBootstrap />
           <ReelDeepLinkBootstrap />
           <OnboardingProvider>
             <CartProvider>
