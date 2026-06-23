@@ -1,126 +1,265 @@
 import React from "react";
-import { Linking, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { Linking, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { useLanguage, SUPPORTED_LANGUAGES } from "../localization/LanguageContext";
-import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
+import { useLanguage } from "../localization/LanguageContext";
+import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
 const BG = APP_BLACK;
 const LIME = APP_LIME;
 const CARD = APP_SURFACE;
-const TEXT = "#f0f4f8";
-const MUTED = "#97a0a8";
+const TEXT = APP_TEXT;
+const MUTED = APP_TEXT_MUTED;
+const DIVIDER = "#3a3a3a";
+const ICON_SLOT = 28;
+
+type SettingsRowProps = {
+  title: string;
+  subtitle?: string;
+  trailing?: string;
+  onPress?: () => void;
+  showDivider?: boolean;
+  showChevron?: boolean;
+};
+
+function SettingsRow({
+  title,
+  subtitle,
+  trailing,
+  onPress,
+  showDivider = true,
+  showChevron = true
+}: SettingsRowProps) {
+  return (
+    <>
+      <Pressable
+        style={[styles.row, subtitle ? styles.rowTall : null]}
+        onPress={onPress}
+        disabled={!onPress}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+      >
+        <View style={styles.iconSlot} />
+        <View style={styles.rowBody}>
+          <Text style={styles.rowTitle}>{title}</Text>
+          {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
+        </View>
+        {trailing ? <Text style={styles.rowTrailing}>{trailing}</Text> : null}
+        {showChevron ? <Ionicons name="chevron-forward" size={18} color={MUTED} /> : null}
+      </Pressable>
+      {showDivider ? <View style={styles.rowDivider} /> : null}
+    </>
+  );
+}
+
+type SettingsSectionProps = {
+  title: string;
+  children: React.ReactNode;
+};
+
+function SettingsSection({ title, children }: SettingsSectionProps) {
+  return (
+    <View style={styles.sectionWrap}>
+      <Text style={styles.sectionHeading}>{title}</Text>
+      <View style={styles.sectionCard}>{children}</View>
+    </View>
+  );
+}
+
+function SettingsRowList({
+  items
+}: {
+  items: Array<Omit<SettingsRowProps, "showDivider"> & { key: string }>;
+}) {
+  return (
+    <>
+      {items.map((item, index) => {
+        const { key, ...rowProps } = item;
+        return <SettingsRow key={key} {...rowProps} showDivider={index < items.length - 1} />;
+      })}
+    </>
+  );
+}
+
+function PromoCard() {
+  return (
+    <View style={styles.promoWrap}>
+      <View style={styles.promoCard}>
+        <LinearGradient
+          colors={["rgba(201, 255, 53, 0.55)", "rgba(201, 255, 53, 0)"]}
+          start={{ x: 1, y: 0 }}
+          end={{ x: 0.4, y: 1 }}
+          style={styles.promoGlow}
+          pointerEvents="none"
+        />
+        <Text style={styles.promoTitle}>Khet Se Ghar Tak</Text>
+        <Text style={styles.promoSubtitle}>Bhoomi, Bazaar, Barakath.</Text>
+      </View>
+    </View>
+  );
+}
 
 export function SettingsMenuScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { signOut } = useAuth();
-  const { t, language, setLanguage } = useLanguage();
-  const topPadding = Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 0;
+  const { t } = useLanguage();
+  const topInset = Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0;
+
+  const openSaved = () => {
+    navigation.goBack();
+    setTimeout(
+      () => navigation.navigate("Main", { screen: "Profile", params: { initialTab: "Saved" } } as any),
+      120
+    );
+  };
+
+  const noop = () => {};
 
   return (
-    <View style={[styles.screen, { paddingTop: topPadding }]}>
-      <View style={styles.topBar}>
-        <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="close" size={24} color={TEXT} />
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
+      <View style={[styles.topBar, topInset > 0 ? { paddingTop: 4 } : null]}>
+        <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} accessibilityLabel="Back">
+          <Ionicons name="chevron-back" size={28} color={LIME} />
         </Pressable>
-        <Text style={styles.topTitle}>{t("settings") || "Settings"}</Text>
-        <View style={{ width: 32 }} />
+        <Text style={styles.topTitle}>Settings & Privacy</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.section}>
-          <Pressable style={styles.menuItem} onPress={() => { navigation.goBack(); }}>
-            <View style={styles.menuIconWrap}>
-              <Ionicons name="notifications-outline" size={22} color={LIME} />
-            </View>
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemText}>{t("notifications") || "Notifications"}</Text>
-              <Text style={styles.menuItemSub}>{t("manageAlerts") || "Manage push & in-app alerts"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
+        <SettingsSection title="Your Account">
+          <SettingsRow
+            title="Account Center"
+            subtitle="Manage accounts, personal details, connected experiences, & preferences"
+            onPress={() => navigation.navigate("EditProfile")}
+            showDivider={false}
+          />
+        </SettingsSection>
 
-          <Pressable style={styles.menuItem} onPress={() => navigation.navigate("EditProfile")}>
-            <View style={styles.menuIconWrap}>
-              <Ionicons name="person-outline" size={22} color={LIME} />
-            </View>
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemText}>{t("editProfile") || "Edit Profile"}</Text>
-              <Text style={styles.menuItemSub}>{t("updateProfile") || "Update name, photo & bio"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
+        <PromoCard />
 
-          <Pressable style={styles.menuItem} onPress={() => { navigation.goBack(); setTimeout(() => navigation.navigate("Main", { screen: "Profile", params: { initialTab: "Saved" } } as any), 100); }}>
-            <View style={styles.menuIconWrap}>
-              <Ionicons name="bookmark-outline" size={22} color={LIME} />
-            </View>
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemText}>{t("saved") || "Saved"}</Text>
-              <Text style={styles.menuItemSub}>{t("viewSavedPosts") || "View your saved posts"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
+        <SettingsSection title="How you use cropvibe">
+          <SettingsRowList
+            items={[
+              { key: "saved", title: "Saved", onPress: openSaved },
+              { key: "archive", title: "Archive", onPress: noop },
+              { key: "activity", title: "Your Activity", onPress: noop },
+              { key: "notifications", title: "Notifications", onPress: noop },
+              { key: "time", title: "Time Management", onPress: noop },
+              { key: "ipad", title: "Cropvibe For iPad", onPress: noop }
+            ]}
+          />
+        </SettingsSection>
 
-          <Pressable style={styles.menuItem} onPress={() => navigation.navigate("Privacy")}>
-            <View style={styles.menuIconWrap}>
-              <Ionicons name="shield-checkmark-outline" size={22} color={LIME} />
-            </View>
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemText}>{t("privacy") || "Privacy"}</Text>
-              <Text style={styles.menuItemSub}>{t("privacySub") || "Control who can see your content"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
+        <SettingsSection title="Who can see your content">
+          <SettingsRowList
+            items={[
+              { key: "privacy", title: "Account Privacy", onPress: () => navigation.navigate("Privacy") },
+              { key: "close-friends", title: "Close Friends", onPress: noop },
+              { key: "cross-posting", title: "Cross Posting", onPress: noop },
+              { key: "blocked", title: "Blocked", onPress: noop },
+              { key: "story-live", title: "Story, Live And Location", onPress: noop },
+              { key: "friends-feed", title: "Activity In Friends Feed", onPress: noop }
+            ]}
+          />
+        </SettingsSection>
 
-          <Pressable style={styles.menuItem} onPress={() => Linking.openURL("mailto:support@cropvibe.com")}>
-            <View style={styles.menuIconWrap}>
-              <Ionicons name="help-circle-outline" size={22} color={LIME} />
-            </View>
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemText}>{t("helpSupport") || "Help & Support"}</Text>
-              <Text style={styles.menuItemSub}>{t("helpSupportSub") || "Contact us or report an issue"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
+        <SettingsSection title="How others can interact with you">
+          <SettingsRowList
+            items={[
+              { key: "messages", title: "Messages And Story Replies", onPress: noop },
+              { key: "tags", title: "Tags And Mentions", onPress: noop },
+              { key: "comments", title: "Comments", onPress: noop },
+              { key: "sharing", title: "Sharing", onPress: noop },
+              { key: "restricted", title: "Restricted", onPress: noop },
+              { key: "limit", title: "Limit Interactions", onPress: noop },
+              { key: "hidden-words", title: "Hidden Words", onPress: noop },
+              { key: "invite", title: "Follow and invite friends", onPress: noop }
+            ]}
+          />
+        </SettingsSection>
 
-          <Pressable style={styles.menuItem} onPress={() => navigation.navigate("About")}>
-            <View style={styles.menuIconWrap}>
-              <Ionicons name="information-circle-outline" size={22} color={LIME} />
-            </View>
-            <View style={styles.menuItemContent}>
-              <Text style={styles.menuItemText}>{t("about") || "About"}</Text>
-              <Text style={styles.menuItemSub}>{t("aboutSub") || "App version & info"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
-        </View>
+        <SettingsSection title="What You See">
+          <SettingsRowList
+            items={[
+              { key: "favorites", title: "Favorites", onPress: noop },
+              { key: "muted", title: "Muted Accounts", onPress: noop },
+              { key: "content-prefs", title: "Content preferences", onPress: noop },
+              { key: "like-counts", title: "Like and share counts", onPress: noop },
+              { key: "creator-subs", title: "Creator Subscriptions", onPress: noop }
+            ]}
+          />
+        </SettingsSection>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t("language") || "Language"}</Text>
-          <View style={styles.langGrid}>
-            {SUPPORTED_LANGUAGES.map((lang) => (
-              <Pressable
-                key={lang}
-                style={[styles.langChip, language === lang ? styles.langChipActive : null]}
-                onPress={() => setLanguage(lang)}
-              >
-                <Text style={[styles.langText, language === lang ? styles.langTextActive : null]}>{lang}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        <SettingsSection title="App, Media & Accessibility Settings">
+          <SettingsRowList
+            items={[
+              { key: "device-perms", title: "Device Permissions", onPress: noop },
+              { key: "archiving", title: "Archiving And Downloading", onPress: noop },
+              { key: "accessibility", title: "Accessibility", onPress: noop },
+              { key: "language", title: "Language And Translations", onPress: noop },
+              { key: "media-quality", title: "Media Quality", onPress: noop },
+              { key: "website-perms", title: "Website Permissions", onPress: noop }
+            ]}
+          />
+        </SettingsSection>
 
-        <View style={styles.section}>
-          <Pressable style={styles.logoutBtn} onPress={() => { signOut(); navigation.reset({ index: 0, routes: [{ name: "Splash" }] }); }}>
-            <Ionicons name="log-out-outline" size={20} color="#ff6b6b" />
-            <Text style={styles.logoutText}>{t("logout") || "Logout"}</Text>
+        <SettingsSection title="Family Centre">
+          <SettingsRow title="Supervision For Teen Accounts" onPress={noop} showDivider={false} />
+        </SettingsSection>
+
+        <SettingsSection title="Your Insights And Tools">
+          <SettingsRow title="Account Type And Tools" onPress={noop} showDivider={false} />
+        </SettingsSection>
+
+        <SettingsSection title="Subscriptions">
+          <SettingsRowList
+            items={[
+              { key: "plus", title: "Cropvibe Plus", trailing: "Not Subscribed", onPress: noop },
+              { key: "verified", title: "Cropvibe Verified", trailing: "Not Subscribed", onPress: noop },
+              { key: "all-subs", title: "All Subscriptions", onPress: noop }
+            ]}
+          />
+        </SettingsSection>
+
+        <SettingsSection title="More Info And Support">
+          <SettingsRowList
+            items={[
+              {
+                key: "help",
+                title: "Help",
+                onPress: () => void Linking.openURL("mailto:support@cropvibe.com")
+              },
+              { key: "ai-support", title: "Cropvibe AI Support Assistant", onPress: noop },
+              { key: "privacy-centre", title: "Privacy Centre", onPress: () => navigation.navigate("Privacy") },
+              { key: "account-status", title: "Account Status", onPress: noop },
+              { key: "about", title: "About", onPress: () => navigation.navigate("About") }
+            ]}
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Login">
+          <SettingsRow title="Add Account" onPress={noop} showDivider={false} />
+        </SettingsSection>
+
+        <View style={styles.footerSection}>
+          <Pressable
+            style={styles.logoutBtn}
+            onPress={() => {
+              signOut();
+              navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+          >
+            <View style={styles.logoutIconSlot} />
+            <Text style={styles.logoutText}>{t("logout") || "Log Out"}</Text>
           </Pressable>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -129,72 +268,139 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#262d35",
-    marginBottom: 6
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+    gap: 4
   },
-  backBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  topTitle: { color: TEXT, fontSize: 18, fontWeight: "900", textTransform: "capitalize" },
-  content: { padding: 16, paddingBottom: 60 },
-  section: {
-    backgroundColor: CARD,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#303842",
-    padding: 4,
-    marginBottom: 16
-  },
-  sectionTitle: { color: MUTED, fontSize: 12, fontWeight: "800", marginBottom: 12, paddingHorizontal: 12, paddingTop: 12 },
-  menuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    gap: 12
-  },
-  menuIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#1a2028",
+  backBtn: {
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center"
   },
-  menuItemContent: { flex: 1 },
-  menuItemText: { color: TEXT, fontSize: 15, fontWeight: "700" },
-  menuItemSub: { color: MUTED, fontSize: 11, fontWeight: "600", marginTop: 2 },
-  badge: {
-    backgroundColor: LIME,
-    borderRadius: 10,
-    minWidth: 22,
-    height: 22,
+  topTitle: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 22,
+    fontWeight: "700",
+    letterSpacing: -0.3
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingBottom: 32
+  },
+  sectionWrap: {
+    marginBottom: 22
+  },
+  sectionHeading: {
+    color: MUTED,
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 10,
+    paddingHorizontal: 2
+  },
+  sectionCard: {
+    backgroundColor: CARD,
+    borderRadius: 14,
+    overflow: "hidden"
+  },
+  row: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 6,
-    marginRight: 6
-  },
-  badgeText: { color: "#1b1f23", fontSize: 11, fontWeight: "800" },
-  langGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, paddingBottom: 14 },
-  langChip: {
-    borderWidth: 1,
-    borderColor: "#3a3a3a",
-    borderRadius: 999,
+    minHeight: 52,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: "#1a2028"
+    paddingVertical: 12,
+    gap: 14
   },
-  langChipActive: { backgroundColor: LIME, borderColor: LIME },
-  langText: { color: "#9aa5ad", fontSize: 12, fontWeight: "800" },
-  langTextActive: { color: "#1b1f23" },
+  rowTall: {
+    alignItems: "flex-start",
+    paddingVertical: 16,
+    minHeight: 72
+  },
+  iconSlot: {
+    width: ICON_SLOT,
+    height: ICON_SLOT
+  },
+  rowBody: {
+    flex: 1,
+    paddingRight: 8
+  },
+  rowTitle: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 20
+  },
+  rowSubtitle: {
+    color: MUTED,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+    fontWeight: "500"
+  },
+  rowTrailing: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: "500",
+    marginRight: 2
+  },
+  rowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: DIVIDER,
+    marginLeft: 14 + ICON_SLOT + 14
+  },
+  promoWrap: {
+    marginBottom: 22
+  },
+  promoCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 22,
+    overflow: "hidden",
+    minHeight: 108,
+    justifyContent: "center"
+  },
+  promoGlow: {
+    position: "absolute",
+    top: -20,
+    right: -10,
+    width: 180,
+    height: 120,
+    borderRadius: 90
+  },
+  promoTitle: {
+    color: "#111111",
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: -0.4
+  },
+  promoSubtitle: {
+    color: "#111111",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 6,
+    opacity: 0.92
+  },
+  footerSection: {
+    marginTop: 8,
+    marginBottom: 8,
+    alignItems: "center"
+  },
   logoutBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 12
+    paddingVertical: 16,
+    paddingHorizontal: 20
   },
-  logoutText: { color: "#ff6b6b", fontSize: 15, fontWeight: "700" }
+  logoutIconSlot: {
+    width: ICON_SLOT,
+    height: ICON_SLOT
+  },
+  logoutText: {
+    color: "#ff6b6b",
+    fontSize: 15,
+    fontWeight: "700"
+  }
 });

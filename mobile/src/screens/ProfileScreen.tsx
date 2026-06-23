@@ -18,14 +18,12 @@ import {
   View,
   useWindowDimensions
 } from "react-native";
-import { ResizeMode, Video } from "expo-av";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuth } from "../auth/AuthContext";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "../components/UserAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { useLanguage } from "../localization/LanguageContext";
@@ -60,6 +58,7 @@ import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { APP_LIME } from "../theme/appColors";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { isReelPost, reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
+import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 
 const PAGE_BG = "#262626";
 const SURFACE = "#303132";
@@ -172,6 +171,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
+  const [previewUriByPostId, setPreviewUriByPostId] = useState<Record<number, string>>({});
   const [savedLoading, setSavedLoading] = useState(false);
   const [taggedLoading, setTaggedLoading] = useState(false);
   const savedLoadedRef = useRef(false);
@@ -554,15 +554,33 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     return postsLoading && userPosts.length === 0;
   }, [activeGalleryTab, postsLoading, savedLoading, savedPosts.length, taggedLoading, taggedPosts.length, userPosts.length]);
 
-  /** Web only: at most one live grid preview when a reel has no still image. */
-  const singleGridVideoPreviewId = useMemo(() => {
-    if (activeGalleryTab !== "Reels" && activeGalleryTab !== "Saved" && activeGalleryTab !== "Tagged") return null;
-    for (const p of visiblePosts) {
-      if (!p.videoUrl || reelGridStillUri(p)) continue;
-      return p.id;
-    }
-    return null;
-  }, [activeGalleryTab, visiblePosts]);
+  const previewHydrationKey = useMemo(
+    () =>
+      visiblePosts
+        .filter((post) => post.videoUrl && !reelGridStillUri(post))
+        .map((post) => post.id)
+        .join(","),
+    [visiblePosts]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const postsNeedingPreview = visiblePosts
+      .filter((post) => post.videoUrl && !reelGridStillUri(post))
+      .slice(0, 36);
+    if (!postsNeedingPreview.length) return;
+    void hydrateReelPreviews(
+      postsNeedingPreview,
+      (postId, uri) => {
+        if (cancelled) return;
+        setPreviewUriByPostId((prev) => (prev[postId] === uri ? prev : { ...prev, [postId]: uri }));
+      },
+      { maxConcurrent: 2, isCancelled: () => cancelled }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [previewHydrationKey, visiblePosts]);
 
   const canDeleteFromProfileGallery =
     !isPublicProfileView && (activeGalleryTab === "Posts" || activeGalleryTab === "Reels");
@@ -651,23 +669,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         { width: gridTileSize, height: tileHeight, backgroundColor: profileTileBackground(index) }
       ];
       if (post.videoUrl) {
-        const stillUri = reelGridStillUri(post);
-        if (stillUri) {
-          return (
-            <Pressable
-              key={post.id}
-              style={tileStyle}
-              onPress={() => openProfilePostsViewer(post)}
-              onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
-            >
-              <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
-              <View style={styles.gridPlayBadge} pointerEvents="none">
-                <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={LIME} fallbackName="videocam" />
-              </View>
-            </Pressable>
-          );
-        }
-        const shouldPlayTile = post.id === singleGridVideoPreviewId;
+        const stillUri = reelGridStillUri(post) || previewUriByPostId[post.id] || null;
         return (
           <Pressable
             key={post.id}
@@ -675,16 +677,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             onPress={() => openProfilePostsViewer(post)}
             onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
           >
-            <Video
-              style={styles.gridImage}
-              source={{ uri: videoPlaybackUrl(post.videoUrl) }}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={shouldPlayTile}
-              isLooping
-              isMuted
-              useNativeControls={false}
-              progressUpdateIntervalMillis={2000}
-            />
+            {stillUri ? (
+              <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
+            ) : (
+              <View style={[styles.gridImage, styles.gridVideoPlaceholder, { backgroundColor: profileTileBackground(index) }]} />
+            )}
             <View style={styles.gridPlayBadge} pointerEvents="none">
               <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={LIME} fallbackName="videocam" />
             </View>
@@ -720,8 +717,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       gridTileSize,
       isReelTab,
       openProfilePostsViewer,
-      reelTileHeight,
-      singleGridVideoPreviewId
+      previewUriByPostId,
+      reelTileHeight
     ]
   );
 
@@ -1000,6 +997,158 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     });
   };
 
+  const profileListHeader = useMemo(
+    () => (
+      <>
+        <View style={styles.profileCard}>
+          <View style={styles.headerMidRow}>
+            <Pressable
+              onPress={() => displayAvatarUrl && setAvatarPreviewOpen(true)}
+              disabled={!displayAvatarUrl}
+              style={({ pressed }) => [styles.avatarPressable, pressed && displayAvatarUrl ? { opacity: 0.85 } : null]}
+              accessibilityRole="button"
+              accessibilityLabel={t("viewProfilePhoto")}
+            >
+              <UserAvatar
+                uri={profileSubject?.avatarUrl}
+                name={profileSubject?.fullName || profileSubject?.username || "U"}
+                size={88}
+                borderRadius={44}
+                fallbackBackgroundColor={SURFACE}
+                initialsColor={TEXT}
+                style={styles.avatar}
+              />
+            </Pressable>
+
+            <View style={styles.headerInfo}>
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{formatStatCount(profileModel?.posts ?? 0)}</Text>
+                  <Text style={styles.statLabel}>{t("posts")}</Text>
+                </View>
+                {isPublicProfileView ? (
+                  <>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("followers")}</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("followers")}</Text>
+                    </Pressable>
+                    <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
+                      <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
+                      <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+
+          {profileSubject?.bio?.trim() ? <Text style={styles.bio}>{profileSubject.bio.trim()}</Text> : null}
+
+          {isPublicProfileView ? (
+            <View style={styles.profileActionsRow}>
+              <Pressable
+                style={styles.profileActionBtn}
+                onPress={() => void followPublicUser()}
+                disabled={isFollowingPublic || followPublicBusy}
+              >
+                <Text style={styles.profileActionBtnText}>
+                  {isFollowingPublic ? t("following") : followPublicBusy ? t("followBusy") : t("follow")}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.profileActionBtn} onPress={openPublicMessage}>
+                <Text style={styles.profileActionBtnText}>{t("messageBtn")}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.profileActionsRow}>
+              <Pressable style={styles.profileActionBtn} onPress={navigateToEditProfile}>
+                <Text style={styles.profileActionBtnText}>{t("editProfile")}</Text>
+              </Pressable>
+              <Pressable style={styles.profileActionBtn} onPress={handleShareProfile}>
+                <Text style={styles.profileActionBtnText}>Share Profile</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {!isPublicProfileView && isInstructor ? (
+            <Pressable style={styles.studioBtn} onPress={() => navigation.navigate("InstructorStudio")}>
+              <Ionicons name="school-outline" size={18} color={LIME} />
+              <Text style={styles.studioText}>Instructor Studio</Text>
+              <Ionicons name="chevron-forward" size={18} color={TEXT} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.gallerySection}>
+          <View style={styles.iconTabsRow}>
+            {galleryTabs.map((tabKey) => {
+              const icons = PROFILE_TAB_ICONS[tabKey];
+              const active = activeGalleryTab === tabKey;
+              return (
+                <Pressable key={tabKey} style={styles.iconTab} onPress={() => handleGalleryTabPress(tabKey)}>
+                  <SvgAssetIcon
+                    module={active ? icons.active : icons.inactive}
+                    size={PROFILE_TAB_ICON}
+                    color={active ? LIME : TEXT}
+                    fallbackName={active ? PROFILE_TAB_FALLBACKS[tabKey].active : PROFILE_TAB_FALLBACKS[tabKey].inactive}
+                  />
+                  {active ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </>
+    ),
+    [
+      activeGalleryTab,
+      displayAvatarUrl,
+      followPublicBusy,
+      galleryTabs,
+      handleGalleryTabPress,
+      handleShareProfile,
+      isFollowingPublic,
+      isInstructor,
+      isPublicProfileView,
+      openPublicMessage,
+      profileModel?.followers,
+      profileModel?.following,
+      profileModel?.posts,
+      profileSubject?.avatarUrl,
+      profileSubject?.bio,
+      profileSubject?.fullName,
+      profileSubject?.username,
+      t
+    ]
+  );
+
+  const profileListEmpty = useMemo(() => {
+    if (galleryLoading) {
+      return (
+        <View style={styles.galleryLoadingWrap}>
+          <ActivityIndicator size="small" color={LIME} />
+        </View>
+      );
+    }
+    return (
+      <View style={styles.galleryEmptyWrap}>
+        <Text style={styles.galleryEmptyTitle}>{isReelTab ? t("emptyReelsTitle") : t("emptyNothingTitle")}</Text>
+        <Text style={styles.galleryEmptySub}>{isReelTab ? t("emptyReelsSub") : t("emptyDefaultSub")}</Text>
+      </View>
+    );
+  }, [galleryLoading, isReelTab, t]);
+
   return (
     <>
       <SafeAreaView style={styles.safeRoot} edges={["top"]}>
@@ -1035,159 +1184,36 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           </View>
         ) : null}
 
-        <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
         {!profileSubject && !isPublicProfileView ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{t("welcome")}</Text>
-            <Text style={styles.cardSub}>{t("welcomeSub")}</Text>
-            <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
-              <Ionicons name="log-in-outline" size={18} color={TEXT} />
-              <Text style={styles.primaryBtnText}>{t("getStarted")}</Text>
-            </Pressable>
-          </View>
+          <ScrollView style={styles.screen} contentContainerStyle={styles.scrollBottom}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>{t("welcome")}</Text>
+              <Text style={styles.cardSub}>{t("welcomeSub")}</Text>
+              <Pressable style={styles.primaryBtn} onPress={() => navigation.reset({ index: 0, routes: [{ name: "InitialSetup" }] })}>
+                <Ionicons name="log-in-outline" size={18} color={TEXT} />
+                <Text style={styles.primaryBtnText}>{t("getStarted")}</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
         ) : profileSubject ? (
-          <>
-            <View style={styles.profileCard}>
-              <View style={styles.headerMidRow}>
-                <Pressable
-                  onPress={() => displayAvatarUrl && setAvatarPreviewOpen(true)}
-                  disabled={!displayAvatarUrl}
-                  style={({ pressed }) => [styles.avatarPressable, pressed && displayAvatarUrl ? { opacity: 0.85 } : null]}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("viewProfilePhoto")}
-                >
-                  <UserAvatar
-                    uri={profileSubject.avatarUrl}
-                    name={profileSubject.fullName || profileSubject.username || "U"}
-                    size={88}
-                    borderRadius={44}
-                    fallbackBackgroundColor={SURFACE}
-                    initialsColor={TEXT}
-                    style={styles.avatar}
-                  />
-                </Pressable>
-
-                <View style={styles.headerInfo}>
-                  <View style={styles.statsRow}>
-                    <View style={styles.statItem}>
-                      <Text style={styles.statValue}>{formatStatCount(profileModel?.posts ?? 0)}</Text>
-                      <Text style={styles.statLabel}>{t("posts")}</Text>
-                    </View>
-                    {isPublicProfileView ? (
-                      <>
-                        <View style={styles.statItem}>
-                          <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
-                          <Text style={styles.statLabel}>{t("followers")}</Text>
-                        </View>
-                        <View style={styles.statItem}>
-                          <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
-                          <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
-                        </View>
-                      </>
-                    ) : (
-                      <>
-                        <Pressable style={styles.statItem} onPress={() => setActiveListType("followers")}>
-                          <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
-                          <Text style={styles.statLabel}>{t("followers")}</Text>
-                        </Pressable>
-                        <Pressable style={styles.statItem} onPress={() => setActiveListType("following")}>
-                          <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
-                          <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
-                        </Pressable>
-                      </>
-                    )}
-                  </View>
-                </View>
-              </View>
-
-              {profileSubject.bio?.trim() ? <Text style={styles.bio}>{profileSubject.bio.trim()}</Text> : null}
-
-              {isPublicProfileView ? (
-                <View style={styles.profileActionsRow}>
-                  <Pressable
-                    style={styles.profileActionBtn}
-                    onPress={() => void followPublicUser()}
-                    disabled={isFollowingPublic || followPublicBusy}
-                  >
-                    <Text style={styles.profileActionBtnText}>
-                      {isFollowingPublic ? t("following") : followPublicBusy ? t("followBusy") : t("follow")}
-                    </Text>
-                  </Pressable>
-                  <Pressable style={styles.profileActionBtn} onPress={openPublicMessage}>
-                    <Text style={styles.profileActionBtnText}>{t("messageBtn")}</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <View style={styles.profileActionsRow}>
-                  <Pressable style={styles.profileActionBtn} onPress={navigateToEditProfile}>
-                    <Text style={styles.profileActionBtnText}>{t("editProfile")}</Text>
-                  </Pressable>
-                  <Pressable style={styles.profileActionBtn} onPress={handleShareProfile}>
-                    <Text style={styles.profileActionBtnText}>Share Profile</Text>
-                  </Pressable>
-                </View>
-              )}
-
-              {!isPublicProfileView && isInstructor ? (
-                <Pressable style={styles.studioBtn} onPress={() => navigation.navigate("InstructorStudio")}>
-                  <Ionicons name="school-outline" size={18} color={LIME} />
-                  <Text style={styles.studioText}>Instructor Studio</Text>
-                  <Ionicons name="chevron-forward" size={18} color={TEXT} />
-                </Pressable>
-              ) : null}
-
-            </View>
-
-            <View style={styles.gallerySection}>
-              <View style={styles.iconTabsRow}>
-                {galleryTabs.map((tabKey) => {
-                  const icons = PROFILE_TAB_ICONS[tabKey];
-                  const active = activeGalleryTab === tabKey;
-                  return (
-                    <Pressable key={tabKey} style={styles.iconTab} onPress={() => handleGalleryTabPress(tabKey)}>
-                      <SvgAssetIcon
-                        module={active ? icons.active : icons.inactive}
-                        size={PROFILE_TAB_ICON}
-                        color={active ? LIME : TEXT}
-                        fallbackName={
-                          active ? PROFILE_TAB_FALLBACKS[tabKey].active : PROFILE_TAB_FALLBACKS[tabKey].inactive
-                        }
-                      />
-                      {active ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {galleryLoading ? (
-                <View style={styles.galleryLoadingWrap}>
-                  <ActivityIndicator size="small" color={LIME} />
-                </View>
-              ) : visiblePosts.length ? (
-                <FlatList
-                  key={activeGalleryTab}
-                  data={visiblePosts}
-                  keyExtractor={(item) => String(item.id)}
-                  numColumns={3}
-                  scrollEnabled={false}
-                  renderItem={renderProfileGridItem}
-                  columnWrapperStyle={styles.gridRow}
-                  contentContainerStyle={styles.gridList}
-                />
-              ) : (
-                <View style={styles.galleryEmptyWrap}>
-                  <Text style={styles.galleryEmptyTitle}>
-                    {isReelTab ? t("emptyReelsTitle") : t("emptyNothingTitle")}
-                  </Text>
-                  <Text style={styles.galleryEmptySub}>
-                    {isReelTab ? t("emptyReelsSub") : t("emptyDefaultSub")}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </>
+          <FlatList
+            key={activeGalleryTab}
+            style={styles.screen}
+            contentContainerStyle={styles.scrollBottom}
+            data={galleryLoading ? [] : visiblePosts}
+            keyExtractor={(item) => String(item.id)}
+            numColumns={3}
+            renderItem={renderProfileGridItem}
+            columnWrapperStyle={styles.gridRow}
+            ListHeaderComponent={profileListHeader}
+            ListEmptyComponent={profileListEmpty}
+            initialNumToRender={12}
+            maxToRenderPerBatch={9}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === "android"}
+            showsVerticalScrollIndicator={false}
+          />
         ) : null}
-      </ScrollView>
       </SafeAreaView>
 
       <PostsReelViewerModal
