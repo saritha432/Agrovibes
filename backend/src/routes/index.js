@@ -107,15 +107,15 @@ const uploadMediaMemory = multer({
   fileFilter: (_req, file, cb) => {
     const type = String(file.mimetype || "").toLowerCase();
     const name = String(file.originalname || "").toLowerCase();
-    if (type.startsWith("image/") || type.startsWith("video/")) {
+    if (type.startsWith("image/") || type.startsWith("video/") || type.startsWith("audio/")) {
       cb(null, true);
       return;
     }
-    if (/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v)$/i.test(name)) {
+    if (/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v|m4a|mp3|caf|aac|wav|ogg)$/i.test(name)) {
       cb(null, true);
       return;
     }
-    cb(new Error("Only image or video files are allowed"));
+    cb(new Error("Only image, video, or audio files are allowed"));
   }
 });
 
@@ -128,9 +128,16 @@ function mediaExtFromMime(mimeType, originalName) {
   if (mime.includes("heic")) return ".heic";
   if (mime.includes("webm")) return ".webm";
   if (mime.includes("quicktime")) return ".mov";
+  if (mime.includes("mp4") && mime.includes("audio")) return ".m4a";
+  if (mime.includes("mpeg") || mime.includes("mp3")) return ".mp3";
+  if (mime.includes("m4a") || mime.includes("x-m4a")) return ".m4a";
+  if (mime.includes("caf")) return ".caf";
+  if (mime.includes("wav")) return ".wav";
+  if (mime.includes("aac")) return ".aac";
+  if (mime.includes("ogg")) return ".ogg";
   if (mime.includes("mp4")) return ".mp4";
   const name = String(originalName || "").toLowerCase();
-  const m = name.match(/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v)$/i);
+  const m = name.match(/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v|m4a|mp3|caf|aac|wav|ogg)$/i);
   return m ? m[0].toLowerCase() : ".bin";
 }
 

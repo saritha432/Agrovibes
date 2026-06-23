@@ -143,6 +143,22 @@ function directMessagePushPayload(body) {
     return { excerpt: "Photo", imageUrl: null };
   }
 
+  if (text.startsWith("[Cropvibe Reply]")) {
+    const jsonText = text.slice("[Cropvibe Reply]".length).trim();
+    if (jsonText.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        const replyText = String(parsed?.text || "").trim();
+        if (replyText) {
+          const excerpt = replyText.length > 120 ? `${replyText.slice(0, 117)}...` : replyText;
+          return { excerpt, imageUrl: null };
+        }
+      } catch {
+        // fall through
+      }
+    }
+  }
+
   if (text.startsWith("[Cropvibe Voice]")) {
     const jsonText = text.slice("[Cropvibe Voice]".length).trim();
     let excerpt = "Voice message";
@@ -231,7 +247,7 @@ function socialPushCopy({ type, actorName, commentExcerpt }) {
   }
 }
 
-async function sendPushToUser(userId, { title, body, data, imageUrl }) {
+async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId }) {
   if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
   const tokens = await listTokensForUser(userId);
   if (!tokens.length) return { sent: 0, skipped: "no_tokens" };
@@ -242,11 +258,71 @@ async function sendPushToUser(userId, { title, body, data, imageUrl }) {
     payloadData[String(key)] = String(value);
   }
 
+  const pushTitle = String(title || "Cropvibe");
+  const pushBody = String(body || "");
   const image = String(imageUrl || "").trim();
   const hasImage = /^https?:\/\//i.test(image);
+
+  // Chat reply actions require a data-only FCM payload on Android so Expo can attach
+  // the registered DIRECT_MESSAGE category (Reply + inline text input).
+  if (categoryId === "DIRECT_MESSAGE") {
+    payloadData.title = pushTitle;
+    payloadData.message = pushBody;
+    payloadData.categoryId = String(categoryId);
+    payloadData.channelId = "direct_messages";
+    payloadData.priority = "high";
+    if (hasImage) payloadData.image = image;
+
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens,
+      data: payloadData,
+      android: {
+        priority: "high"
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: pushTitle,
+              body: pushBody
+            },
+            sound: "default",
+            category: String(categoryId),
+            ...(hasImage ? { "mutable-content": 1 } : {})
+          }
+        },
+        ...(hasImage ? { fcm_options: { image } } : {})
+      }
+    });
+
+    const invalidTokens = [];
+    response.responses.forEach((item, index) => {
+      if (item.success) return;
+      const code = item.error?.code || "";
+      if (
+        code === "messaging/registration-token-not-registered" ||
+        code === "messaging/invalid-registration-token"
+      ) {
+        invalidTokens.push(tokens[index]);
+      }
+    });
+    if (invalidTokens.length) {
+      await removeInvalidTokens(invalidTokens);
+    }
+
+    return { sent: response.successCount, failed: response.failureCount };
+  }
+
+  if (categoryId) {
+    payloadData.categoryId = String(categoryId);
+  }
+
   const notification = {
-    title: String(title || "Cropvibe"),
-    body: String(body || "")
+    title: pushTitle,
+    body: pushBody
   };
   if (hasImage) notification.imageUrl = image;
 
@@ -272,6 +348,7 @@ async function sendPushToUser(userId, { title, body, data, imageUrl }) {
       payload: {
         aps: {
           sound: "default",
+          ...(categoryId ? { category: String(categoryId) } : {}),
           ...(hasImage ? { "mutable-content": 1 } : {})
         }
       },
@@ -303,6 +380,7 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
     title: copy.title,
     body: copy.body,
     imageUrl,
+    categoryId: type === "direct_message" ? "DIRECT_MESSAGE" : undefined,
     data: {
       type: type || "generic",
       actorId: actorId != null ? String(actorId) : "",

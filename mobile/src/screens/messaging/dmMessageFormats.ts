@@ -1,6 +1,8 @@
 export const DM_MEDIA_PREFIX = "[Cropvibe Media]";
 export const DM_VOICE_PREFIX = "[Cropvibe Voice]";
 export const DM_CALL_PREFIX = "[Cropvibe Call]";
+export const DM_REPLY_PREFIX = "[Cropvibe Reply]";
+export const DM_REACT_PREFIX = "[Cropvibe React]";
 
 export type DmCallStatus = "completed" | "missed" | "declined" | "cancelled";
 export type DmCallMode = "voice" | "video";
@@ -24,12 +26,32 @@ export type DmVoicePayload = {
   durationMs?: number;
 };
 
+export type DmReplyPayload = {
+  replyToId: number;
+  replyPreview: string;
+  replyAuthor: string;
+  text: string;
+};
+
+export type DmReactPayload = {
+  targetId: number;
+  emoji: string;
+};
+
 export function buildDmMediaMessage(payload: DmMediaPayload) {
   return `${DM_MEDIA_PREFIX}\n${JSON.stringify(payload)}`;
 }
 
 export function buildDmVoiceMessage(payload: DmVoicePayload) {
   return `${DM_VOICE_PREFIX}\n${JSON.stringify(payload)}`;
+}
+
+export function buildDmReplyMessage(payload: DmReplyPayload) {
+  return `${DM_REPLY_PREFIX}\n${JSON.stringify(payload)}`;
+}
+
+export function buildDmReactMessage(payload: DmReactPayload) {
+  return `${DM_REACT_PREFIX}\n${JSON.stringify(payload)}`;
 }
 
 export function parseDmMediaMessage(body: string): DmMediaPayload | null {
@@ -65,6 +87,44 @@ export function parseDmVoiceMessage(body: string): DmVoicePayload | null {
   } catch {
     return null;
   }
+}
+
+export function parseDmReplyMessage(body: string): DmReplyPayload | null {
+  if (!String(body || "").startsWith(DM_REPLY_PREFIX)) return null;
+  const jsonText = String(body).slice(DM_REPLY_PREFIX.length).trim();
+  if (!jsonText.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const text = String(parsed.text || "").trim();
+    const replyPreview = String(parsed.replyPreview || "").trim();
+    const replyAuthor = String(parsed.replyAuthor || "").trim() || "Message";
+    const replyToId = Number(parsed.replyToId);
+    if (!text || !Number.isFinite(replyToId) || replyToId <= 0) return null;
+    return { replyToId, replyPreview, replyAuthor, text };
+  } catch {
+    return null;
+  }
+}
+
+export function parseDmReactMessage(body: string): DmReactPayload | null {
+  if (!String(body || "").startsWith(DM_REACT_PREFIX)) return null;
+  const jsonText = String(body).slice(DM_REACT_PREFIX.length).trim();
+  if (!jsonText.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const emoji = String(parsed.emoji || "").trim();
+    const targetId = Number(parsed.targetId);
+    if (!emoji || !Number.isFinite(targetId) || targetId <= 0) return null;
+    return { targetId, emoji };
+  } catch {
+    return null;
+  }
+}
+
+export function dmMessageCopyText(body: string, t: (key: string) => string): string {
+  const reply = parseDmReplyMessage(body);
+  if (reply) return reply.text;
+  return formatDmInboxPreview(body, t);
 }
 
 export function formatVoiceDuration(ms?: number) {
@@ -144,6 +204,11 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
 
   const call = parseDmCallMessage(text);
   if (call) return formatDmCallLabel(call, t);
+
+  const reply = parseDmReplyMessage(text);
+  if (reply) return reply.text;
+
+  if (parseDmReactMessage(text)) return "";
 
   if (text.startsWith("[Cropvibe Live]")) return t("sharedLive");
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return t("sharedReel");

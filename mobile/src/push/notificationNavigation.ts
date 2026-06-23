@@ -1,6 +1,10 @@
 import * as Notifications from "expo-notifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { sendDirectMessage } from "../services/api";
 import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
+
+const AUTH_STORAGE_KEY = "agrovibes.auth";
 
 const AUTH_FLOW_ROUTES = new Set([
   "Splash",
@@ -52,10 +56,38 @@ function peerIdFromData(data: Record<string, unknown>) {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
-export function handleNotificationResponse(response: Notifications.NotificationResponse) {
+async function resolveAuthToken(explicit?: string | null) {
+  const direct = String(explicit || "").trim();
+  if (direct) return direct;
+  try {
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { token?: string } | null;
+    const stored = String(parsed?.token || "").trim();
+    return stored || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function handleNotificationResponse(
+  response: Notifications.NotificationResponse,
+  options?: { authToken?: string | null }
+) {
   const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
   const title = String(response.notification.request.content.title || "").trim() || "Someone";
   const type = String(data.type || "");
+  const actionId = response.actionIdentifier;
+
+  if (actionId === "REPLY") {
+    if (type !== "direct_message") return;
+    const senderId = peerIdFromData(data);
+    const text = String(response.userText || "").trim();
+    const authToken = await resolveAuthToken(options?.authToken);
+    if (!senderId || !text || !authToken) return;
+    void sendDirectMessage(authToken, senderId, text).catch(() => undefined);
+    return;
+  }
 
   if (type === "incoming_call") {
     const callerId = peerIdFromData(data);

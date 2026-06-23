@@ -8,6 +8,7 @@ import {
   addNotificationReceivedListener,
   addNotificationResponseListener,
   registerPushNotifications,
+  setupDirectMessageNotificationCategory,
   unregisterPushNotifications
 } from "./pushNotifications";
 import { handleNotificationResponse } from "./notificationNavigation";
@@ -36,8 +37,10 @@ export function PushNotificationBootstrap() {
   React.useEffect(() => {
     if (Platform.OS === "web") return;
 
+    void setupDirectMessageNotificationCategory();
+
     void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) handleNotificationResponse(response);
+      if (response) void handleNotificationResponse(response, { authToken: authTokenRef.current });
     });
 
     const receivedSub = addNotificationReceivedListener((event) => {
@@ -65,7 +68,7 @@ export function PushNotificationBootstrap() {
       }
     });
     const responseSub = addNotificationResponseListener((response) => {
-      handleNotificationResponse(response);
+      void handleNotificationResponse(response, { authToken: authTokenRef.current });
     });
     return () => {
       receivedSub.remove();

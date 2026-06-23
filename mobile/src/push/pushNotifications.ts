@@ -26,6 +26,16 @@ async function ensureAndroidChannel() {
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35"
   });
+  await Notifications.setNotificationChannelAsync("direct_messages", {
+    name: "Messages",
+    description: "Direct message notifications with reply",
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: false,
+    sound: "default",
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#C9FF35"
+  });
 }
 
 export async function getNativePushToken(): Promise<string | null> {
@@ -102,4 +112,22 @@ export function addNotificationResponseListener(
 
 export function addNotificationReceivedListener(listener: (event: Notifications.Notification) => void) {
   return Notifications.addNotificationReceivedListener(listener);
+}
+
+export async function setupDirectMessageNotificationCategory() {
+  if (Platform.OS === "web") return;
+  await ensureAndroidChannel();
+  await Notifications.setNotificationCategoryAsync("DIRECT_MESSAGE", [
+    {
+      identifier: "REPLY",
+      buttonTitle: "Reply",
+      textInput: {
+        submitButtonTitle: "Send",
+        placeholder: "Message..."
+      },
+      options: {
+        opensAppToForeground: false
+      }
+    }
+  ]);
 }
