@@ -82,7 +82,7 @@
                  "web":  {
                              "favicon":  "./assets/logo.png"
                          },
-                 "owner":  "cropvibe-farming",
+                 "owner":  "saritha-farming",
                  "runtimeVersion":  {
                                         "policy":  "appVersion"
                                     },
@@ -130,7 +130,7 @@
                              ],
                  "extra":  {
                                "eas":  {
-                                           "projectId":  "d7965c57-28e1-45c1-b0dc-1220030a389f"
+                                           "projectId":  "b0f1e9b2-87d3-45e5-8925-7d531ca96ebe"
                                        }
                            }
              }

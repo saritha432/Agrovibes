@@ -1,3 +1,8 @@
 .expo/
 node_modules/
 dist/
+credentials.json
+*.jks
+android/keystores/*.jks
+android/keystores/*.keystore
+!android/keystores/.gitkeep

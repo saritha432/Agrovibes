@@ -25,6 +25,7 @@
     "build:android:local": "cd android && gradlew.bat assembleRelease",
     "build:android:local:apk": "npm run prebuild:android && npm run build:android:local",
     "build:android:prod": "node scripts/eas.js build --platform android --profile production",
+    "import:playstore-keystore": "powershell -ExecutionPolicy Bypass -File scripts/import-playstore-keystore.ps1",
     "build:ios:preview": "node scripts/eas.js build --platform ios --profile preview",
     "build:ios:prod": "node scripts/eas.js build --platform ios --profile production",
     "build:all:preview": "node scripts/eas.js build --platform all --profile preview",

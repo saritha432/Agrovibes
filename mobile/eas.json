@@ -24,6 +24,7 @@
     },
     "production": {
       "channel": "production",
+      "credentialsSource": "local",
       "env": {
         "INCLUDE_FIREBASE_PLUGINS": "1"
       },
