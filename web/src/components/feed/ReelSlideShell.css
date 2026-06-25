@@ -75,6 +75,30 @@
   gap: 14px;
 }
 
+.reel-slide__action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.reel-slide__action-count-btn {
+  border: none;
+  background: none;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  padding: 0;
+  min-width: 44px;
+}
+
+.reel-slide__action-count-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .reel-slide__action {
   border: none;
   background: none;

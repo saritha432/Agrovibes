@@ -6,6 +6,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { MessagesPage } from "../pages/MessagesPage";
 import { MessagesChat } from "../pages/messages/MessagesChat";
 import { MessagesChatPlaceholder } from "../pages/messages/MessagesChatPlaceholder";
+import { NotificationsPage } from "../pages/NotificationsPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
 import { EditProfilePage } from "../pages/EditProfilePage";
@@ -57,6 +58,7 @@ export function AppRoutes() {
           <Route index element={<MessagesChatPlaceholder />} />
           <Route path=":peerUserId" element={<MessagesChat />} />
         </Route>
+        <Route path="notifications" element={<NotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="profile/edit" element={<EditProfilePage />} />
       </Route>

@@ -13,8 +13,10 @@ export type HomeComment = {
   userId?: number;
 };
 
-export async function fetchHomeStories() {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`);
+export async function fetchHomeStories(token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`, { headers });
   return (await parseJsonOrThrow(response)) as { stories: HomeStory[] };
 }
 
@@ -103,6 +105,38 @@ export async function unsaveHomePost(token: string, postId: number) {
     token,
     { method: "POST" }
   )) as { saved: boolean };
+}
+
+export type HomePostLiker = {
+  userId: number;
+  fullName: string;
+  username?: string;
+  avatarUrl?: string;
+  createdAt?: string;
+};
+
+export async function fetchHomePostLikes(postId: number, token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/likes`,
+      { headers }
+    );
+    if (!response.ok) return { likers: [] as HomePostLiker[] };
+    const data = (await response.json()) as { likers?: HomePostLiker[] };
+    return { likers: Array.isArray(data.likers) ? data.likers : [] };
+  } catch {
+    return { likers: [] as HomePostLiker[] };
+  }
+}
+
+export async function deleteHomePostComment(token: string, postId: number, commentId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments/${encodeURIComponent(String(commentId))}`,
+    token,
+    { method: "DELETE" }
+  )) as { ok: boolean; commentsCount: number };
 }
 
 export async function fetchUsers(

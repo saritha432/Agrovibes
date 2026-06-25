@@ -10,12 +10,15 @@ export function AppShell() {
   const { pathname } = useLocation();
   const showRightPanel = RIGHT_PANEL_ROUTES.has(pathname);
   const flushContent = FLUSH_ROUTES.has(pathname) || pathname.startsWith("/messages/");
+  const notificationsView = pathname === "/notifications";
 
   return (
     <div className="app-shell">
       <Sidebar />
       <div className={`app-shell__main${showRightPanel ? " app-shell__main--with-right" : ""}`}>
-        <div className={`app-shell__content${flushContent ? " app-shell__content--flush" : ""}`}>
+        <div
+          className={`app-shell__content${flushContent ? " app-shell__content--flush" : ""}${notificationsView ? " app-shell__content--notifications" : ""}`}
+        >
           <Outlet />
         </div>
         {showRightPanel ? <HomeRightPanel /> : null}

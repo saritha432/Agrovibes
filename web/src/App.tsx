@@ -1,16 +1,19 @@
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { CreateModalProvider } from "./context/CreateModalContext";
+import { NotificationPanelProvider } from "./context/NotificationPanelContext";
 import { AppRoutes } from "./routes/AppRoutes";
 
 export default function App() {
   return (
     <AuthProvider>
-      <CreateModalProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
-      </CreateModalProvider>
+      <BrowserRouter>
+        <NotificationPanelProvider>
+          <CreateModalProvider>
+            <AppRoutes />
+          </CreateModalProvider>
+        </NotificationPanelProvider>
+      </BrowserRouter>
     </AuthProvider>
   );
 }

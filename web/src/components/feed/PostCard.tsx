@@ -6,6 +6,7 @@ import { dropCaption, isDropPost } from "../../utils/feedOrder";
 import { ProfileReelViewer } from "../profile/ProfileReelViewer";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
+import { PostLikesSheet } from "./PostLikesSheet";
 import { PostMediaCarousel } from "./PostMediaCarousel";
 import { ReelIcon } from "./ReelIcon";
 import { ReelLikeBurst } from "./ReelLikeBurst";
@@ -44,6 +45,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   const [openCommentsInViewer, setOpenCommentsInViewer] = useState(false);
   const [saved, setSaved] = useState(!!post.viewerHasSaved);
   const [likeBurst, setLikeBurst] = useState(0);
+  const [likesOpen, setLikesOpen] = useState(false);
 
   const images = galleryUrls(post);
   const videoSrc = resolveWebVideoUrl(post.videoUrl);
@@ -69,6 +71,22 @@ export function PostCard({ post, reelPosts = [] }: Props) {
     observer.observe(root);
     return () => observer.disconnect();
   }, [videoSrc]);
+
+  useEffect(() => {
+    setCommentsCount(post.commentsCount);
+  }, [post.commentsCount, post.id]);
+
+  useEffect(() => {
+    const onCount = (evt: Event) => {
+      const data = (evt as CustomEvent<{ postId?: number; commentsCount?: number }>).detail;
+      if (Number(data?.postId) !== post.id) return;
+      if (Number.isFinite(Number(data?.commentsCount))) {
+        setCommentsCount(Number(data.commentsCount));
+      }
+    };
+    window.addEventListener("cropvibe:comments-count-changed", onCount as EventListener);
+    return () => window.removeEventListener("cropvibe:comments-count-changed", onCount as EventListener);
+  }, [post.id]);
 
   useEffect(() => {
     setSaved(!!post.viewerHasSaved);
@@ -176,11 +194,25 @@ export function PostCard({ post, reelPosts = [] }: Props) {
     await toggleLike();
   };
 
+  const openLikes = () => {
+    if (!likes && !liked) return;
+    setLikesOpen(true);
+  };
+
+  const broadcastCommentsCount = (count: number) => {
+    setCommentsCount(count);
+    window.dispatchEvent(
+      new CustomEvent("cropvibe:comments-count-changed", {
+        detail: { postId: post.id, commentsCount: count }
+      })
+    );
+  };
+
   const openComments = () => {
     if (typeof window !== "undefined" && window.location.pathname === "/") {
       window.dispatchEvent(
         new CustomEvent("cropvibe:open-right-comments", {
-          detail: { postId: post.id, commentsCount }
+          detail: { postId: post.id, commentsCount, postUserName: post.userName }
         })
       );
       return;
@@ -230,8 +262,8 @@ export function PostCard({ post, reelPosts = [] }: Props) {
             : undefined
         }
       >
-        {videoSrc ? (
-          <>
+        <div className="post-card__media-inner">
+          {videoSrc ? (
             <video
               ref={videoRef}
               src={videoSrc}
@@ -241,13 +273,13 @@ export function PostCard({ post, reelPosts = [] }: Props) {
               muted={muted}
               className="post-card__video"
             />
-            {reel ? <ReelLikeBurst postId={post.id} trigger={likeBurst} /> : null}
-          </>
-        ) : images.length ? (
-          <PostMediaCarousel urls={images} />
-        ) : (
-          <div className="post-card__placeholder">{reel ? "Reel" : "Post"}</div>
-        )}
+          ) : images.length ? (
+            <PostMediaCarousel urls={images} />
+          ) : (
+            <div className="post-card__placeholder">{reel ? "Reel" : "Post"}</div>
+          )}
+        </div>
+        {reel ? <ReelLikeBurst postId={post.id} trigger={likeBurst} /> : null}
       </div>
 
       <div className="post-card__actions">
@@ -268,6 +300,9 @@ export function PostCard({ post, reelPosts = [] }: Props) {
             aria-label="Comments"
           >
             <ReelIcon name="comment" size={23} color="currentColor" />
+            {reel && commentsCount > 0 ? (
+              <span className="post-card__action-count">{commentsCount}</span>
+            ) : null}
           </button>
           <button type="button" onClick={() => void sharePost()} aria-label="Share">
             <ReelIcon name="share" size={22} color="currentColor" />
@@ -285,7 +320,11 @@ export function PostCard({ post, reelPosts = [] }: Props) {
         </button>
       </div>
 
-      {likes > 0 ? <p className="post-card__likes">{likes} {likes === 1 ? "like" : "likes"}</p> : null}
+      {likes > 0 ? (
+        <button type="button" className="post-card__likes" onClick={openLikes}>
+          {likes} {likes === 1 ? "like" : "likes"}
+        </button>
+      ) : null}
 
       {caption ? (
         <p className="post-card__caption">
@@ -302,9 +341,19 @@ export function PostCard({ post, reelPosts = [] }: Props) {
       {commentsOpen ? (
         <CommentPanel
           postId={post.id}
+          postUserName={post.userName}
           commentsCount={commentsCount}
           onClose={() => setCommentsOpen(false)}
-          onCountChange={setCommentsCount}
+          onCountChange={broadcastCommentsCount}
+        />
+      ) : null}
+
+      {likesOpen ? (
+        <PostLikesSheet
+          postId={post.id}
+          likesCount={likes}
+          viewerHasLiked={liked}
+          onClose={() => setLikesOpen(false)}
         />
       ) : null}
 

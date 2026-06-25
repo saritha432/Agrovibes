@@ -47,7 +47,11 @@ export function HomeRightPanel() {
   const [suggestions, setSuggestions] = useState<UserSearchRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [activeComments, setActiveComments] = useState<{ postId: number; commentsCount: number } | null>(null);
+  const [activeComments, setActiveComments] = useState<{
+    postId: number;
+    commentsCount: number;
+    postUserName?: string;
+  } | null>(null);
 
   const loadSuggestions = useCallback(async () => {
     if (authLoading) return;
@@ -75,12 +79,13 @@ export function HomeRightPanel() {
 
   useEffect(() => {
     const onOpenComments = (evt: Event) => {
-      const data = (evt as CustomEvent<{ postId?: number; commentsCount?: number }>).detail;
+      const data = (evt as CustomEvent<{ postId?: number; commentsCount?: number; postUserName?: string }>).detail;
       const postId = Number(data?.postId);
       if (!Number.isFinite(postId) || postId <= 0) return;
       setActiveComments({
         postId,
-        commentsCount: Number.isFinite(Number(data?.commentsCount)) ? Number(data?.commentsCount) : 0
+        commentsCount: Number.isFinite(Number(data?.commentsCount)) ? Number(data?.commentsCount) : 0,
+        postUserName: data?.postUserName
       });
     };
     window.addEventListener("cropvibe:open-right-comments", onOpenComments as EventListener);
@@ -115,9 +120,17 @@ export function HomeRightPanel() {
         <div className="right-panel__comments-wrap">
           <CommentPanel
             postId={activeComments.postId}
+            postUserName={activeComments.postUserName}
             commentsCount={activeComments.commentsCount}
             onClose={() => setActiveComments(null)}
-            onCountChange={(count) => setActiveComments((prev) => (prev ? { ...prev, commentsCount: count } : prev))}
+            onCountChange={(count) => {
+              setActiveComments((prev) => (prev ? { ...prev, commentsCount: count } : prev));
+              window.dispatchEvent(
+                new CustomEvent("cropvibe:comments-count-changed", {
+                  detail: { postId: activeComments.postId, commentsCount: count }
+                })
+              );
+            }}
             portal={false}
             inline
           />

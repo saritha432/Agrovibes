@@ -20,7 +20,7 @@ export function HomePage() {
     try {
       const [postsRes, storiesRes] = await Promise.all([
         fetchHomePosts(token),
-        fetchHomeStories()
+        fetchHomeStories(token),
       ]);
       setPosts(postsRes.posts);
       setStories(storiesRes.stories ?? []);
