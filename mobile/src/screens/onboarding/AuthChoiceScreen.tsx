@@ -16,7 +16,6 @@ const BG = APP_BLACK;
 const CARD = APP_SURFACE;
 const BORDER = "#3a3a3a";
 
-/** Digits only; autocomplete with +91 keeps the last 10 (local) digits. */
 function sanitizeIndianMobileInput(raw: string): string {
   const digits = raw.replace(/\D/g, "");
   if (!digits) return "";
@@ -24,8 +23,7 @@ function sanitizeIndianMobileInput(raw: string): string {
   return digits.slice(0, 10);
 }
 
-/** Match backend + register: last 10 digits for @phone.agrovibes (handles +91 / leading 0). */
-function resolvePhoneEmailLocalPart(digits: string): string {
+function resolvePhoneLocalDigits(digits: string): string {
   const d = digits.replace(/\D/g, "");
   return d.length >= 10 ? d.slice(-10) : d;
 }
@@ -50,7 +48,6 @@ export function AuthChoiceScreen() {
   const [registerPhone, setRegisterPhone] = React.useState("");
   const [registerPassword, setRegisterPassword] = React.useState("");
   const [fullName, setFullName] = React.useState("");
-  const [username, setUsername] = React.useState("");
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
@@ -88,25 +85,22 @@ export function AuthChoiceScreen() {
   const submit = async () => {
     const digits = phone.replace(/\D/g, "");
     if (password.trim().length < 6 || loadingSubmit) return;
-    if (mode === "register" && (!fullName.trim() || !username.trim())) return;
+    if (mode === "register" && !fullName.trim()) return;
     if (digits.length < 10) return;
     setLoadingSubmit(true);
     setErrorText("");
     try {
-      const phoneLocal = resolvePhoneEmailLocalPart(digits);
-      const syntheticEmail = `${phoneLocal}@phone.agrovibes`;
+      const mobile = resolvePhoneLocalDigits(digits);
       const auth =
         mode === "register"
           ? await authRegister({
-              email: syntheticEmail,
+              phone: mobile,
               password: password.trim(),
               fullName: fullName.trim(),
-              role: "student",
-              username: username.trim(),
-              phone: `+91${phoneLocal}`
+              role: "student"
             })
           : await authLogin({
-              identifier: syntheticEmail,
+              identifier: mobile,
               password: password.trim()
             });
       await signIn(auth);
@@ -125,6 +119,13 @@ export function AuthChoiceScreen() {
     }
   };
 
+  const digits = phone.replace(/\D/g, "");
+  const canSubmit =
+    password.trim().length >= 6 &&
+    digits.length >= 10 &&
+    (mode !== "register" || fullName.trim().length > 0) &&
+    !loadingSubmit;
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -133,7 +134,6 @@ export function AuthChoiceScreen() {
           {mode === "register" ? t("createSubtitle") : t("loginSubtitle")}
         </Text>
       </View>
-
 
       <View style={styles.modeSegment}>
         <Pressable
@@ -144,7 +144,9 @@ export function AuthChoiceScreen() {
             setSuccessText("");
           }}
         >
-          <Text style={[styles.modeSegmentText, mode === "register" ? styles.modeSegmentTextActive : null]}>{t("getStarted")}</Text>
+          <Text style={[styles.modeSegmentText, mode === "register" ? styles.modeSegmentTextActive : null]}>
+            {t("getStarted")}
+          </Text>
         </Pressable>
         <Pressable
           style={[styles.modeSegmentBtn, mode === "login" ? styles.modeSegmentBtnActive : null]}
@@ -153,32 +155,24 @@ export function AuthChoiceScreen() {
             setErrorText("");
           }}
         >
-          <Text style={[styles.modeSegmentText, mode === "login" ? styles.modeSegmentTextActive : null]}>{t("login")}</Text>
+          <Text style={[styles.modeSegmentText, mode === "login" ? styles.modeSegmentTextActive : null]}>
+            {t("login")}
+          </Text>
         </Pressable>
       </View>
 
       <View style={styles.card}>
         {successText ? <Text style={styles.successBanner}>{successText}</Text> : null}
         {mode === "register" ? (
-          <>
-            <TextInput
-              value={fullName}
-              onChangeText={setFullName}
-              placeholder={t("name")}
-              placeholderTextColor="#7f8b93"
-              style={styles.input}
-            />
-            <TextInput
-              value={username}
-              onChangeText={setUsername}
-              placeholder={t("username")}
-              placeholderTextColor="#7f8b93"
-              style={[styles.input, styles.spaced]}
-              autoCapitalize="none"
-            />
-          </>
+          <TextInput
+            value={fullName}
+            onChangeText={setFullName}
+            placeholder={t("name")}
+            placeholderTextColor="#7f8b93"
+            style={styles.input}
+          />
         ) : null}
-        <View style={styles.row}>
+        <View style={[styles.row, mode === "login" ? styles.rowFirst : null]}>
           <View style={styles.countryTag}>
             <Text style={styles.countryText}>🇮🇳 +91</Text>
           </View>
@@ -215,26 +209,14 @@ export function AuthChoiceScreen() {
             <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#9aa5ad" />
           </Pressable>
         </View>
-        <Pressable
-          onPress={submit}
-          style={[
-            styles.primaryBtn,
-            password.trim().length < 6 ||
-            phone.replace(/\D/g, "").length < 10 ||
-            (mode === "register" && (!fullName.trim() || !username.trim())) ||
-            loadingSubmit
-              ? styles.disabled
-              : null
-          ]}
-        >
-          <Text style={styles.primaryBtnText}>{loadingSubmit ? "Submitting..." : mode === "register" ? t("submit") : t("login")}</Text>
+        <Pressable onPress={submit} style={[styles.primaryBtn, !canSubmit ? styles.disabled : null]} disabled={!canSubmit}>
+          <Text style={styles.primaryBtnText}>
+            {loadingSubmit ? "Submitting..." : mode === "register" ? t("submit") : t("login")}
+          </Text>
         </Pressable>
 
         {mode === "login" ? (
-          <Pressable
-            onPress={() => navigation.navigate("ForgotPassword")}
-            style={styles.forgotPasswordLink}
-          >
+          <Pressable onPress={() => navigation.navigate("ForgotPassword")} style={styles.forgotPasswordLink}>
             <Text style={styles.forgotPasswordText}>{t("forgotPasswordLink")}</Text>
           </Pressable>
         ) : null}
@@ -314,6 +296,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   row: { flexDirection: "row", gap: 8, alignItems: "center", marginTop: 10 },
+  rowFirst: { marginTop: 0 },
   rowInput: { flex: 1, minWidth: 0 },
   primaryBtn: {
     marginTop: 12,
