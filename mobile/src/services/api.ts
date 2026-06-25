@@ -232,12 +232,12 @@ export function formatAuthError(error: unknown, fallback = "Something went wrong
 }
 
 export async function authRegister(payload: {
-  email: string;
+  email?: string;
   password: string;
   fullName: string;
   role?: string;
   username?: string;
-  phone?: string;
+  phone: string;
 }) {
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/register`, {
     method: "POST",
