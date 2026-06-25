@@ -33,6 +33,7 @@ export function CommentPanel({
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,12 +55,15 @@ export function CommentPanel({
   const submit = async () => {
     const text = draft.trim();
     if (!text || !token || submitting) return;
+    const parentNum = replyingTo ? Number(replyingTo.id) : NaN;
+    const parentCommentId = Number.isFinite(parentNum) && parentNum > 0 ? parentNum : undefined;
     setSubmitting(true);
     setError(null);
     try {
-      const res = await createHomePostComment(token, postId, text);
+      const res = await createHomePostComment(token, postId, text, { parentCommentId });
       setComments((prev) => [...prev, res.comment]);
       setDraft("");
+      setReplyingTo(null);
       onCountChange(res.commentsCount);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to post comment");
@@ -67,6 +71,29 @@ export function CommentPanel({
       setSubmitting(false);
     }
   };
+
+  const rows = (() => {
+    const byParent = new Map<string, HomeComment[]>();
+    const top: HomeComment[] = [];
+    for (const c of comments) {
+      const parentKey = c.parentCommentId ? String(c.parentCommentId) : "";
+      if (!parentKey) {
+        top.push(c);
+        continue;
+      }
+      const list = byParent.get(parentKey) || [];
+      list.push(c);
+      byParent.set(parentKey, list);
+    }
+
+    const out: Array<{ c: HomeComment; depth: 0 | 1 }> = [];
+    for (const c of top) {
+      out.push({ c, depth: 0 });
+      const replies = byParent.get(String(c.id)) || [];
+      for (const r of replies) out.push({ c: r, depth: 1 });
+    }
+    return out;
+  })();
 
   const content = (
     <div
@@ -93,14 +120,26 @@ export function CommentPanel({
           {!loading && comments.length === 0 ? (
             <p className="comment-panel__status">No comments yet.</p>
           ) : null}
-          {comments.map((c) => (
-            <div key={c.id} className="comment-panel__row">
+          {rows.map(({ c, depth }) => (
+            <div key={`${c.id}-${depth}`} className={`comment-panel__row${depth ? " comment-panel__row--reply" : ""}`}>
               <span className="comment-panel__avatar">
                 {c.avatarUrl ? <img src={c.avatarUrl} alt="" /> : c.user.charAt(0).toUpperCase()}
               </span>
               <div>
                 <strong>{c.user}</strong>
                 <p>{c.text}</p>
+                <button
+                  type="button"
+                  className="comment-panel__reply-btn"
+                  onClick={() => {
+                    const clean = String(c.user || "").replace(/^@/, "").trim();
+                    setReplyingTo({ id: String(c.id), user: clean || c.user });
+                    const mention = clean ? `@${clean} ` : "";
+                    setDraft((d) => (d.trim() ? `${d} ${mention}` : mention));
+                  }}
+                >
+                  Reply
+                </button>
               </div>
             </div>
           ))}
@@ -108,6 +147,16 @@ export function CommentPanel({
 
         {token ? (
           <footer className="comment-panel__composer">
+            {replyingTo ? (
+              <div className="comment-panel__replying">
+                <span>
+                  Replying to @{String(replyingTo.user || "").replace(/^@/, "")}
+                </span>
+                <button type="button" onClick={() => setReplyingTo(null)}>
+                  Cancel
+                </button>
+              </div>
+            ) : null}
             <input
               type="text"
               value={draft}
