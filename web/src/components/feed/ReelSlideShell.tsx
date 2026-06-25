@@ -172,10 +172,9 @@ export function ReelSlideShell({
       tapTimeoutRef.current = null;
       const el = videoRef.current;
       if (!el) return;
-      if (el.muted || muted) {
-        setMuted(false);
-        el.muted = false;
-      }
+      const nextMuted = !el.muted;
+      setMuted(nextMuted);
+      el.muted = nextMuted;
     }, 280);
   };
 
