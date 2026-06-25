@@ -24,7 +24,13 @@
   padding: 16px 0 48px;
 }
 
-.app-shell__main:not(.app-shell__main--with-right) .app-shell__content {
+.app-shell__content--flush {
+  padding-top: 0;
+  padding-bottom: 0;
+  max-width: none;
+}
+
+.app-shell__main:not(.app-shell__main--with-right) .app-shell__content:not(.app-shell__content--flush) {
   max-width: var(--content-max);
   padding: 24px 20px 48px;
 }

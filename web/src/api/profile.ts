@@ -59,6 +59,14 @@ export async function removeFollower(token: string, targetUserId: number) {
   })) as { ok: boolean };
 }
 
+export async function respondToFollowRequest(token: string, targetUserId: number, action: "accept" | "decline") {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/respond`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId, action })
+  })) as { ok: boolean };
+}
+
 export async function updateMyProfile(
   token: string,
   payload: {

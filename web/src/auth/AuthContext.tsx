@@ -7,7 +7,9 @@ import {
   useState,
   type ReactNode
 } from "react";
+import { fetchAuthMe } from "../api/auth";
 import type { AuthUser } from "../api/types";
+import { connectSocketChat, disconnectSocketChat } from "../services/socketChat";
 
 const STORAGE_KEY = "cropvibe.web.auth";
 
@@ -28,25 +30,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { token?: string; user?: AuthUser };
-      if (parsed.token && parsed.user) {
-        setToken(parsed.token);
-        setUser(parsed.user);
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { token?: string; user?: AuthUser };
+        if (!parsed.token || !parsed.user) {
+          localStorage.removeItem(STORAGE_KEY);
+          return;
+        }
+        try {
+          const me = await fetchAuthMe(parsed.token);
+          if (cancelled) return;
+          setToken(parsed.token);
+          setUser(me.user);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: parsed.token, user: me.user }));
+          connectSocketChat(parsed.token);
+        } catch {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      setLoading(false);
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signIn = useCallback((payload: { token: string; user: AuthUser }) => {
     setToken(payload.token);
     setUser(payload.user);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    connectSocketChat(payload.token);
   }, []);
 
   const updateUser = useCallback((patch: Partial<AuthUser>) => {
@@ -67,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(() => {
+    disconnectSocketChat();
     setToken(null);
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);

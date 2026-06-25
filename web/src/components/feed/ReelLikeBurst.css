@@ -1,0 +1,34 @@
+.reel-like-burst {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.reel-like-burst__heart {
+  position: absolute;
+  animation: reel-heart-burst 900ms ease-out forwards;
+  animation-delay: var(--delay);
+  opacity: 0;
+  transform: translate(0, 14px) scale(0.55);
+}
+
+@keyframes reel-heart-burst {
+  0% {
+    opacity: 0;
+    transform: translate(0, 14px) scale(0.55);
+  }
+  22% {
+    opacity: 1;
+    transform: translate(calc(var(--x-to) * 0.25), calc(var(--y-lift) * -0.15)) scale(1.2);
+  }
+  75% {
+    opacity: 0.95;
+    transform: translate(var(--x-to), calc(var(--y-lift) * -0.85)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x-to), calc(var(--y-lift) * -1)) scale(0.9);
+  }
+}

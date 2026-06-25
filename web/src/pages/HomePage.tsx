@@ -4,6 +4,7 @@ import type { HomePost, HomeStory } from "../api/types";
 import { PostCard } from "../components/feed/PostCard";
 import { HomeStories } from "../components/feed/HomeStories";
 import { useAuth } from "../auth/AuthContext";
+import { isDropPost } from "../utils/feedOrder";
 import "./HomePage.css";
 
 export function HomePage() {
@@ -34,6 +35,14 @@ export function HomePage() {
     void loadFeed();
   }, [loadFeed]);
 
+  useEffect(() => {
+    const onRefresh = () => void loadFeed();
+    window.addEventListener("cropvibe:feed-refresh", onRefresh);
+    return () => window.removeEventListener("cropvibe:feed-refresh", onRefresh);
+  }, [loadFeed]);
+
+  const reelPosts = posts.filter(isDropPost);
+
   return (
     <div className="home-page">
       <HomeStories
@@ -54,7 +63,7 @@ export function HomePage() {
 
       <div className="home-feed">
         {posts.map((post) => (
-          <PostCard key={post.id} post={post} />
+          <PostCard key={post.id} post={post} reelPosts={reelPosts} />
         ))}
       </div>
     </div>

@@ -1,3 +1,5 @@
+import { formatDmInboxPreview } from "../../utils/dmMessageFormats";
+
 export function formatThreadTime(iso: string) {
   const d = new Date(iso);
   const now = new Date();
@@ -15,11 +17,9 @@ export function formatMsgTime(iso: string) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+
 export function previewMessage(body: string) {
-  if (String(body || "").startsWith("[Cropvibe Reel]") || String(body || "").startsWith("[AgroVibe Reel]")) {
-    return "Shared a reel";
-  }
-  return body;
+  return formatDmInboxPreview(body);
 }
 
 export type SharedReelPayload = {

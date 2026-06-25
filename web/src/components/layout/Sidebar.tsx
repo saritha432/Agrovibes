@@ -1,13 +1,14 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import { useCreateModal } from "../../context/CreateModalContext";
 import "./Sidebar.css";
 
 const NAV = [
   { to: "/", label: "Home", icon: "home" },
   { to: "/search", label: "Search", icon: "search" },
-  { to: "/reels", label: "Reels", icon: "reels" },
-  { to: "/market", label: "Market", icon: "market" },
-  { to: "/learn", label: "Learn", icon: "learn" },
+  { to: "/drops", label: "Drops", icon: "drops" },
+  // { to: "/market", label: "Market", icon: "market" },
+  // { to: "/learn", label: "Learn", icon: "learn" },
   { to: "/messages", label: "Messages", icon: "messages" },
   { to: "/profile", label: "Profile", icon: "profile" }
 ] as const;
@@ -26,22 +27,10 @@ function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
           <path d="M19 10.5A8.5 8.5 0 1 1 10.5 2 8.5 8.5 0 0 1 19 10.5Zm-1.2 9.3 4.2 4.2" />
         </svg>
       );
-    case "reels":
+    case "drops":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
           <path d="M3 5.25A2.25 2.25 0 0 1 5.25 3h13.5A2.25 2.25 0 0 1 21 5.25v13.5A2.25 2.25 0 0 1 18.75 21H5.25A2.25 2.25 0 0 1 3 18.75V5.25Zm6 3 8 4.5-8 4.5V8.25Z" />
-        </svg>
-      );
-    case "market":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M3 7.5h18l-1.5 12H4.5L3 7.5Zm3-4.5h12l1.5 4.5H4.5L6 3Z" />
-        </svg>
-      );
-    case "learn":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M4 5.25v13.5L12 21l8-2.25V5.25L12 3 4 5.25Zm8 2.25 5 1.4v8.7l-5-1.4V7.5Zm-2 0v8.7l-5 1.4V8.9l5-1.4Z" />
         </svg>
       );
     case "messages":
@@ -63,6 +52,7 @@ function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
 
 export function Sidebar() {
   const { user, signOut } = useAuth();
+  const { openCreate } = useCreateModal();
 
   return (
     <aside className="sidebar">
@@ -91,7 +81,7 @@ export function Sidebar() {
           ))}
         </nav>
 
-        <button type="button" className="sidebar__create" title="Create">
+        <button type="button" className="sidebar__create" title="Create" onClick={openCreate}>
           <span className="sidebar__icon">
             <svg viewBox="0 0 24 24" aria-hidden>
               <path d="M12 4.5v15m7.5-7.5h-15" stroke="currentColor" strokeWidth="2" fill="none" />

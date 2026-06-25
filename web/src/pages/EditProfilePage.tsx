@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { updateMyProfile } from "../api/profile";
+import { uploadImageFile } from "../api/uploads";
 import { useAuth } from "../auth/AuthContext";
 import { userInitials } from "./profileUtils";
 import "./EditProfilePage.css";
@@ -16,6 +17,7 @@ function safeUsername(value: string) {
 export function EditProfilePage() {
   const navigate = useNavigate();
   const { user, token, signIn } = useAuth();
+  const avatarFileRef = useRef<HTMLInputElement>(null);
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [username, setUsername] = useState(
     () => safeUsername(user?.username || (user?.email || "").split("@")[0] || "")
@@ -26,6 +28,7 @@ export function EditProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   if (!user || !token) {
     return (
@@ -34,6 +37,22 @@ export function EditProfilePage() {
       </div>
     );
   }
+
+  const onAvatarPick = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    setError(null);
+    try {
+      const { url } = await uploadImageFile(file);
+      setAvatarUrl(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Avatar upload failed.");
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarFileRef.current) avatarFileRef.current.value = "";
+    }
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -75,9 +94,19 @@ export function EditProfilePage() {
 
       <form className="edit-profile__form" onSubmit={(e) => void onSubmit(e)}>
         <div className="edit-profile__avatar-preview">
-          <span>
-            {avatarUrl ? <img src={avatarUrl} alt="" /> : userInitials(fullName || user.fullName)}
-          </span>
+          <button type="button" className="edit-profile__avatar-btn" onClick={() => avatarFileRef.current?.click()}>
+            <span>
+              {avatarUrl ? <img src={avatarUrl} alt="" /> : userInitials(fullName || user.fullName)}
+            </span>
+            <em>{uploadingAvatar ? "Uploading…" : "Change photo"}</em>
+          </button>
+          <input
+            ref={avatarFileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => void onAvatarPick(e.target.files)}
+          />
         </div>
 
         <label>
@@ -107,7 +136,7 @@ export function EditProfilePage() {
 
         {error ? <p className="edit-profile__error">{error}</p> : null}
 
-        <button type="submit" className="edit-profile__save" disabled={saving}>
+        <button type="submit" className="edit-profile__save" disabled={saving || uploadingAvatar}>
           {saving ? "Saving…" : "Save"}
         </button>
       </form>

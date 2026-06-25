@@ -28,6 +28,30 @@
   gap: 14px;
 }
 
+.edit-profile__avatar-preview {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.edit-profile__avatar-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  font-style: normal;
+}
+
+.edit-profile__avatar-btn em {
+  font-style: normal;
+  font-weight: 600;
+}
+
 .edit-profile__avatar-preview span {
   width: 88px;
   height: 88px;

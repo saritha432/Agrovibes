@@ -53,3 +53,14 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
     }
   )) as { message: DirectMessageItem };
 }
+
+export async function ringDirectCall(
+  token: string,
+  payload: { peerUserId: number; mode: "voice" | "video" }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/calls/ring`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { roomName: string; mode: "voice" | "video"; peerUserId: number };
+}

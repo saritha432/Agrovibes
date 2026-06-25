@@ -7,6 +7,7 @@ import { MessagesPage } from "../pages/MessagesPage";
 import { MessagesChat } from "../pages/messages/MessagesChat";
 import { MessagesChatPlaceholder } from "../pages/messages/MessagesChatPlaceholder";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
+import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
 import { EditProfilePage } from "../pages/EditProfilePage";
 import { ProfilePage } from "../pages/ProfilePage";
 import { ReelsPage } from "../pages/ReelsPage";
@@ -30,11 +31,13 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/watch/:postId" element={<ReelWatchPage />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<HomePage />} />
         <Route path="search" element={<SearchPage />} />
-        <Route path="reels" element={<ReelsPage />} />
+        <Route path="drops" element={<ReelsPage />} />
+        <Route path="reels" element={<Navigate to="/drops" replace />} />
         <Route
           path="market"
           element={

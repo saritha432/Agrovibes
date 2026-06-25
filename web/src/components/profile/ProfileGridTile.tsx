@@ -18,13 +18,15 @@ export function ProfileGridTile({
   isReelTab,
   allowMutedPreview,
   onOpenReel,
-  onOpenImage
+  onOpenImage,
+  onDelete
 }: {
   post: HomePost;
   isReelTab: boolean;
   allowMutedPreview: boolean;
   onOpenReel: () => void;
   onOpenImage: () => void;
+  onDelete?: () => void;
 }) {
   const still = reelGridStillUri(post);
   const isVideo = !!post.videoUrl;
@@ -35,7 +37,16 @@ export function ProfileGridTile({
 
   if (isVideo) {
     return (
-      <button type="button" className={tileClass} onClick={onOpenReel}>
+      <button
+        type="button"
+        className={tileClass}
+        onClick={onOpenReel}
+        onContextMenu={(e) => {
+          if (!onDelete) return;
+          e.preventDefault();
+          onDelete();
+        }}
+      >
         {still || cover ? (
           <img src={still || cover || ""} alt="" loading="lazy" />
         ) : allowMutedPreview && videoSrc ? (
@@ -64,6 +75,11 @@ export function ProfileGridTile({
       type="button"
       className={tileClass}
       onClick={() => (cover ? onOpenImage() : undefined)}
+      onContextMenu={(e) => {
+        if (!onDelete) return;
+        e.preventDefault();
+        onDelete();
+      }}
       disabled={!cover}
     >
       {cover ? (
