@@ -13,6 +13,8 @@ import { ProfilePage } from "../pages/ProfilePage";
 import { ReelsPage } from "../pages/ReelsPage";
 import { ReelWatchPage } from "../pages/ReelWatchPage";
 import { SearchPage } from "../pages/SearchPage";
+import { PrivacyPolicy } from "../pages/PrivacyPolicy";
+import { DeleteAccount } from "../pages/DeleteAccount";
 
 function ProtectedLayout() {
   const { token, loading } = useAuth();
@@ -32,6 +34,8 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/delete-account" element={<DeleteAccount />} />
       <Route path="/watch/:postId" element={<ReelWatchPage />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<HomePage />} />
