@@ -5,6 +5,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { dropCaption } from "../../utils/feedOrder";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
+import { PostLikesSheet } from "./PostLikesSheet";
 import { ReelActionsRail } from "./ReelActionsRail";
 import { ReelLikeBurst } from "./ReelLikeBurst";
 import "./ReelSlideShell.css";
@@ -39,6 +40,7 @@ export function ReelSlideShell({
   const [saved, setSaved] = useState(!!post.viewerHasSaved);
   const [saveBusy, setSaveBusy] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [likesOpen, setLikesOpen] = useState(false);
 
   const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
   const caption = dropCaption(post.caption);
@@ -218,6 +220,9 @@ export function ReelSlideShell({
             likeBusy={likeBusy || !token}
             discUrl={poster}
             onLike={() => void toggleLike()}
+            onLikesPress={() => {
+              if (likes || liked) setLikesOpen(true);
+            }}
             onComment={() => setCommentsOpen(true)}
             onShare={() => void sharePost()}
             onMore={() => setOptionsOpen(true)}
@@ -234,11 +239,21 @@ export function ReelSlideShell({
       {commentsOpen ? (
         <CommentPanel
           postId={post.id}
+          postUserName={post.userName}
           commentsCount={commentsCount}
           onClose={() => setCommentsOpen(false)}
           onCountChange={setCommentsCount}
           portal={!sideComments}
           sidecar={sideComments}
+        />
+      ) : null}
+
+      {likesOpen ? (
+        <PostLikesSheet
+          postId={post.id}
+          likesCount={likes}
+          viewerHasLiked={liked}
+          onClose={() => setLikesOpen(false)}
         />
       ) : null}
 

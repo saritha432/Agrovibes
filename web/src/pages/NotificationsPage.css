@@ -1,0 +1,26 @@
+.notifications-page {
+  width: 100%;
+  min-height: calc(100vh - 32px);
+  background: var(--bg);
+}
+
+.notifications-page__head {
+  padding: 20px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+
+.notifications-page__head h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #c9ff35;
+  text-align: center;
+}
+
+.notifications-page .notification-list {
+  padding: 0 16px 32px;
+}

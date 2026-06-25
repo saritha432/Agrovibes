@@ -11,6 +11,7 @@ type Props = {
   showDisc?: boolean;
   discUrl?: string;
   onLike: () => void;
+  onLikesPress?: () => void;
   onComment: () => void;
   onShare: () => void;
   onMore?: () => void;
@@ -27,6 +28,7 @@ export function ReelActionsRail({
   showDisc = true,
   discUrl,
   onLike,
+  onLikesPress,
   onComment,
   onShare,
   onMore,
@@ -34,20 +36,28 @@ export function ReelActionsRail({
 }: Props) {
   return (
     <div className="reel-slide__actions">
-      <button
-        type="button"
-        className={`reel-slide__action${liked ? " reel-slide__action--liked" : ""}`}
-        disabled={likeBusy}
-        onClick={onLike}
-        aria-label="Like"
-      >
-        <span className="reel-slide__action-icon">
-          <ReelIcon name="heart" filled={liked} size={liked ? 24 : 22} color={liked ? "#c9ff35" : "#fff"} />
-        </span>
-        <span className={`reel-slide__action-count${liked ? " reel-slide__action-count--liked" : ""}`}>
+      <div className="reel-slide__action-stack">
+        <button
+          type="button"
+          className={`reel-slide__action${liked ? " reel-slide__action--liked" : ""}`}
+          disabled={likeBusy}
+          onClick={onLike}
+          aria-label="Like"
+        >
+          <span className="reel-slide__action-icon">
+            <ReelIcon name="heart" filled={liked} size={liked ? 24 : 22} color={liked ? "#c9ff35" : "#fff"} />
+          </span>
+        </button>
+        <button
+          type="button"
+          className={`reel-slide__action-count-btn${liked ? " reel-slide__action-count--liked" : ""}`}
+          disabled={!likes}
+          onClick={onLikesPress}
+          aria-label="View likes"
+        >
           {likes}
-        </span>
-      </button>
+        </button>
+      </div>
       <button type="button" className="reel-slide__action" onClick={onComment} aria-label="Comments">
         <span className="reel-slide__action-icon">
           <ReelIcon name="comment" size={22} />
