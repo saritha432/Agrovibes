@@ -89,6 +89,22 @@ export async function unlikeHomePost(token: string, postId: number) {
   )) as { liked: boolean; likesCount: number };
 }
 
+export async function saveHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/save`,
+    token,
+    { method: "POST" }
+  )) as { saved: boolean };
+}
+
+export async function unsaveHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unsave`,
+    token,
+    { method: "POST" }
+  )) as { saved: boolean };
+}
+
 export async function fetchUsers(
   token: string,
   params: { search?: string; limit?: number } = {}

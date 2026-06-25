@@ -18,31 +18,32 @@ function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
     case "home":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M9.005 22H4.75a.75.75 0 0 1-.75-.75V10.5a1 1 0 0 1 .3-.7l8.25-7.5a1 1 0 0 1 1.35 0l8.25 7.5a1 1 0 0 1 .3.7V21.25a.75.75 0 0 1-.75.75H15v-7.5a1.5 1.5 0 0 0-1.5-1.5h-3A1.5 1.5 0 0 0 9 13.75V22Z" />
+          <path d="m3.2 10.8 8.1-6.4a1.2 1.2 0 0 1 1.5 0l8.1 6.4M5.5 9.7V20a1 1 0 0 0 1 1h4.7v-5.2a1 1 0 0 1 1-1h0.6a1 1 0 0 1 1 1V21h4.7a1 1 0 0 0 1-1V9.7" />
         </svg>
       );
     case "search":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M19 10.5A8.5 8.5 0 1 1 10.5 2 8.5 8.5 0 0 1 19 10.5Zm-1.2 9.3 4.2 4.2" />
+          <path d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm5.7-2.3L21 21" />
         </svg>
       );
     case "drops":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M3 5.25A2.25 2.25 0 0 1 5.25 3h13.5A2.25 2.25 0 0 1 21 5.25v13.5A2.25 2.25 0 0 1 18.75 21H5.25A2.25 2.25 0 0 1 3 18.75V5.25Zm6 3 8 4.5-8 4.5V8.25Z" />
+          <path d="M3.5 6.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11Z" />
+          <path d="m10 9 5 3-5 3V9Z" />
         </svg>
       );
     case "messages":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M12 3a8.25 8.25 0 0 0-8.25 8.25c0 4.28 3.26 7.8 7.43 8.24L12 21l.82-1.51c4.17-.44 7.43-3.96 7.43-8.24A8.25 8.25 0 0 0 12 3Z" />
+          <path d="M12 4.2c-4.9 0-8.8 3.2-8.8 7.3 0 2.3 1.2 4.3 3.2 5.7v2.6a.6.6 0 0 0 1 .5l2.8-1.7c.6.1 1.2.2 1.8.2 4.9 0 8.8-3.2 8.8-7.3S16.9 4.2 12 4.2Z" />
         </svg>
       );
     case "profile":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
-          <path d="M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12Zm0 2.25c-3.04 0-9 1.52-9 4.53V21h18v-2.22c0-3.01-5.96-4.53-9-4.53Z" />
+          <path d="M12 13.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4Zm0 1.8c-4.7 0-8.2 2.3-8.2 4.8v.2h16.4v-.2c0-2.5-3.5-4.8-8.2-4.8Z" />
         </svg>
       );
     default:
@@ -58,7 +59,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar__inner">
         <NavLink to="/" className="sidebar__logo" end title="Cropvibe">
-          <img src="/cropvibe.png" alt="" className="sidebar__logo-icon" />
+          <img src="/cropvibefavicon.png" alt="" className="sidebar__logo-icon" />
           <img src="/logo-wordmark.png" alt="Cropvibe" className="sidebar__logo-wordmark" />
         </NavLink>
 

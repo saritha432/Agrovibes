@@ -3,7 +3,7 @@ import type { HomePost } from "../../api/types";
 import { ReelSlideShell } from "./ReelSlideShell";
 
 export function DropVideoSlide({ post, active }: { post: HomePost; active: boolean }) {
-  return <ReelSlideShell post={post} active={active} />;
+  return <ReelSlideShell post={post} active={active} sideComments />;
 }
 
 export function useDropFeedAutoplay(postCount: number, onActiveChange: (index: number) => void) {

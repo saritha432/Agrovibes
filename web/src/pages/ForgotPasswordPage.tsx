@@ -183,7 +183,29 @@ export function ForgotPasswordPage() {
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
-                  {showPassword ? "Hide" : "Show"}
+                  {showPassword ? (
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+                      <path
+                        d="M3 3l18 18M10.58 10.58A2 2 0 0010 12a2 2 0 003.42 1.42M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.11 11 7.5a11.8 11.8 0 01-3.04 4.36M6.23 6.23A11.77 11.77 0 001 11.5C2.73 15.89 7 19 12 19c1.61 0 3.14-.32 4.53-.9"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+                      <path
+                        d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Zm11-3.5A3.5 3.5 0 1012 15.5 3.5 3.5 0 0012 8.5Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
                 </button>
               </span>
             </label>
@@ -204,7 +226,29 @@ export function ForgotPasswordPage() {
                   onClick={() => setShowConfirm((v) => !v)}
                   aria-label={showConfirm ? "Hide password" : "Show password"}
                 >
-                  {showConfirm ? "Hide" : "Show"}
+                  {showConfirm ? (
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+                      <path
+                        d="M3 3l18 18M10.58 10.58A2 2 0 0010 12a2 2 0 003.42 1.42M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.11 11 7.5a11.8 11.8 0 01-3.04 4.36M6.23 6.23A11.77 11.77 0 001 11.5C2.73 15.89 7 19 12 19c1.61 0 3.14-.32 4.53-.9"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+                      <path
+                        d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Zm11-3.5A3.5 3.5 0 1012 15.5 3.5 3.5 0 0012 8.5Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
                 </button>
               </span>
             </label>

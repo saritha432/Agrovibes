@@ -15,7 +15,7 @@ export function LoginPage() {
   const location = useLocation();
   const resetState = location.state as { resetOk?: boolean; loginPhone?: string } | null;
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [loginId, setLoginId] = useState(() => resetState?.loginPhone || "");
+  const [loginMobile, setLoginMobile] = useState(() => resetState?.loginPhone || "");
   const [successText, setSuccessText] = useState(
     resetState?.resetOk ? "Password reset successfully. Log in with your new password." : ""
   );
@@ -32,6 +32,12 @@ export function LoginPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    const normalizedLoginPhone = mode === "login" ? normalizePhoneInput(loginMobile) : null;
+    if (mode === "login" && !normalizedLoginPhone) {
+      setError("Enter a valid 10-digit mobile number.");
+      return;
+    }
 
     if (password.trim().length < 6) {
       setError("Password must be at least 6 characters.");
@@ -58,7 +64,7 @@ export function LoginPage() {
     try {
       const res =
         mode === "login"
-          ? await authLogin({ identifier: loginId.trim(), password: password.trim() })
+          ? await authLogin({ identifier: normalizedLoginPhone!, password: password.trim() })
           : await authRegister({
               email: email.trim().toLowerCase(),
               password: password.trim(),
@@ -77,7 +83,7 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <img src="/cropvibe.png" alt="Cropvibe" className="login-card__logo" />
+        <img src="/logo-wordmark.png" alt="Cropvibe" className="login-card__logo login-card__logo--wordmark" />
         <h1 className="login-card__title">{mode === "login" ? "Log in" : "Create account"}</h1>
 
         {successText ? <p className="login-form__banner">{successText}</p> : null}
@@ -121,14 +127,16 @@ export function LoginPage() {
             </>
           ) : (
             <label className="login-form__label">
-              Email or mobile
+              Mobile
               <input
-                type="text"
-                placeholder="Email or mobile"
-                value={loginId}
-                onChange={(e) => setLoginId(e.target.value)}
+                type="tel"
+                inputMode="numeric"
+                placeholder="Mobile"
+                value={loginMobile}
+                onChange={(e) => setLoginMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                maxLength={10}
                 required
-                autoComplete="username"
+                autoComplete="tel"
               />
             </label>
           )}
@@ -154,15 +162,23 @@ export function LoginPage() {
                 {showPassword ? (
                   <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
                     <path
-                      fill="currentColor"
-                      d="M11.83 9 15 12.17V12a3 3 0 0 0-3-3h-.17M7.53 9.8 3 14.33 4.67 16l4.24-4.24-1.41-1.41L7.53 9.8M2.81 2.81 1.39 4.22l2.05 2.05C2.73 7.61 1 10.5 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l2.42 2.42 1.41-1.41L2.81 2.81M12 4.5c5 0 9.27 3.11 11 7.5-.64 1.63-1.56 3.09-2.7 4.31l1.41 1.41C22.27 15.39 23 13.76 23 12c-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-4 .71l1.55 1.55c.79-.15 1.6-.26 2.45-.26z"
+                      d="M3 3l18 18M10.58 10.58A2 2 0 0010 12a2 2 0 003.42 1.42M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.11 11 7.5a11.8 11.8 0 01-3.04 4.36M6.23 6.23A11.77 11.77 0 001 11.5C2.73 15.89 7 19 12 19c1.61 0 3.14-.32 4.53-.9"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
                   </svg>
                 ) : (
                   <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
                     <path
-                      fill="currentColor"
-                      d="M12 6.5c3.79 0 7.17 2.13 8.82 5.5-1.65 3.37-5.03 5.5-8.82 5.5S4.83 15.37 3.18 12C4.83 8.63 8.21 6.5 12 6.5m0-2C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 5a2.5 2.5 0 0 1 0 5 2.5 2.5 0 0 1 0-5m0-2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z"
+                      d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Zm11-3.5A3.5 3.5 0 1012 15.5 3.5 3.5 0 0012 8.5Z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
                   </svg>
                 )}
@@ -177,7 +193,7 @@ export function LoginPage() {
         </form>
 
         {mode === "login" ? (
-          <Link to="/forgot-password" className="login-card__toggle">
+          <Link to="/forgot-password" className="login-card__toggle login-card__toggle--left">
             Forgot password?
           </Link>
         ) : null}
@@ -190,6 +206,7 @@ export function LoginPage() {
             setError(null);
             setSuccessText("");
             setShowPassword(false);
+            setPassword("");
           }}
         >
           {mode === "login" ? "Create an account" : "Already have an account?"}

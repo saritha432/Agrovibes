@@ -110,10 +110,6 @@ export function EditProfilePage() {
         </div>
 
         <label>
-          Avatar URL
-          <input value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://…" />
-        </label>
-        <label>
           Full name
           <input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
         </label>
