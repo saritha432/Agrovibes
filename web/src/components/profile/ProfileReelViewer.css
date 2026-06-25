@@ -40,6 +40,12 @@
   scroll-snap-type: y mandatory;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.profile-reel-viewer__scroller::-webkit-scrollbar {
+  display: none;
 }
 
 .profile-reel-viewer__slide-wrap {

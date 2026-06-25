@@ -1,63 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { HomePost } from "../../api/types";
-import { resolveWebVideoUrl } from "../../utils/videoUrl";
+import { ReelSlideShell } from "../feed/ReelSlideShell";
 import "./ProfileReelViewer.css";
-
-function reelCaption(caption?: string | null) {
-  return String(caption || "")
-    .replace(/^\[REEL\]\s*/i, "")
-    .trim();
-}
-
-function ProfileReelSlide({ post, active }: { post: HomePost; active: boolean }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const src = resolveWebVideoUrl(post.videoUrl);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !src) return;
-    if (active) {
-      el.muted = false;
-      void el.play().catch(() => {
-        el.muted = true;
-        void el.play().catch(() => {});
-      });
-    } else {
-      el.pause();
-    }
-  }, [active, src]);
-
-  const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
-
-  return (
-    <section className="profile-reel-viewer__slide">
-      {src ? (
-        <video
-          ref={videoRef}
-          className="profile-reel-viewer__video"
-          src={src}
-          poster={poster}
-          playsInline
-          loop
-          onClick={() => {
-            const el = videoRef.current;
-            if (!el) return;
-            el.muted = false;
-            if (el.paused) void el.play();
-            else el.pause();
-          }}
-        />
-      ) : (
-        <div className="profile-reel-viewer__missing">Video unavailable</div>
-      )}
-      <div className="profile-reel-viewer__meta">
-        <strong>{post.userName}</strong>
-        {reelCaption(post.caption) ? <p>{reelCaption(post.caption)}</p> : null}
-      </div>
-    </section>
-  );
-}
 
 function ProfileReelViewerContent({
   posts,
@@ -125,7 +70,7 @@ function ProfileReelViewerContent({
       <div ref={scrollerRef} className="profile-reel-viewer__scroller">
         {posts.map((post, index) => (
           <div key={post.id} className="profile-reel-viewer__slide-wrap" data-index={index}>
-            <ProfileReelSlide post={post} active={index === activeIndex} />
+            <ReelSlideShell post={post} active={index === activeIndex} />
           </div>
         ))}
       </div>

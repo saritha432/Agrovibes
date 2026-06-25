@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { authLogin, authRegister } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
 import "./LoginPage.css";
@@ -12,13 +12,17 @@ function normalizePhoneInput(raw: string) {
 
 export function LoginPage() {
   const { token, signIn, loading } = useAuth();
+  const location = useLocation();
+  const resetState = location.state as { resetOk?: boolean; loginPhone?: string } | null;
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [loginId, setLoginId] = useState("");
+  const [loginId, setLoginId] = useState(() => resetState?.loginPhone || "");
+  const [successText, setSuccessText] = useState(
+    resetState?.resetOk ? "Password reset successfully. Log in with your new password." : ""
+  );
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -37,10 +41,6 @@ export function LoginPage() {
     if (mode === "register") {
       if (!fullName.trim()) {
         setError("Name is required.");
-        return;
-      }
-      if (!username.trim()) {
-        setError("Username is required.");
         return;
       }
       if (!email.trim()) {
@@ -63,7 +63,6 @@ export function LoginPage() {
               email: email.trim().toLowerCase(),
               password: password.trim(),
               fullName: fullName.trim(),
-              username: username.trim().toLowerCase(),
               phone: normalizePhoneInput(phone)!,
               role: "student"
             });
@@ -81,6 +80,8 @@ export function LoginPage() {
         <img src="/cropvibe.png" alt="Cropvibe" className="login-card__logo" />
         <h1 className="login-card__title">{mode === "login" ? "Log in" : "Create account"}</h1>
 
+        {successText ? <p className="login-form__banner">{successText}</p> : null}
+
         <form onSubmit={onSubmit} className="login-form">
           {mode === "register" ? (
             <>
@@ -93,17 +94,6 @@ export function LoginPage() {
                   onChange={(e) => setFullName(e.target.value)}
                   required
                   autoComplete="name"
-                />
-              </label>
-              <label className="login-form__label">
-                Username
-                <input
-                  type="text"
-                  placeholder="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, ""))}
-                  required
-                  autoComplete="username"
                 />
               </label>
               <label className="login-form__label">
@@ -131,10 +121,10 @@ export function LoginPage() {
             </>
           ) : (
             <label className="login-form__label">
-              Email, username, or mobile
+              Email or mobile
               <input
                 type="text"
-                placeholder="Email, username, or mobile"
+                placeholder="Email or mobile"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
                 required
@@ -186,12 +176,19 @@ export function LoginPage() {
           </button>
         </form>
 
+        {mode === "login" ? (
+          <Link to="/forgot-password" className="login-card__toggle">
+            Forgot password?
+          </Link>
+        ) : null}
+
         <button
           type="button"
           className="login-card__toggle"
           onClick={() => {
             setMode(mode === "login" ? "register" : "login");
             setError(null);
+            setSuccessText("");
             setShowPassword(false);
           }}
         >

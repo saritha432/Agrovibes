@@ -1,26 +1,76 @@
-import { API_BASE_URL, fetchWithAuth, parseJsonOrThrow } from "./client";
+import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
 import type { NetworkPerson } from "./profile";
 import type { HomePost, HomeStory, UserSearchRecord } from "./types";
 
+export type HomeComment = {
+  id: string;
+  user: string;
+  text: string;
+  likes: number;
+  avatarUrl?: string | null;
+  createdAt?: string;
+  parentCommentId?: string;
+  userId?: number;
+};
+
 export async function fetchHomeStories() {
-  const response = await fetch(`${API_BASE_URL}/v1/home/stories`);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`);
   return (await parseJsonOrThrow(response)) as { stories: HomeStory[] };
 }
 
 export async function fetchHomePosts(token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts`, { headers });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts`, { headers });
   return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+}
+
+export async function fetchMyHomePosts(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
 }
 
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, {
-    headers
-  });
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`,
+    { headers }
+  );
   return (await parseJsonOrThrow(response)) as { post: HomePost };
+}
+
+export async function fetchHomePostComments(postId: number, token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`,
+    { headers }
+  );
+  return (await parseJsonOrThrow(response)) as { comments: HomeComment[] };
+}
+
+export async function createHomePostComment(
+  token: string,
+  postId: number,
+  text: string,
+  options?: { parentCommentId?: number | null }
+) {
+  const body: { text: string; parentCommentId?: number } = { text };
+  if (options?.parentCommentId != null && Number.isFinite(options.parentCommentId) && options.parentCommentId > 0) {
+    body.parentCommentId = Number(options.parentCommentId);
+  }
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/comments`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  )) as {
+    comment: HomeComment;
+    commentsCount: number;
+  };
 }
 
 export async function likeHomePost(token: string, postId: number) {

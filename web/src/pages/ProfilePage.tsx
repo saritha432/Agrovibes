@@ -1,26 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { fetchHomePosts, fetchSocialNetwork, sendFollowRequest } from "../api/home";
+import { fetchMyHomePosts, fetchSocialNetwork, sendFollowRequest } from "../api/home";
 import type { HomePost } from "../api/types";
 import {
   fetchProfileStats,
   fetchSavedHomePosts,
   fetchTaggedHomePosts,
   removeFollower,
+  respondToFollowRequest,
   unfollowUser,
   type NetworkPerson
 } from "../api/profile";
+import { deleteHomePost } from "../api/posts";
+import { getWebAppOrigin } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ProfileGalleryIcon, PROFILE_GALLERY_TABS } from "../components/profile/ProfileGalleryIcons";
 import { ProfileGridTile } from "../components/profile/ProfileGridTile";
 import { ProfileReelViewer } from "../components/profile/ProfileReelViewer";
 import {
-  displayHandle,
   filterUserPosts,
   locationDisplay,
   parsePersonUserId,
   reelGridStillUri,
-  roleLabel,
   userInitials,
   visibleGalleryPosts,
   type GalleryTab
@@ -41,10 +42,12 @@ export function ProfilePage() {
   const [followingMenuFor, setFollowingMenuFor] = useState<string | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<NetworkPerson | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
-  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Reels");
+  const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>("Posts");
+  const [postsStat, setPostsStat] = useState(0);
   const [reelViewerIndex, setReelViewerIndex] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const loadPosts = useCallback(async () => {
     if (!token) {
@@ -55,7 +58,7 @@ export function ProfilePage() {
     }
     try {
       const [homeData, savedData, taggedData] = await Promise.all([
-        fetchHomePosts(token),
+        fetchMyHomePosts(token),
         fetchSavedHomePosts(token),
         fetchTaggedHomePosts(token)
       ]);
@@ -85,6 +88,7 @@ export function ProfilePage() {
       ]);
       setFollowersCount(Number(stats.followersCount || 0));
       setFollowingCount(Number(stats.followingCount || 0));
+      setPostsStat(Number(stats.postsCount || 0));
       setFollowersList(network.followers || []);
       setFollowingList(network.following || []);
     } catch {
@@ -118,7 +122,35 @@ export function ProfilePage() {
   const isReelTab =
     activeGalleryTab === "Reels" || activeGalleryTab === "Saved" || activeGalleryTab === "Tagged";
 
-  const postsStat = userPosts.length;
+  const postsStatDisplay = Math.max(postsStat, userPosts.length);
+
+  const confirmDeletePost = async (post: HomePost) => {
+    if (!token) return;
+    if (!window.confirm("Delete this post from your profile?")) return;
+    try {
+      await deleteHomePost(token, post.id);
+      await loadPosts();
+      await refreshStats();
+    } catch {
+      window.alert("Could not delete post.");
+    }
+  };
+
+  const shareProfile = async () => {
+    if (!user) return;
+    const url = `${getWebAppOrigin()}/profile`;
+    const text = `Check out ${user.fullName} on Cropvibe — ${url}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `${user.fullName} - Cropvibe`, text, url });
+      } else {
+        await navigator.clipboard.writeText(text);
+        window.alert("Profile link copied.");
+      }
+    } catch {
+      // user cancelled share
+    }
+  };
 
   const singleGridVideoPreviewId = useMemo(() => {
     if (!isReelTab) return null;
@@ -142,12 +174,10 @@ export function ProfilePage() {
     );
   }
 
-  const handle = displayHandle(user);
   const initials = userInitials(user.fullName);
-  const bioText =
-    user.bio?.trim() ||
-    `${user.fullName} — growing and trading fresh produce. Share tips and connect with the community.`;
+  const bioText = user.bio?.trim() || "";
   const isInstructor = user.role === "instructor" || user.role === "admin";
+  const headerTitle = user.username || user.fullName;
 
   const personRowId = (p: NetworkPerson) => `${String(p.key || "").toLowerCase()}::${p.name}`;
 
@@ -174,6 +204,28 @@ export function ProfilePage() {
     }
   };
 
+  const onAcceptFollow = async (person: NetworkPerson) => {
+    const targetId = parsePersonUserId(person);
+    if (!token || !targetId) return;
+    try {
+      await respondToFollowRequest(token, targetId, "accept");
+      await refreshStats();
+    } catch {
+      // ignore
+    }
+  };
+
+  const onDeclineFollow = async (person: NetworkPerson) => {
+    const targetId = parsePersonUserId(person);
+    if (!token || !targetId) return;
+    try {
+      await respondToFollowRequest(token, targetId, "decline");
+      await refreshStats();
+    } catch {
+      // ignore
+    }
+  };
+
   const onRemoveFollower = async (person: NetworkPerson) => {
     const targetId = parsePersonUserId(person);
     if (!token || !targetId) return;
@@ -189,32 +241,57 @@ export function ProfilePage() {
     }
   };
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = () => setMenuOpen(false);
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [menuOpen]);
+
   const activeList = activeListType === "followers" ? followersList : followingList;
 
   return (
     <div className={`profile-page${reelViewerIndex != null ? " profile-page--reel-open" : ""}`}>
       <header className="profile-topbar">
-        <Link to="/search" className="profile-topbar__btn" aria-label="Search">
-          ⌕
-        </Link>
+        <span className="profile-topbar__spacer" aria-hidden />
+        <h1 className="profile-topbar__title">{headerTitle}</h1>
+        <div className="profile-topbar__menu-wrap">
+          <button
+            type="button"
+            className="profile-topbar__menu"
+            aria-label="Menu"
+            aria-expanded={menuOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+          >
+            <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
+          </button>
+          {menuOpen ? (
+            <div className="profile-topbar__dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
+              <Link to="/profile/edit" role="menuitem" onClick={() => setMenuOpen(false)}>
+                Edit profile
+              </Link>
+              <button type="button" role="menuitem" onClick={() => void signOut()}>
+                Log out
+              </button>
+            </div>
+          ) : null}
+        </div>
       </header>
 
       <section className="profile-card">
-        <p className="profile-card__handle">{handle}</p>
-
         <div className="profile-card__mid">
           <div className="profile-card__avatar-wrap">
             <span className="profile-card__avatar">
               {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials}
             </span>
-            <span className="profile-card__shield" aria-hidden>
-              ✓
-            </span>
           </div>
 
           <div className="profile-card__stats">
             <div className="profile-card__stat">
-              <strong>{postsStat}</strong>
+              <strong>{postsStatDisplay}</strong>
               <span>Posts</span>
             </div>
             <button
@@ -236,35 +313,18 @@ export function ProfilePage() {
           </div>
         </div>
 
-        <div className="profile-card__name-row">
-          <h1>{user.fullName}</h1>
-          <span className="profile-card__kyc">✓ KYC Verified</span>
-        </div>
-
-        <p className="profile-card__role">
-          {roleLabel(user.role)} <span aria-hidden>🌾</span>
-        </p>
-        <p className="profile-card__bio">{bioText}</p>
+        {bioText ? <p className="profile-card__bio">{bioText}</p> : null}
         {user.website ? <p className="profile-card__website">{user.website}</p> : null}
-        <p className="profile-card__location">📍 {locationDisplay(user.locationLabel)}</p>
-
-        <div className="profile-card__rating">
-          <span className="profile-card__stars" aria-hidden>
-            ★★★★☆
-          </span>
-          <span>4.8</span>
-        </div>
+        {user.locationLabel?.trim() ? (
+          <p className="profile-card__location">{locationDisplay(user.locationLabel)}</p>
+        ) : null}
 
         <div className="profile-card__actions">
-          <Link to="/profile/edit" className="profile-card__edit">
-            ✎ Edit Profile
+          <Link to="/profile/edit" className="profile-card__action-btn">
+            Edit Profile
           </Link>
-          <button
-            type="button"
-            className="profile-card__share"
-            onClick={() => window.alert("Share coming soon.")}
-          >
-            ↗
+          <button type="button" className="profile-card__action-btn" onClick={() => void shareProfile()}>
+            Share Profile
           </button>
         </div>
 
@@ -277,10 +337,6 @@ export function ProfilePage() {
             Instructor Studio →
           </button>
         ) : null}
-
-        <button type="button" className="profile-card__logout" onClick={() => void signOut()}>
-          Log out
-        </button>
       </section>
 
       <section className="profile-gallery">
@@ -309,7 +365,7 @@ export function ProfilePage() {
               {activeGalleryTab === "Tagged"
                 ? "No tagged posts yet."
                 : activeGalleryTab === "Saved"
-                  ? "Saved reels will appear here."
+                  ? "Saved drops will appear here."
                   : "No posts in this tab yet."}
             </p>
           ) : null}
@@ -324,6 +380,11 @@ export function ProfilePage() {
                 setReelViewerIndex(ix >= 0 ? ix : 0);
               }}
               onOpenImage={() => setActiveImagePost(post)}
+              onDelete={
+                activeGalleryTab === "Posts" || activeGalleryTab === "Reels"
+                  ? () => void confirmDeletePost(post)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -383,6 +444,16 @@ export function ProfilePage() {
                               >
                                 Message
                               </button>
+                            ) : null}
+                            {person.viewerStatus === "pending" && activeListType === "followers" ? (
+                              <>
+                                <button type="button" onClick={() => void onAcceptFollow(person)}>
+                                  Confirm
+                                </button>
+                                <button type="button" onClick={() => void onDeclineFollow(person)}>
+                                  Delete
+                                </button>
+                              </>
                             ) : null}
                             {person.canFollowBack && person.viewerStatus === "none" ? (
                               <button type="button" onClick={() => void onFollowBack(person)}>

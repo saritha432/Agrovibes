@@ -1,68 +1,86 @@
-.reels-page {
+.drops-page {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   display: flex;
   justify-content: center;
-  min-height: calc(100vh - 96px);
+  background: #000;
 }
 
-.reels-page__status {
+.drops-page__status {
   color: var(--text-muted);
   text-align: center;
   padding: 48px;
+  margin: auto;
 }
 
-.reels-page__viewer {
+.drops-feed {
   width: 100%;
-  max-width: 400px;
-  border-radius: 16px;
-  overflow: hidden;
+  max-width: 480px;
+  height: 100%;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
   background: #000;
-  border: 1px solid var(--border);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.drops-feed::-webkit-scrollbar {
+  display: none;
+}
+
+.drops-feed__slide-wrap {
+  height: 100%;
+  min-height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+/* Explore grid (search page) */
+.explore-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+}
+
+.explore-grid__tile {
   position: relative;
-}
-
-.reels-page__video {
-  width: 100%;
   aspect-ratio: 9 / 16;
-  max-height: min(80vh, 720px);
-  object-fit: contain;
-  background: #000;
-}
-
-.reels-page__meta {
-  padding: 14px 16px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 48px;
-  color: #fff;
-}
-
-.reels-page__meta p {
-  margin: 6px 0 0;
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.reels-page__nav {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.6);
-}
-
-.reels-page__nav button {
-  width: 40px;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  background: transparent;
-  color: #fff;
+  border: none;
+  padding: 0;
   cursor: pointer;
+  overflow: hidden;
+  background: #303132;
 }
 
-.reels-page__nav button:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.explore-grid__tile img,
+.explore-grid__tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.explore-grid__play {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+}
+
+.explore-grid__empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 48px 16px;
 }

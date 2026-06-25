@@ -1,6 +1,6 @@
 .profile-page {
   width: 100%;
-  max-width: 470px;
+  max-width: 430px;
   margin: 0 auto;
   padding-bottom: 48px;
 }
@@ -10,24 +10,82 @@
 }
 
 .profile-topbar {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: 34px 1fr 34px;
+  align-items: center;
+  gap: 8px;
   padding: 8px 4px 12px;
+  min-height: 48px;
 }
 
-.profile-topbar__btn {
-  color: var(--accent);
-  font-size: 22px;
+.profile-topbar__spacer {
+  width: 34px;
+}
+
+.profile-topbar__title {
+  margin: 0;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-topbar__menu-wrap {
+  position: relative;
+  justify-self: end;
+}
+
+.profile-topbar__menu {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.profile-topbar__dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  background: #303132;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  overflow: hidden;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.profile-topbar__dropdown a,
+.profile-topbar__dropdown button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  color: #fff;
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
   text-decoration: none;
-  line-height: 1;
+  cursor: pointer;
+}
+
+.profile-topbar__dropdown a:hover,
+.profile-topbar__dropdown button:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .profile-card {
-  background: #111418;
-  border: 1px solid #303842;
-  border-radius: 18px;
-  padding: 14px;
-  margin-bottom: 16px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0 16px 16px;
+  margin-bottom: 8px;
 }
 
 .profile-card__handle {
@@ -189,30 +247,24 @@
   gap: 8px;
 }
 
-.profile-card__edit {
+.profile-card__action-btn {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 11px 10px;
-  border-radius: 12px;
-  background: var(--accent);
-  color: #111;
-  font-weight: 900;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: #383838;
+  color: #fff;
+  font-weight: 700;
   font-size: 14px;
   text-decoration: none;
+  cursor: pointer;
 }
 
-.profile-card__share {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  border: 1px solid #303842;
-  background: #1d2126;
-  color: var(--text);
-  font-size: 18px;
-  cursor: pointer;
+.profile-card__action-btn:hover {
+  background: #424242;
 }
 
 .profile-card__studio {
