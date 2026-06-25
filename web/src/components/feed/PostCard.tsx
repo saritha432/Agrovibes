@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { likeHomePost, unlikeHomePost } from "../../api/home";
+import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { dropCaption, isDropPost } from "../../utils/feedOrder";
@@ -8,6 +8,7 @@ import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostMediaCarousel } from "./PostMediaCarousel";
 import { ReelIcon } from "./ReelIcon";
+import { ReelLikeBurst } from "./ReelLikeBurst";
 import "./PostCard.css";
 
 function isReel(post: HomePost) {
@@ -30,14 +31,19 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   const { token } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
+  const reelTapTimeoutRef = useRef<number | null>(null);
   const [liked, setLiked] = useState(!!post.viewerHasLiked);
   const [likes, setLikes] = useState(post.likesCount);
   const [commentsCount, setCommentsCount] = useState(post.commentsCount);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
   const [inView, setInView] = useState(false);
   const [muted, setMuted] = useState(true);
   const [reelViewerOpen, setReelViewerOpen] = useState(false);
+  const [openCommentsInViewer, setOpenCommentsInViewer] = useState(false);
+  const [saved, setSaved] = useState(!!post.viewerHasSaved);
+  const [likeBurst, setLikeBurst] = useState(0);
 
   const images = galleryUrls(post);
   const videoSrc = resolveWebVideoUrl(post.videoUrl);
@@ -65,6 +71,10 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   }, [videoSrc]);
 
   useEffect(() => {
+    setSaved(!!post.viewerHasSaved);
+  }, [post.viewerHasSaved, post.id]);
+
+  useEffect(() => {
     const el = videoRef.current;
     if (!el || !videoSrc) return;
 
@@ -80,6 +90,15 @@ export function PostCard({ post, reelPosts = [] }: Props) {
       if (!reel) el.currentTime = 0;
     }
   }, [inView, videoSrc, muted, reel]);
+
+  useEffect(() => {
+    return () => {
+      if (reelTapTimeoutRef.current) {
+        window.clearTimeout(reelTapTimeoutRef.current);
+        reelTapTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const toggleLike = async () => {
     if (!token || busy) return;
@@ -108,17 +127,65 @@ export function PostCard({ post, reelPosts = [] }: Props) {
       if (navigator.share) {
         await navigator.share({ title: "Cropvibe", text, url });
       } else {
-        await navigator.clipboard.writeText(url);
-        window.alert("Link copied.");
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url);
+          window.alert("Link copied.");
+        } else {
+          window.prompt("Copy this link:", url);
+        }
       }
     } catch {
-      // cancelled
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(url);
+          window.alert("Link copied.");
+        } catch {
+          window.prompt("Copy this link:", url);
+        }
+      } else {
+        window.prompt("Copy this link:", url);
+      }
+    }
+  };
+
+  const toggleSave = async () => {
+    if (!token || saveBusy) return;
+    const nextSaved = !saved;
+    setSaveBusy(true);
+    setSaved(nextSaved);
+    try {
+      const res = nextSaved ? await saveHomePost(token, post.id) : await unsaveHomePost(token, post.id);
+      setSaved(!!res.saved);
+    } catch {
+      setSaved(!nextSaved);
+      window.alert("Could not update saved posts. Please try again.");
+    } finally {
+      setSaveBusy(false);
     }
   };
 
   const openReelFullscreen = () => {
     if (!reel || !videoSrc) return;
+    setOpenCommentsInViewer(false);
     setReelViewerOpen(true);
+  };
+
+  const likeFromDoubleTap = async () => {
+    setLikeBurst((n) => n + 1);
+    if (!token || liked || busy) return;
+    await toggleLike();
+  };
+
+  const openComments = () => {
+    if (typeof window !== "undefined" && window.location.pathname === "/") {
+      window.dispatchEvent(
+        new CustomEvent("cropvibe:open-right-comments", {
+          detail: { postId: post.id, commentsCount }
+        })
+      );
+      return;
+    }
+    setCommentsOpen(true);
   };
 
   return (
@@ -133,25 +200,49 @@ export function PostCard({ post, reelPosts = [] }: Props) {
         </span>
         <div className="post-card__meta">
           <strong>{post.userName}</strong>
-          {post.location ? <span>{post.location}</span> : null}
+          {post.location && post.location.trim().toLowerCase() !== "unknown" ? <span>{post.location}</span> : null}
         </div>
       </header>
 
       <div
         ref={mediaRef}
         className={`post-card__media${reel ? " post-card__media--reel" : ""}`}
-        onDoubleClick={reel ? openReelFullscreen : undefined}
+        onClick={
+          reel
+            ? () => {
+                if (reelTapTimeoutRef.current) window.clearTimeout(reelTapTimeoutRef.current);
+                reelTapTimeoutRef.current = window.setTimeout(() => {
+                  reelTapTimeoutRef.current = null;
+                  openReelFullscreen();
+                }, 220);
+              }
+            : undefined
+        }
+        onDoubleClick={
+          reel
+            ? () => {
+                if (reelTapTimeoutRef.current) {
+                  window.clearTimeout(reelTapTimeoutRef.current);
+                  reelTapTimeoutRef.current = null;
+                }
+                void likeFromDoubleTap();
+              }
+            : undefined
+        }
       >
         {videoSrc ? (
-          <video
-            ref={videoRef}
-            src={videoSrc}
-            poster={poster}
-            playsInline
-            loop
-            muted={muted}
-            className="post-card__video"
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={videoSrc}
+              poster={poster}
+              playsInline
+              loop
+              muted={muted}
+              className="post-card__video"
+            />
+            {reel ? <ReelLikeBurst postId={post.id} trigger={likeBurst} /> : null}
+          </>
         ) : images.length ? (
           <PostMediaCarousel urls={images} />
         ) : (
@@ -172,7 +263,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => setCommentsOpen(true)}
+            onClick={openComments}
             className="post-card__comment-btn"
             aria-label="Comments"
           >
@@ -182,8 +273,15 @@ export function PostCard({ post, reelPosts = [] }: Props) {
             <ReelIcon name="share" size={22} color="currentColor" />
           </button>
         </div>
-        <button type="button" className="post-card__save-btn" aria-label="Save" disabled>
-          <ReelIcon name="bookmark" size={22} color="currentColor" />
+        <button
+          type="button"
+          className="post-card__save-btn"
+          aria-label={saved ? "Remove from saved" : "Save"}
+          aria-pressed={saved}
+          disabled={!token || saveBusy}
+          onClick={() => void toggleSave()}
+        >
+          <ReelIcon name="bookmark" size={22} color={saved ? "#c9ff35" : "currentColor"} />
         </button>
       </div>
 
@@ -196,7 +294,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
       ) : null}
 
       {commentsCount > 0 ? (
-        <button type="button" className="post-card__view-comments" onClick={() => setCommentsOpen(true)}>
+        <button type="button" className="post-card__view-comments" onClick={openComments}>
           View all {commentsCount} comments
         </button>
       ) : null}
@@ -214,7 +312,11 @@ export function PostCard({ post, reelPosts = [] }: Props) {
         <ProfileReelViewer
           posts={reelList}
           initialIndex={reelIndex >= 0 ? reelIndex : 0}
-          onClose={() => setReelViewerOpen(false)}
+          initialCommentsPostId={openCommentsInViewer ? post.id : null}
+          onClose={() => {
+            setReelViewerOpen(false);
+            setOpenCommentsInViewer(false);
+          }}
         />
       ) : null}
     </article>

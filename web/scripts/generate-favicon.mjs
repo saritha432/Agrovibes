@@ -15,6 +15,9 @@ if (!existsSync(sourcePath)) {
 const input = readFileSync(sourcePath);
 
 async function toCircularPng(size) {
+  const zoom = 1.35;
+  const zoomed = Math.round(size * zoom);
+  const offset = Math.max(0, Math.floor((zoomed - size) / 2));
   const circleMask = Buffer.from(
     `<svg width="${size}" height="${size}">
       <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/>
@@ -22,7 +25,8 @@ async function toCircularPng(size) {
   );
 
   return sharp(input)
-    .resize(size, size, { fit: "cover", position: "centre" })
+    .resize(zoomed, zoomed, { fit: "cover", position: "centre" })
+    .extract({ left: offset, top: offset, width: size, height: size })
     .ensureAlpha()
     .composite([{ input: circleMask, blend: "dest-in" }])
     .png()

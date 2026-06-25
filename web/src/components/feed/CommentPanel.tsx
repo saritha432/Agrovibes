@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   createHomePostComment,
   fetchHomePostComments,
@@ -12,9 +13,20 @@ type Props = {
   commentsCount: number;
   onClose: () => void;
   onCountChange: (count: number) => void;
+  portal?: boolean;
+  sidecar?: boolean;
+  inline?: boolean;
 };
 
-export function CommentPanel({ postId, commentsCount, onClose, onCountChange }: Props) {
+export function CommentPanel({
+  postId,
+  commentsCount,
+  onClose,
+  onCountChange,
+  portal = true,
+  sidecar = false,
+  inline = false
+}: Props) {
   const { token, user } = useAuth();
   const [comments, setComments] = useState<HomeComment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,10 +68,17 @@ export function CommentPanel({ postId, commentsCount, onClose, onCountChange }: 
     }
   };
 
-  return (
-    <div className="comment-panel" role="dialog" aria-modal="true" aria-label="Comments">
-      <button type="button" className="comment-panel__backdrop" onClick={onClose} aria-label="Close" />
-      <div className="comment-panel__sheet">
+  const content = (
+    <div
+      className={`comment-panel${sidecar ? " comment-panel--sidecar" : ""}${inline ? " comment-panel--inline" : ""}`}
+      role="dialog"
+      aria-modal={sidecar || inline ? undefined : "true"}
+      aria-label="Comments"
+    >
+      {!sidecar && !inline ? (
+        <button type="button" className="comment-panel__backdrop" onClick={onClose} aria-label="Close" />
+      ) : null}
+      <div className={`comment-panel__sheet${inline ? " comment-panel__sheet--inline" : ""}`}>
         <header className="comment-panel__head">
           <strong>Comments</strong>
           <span>{commentsCount}</span>
@@ -112,4 +131,7 @@ export function CommentPanel({ postId, commentsCount, onClose, onCountChange }: 
       </div>
     </div>
   );
+
+  if (!portal || inline || typeof document === "undefined") return content;
+  return createPortal(content, document.body);
 }

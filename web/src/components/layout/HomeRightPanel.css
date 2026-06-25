@@ -171,3 +171,42 @@
   letter-spacing: 0;
   font-size: 12px;
 }
+
+.right-panel__comments-head {
+  margin-bottom: 10px;
+}
+
+.right-panel__comments-back {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.right-panel--comments {
+  width: min(520px, 42vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: 12px 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel__comments-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.right-panel--comments .comment-panel--inline {
+  height: 100%;
+  display: flex !important;
+}
+
+.right-panel--comments .comment-panel--inline .comment-panel__sheet--inline {
+  height: 100%;
+  max-height: none;
+  border-radius: 14px;
+}

@@ -7,10 +7,12 @@ import "./ProfileReelViewer.css";
 function ProfileReelViewerContent({
   posts,
   initialIndex,
+  initialCommentsPostId,
   onClose
 }: {
   posts: HomePost[];
   initialIndex: number;
+  initialCommentsPostId?: number | null;
   onClose: () => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -70,7 +72,12 @@ function ProfileReelViewerContent({
       <div ref={scrollerRef} className="profile-reel-viewer__scroller">
         {posts.map((post, index) => (
           <div key={post.id} className="profile-reel-viewer__slide-wrap" data-index={index}>
-            <ReelSlideShell post={post} active={index === activeIndex} />
+            <ReelSlideShell
+              post={post}
+              active={index === activeIndex}
+              sideComments
+              initialCommentsOpen={post.id === initialCommentsPostId}
+            />
           </div>
         ))}
       </div>
@@ -81,15 +88,22 @@ function ProfileReelViewerContent({
 export function ProfileReelViewer({
   posts,
   initialIndex,
+  initialCommentsPostId,
   onClose
 }: {
   posts: HomePost[];
   initialIndex: number;
+  initialCommentsPostId?: number | null;
   onClose: () => void;
 }) {
   if (typeof document === "undefined") return null;
   return createPortal(
-    <ProfileReelViewerContent posts={posts} initialIndex={initialIndex} onClose={onClose} />,
+    <ProfileReelViewerContent
+      posts={posts}
+      initialIndex={initialIndex}
+      initialCommentsPostId={initialCommentsPostId}
+      onClose={onClose}
+    />,
     document.body
   );
 }

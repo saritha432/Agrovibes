@@ -13,6 +13,7 @@ type Props = {
   onLike: () => void;
   onComment: () => void;
   onShare: () => void;
+  onMore?: () => void;
   onMute?: () => void;
 };
 
@@ -28,6 +29,7 @@ export function ReelActionsRail({
   onLike,
   onComment,
   onShare,
+  onMore,
   onMute
 }: Props) {
   return (
@@ -57,7 +59,7 @@ export function ReelActionsRail({
           <ReelIcon name="share" size={22} />
         </span>
       </button>
-      <button type="button" className="reel-slide__action" aria-label="More" disabled>
+      <button type="button" className="reel-slide__action" aria-label="More" onClick={onMore}>
         <span className="reel-slide__action-icon">
           <ReelIcon name="more" size={22} />
         </span>

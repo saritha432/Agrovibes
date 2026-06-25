@@ -18,10 +18,16 @@
 }
 
 .login-card__logo {
-  width: 72px;
-  height: 72px;
+  width: 92px;
+  height: 92px;
   object-fit: contain;
   margin-bottom: 16px;
+}
+
+.login-card__logo--wordmark {
+  width: min(260px, 100%);
+  height: auto;
+  max-height: 72px;
 }
 
 .login-card__title {
@@ -209,4 +215,10 @@
   color: var(--accent);
   cursor: pointer;
   font-size: 13px;
+}
+
+.login-card__toggle--left {
+  display: block;
+  width: 100%;
+  text-align: left;
 }

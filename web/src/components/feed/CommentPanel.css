@@ -1,10 +1,12 @@
 .comment-panel {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 12000;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
 .comment-panel__backdrop {
@@ -17,13 +19,19 @@
 
 .comment-panel__sheet {
   position: relative;
-  width: min(480px, 100%);
-  max-height: 70vh;
+  width: min(720px, 100%);
+  max-height: 78vh;
   background: #1a1a1a;
-  border-radius: 16px 16px 0 0;
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
   border: 1px solid #333;
+}
+
+.comment-panel__sheet--inline {
+  width: 100%;
+  max-height: none;
+  height: 100%;
 }
 
 .comment-panel__head {
@@ -122,4 +130,45 @@
   color: #f87171;
   text-align: center;
   padding: 8px;
+}
+
+.comment-panel--sidecar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--comment-side-width, 390px);
+  padding: 0;
+  display: block;
+  z-index: 4;
+}
+
+.comment-panel--sidecar .comment-panel__sheet {
+  width: 100%;
+  max-height: none;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+  border-left: 1px solid #333;
+  background: #111318;
+}
+
+.comment-panel--inline {
+  position: static !important;
+  inset: auto !important;
+  z-index: auto;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  display: block !important;
+  align-items: unset;
+  justify-content: unset;
+  box-sizing: border-box;
+}
+
+.comment-panel--inline .comment-panel__sheet {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0;
 }

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { fetchUsers, sendFollowRequest } from "../../api/home";
 import type { UserSearchRecord } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { CommentPanel } from "../feed/CommentPanel";
 import "./HomeRightPanel.css";
 
 function displayHandle(user: { username?: string | null; fullName: string }) {
@@ -46,6 +47,7 @@ export function HomeRightPanel() {
   const [suggestions, setSuggestions] = useState<UserSearchRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [activeComments, setActiveComments] = useState<{ postId: number; commentsCount: number } | null>(null);
 
   const loadSuggestions = useCallback(async () => {
     if (authLoading) return;
@@ -71,6 +73,20 @@ export function HomeRightPanel() {
     void loadSuggestions();
   }, [loadSuggestions]);
 
+  useEffect(() => {
+    const onOpenComments = (evt: Event) => {
+      const data = (evt as CustomEvent<{ postId?: number; commentsCount?: number }>).detail;
+      const postId = Number(data?.postId);
+      if (!Number.isFinite(postId) || postId <= 0) return;
+      setActiveComments({
+        postId,
+        commentsCount: Number.isFinite(Number(data?.commentsCount)) ? Number(data?.commentsCount) : 0
+      });
+    };
+    window.addEventListener("cropvibe:open-right-comments", onOpenComments as EventListener);
+    return () => window.removeEventListener("cropvibe:open-right-comments", onOpenComments as EventListener);
+  }, []);
+
   const onFollow = async (target: UserSearchRecord) => {
     if (!token || busyId != null) return;
     setBusyId(target.id);
@@ -87,6 +103,28 @@ export function HomeRightPanel() {
   };
 
   if (!user) return null;
+
+  if (activeComments) {
+    return (
+      <aside className="right-panel right-panel--comments" aria-label="Comments">
+        <div className="right-panel__comments-head">
+          <button type="button" className="right-panel__comments-back" onClick={() => setActiveComments(null)}>
+            ← Back to suggestions
+          </button>
+        </div>
+        <div className="right-panel__comments-wrap">
+          <CommentPanel
+            postId={activeComments.postId}
+            commentsCount={activeComments.commentsCount}
+            onClose={() => setActiveComments(null)}
+            onCountChange={(count) => setActiveComments((prev) => (prev ? { ...prev, commentsCount: count } : prev))}
+            portal={false}
+            inline
+          />
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="right-panel" aria-label="Suggestions">
