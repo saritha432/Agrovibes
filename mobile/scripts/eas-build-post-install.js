@@ -25,18 +25,33 @@ if (isStoreBuild) {
   }
 }
 
-// Belt-and-suspenders: apply Kotlin fix if patch-package did not run.
-const permissionsFile = path.join(
-  __dirname,
-  "..",
-  "node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
-);
-const oldLine = "return requestedPermissions.contains(permission)";
-const fixedLine = "return requestedPermissions?.contains(permission) ?: false";
-
-if (fs.existsSync(permissionsFile)) {
-  const content = fs.readFileSync(permissionsFile, "utf8");
+// Belt-and-suspenders: apply Kotlin fixes if patch-package did not run.
+function applyTextFix(filePath, oldLine, fixedLine) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+  const content = fs.readFileSync(filePath, "utf8");
   if (content.includes(oldLine) && !content.includes(fixedLine)) {
-    fs.writeFileSync(permissionsFile, content.replace(oldLine, fixedLine));
+    fs.writeFileSync(filePath, content.replaceAll(oldLine, fixedLine));
   }
 }
+
+const projectRoot = path.join(__dirname, "..");
+
+applyTextFix(
+  path.join(
+    projectRoot,
+    "node_modules/expo-modules-core/android/src/main/java/expo/modules/adapters/react/permissions/PermissionsService.kt"
+  ),
+  "return requestedPermissions.contains(permission)",
+  "return requestedPermissions?.contains(permission) ?: false"
+);
+
+applyTextFix(
+  path.join(
+    projectRoot,
+    "node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt"
+  ),
+  "if (drawingOpPool.isEmpty()) DrawingOp() else drawingOpPool.removeLast()",
+  "if (drawingOpPool.isEmpty()) DrawingOp() else drawingOpPool.removeAt(drawingOpPool.lastIndex)"
+);
