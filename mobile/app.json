@@ -1,126 +1,137 @@
 {
-  "expo": {
-    "name": "Cropvibe",
-    "slug": "agrovibes",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/logo-adaptive-foreground.png",
-    "platforms": [
-      "android",
-      "ios",
-      "web"
-    ],
-    "splash": {
-      "image": "./assets/logo-adaptive-foreground.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#262626"
-    },
-    "androidStatusBar": {
-      "backgroundColor": "#262626",
-      "barStyle": "light-content",
-      "translucent": false
-    },
-    "assetBundlePatterns": [],
-    "scheme": "agrovibes",
-    "android": {
-      "package": "com.agrovibes.app",
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "https",
-              "host": "agrovibes.app",
-              "pathPrefix": "/reel"
-            },
-            {
-              "scheme": "https",
-              "host": "agrovibes.app",
-              "pathPrefix": "/watch"
-            }
-          ],
-          "category": ["BROWSABLE", "DEFAULT"]
-        }
-      ],
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/logo-adaptive-foreground.png",
-        "backgroundColor": "#262626"
-      },
-      "permissions": [
-        "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.POST_NOTIFICATIONS"
-      ],
-      "googleServicesFile": "./google-services.json"
-    },
-    "ios": {
-      "bundleIdentifier": "com.agrovibes.app",
-      "supportsTablet": true,
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Cropvibe uses your camera to record reels, stories, and posts.",
-        "NSMicrophoneUsageDescription": "Cropvibe uses your microphone for reels, stories, and live streams.",
-        "NSPhotoLibraryUsageDescription": "Cropvibe accesses your photo library so you can upload images and videos.",
-        "NSPhotoLibraryAddUsageDescription": "Cropvibe saves edited photos to your library when you ask it to.",
-        "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
-      }
-    },
-    "web": {
-      "favicon": "./assets/logo.png"
-    },
-    "owner": "saritha-farming",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "plugins": [
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "enableProguardInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true,
-            "abiFilters": ["arm64-v8a"],
-            "useLegacyPackaging": false,
-            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*"
-          },
-          "ios": {
-            "useFrameworks": "static"
-          }
-        }
-      ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Cropvibe uses your camera to record reels, stories, and posts.",
-          "microphonePermission": "Cropvibe uses your microphone to record audio for reels and stories.",
-          "recordAudioAndroid": true
-        }
-      ],
-      "expo-font",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/logo-adaptive-foreground.png",
-          "color": "#FFFFFF",
-          "defaultChannel": "default"
-        }
-      ],
-      "@livekit/react-native-expo-plugin",
-      "@config-plugins/react-native-webrtc",
-      "./scripts/withAndroidLargeHeap.js"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "b0f1e9b2-87d3-45e5-8925-7d531ca96ebe"
-      }
-    }
-  }
+    "expo":  {
+                 "name":  "Cropvibe",
+                 "slug":  "agrovibes",
+                 "version":  "1.0.1",
+                 "orientation":  "portrait",
+                 "icon":  "./assets/logo-adaptive-foreground.png",
+                 "platforms":  [
+                                   "android",
+                                   "ios",
+                                   "web"
+                               ],
+                 "splash":  {
+                                "image":  "./assets/logo-adaptive-foreground.png",
+                                "resizeMode":  "contain",
+                                "backgroundColor":  "#262626"
+                            },
+                 "androidStatusBar":  {
+                                          "backgroundColor":  "#262626",
+                                          "barStyle":  "light-content",
+                                          "translucent":  false
+                                      },
+                 "assetBundlePatterns":  [
+
+                                         ],
+                 "scheme":  "agrovibes",
+                 "android":  {
+                                 "package":  "com.cropvibe.app",
+                                 "versionCode":  2,
+                                 "intentFilters":  [
+                                                       {
+                                                           "action":  "VIEW",
+                                                           "autoVerify":  true,
+                                                           "data":  [
+                                                                        {
+                                                                            "scheme":  "https",
+                                                                            "host":  "agrovibes.app",
+                                                                            "pathPrefix":  "/reel"
+                                                                        },
+                                                                        {
+                                                                            "scheme":  "https",
+                                                                            "host":  "agrovibes.app",
+                                                                            "pathPrefix":  "/watch"
+                                                                        }
+                                                                    ],
+                                                           "category":  [
+                                                                            "BROWSABLE",
+                                                                            "DEFAULT"
+                                                                        ]
+                                                       }
+                                                   ],
+                                 "adaptiveIcon":  {
+                                                      "foregroundImage":  "./assets/logo-adaptive-foreground.png",
+                                                      "backgroundColor":  "#262626"
+                                                  },
+                                 "permissions":  [
+                                                     "android.permission.INTERNET",
+                                                     "android.permission.ACCESS_NETWORK_STATE",
+                                                     "android.permission.CAMERA",
+                                                     "android.permission.RECORD_AUDIO",
+                                                     "android.permission.MODIFY_AUDIO_SETTINGS",
+                                                     "android.permission.BLUETOOTH_CONNECT",
+                                                     "android.permission.READ_MEDIA_IMAGES",
+                                                     "android.permission.READ_MEDIA_VIDEO",
+                                                     "android.permission.WRITE_EXTERNAL_STORAGE",
+                                                     "android.permission.POST_NOTIFICATIONS"
+                                                 ],
+                                 "googleServicesFile":  "./google-services.json"
+                             },
+                 "ios":  {
+                             "bundleIdentifier":  "com.cropvibe.app",
+                             "supportsTablet":  true,
+                             "infoPlist":  {
+                                               "ITSAppUsesNonExemptEncryption":  false,
+                                               "NSCameraUsageDescription":  "Cropvibe uses your camera to record reels, stories, and posts.",
+                                               "NSMicrophoneUsageDescription":  "Cropvibe uses your microphone for reels, stories, and live streams.",
+                                               "NSPhotoLibraryUsageDescription":  "Cropvibe accesses your photo library so you can upload images and videos.",
+                                               "NSPhotoLibraryAddUsageDescription":  "Cropvibe saves edited photos to your library when you ask it to.",
+                                               "NSLocationWhenInUseUsageDescription":  "Cropvibe can tag posts with your district when you add a location."
+                                           }
+                         },
+                 "web":  {
+                             "favicon":  "./assets/logo.png"
+                         },
+                 "owner":  "cropvibe-farming",
+                 "runtimeVersion":  {
+                                        "policy":  "appVersion"
+                                    },
+                 "plugins":  [
+                                 "./plugins/withExpoModulesCoreApi35Fix.js",
+                                 [
+                                     "expo-build-properties",
+                                     {
+                                         "android":  {
+                                                         "compileSdkVersion":  35,
+                                                         "targetSdkVersion":  35,
+                                                         "enableProguardInReleaseBuilds":  true,
+                                                         "enableShrinkResourcesInReleaseBuilds":  true,
+                                                         "abiFilters":  [
+                                                                            "arm64-v8a"
+                                                                        ],
+                                                         "useLegacyPackaging":  false,
+                                                         "extraProguardRules":  "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native \u003cmethods\u003e; }\n-keepattributes *Annotation*"
+                                                     },
+                                         "ios":  {
+                                                     "useFrameworks":  "static"
+                                                 }
+                                     }
+                                 ],
+                                 [
+                                     "expo-camera",
+                                     {
+                                         "cameraPermission":  "Cropvibe uses your camera to record reels, stories, and posts.",
+                                         "microphonePermission":  "Cropvibe uses your microphone to record audio for reels and stories.",
+                                         "recordAudioAndroid":  true
+                                     }
+                                 ],
+                                 "expo-font",
+                                 [
+                                     "expo-notifications",
+                                     {
+                                         "icon":  "./assets/logo-adaptive-foreground.png",
+                                         "color":  "#FFFFFF",
+                                         "defaultChannel":  "default"
+                                     }
+                                 ],
+                                 "@livekit/react-native-expo-plugin",
+                                 "@config-plugins/react-native-webrtc",
+                                 "./scripts/withAndroidLargeHeap.js"
+                             ],
+                 "extra":  {
+                               "eas":  {
+                                           "projectId":  "d7965c57-28e1-45c1-b0dc-1220030a389f"
+                                       }
+                           }
+             }
 }
