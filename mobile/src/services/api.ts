@@ -1267,14 +1267,37 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
     );
   }
 
-  const uploadRes = await fetchWithRetry(
-    `${API_BASE_URL}/v1/media/upload`,
-    {
-      method: "POST",
-      body: form as any
-    },
-    120_000
-  );
+  let uploadRes: Response;
+  if (Platform.OS === "web") {
+    // Web uploads can run longer on browser/network; keep one long request to avoid duplicate uploads.
+    const controller = new AbortController();
+    const timeoutMs = 10 * 60 * 1000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      uploadRes = await fetch(`${API_BASE_URL}/v1/media/upload`, {
+        method: "POST",
+        body: form as any,
+        signal: controller.signal
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error || "");
+      if (/aborted|abort|timed out|timeout/i.test(msg)) {
+        throw new Error("Upload timed out. Check internet speed and try a smaller video.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  } else {
+    uploadRes = await fetchWithRetry(
+      `${API_BASE_URL}/v1/media/upload`,
+      {
+        method: "POST",
+        body: form as any
+      },
+      120_000
+    );
+  }
   if (!uploadRes.ok) {
     let detail = `Upload failed (${uploadRes.status})`;
     try {
@@ -1298,7 +1321,7 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
 
 export async function uploadVideoFile(fileUri: string, asset?: PickerAssetMeta | null) {
   await assertVideoUnderUploadLimit(fileUri);
-  assertVideoResolutionWithinLimit(asset?.width, asset?.height);
+  assertVideoResolutionWithinLimit(asset?.width ?? undefined, asset?.height ?? undefined);
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
   const mime =

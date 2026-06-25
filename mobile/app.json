@@ -2,7 +2,7 @@
     "expo":  {
                  "name":  "Cropvibe",
                  "slug":  "agrovibes",
-                 "version":  "1.0.2",
+                 "version":  "1.0.3",
                  "orientation":  "portrait",
                  "icon":  "./assets/logo-adaptive-foreground.png",
                  "platforms":  [
@@ -26,7 +26,7 @@
                  "scheme":  "agrovibes",
                  "android":  {
                                  "package":  "com.cropvibe.app",
-                                 "versionCode":  3,
+                                 "versionCode":  4,
                                  "intentFilters":  [
                                                        {
                                                            "action":  "VIEW",
@@ -88,6 +88,7 @@
                                     },
                  "plugins":  [
                                  "./plugins/withExpoModulesCoreApi35Fix.js",
+                                 "./plugins/withRnScreensApi35Fix.js",
                                  [
                                      "expo-build-properties",
                                      {
