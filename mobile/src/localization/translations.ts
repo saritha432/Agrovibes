@@ -10,7 +10,7 @@ const ONBOARDING_EN = {
   createAccount: "Create Account",
   login: "Login",
   signIn: "Sign In",
-  createSubtitle: "Enter details to create your account.",
+  createSubtitle: "Enter your name, mobile number and password.",
   loginSubtitle: "Enter mobile number and password to login.",
   name: "Name",
   username: "Username",

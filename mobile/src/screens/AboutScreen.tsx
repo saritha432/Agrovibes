@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage } from "../localization/LanguageContext";
+import Constants from "expo-constants";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
 
 const BG = APP_BLACK;
@@ -12,7 +13,7 @@ const CARD = APP_SURFACE;
 const TEXT = "#f0f4f8";
 const MUTED = "#97a0a8";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = Constants.expoConfig?.version ?? "1.0.1";
 
 export function AboutScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();

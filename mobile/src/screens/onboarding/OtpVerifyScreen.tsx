@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useAuth } from "../../auth/AuthContext";
 import { useLanguage } from "../../localization/LanguageContext";
+import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { sendPhoneOtp, verifyPhoneOtp } from "../../services/api";
 import { APP_LIME } from "../../theme/appColors";
@@ -41,7 +42,10 @@ export function OtpVerifyScreen() {
     try {
       const auth = await verifyPhoneOtp({ phone, code: digits });
       await signIn({ token: auth.token, user: auth.user });
-      navigation.reset({ index: 0, routes: [{ name: "Main" }] });
+      if (!auth.isNewUser && auth?.user?.id != null) {
+        await markLaunchSetupComplete(auth.user.id);
+      }
+      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
     } catch (e: any) {
       setError(e?.message || t("invalidOtp"));
     } finally {

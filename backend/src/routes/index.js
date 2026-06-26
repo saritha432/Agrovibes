@@ -1392,19 +1392,20 @@ router.post("/v1/auth/register", async (req, res) => {
   try {
     await ensureLearnUsersTable();
     const { email, password, fullName, role, username, phone } = req.body || {};
-    let storeEmail = String(email || "").trim().toLowerCase();
+    const normalizedPhone = normalizeIndiaPhone(phone || email);
+    const phoneDigits = normalizedPhone ? phoneDigitsOnly(normalizedPhone).slice(-10) : "";
+    let storeEmail = phoneDigits || String(email || "").trim().toLowerCase();
     if (storeEmail.endsWith("@phone.agrovibes")) {
       const localDigits = storeEmail.split("@")[0].replace(/\D/g, "");
       if (localDigits.length >= 10) {
-        storeEmail = `${localDigits.slice(-10)}@phone.agrovibes`;
+        storeEmail = localDigits.slice(-10);
       }
     }
     const normalizedUsername = String(username || "").trim().toLowerCase() || null;
-    const normalizedPhone = normalizeIndiaPhone(phone || (storeEmail.endsWith("@phone.agrovibes") ? storeEmail.split("@")[0] : null));
     const safeRole = ["student", "instructor", "admin"].includes(String(role)) ? String(role) : "student";
 
-    if (!storeEmail || !password || String(password).length < 6 || !fullName) {
-      res.status(400).json({ message: "email, fullName and password (min 6 chars) are required" });
+    if (!normalizedPhone || !storeEmail || !password || String(password).length < 6 || !fullName) {
+      res.status(400).json({ message: "phone, fullName and password (min 6 chars) are required" });
       return;
     }
 
@@ -1443,31 +1444,36 @@ router.post("/v1/auth/login", async (req, res) => {
     const phoneIdentifier = normalizeIndiaPhone(normalizedIdentifier);
     const syntheticPhoneEmail = syntheticPhoneEmailFromIdentifier(normalizedIdentifier);
     if (!normalizedIdentifier || !password) {
-      res.status(400).json({ message: "identifier (email/phone/username) and password are required" });
+      res.status(400).json({ message: "mobile number and password are required" });
       return;
     }
 
     const idDigits = phoneIdentifier ? phoneDigitsOnly(phoneIdentifier) : "";
     const phoneDigitsLast10 = idDigits.length >= 10 ? idDigits.slice(-10) : "";
-
     const syntheticLocal = syntheticPhoneEmail ? syntheticPhoneEmail.split("@")[0] : "";
+    const phoneOnlyLogin = Boolean(phoneIdentifier || syntheticPhoneEmail);
 
     const result = await query(
       `
       SELECT ${authUserSelect}, password_hash AS "passwordHash"
       FROM learn_users
-      WHERE LOWER(TRIM(email)) = $1
-         OR LOWER(TRIM(username)) = $1
+      WHERE ($6::BOOLEAN = false AND (
+              LOWER(TRIM(email)) = $1
+              OR LOWER(TRIM(username)) = $1
+            ))
          OR ($2::TEXT IS NOT NULL AND $4::TEXT <> '' AND (
               phone = $2
               OR RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $4
             ))
          OR ($3::TEXT IS NOT NULL AND LOWER(TRIM(email)) = $3)
-         OR ($5::TEXT <> '' AND LOWER(TRIM(email)) LIKE '%@phone.agrovibes'
-             AND RIGHT(REGEXP_REPLACE(SPLIT_PART(LOWER(TRIM(email)), '@', 1), '[^0-9]', '', 'g'), 10) = $5)
+         OR ($5::TEXT <> '' AND (
+              LOWER(TRIM(email)) = $5
+              OR (LOWER(TRIM(email)) LIKE '%@phone.agrovibes'
+                  AND RIGHT(REGEXP_REPLACE(SPLIT_PART(LOWER(TRIM(email)), '@', 1), '[^0-9]', '', 'g'), 10) = $5)
+            ))
       LIMIT 1
       `,
-      [normalizedIdentifier, phoneIdentifier, syntheticPhoneEmail, phoneDigitsLast10, syntheticLocal]
+      [normalizedIdentifier, phoneIdentifier, syntheticPhoneEmail, phoneDigitsLast10, syntheticLocal, phoneOnlyLogin]
     );
     const userRow = result.rows[0];
     if (!userRow) {
@@ -1485,6 +1491,34 @@ router.post("/v1/auth/login", async (req, res) => {
     }
 
     const user = authUserFromRow(userRow);
+
+    const plainMobileKey = phoneDigitsLast10 || syntheticLocal;
+
+    if (phoneOnlyLogin && plainMobileKey) {
+      const updates = [];
+      const params = [];
+      let idx = 1;
+      const currentEmail = String(userRow.email || "").trim().toLowerCase();
+      const normalizedCurrentEmail =
+        currentEmail.endsWith("@phone.agrovibes")
+          ? currentEmail.split("@")[0].replace(/\D/g, "").slice(-10)
+          : currentEmail.replace(/\D/g, "").slice(-10) || currentEmail;
+      if (normalizedCurrentEmail !== plainMobileKey) {
+        updates.push(`email = $${idx++}`);
+        params.push(plainMobileKey);
+        user.email = plainMobileKey;
+      }
+      if (phoneIdentifier && !String(userRow.phone || "").trim()) {
+        updates.push(`phone = $${idx++}`);
+        params.push(phoneIdentifier);
+        user.phone = phoneIdentifier;
+      }
+      if (updates.length) {
+        params.push(userRow.id);
+        await query(`UPDATE learn_users SET ${updates.join(", ")} WHERE id = $${idx}`, params);
+      }
+    }
+
     const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
     res.json({ token, user });
   } catch (error) {
