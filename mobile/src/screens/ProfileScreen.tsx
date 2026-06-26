@@ -160,7 +160,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const publicAvatarFromRoute = isPublicProfileView ? (route.params?.avatarUrl as string | null | undefined) : undefined;
   const { width, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { user, token, signOut } = useAuth();
+  const { user, token, signOut, refreshUser } = useAuth();
   const { t } = useLanguage();
   const [publicUsername, setPublicUsername] = useState<string | null>(null);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
@@ -388,6 +388,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         return;
       }
       if (!user?.id) return;
+      void refreshUser().catch(() => {});
       const hadCache = hydrateProfilePostsFromCache();
       void loadUserPosts();
       if (savedLoadedRef.current) void loadSavedPosts();
@@ -396,7 +397,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         // Preload saved in background — common profile tab after reels.
         void loadSavedPosts();
       }
-    }, [hydrateProfilePostsFromCache, isPublicProfileView, loadSavedPosts, loadTaggedPosts, loadUserPosts, user?.id])
+    }, [hydrateProfilePostsFromCache, isPublicProfileView, loadSavedPosts, loadTaggedPosts, loadUserPosts, refreshUser, user?.id])
   );
 
   useEffect(() => {

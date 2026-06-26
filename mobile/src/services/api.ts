@@ -292,6 +292,10 @@ export async function updateMyProfile(
   })) as AuthResponse;
 }
 
+export async function fetchAuthMe(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token)) as { user: AuthResponse["user"] };
+}
+
 export async function fetchAdminUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.set("search", params.search);
@@ -539,8 +543,10 @@ export async function fetchCommunityQuestions() {
   return (await response.json()) as { questions: CommunityQuestion[] };
 }
 
-export async function fetchHomeStories() {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`);
+export async function fetchHomeStories(token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }

@@ -1065,7 +1065,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     (caption: string | null | undefined) => formatReelCaption(caption, language, t),
     [language, t]
   );
-  const { token, user } = useAuth();
+  const { token, user, refreshUser } = useAuth();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
   const appIsActive = useAppIsActive();
@@ -1425,6 +1425,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useFocusEffect(
     useCallback(() => {
+      if (!token) return;
+      void refreshUser().catch(() => {});
+    }, [refreshUser, token])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       if (!token || !appIsActive) return;
       const mediaBusy = !!(reelViewerOpen || watchingLivePost || playingPostId != null);
       const pollMs = mediaBusy ? 30000 : 20000;
@@ -1730,7 +1737,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     let mounted = true;
-    fetchHomeStories()
+    fetchHomeStories(token)
       .then((data) => {
         if (!mounted) return;
         const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
@@ -1743,7 +1750,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return () => {
       mounted = false;
     };
-  }, [applyViewedStories, optimisticStories, refreshToken]);
+  }, [applyViewedStories, optimisticStories, refreshToken, token]);
 
   useEffect(() => {
     if (!activeStory?.id || !isStoryOpen) return;
@@ -4148,6 +4155,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     const expanded = !!expandedReplyThreads[String(c.id)];
                     const shown = needsMoreLink && !expanded ? direct.slice(0, REPLY_PREVIEW_VISIBLE) : direct;
                     const moreCount = needsMoreLink && !expanded ? direct.length - REPLY_PREVIEW_VISIBLE : 0;
+                    const replyIndent = Math.min(4, depth + 1) * COMMENT_REPLY_INDENT;
 
                     return (
                       <React.Fragment key={c.id}>
@@ -4156,15 +4164,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                         {moreCount > 0 ? (
                           <Pressable
                             onPress={() => setExpandedReplyThreads((p) => ({ ...p, [String(c.id)]: true }))}
-                            style={[
-                              styles.viewMoreCommentsWrap,
-                              { marginLeft: Math.min(4, depth + 1) * COMMENT_REPLY_INDENT, paddingLeft: 0 }
-                            ]}
+                            style={[styles.viewMoreCommentsWrap, { marginLeft: replyIndent, paddingLeft: 0 }]}
                           >
                             <View style={styles.viewMoreCommentsLine} />
                             <Text style={styles.viewMoreCommentsText}>
                               View {moreCount} more {moreCount === 1 ? "reply" : "replies"}
                             </Text>
+                          </Pressable>
+                        ) : null}
+                        {needsMoreLink && expanded ? (
+                          <Pressable
+                            onPress={() => setExpandedReplyThreads((p) => ({ ...p, [String(c.id)]: false }))}
+                            style={[styles.viewMoreCommentsWrap, { marginLeft: replyIndent, paddingLeft: 0 }]}
+                          >
+                            <View style={styles.viewMoreCommentsLine} />
+                            <Text style={styles.hideRepliesText}>Hide replies</Text>
                           </Pressable>
                         ) : null}
                       </React.Fragment>
@@ -5031,6 +5045,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#52525b"
   },
   viewMoreCommentsText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
+  hideRepliesText: { color: "#71717a", fontSize: 12, fontWeight: "700" },
   replyingToBanner: {
     flexDirection: "row",
     alignItems: "center",

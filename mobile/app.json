@@ -4,14 +4,14 @@
     "slug": "agrovibes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/logo-adaptive-foreground.png",
+    "icon": "./assets/cropvibelogo.png",
     "platforms": [
       "android",
       "ios",
       "web"
     ],
     "splash": {
-      "image": "./assets/logo-adaptive-foreground.png",
+      "image": "./assets/cropvibelogo.png",
       "resizeMode": "contain",
       "backgroundColor": "#262626"
     },
@@ -44,7 +44,7 @@
         }
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo-adaptive-foreground.png",
+        "foregroundImage": "./assets/cropvibelogo.png",
         "backgroundColor": "#262626"
       },
       "permissions": [
@@ -74,7 +74,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/logo.png"
+      "favicon": "./assets/cropvibefavicon.png"
     },
     "owner": "saritha-farming",
     "runtimeVersion": {
@@ -108,7 +108,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/logo-adaptive-foreground.png",
+          "icon": "./assets/cropvibelogo.png",
           "color": "#FFFFFF",
           "defaultChannel": "default"
         }

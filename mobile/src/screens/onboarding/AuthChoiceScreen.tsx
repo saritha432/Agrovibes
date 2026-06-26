@@ -50,7 +50,6 @@ export function AuthChoiceScreen() {
   const [registerPhone, setRegisterPhone] = React.useState("");
   const [registerPassword, setRegisterPassword] = React.useState("");
   const [fullName, setFullName] = React.useState("");
-  const [username, setUsername] = React.useState("");
   const [loadingSubmit, setLoadingSubmit] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
@@ -88,7 +87,7 @@ export function AuthChoiceScreen() {
   const submit = async () => {
     const digits = phone.replace(/\D/g, "");
     if (password.trim().length < 6 || loadingSubmit) return;
-    if (mode === "register" && (!fullName.trim() || !username.trim())) return;
+    if (mode === "register" && !fullName.trim()) return;
     if (digits.length < 10) return;
     setLoadingSubmit(true);
     setErrorText("");
@@ -102,7 +101,6 @@ export function AuthChoiceScreen() {
               password: password.trim(),
               fullName: fullName.trim(),
               role: "student",
-              username: username.trim(),
               phone: `+91${phoneLocal}`
             })
           : await authLogin({
@@ -168,14 +166,6 @@ export function AuthChoiceScreen() {
               placeholderTextColor="#7f8b93"
               style={styles.input}
             />
-            <TextInput
-              value={username}
-              onChangeText={setUsername}
-              placeholder={t("username")}
-              placeholderTextColor="#7f8b93"
-              style={[styles.input, styles.spaced]}
-              autoCapitalize="none"
-            />
           </>
         ) : null}
         <View style={styles.row}>
@@ -221,7 +211,7 @@ export function AuthChoiceScreen() {
             styles.primaryBtn,
             password.trim().length < 6 ||
             phone.replace(/\D/g, "").length < 10 ||
-            (mode === "register" && (!fullName.trim() || !username.trim())) ||
+            (mode === "register" && !fullName.trim()) ||
             loadingSubmit
               ? styles.disabled
               : null

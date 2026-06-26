@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
     right: -8,
     minWidth: 14,
     height: 14,
-    backgroundColor: "#e53935",
+    backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -426,7 +426,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3
   },
   badgeText: {
-    color: "#fff",
+    color: APP_BLACK,
     fontSize: 8,
     fontWeight: "800",
     lineHeight: 10

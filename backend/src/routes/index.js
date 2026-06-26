@@ -3131,16 +3131,20 @@ router.get("/v1/community/questions", async (_req, res) => {
 
 const STORY_TTL_SQL = "24 hours";
 
-router.get("/v1/home/stories", async (_req, res) => {
+router.get("/v1/home/stories", authOptional, async (req, res) => {
   try {
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
+    const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:v2:${gen}`;
+    const cacheKey = `v1:home:stories:v3:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
       return;
     }
     await ensureHomeStoriesTable();
+    await ensureSocialFollowsTable();
     // Stories expire after 24 hours (Instagram-style). Remove expired rows so they no longer appear.
     await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
     const result = await query(
@@ -3181,9 +3185,22 @@ router.get("/v1/home/stories", async (_req, res) => {
         LIMIT 1
       ) nm ON TRUE
       WHERE s.created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
+        AND $1::integer IS NOT NULL
+        AND COALESCE(s.user_id, lu.id) IS NOT NULL
+        AND (
+          COALESCE(s.user_id, lu.id) = $1::integer
+          OR EXISTS (
+            SELECT 1
+            FROM social_follows sf
+            WHERE sf.follower_id = $1::integer
+              AND sf.following_id = COALESCE(s.user_id, lu.id)
+              AND sf.status = 'accepted'
+          )
+        )
       ORDER BY s.created_at DESC
       LIMIT 40
-      `
+      `,
+      [viewerId]
     );
 
     const body = { stories: result.rows.map(sanitizeStoryRowMedia) };
