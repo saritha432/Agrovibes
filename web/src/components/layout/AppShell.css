@@ -30,7 +30,12 @@
   max-width: none;
 }
 
-.app-shell__main:not(.app-shell__main--with-right) .app-shell__content:not(.app-shell__content--flush) {
+.app-shell__content--notifications {
+  max-width: var(--feed-width);
+  padding: 0;
+}
+
+.app-shell__main:not(.app-shell__main--with-right) .app-shell__content:not(.app-shell__content--flush):not(.app-shell__content--notifications) {
   max-width: var(--content-max);
   padding: 24px 20px 48px;
 }

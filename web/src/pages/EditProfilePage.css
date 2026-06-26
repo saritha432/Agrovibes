@@ -1,25 +1,126 @@
 .edit-profile {
   width: 100%;
-  max-width: 470px;
+  max-width: 520px;
   margin: 0 auto;
 }
 
 .edit-profile__head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 
 .edit-profile__head a {
   color: var(--accent);
   text-decoration: none;
   font-weight: 700;
+  justify-self: start;
 }
 
 .edit-profile__head h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
+  text-align: center;
+}
+
+.edit-profile__save-top {
+  justify-self: end;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.edit-profile__save-top:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.edit-profile__hero {
+  position: relative;
+  margin-bottom: 56px;
+}
+
+.edit-profile__banner {
+  height: 148px;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(201, 255, 53, 0.45), transparent 55%),
+    linear-gradient(315deg, rgba(201, 255, 53, 0.35), transparent 50%),
+    #fff;
+  background-size: 22px 22px, 22px 22px, auto;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(201, 255, 53, 0.45), transparent 55%),
+    linear-gradient(315deg, rgba(201, 255, 53, 0.35), transparent 50%),
+    #fff;
+}
+
+.edit-profile__avatar-wrap {
+  position: absolute;
+  left: 14px;
+  bottom: -48px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0;
+  color: var(--accent);
+}
+
+.edit-profile__avatar-wrap:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.edit-profile__avatar-wrap em {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.edit-profile__avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 3px solid var(--bg);
+  background: #1d2126;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  font-weight: 900;
+  color: var(--accent);
+  overflow: hidden;
+  position: relative;
+}
+
+.edit-profile__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.edit-profile__avatar-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  display: grid;
+  place-items: center;
 }
 
 .edit-profile__form {
@@ -28,68 +129,47 @@
   gap: 14px;
 }
 
-.edit-profile__avatar-preview {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 8px;
+.edit-profile__card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px 8px;
 }
 
-.edit-profile__avatar-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  color: var(--accent);
-  font-size: 13px;
-  font-style: normal;
-}
-
-.edit-profile__avatar-btn em {
-  font-style: normal;
-  font-weight: 600;
-}
-
-.edit-profile__avatar-preview span {
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  border: 2px solid var(--accent);
-  background: #1d2126;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  font-weight: 900;
-  color: var(--accent);
-  overflow: hidden;
-}
-
-.edit-profile__avatar-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.edit-profile__card h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
 }
 
 .edit-profile label {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-muted);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.edit-profile__card label:last-child {
+  border-bottom: none;
 }
 
 .edit-profile input,
 .edit-profile textarea {
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--text);
   font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.edit-profile textarea {
+  min-height: 72px;
+  resize: vertical;
 }
 
 .edit-profile__error {
@@ -99,7 +179,7 @@
 }
 
 .edit-profile__save {
-  margin-top: 8px;
+  margin-top: 4px;
   padding: 12px;
   border: none;
   border-radius: 12px;

@@ -1,9 +1,9 @@
 .reel-like-burst {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 6;
   pointer-events: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .reel-like-burst__heart {

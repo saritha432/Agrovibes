@@ -1,19 +1,22 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { useCreateModal } from "../../context/CreateModalContext";
+import { useNotificationPanel } from "../../context/NotificationPanelContext";
+import { CountBadge } from "../ui/CountBadge";
 import "./Sidebar.css";
 
 const NAV = [
   { to: "/", label: "Home", icon: "home" },
   { to: "/search", label: "Search", icon: "search" },
   { to: "/drops", label: "Drops", icon: "drops" },
-  // { to: "/market", label: "Market", icon: "market" },
-  // { to: "/learn", label: "Learn", icon: "learn" },
   { to: "/messages", label: "Messages", icon: "messages" },
+  { to: "/notifications", label: "Notifications", icon: "notifications" },
   { to: "/profile", label: "Profile", icon: "profile" }
 ] as const;
 
-function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
+type NavIconName = (typeof NAV)[number]["icon"];
+
+function NavIcon({ name }: { name: NavIconName }) {
   switch (name) {
     case "home":
       return (
@@ -40,6 +43,13 @@ function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
           <path d="M12 4.2c-4.9 0-8.8 3.2-8.8 7.3 0 2.3 1.2 4.3 3.2 5.7v2.6a.6.6 0 0 0 1 .5l2.8-1.7c.6.1 1.2.2 1.8.2 4.9 0 8.8-3.2 8.8-7.3S16.9 4.2 12 4.2Z" />
         </svg>
       );
+    case "notifications":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M12 3.2a5.8 5.8 0 0 0-5.8 5.8v3.4l-1.4 2.2a1 1 0 0 0 .8 1.6h12.8a1 1 0 0 0 .8-1.6l-1.4-2.2V9a5.8 5.8 0 0 0-5.8-5.8Z" />
+          <path d="M10 18.8a2 2 0 0 0 4 0" />
+        </svg>
+      );
     case "profile":
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
@@ -54,6 +64,7 @@ function NavIcon({ name }: { name: (typeof NAV)[number]["icon"] }) {
 export function Sidebar() {
   const { user, signOut } = useAuth();
   const { openCreate } = useCreateModal();
+  const { messageUnreadCount, notificationUnreadCount } = useNotificationPanel();
 
   return (
     <aside className="sidebar">
@@ -74,8 +85,16 @@ export function Sidebar() {
                 `sidebar__link${isActive ? " sidebar__link--active" : ""}`
               }
             >
-              <span className="sidebar__icon">
-                <NavIcon name={item.icon} />
+              <span className="sidebar__icon-wrap">
+                <span className={`sidebar__icon${item.icon === "notifications" ? " sidebar__icon--notifications" : ""}`}>
+                  <NavIcon name={item.icon} />
+                </span>
+                {item.icon === "messages" && messageUnreadCount > 0 ? (
+                  <CountBadge count={messageUnreadCount} />
+                ) : null}
+                {item.icon === "notifications" && notificationUnreadCount > 0 ? (
+                  <CountBadge count={notificationUnreadCount} />
+                ) : null}
               </span>
               <span className="sidebar__label">{item.label}</span>
             </NavLink>

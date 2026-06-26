@@ -1,0 +1,57 @@
+.profile-photo-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 14500;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.profile-photo-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
+.profile-photo-sheet__panel {
+  position: relative;
+  width: min(420px, 100%);
+  background: #262626;
+  border-radius: 16px 16px 0 0;
+  border: 1px solid #333;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-photo-sheet__panel h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #fff;
+}
+
+.profile-photo-sheet__panel button {
+  border: none;
+  background: none;
+  color: #fff;
+  text-align: left;
+  padding: 14px 4px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.profile-photo-sheet__remove {
+  color: #f87171 !important;
+}
+
+.profile-photo-sheet__cancel {
+  margin-top: 8px;
+  text-align: center !important;
+  border-radius: 12px;
+  border: 1px solid #404040 !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
