@@ -2,6 +2,8 @@ const { getDefaultConfig } = require("expo/metro-config");
 const path = require("path");
 
 const config = getDefaultConfig(__dirname);
+// Bump when resolver/layout changes so stale per-platform Metro caches rebuild (web vs android).
+config.cacheVersion = "cropvibe-account-center-v2";
 const firebaseWebStub = path.resolve(__dirname, "src/firebase/stubs/emptyModule.js");
 
 const defaultResolveRequest = config.resolver.resolveRequest;
