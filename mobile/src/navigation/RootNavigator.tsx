@@ -1,5 +1,4 @@
 import React from "react";
-import type { NavigatorScreenParams } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { AppNavigator } from "./AppNavigator";
 import { InstructorStudioScreen } from "../screens/InstructorStudioScreen";
@@ -25,57 +24,16 @@ import { EditProfileScreen } from "../screens/EditProfileScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
+import { AccountCenterScreen } from "../screens/AccountCenterScreen";
+import { ProfilesPersonalDetailsScreen } from "../screens/ProfilesPersonalDetailsScreen";
+import { PasswordSecurityScreen } from "../screens/PasswordSecurityScreen";
+import { ChangePasswordScreen } from "../screens/ChangePasswordScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
 import { AboutScreen } from "../screens/AboutScreen";
-import type { MarketStackParamList } from "./MarketStackNavigator";
-import type { LearnStackParamList } from "./LearnStackNavigator";
+import type { RootStackParamList } from "./rootStackTypes";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 
-export type MainTabParamList = {
-  Home: undefined;
-  Search: undefined;
-  Market: NavigatorScreenParams<MarketStackParamList>;
-  Learn: NavigatorScreenParams<LearnStackParamList>;
-  Services: undefined;
-  Messages: undefined;
-  Profile: undefined;
-};
-
-export type RootStackParamList = {
-  Splash: undefined;
-  InitialSetup: undefined;
-  AuthChoice: { initialMode?: "register" | "login"; passwordResetSuccess?: boolean; loginPhone?: string } | undefined;
-  OtpVerify: { phone: string };
-  ForgotPassword: undefined;
-  ForgotPasswordOtp: { phone: string };
-  PersonalInfo: undefined;
-  RoleSelection: undefined;
-  BuyerInterests: undefined;
-  BuyerDelivery: undefined;
-  BuyerWalkthrough: undefined;
-  SellerFarm: undefined;
-  SellerKYC: undefined;
-  SellerBank: undefined;
-  ExpertDomain: undefined;
-  ExpertCredentials: undefined;
-  ExpertVerification: undefined;
-  SecurityVerification: undefined;
-  Main: NavigatorScreenParams<MainTabParamList> | undefined;
-  InstructorStudio: undefined;
-  EditProfile: undefined;
-  PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
-  DirectChat: {
-    peerUserId: number;
-    peerName: string;
-    peerKey?: string;
-    peerUsername?: string;
-    peerAvatarUrl?: string | null;
-    incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number };
-  };
-  SettingsMenu: undefined;
-  Privacy: undefined;
-  About: undefined;
-};
+export type { MainTabParamList, RootStackParamList } from "./rootStackTypes";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -121,6 +79,42 @@ export function RootNavigator() {
       />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
       <Stack.Screen name="SettingsMenu" component={SettingsMenuScreen} options={{ headerShown: false, animation: "slide_from_right" }} />
+      <Stack.Screen
+        name="AccountCenter"
+        component={AccountCenterScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ProfilesPersonalDetails"
+        component={ProfilesPersonalDetailsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="PasswordSecurity"
+        component={PasswordSecurityScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ChangePassword"
+        component={ChangePasswordScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
       <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ headerShown: false }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
