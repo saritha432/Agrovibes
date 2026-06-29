@@ -21,10 +21,13 @@ coverage/
 android/
 ios/
 
-# Backend & non-mobile siblings (in case git workflow climbs up)
+# Monorepo siblings (when EAS walks up to git root without EAS_NO_VCS)
+../web/
 ../backend/
 ../db/
-../.git/
+../web/node_modules/
+../backend/node_modules/
+
 
 # Local inspect/export trees (backend uploads, videos) — not used by the app build
 eas-inspect-out/

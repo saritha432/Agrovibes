@@ -163,6 +163,7 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS bio TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS website TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMPTZ`);
   learnUsersTableReady = true;
 }
 
@@ -1923,13 +1924,20 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
 router.get("/v1/auth/me", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
-    const result = await query(`SELECT ${authUserSelect} FROM learn_users WHERE id = $1 LIMIT 1`, [req.user.userId]);
+    const result = await query(
+      `SELECT ${authUserSelect}, password_updated_at AS "passwordUpdatedAt", created_at AS "createdAt" FROM learn_users WHERE id = $1 LIMIT 1`,
+      [req.user.userId]
+    );
     const user = authUserFromRow(result.rows[0]);
     if (!user) {
       res.status(404).json({ message: "User not found" });
       return;
     }
-    res.json({ user });
+    const row = result.rows[0];
+    res.json({
+      user,
+      passwordUpdatedAt: row.passwordUpdatedAt || row.createdAt || null
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile", error: error.message });
   }
@@ -2116,6 +2124,72 @@ router.get("/v1/users", authRequired, async (req, res) => {
     res.json({ users, total, limit, offset });
   } catch (error) {
     res.status(500).json({ message: "Failed to list users", error: error.message });
+  }
+});
+
+function validateNewPassword(password) {
+  const value = String(password || "");
+  if (value.length < 6) return "New password must be at least 6 characters";
+  if (!/[A-Za-z]/.test(value)) return "New password must include a letter";
+  if (!/\d/.test(value)) return "New password must include a number";
+  if (!/[!$%@#&*()_+\-=[\]{};':"\\|,.<>/?]/.test(value)) {
+    return "New password must include a special character";
+  }
+  return null;
+}
+
+router.post("/v1/auth/me/change-password", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+    const passwordError = validateNewPassword(newPassword);
+    if (!currentPassword) {
+      res.status(400).json({ message: "Current password is required" });
+      return;
+    }
+    if (passwordError) {
+      res.status(400).json({ message: passwordError });
+      return;
+    }
+    if (currentPassword === newPassword) {
+      res.status(400).json({ message: "New password must be different from your current password" });
+      return;
+    }
+
+    const existing = await query(
+      `SELECT password_hash AS "passwordHash" FROM learn_users WHERE id = $1 LIMIT 1`,
+      [req.user.userId]
+    );
+    const row = existing.rows[0];
+    if (!row) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    const hash = String(row.passwordHash || "");
+    let ok = await bcrypt.compare(currentPassword, hash);
+    if (!ok) {
+      ok = await bcrypt.compare(currentPassword.trim(), hash);
+    }
+    if (!ok) {
+      res.status(401).json({ message: "Current password is incorrect" });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await query(
+      `
+      UPDATE learn_users
+      SET password_hash = $1, password_updated_at = NOW()
+      WHERE id = $2
+      `,
+      [passwordHash, req.user.userId]
+    );
+
+    res.json({ success: true, passwordUpdatedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to change password", error: error?.message || String(error) });
   }
 });
 

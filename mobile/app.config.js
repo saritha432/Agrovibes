@@ -1,6 +1,9 @@
 const appJson = require("./app.json");
+const fs = require("fs");
+const path = require("path");
 
 const FIREBASE_PLUGINS = ["./plugins/withFirebase.js"];
+const IOS_GOOGLE_SERVICES_FILE = "./GoogleService-Info.plist";
 
 function isFirebasePlugin(entry) {
   if (typeof entry === "string") {
@@ -24,8 +27,34 @@ function shouldIncludeFirebasePlugins() {
   );
 }
 
+function assertIosFirebaseConfig() {
+  const buildingIos =
+    process.env.EAS_BUILD_PLATFORM === "ios" ||
+    (Array.isArray(process.argv) && process.argv.some((arg) => String(arg).includes("ios")));
+  if (!buildingIos || !shouldIncludeFirebasePlugins()) {
+    return;
+  }
+
+  const plistPath = path.resolve(__dirname, IOS_GOOGLE_SERVICES_FILE);
+  if (fs.existsSync(plistPath)) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "iOS EAS build requires GoogleService-Info.plist for Firebase (Analytics/Crashlytics).",
+      "1. Open Firebase Console → project cropvibe → Add app → iOS",
+      "2. Bundle ID: com.cropvibe.app",
+      "3. Download GoogleService-Info.plist into mobile/",
+      "4. Re-run: npm run build:ios:prod"
+    ].join("\n")
+  );
+}
+
 /** @type {import('expo/config').ExpoConfig} */
 module.exports = () => {
+  assertIosFirebaseConfig();
+
   const base = appJson.expo;
   const plugins = (base.plugins || []).filter((entry) => !isFirebasePlugin(entry));
 
@@ -35,6 +64,10 @@ module.exports = () => {
 
   return {
     ...base,
+    ios: {
+      ...base.ios,
+      googleServicesFile: IOS_GOOGLE_SERVICES_FILE
+    },
     plugins
   };
 };

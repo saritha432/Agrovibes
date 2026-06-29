@@ -2,42 +2,33 @@
   "expo": {
     "name": "Cropvibe",
     "slug": "agrovibes",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
-
-    "icon": "./assets/logo.png",
-
+    "icon": "./assets/logo-adaptive-foreground.png",
     "platforms": [
       "android",
       "ios",
       "web"
     ],
-
     "scheme": "agrovibes",
-
     "splash": {
       "image": "./assets/logo-adaptive-foreground.png",
       "resizeMode": "contain",
       "backgroundColor": "#262626"
     },
-
     "androidStatusBar": {
       "backgroundColor": "#262626",
       "barStyle": "light-content",
       "translucent": false
     },
-
     "assetBundlePatterns": [],
-
     "android": {
       "package": "com.cropvibe.app",
-      "versionCode": 6,
-
+      "versionCode": 7,
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"
       },
-
       "intentFilters": [
         {
           "action": "VIEW",
@@ -60,13 +51,6 @@
           ]
         }
       ],
-      "blockedPermissions": [
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
-      ],
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
@@ -76,81 +60,60 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.POST_NOTIFICATIONS"
       ],
-
       "googleServicesFile": "./google-services.json"
     },
-
     "ios": {
       "bundleIdentifier": "com.cropvibe.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
-
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-
         "NSCameraUsageDescription": "Cropvibe uses your camera to capture photos and videos for posts, reels, stories and live sessions.",
-
         "NSMicrophoneUsageDescription": "Cropvibe uses your microphone for recording videos and participating in live sessions.",
-
         "NSPhotoLibraryUsageDescription": "Cropvibe allows you to select photos and videos from your library to share with the farming community.",
-
         "NSPhotoLibraryAddUsageDescription": "Cropvibe saves media to your device only when you choose to download or save content.",
-
         "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
-      }
+      },
+      "buildNumber": "2"
     },
-
     "web": {
       "favicon": "./assets/logo.png"
     },
-
     "owner": "cropvibe-farming",
-
     "runtimeVersion": {
       "policy": "appVersion"
     },
-
     "plugins": [
       "./plugins/withExpoModulesCoreApi35Fix.js",
       "./plugins/withRnScreensApi35Fix.js",
-
       [
         "expo-build-properties",
         {
           "android": {
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
-
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
-
             "abiFilters": [
               "arm64-v8a"
             ],
-
             "useLegacyPackaging": false,
-
             "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*"
           },
-
           "ios": {
             "useFrameworks": "static"
           }
         }
       ],
-
       [
         "expo-camera",
         {
           "cameraPermission": "Cropvibe uses your camera to capture photos and videos for posts, reels, stories and live sessions.",
-
           "microphonePermission": "Cropvibe uses your microphone to record audio for videos, reels and live sessions.",
-
           "recordAudioAndroid": true
         }
       ],
-
       "expo-font",
-
       [
         "expo-notifications",
         {
@@ -159,13 +122,10 @@
           "defaultChannel": "default"
         }
       ],
-
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
-
       "./scripts/withAndroidLargeHeap.js"
     ],
-
     "extra": {
       "eas": {
         "projectId": "d7965c57-28e1-45c1-b0dc-1220030a389f"

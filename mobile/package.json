@@ -6,8 +6,14 @@
   "engines": {
     "node": "20.x"
   },
+  "expo": {
+    "install": {
+      "exclude": ["react-native-screens"]
+    }
+  },
   "scripts": {
     "start": "expo start --port 8082",
+    "start:clean": "expo start --port 8082 --clear",
     "start:tunnel": "expo start --tunnel --port 8082",
     "start:lan": "expo start --lan --port 8082",
     "android": "expo run:android",
