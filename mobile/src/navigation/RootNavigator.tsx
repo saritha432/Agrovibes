@@ -1,5 +1,4 @@
 import React from "react";
-import type { NavigatorScreenParams } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { AppNavigator } from "./AppNavigator";
 import { InstructorStudioScreen } from "../screens/InstructorStudioScreen";
@@ -25,57 +24,29 @@ import { EditProfileScreen } from "../screens/EditProfileScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
+import { AccountCenterScreen } from "../screens/AccountCenterScreen";
+import { ProfilesPersonalDetailsScreen } from "../screens/ProfilesPersonalDetailsScreen";
+import { PasswordSecurityScreen } from "../screens/PasswordSecurityScreen";
+import { ChangePasswordScreen } from "../screens/ChangePasswordScreen";
+import { TwoFactorAuthScreen } from "../screens/TwoFactorAuthScreen";
+import { EmailVerificationScreen } from "../screens/EmailVerificationScreen";
+import { VerificationSelfieScreen } from "../screens/VerificationSelfieScreen";
+import { SaveLoginScreen } from "../screens/SaveLoginScreen";
+import { WhereLoggedInScreen } from "../screens/WhereLoggedInScreen";
+import { LoginActivityScreen } from "../screens/LoginActivityScreen";
+import { SecurityCheckupScreen } from "../screens/SecurityCheckupScreen";
+import { ConnectedExperiencesScreen } from "../screens/ConnectedExperiencesScreen";
+import { SharingAcrossProfilesScreen } from "../screens/SharingAcrossProfilesScreen";
+import { MemoriesFromInstagramScreen } from "../screens/MemoriesFromInstagramScreen";
+import { ShowingProfileLinksScreen } from "../screens/ShowingProfileLinksScreen";
+import { SyncingProfilePicturesScreen } from "../screens/SyncingProfilePicturesScreen";
+import { ManagingAvatarsScreen } from "../screens/ManagingAvatarsScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
 import { AboutScreen } from "../screens/AboutScreen";
-import type { MarketStackParamList } from "./MarketStackNavigator";
-import type { LearnStackParamList } from "./LearnStackNavigator";
+import type { RootStackParamList } from "./rootStackTypes";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 
-export type MainTabParamList = {
-  Home: undefined;
-  Search: undefined;
-  Market: NavigatorScreenParams<MarketStackParamList>;
-  Learn: NavigatorScreenParams<LearnStackParamList>;
-  Services: undefined;
-  Messages: undefined;
-  Profile: undefined;
-};
-
-export type RootStackParamList = {
-  Splash: undefined;
-  InitialSetup: undefined;
-  AuthChoice: { initialMode?: "register" | "login"; passwordResetSuccess?: boolean; loginPhone?: string } | undefined;
-  OtpVerify: { phone: string };
-  ForgotPassword: undefined;
-  ForgotPasswordOtp: { phone: string };
-  PersonalInfo: undefined;
-  RoleSelection: undefined;
-  BuyerInterests: undefined;
-  BuyerDelivery: undefined;
-  BuyerWalkthrough: undefined;
-  SellerFarm: undefined;
-  SellerKYC: undefined;
-  SellerBank: undefined;
-  ExpertDomain: undefined;
-  ExpertCredentials: undefined;
-  ExpertVerification: undefined;
-  SecurityVerification: undefined;
-  Main: NavigatorScreenParams<MainTabParamList> | undefined;
-  InstructorStudio: undefined;
-  EditProfile: undefined;
-  PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
-  DirectChat: {
-    peerUserId: number;
-    peerName: string;
-    peerKey?: string;
-    peerUsername?: string;
-    peerAvatarUrl?: string | null;
-    incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number };
-  };
-  SettingsMenu: undefined;
-  Privacy: undefined;
-  About: undefined;
-};
+export type { MainTabParamList, RootStackParamList } from "./rootStackTypes";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -121,6 +92,159 @@ export function RootNavigator() {
       />
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
       <Stack.Screen name="SettingsMenu" component={SettingsMenuScreen} options={{ headerShown: false, animation: "slide_from_right" }} />
+      <Stack.Screen
+        name="AccountCenter"
+        component={AccountCenterScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ProfilesPersonalDetails"
+        component={ProfilesPersonalDetailsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="PasswordSecurity"
+        component={PasswordSecurityScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ChangePassword"
+        component={ChangePasswordScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="TwoFactorAuth"
+        component={TwoFactorAuthScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="EmailVerification"
+        component={EmailVerificationScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="VerificationSelfie"
+        component={VerificationSelfieScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SaveLogin"
+        component={SaveLoginScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="WhereLoggedIn"
+        component={WhereLoggedInScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="LoginActivity"
+        component={LoginActivityScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SecurityCheckup"
+        component={SecurityCheckupScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ConnectedExperiences"
+        component={ConnectedExperiencesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SharingAcrossProfiles"
+        component={SharingAcrossProfilesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="MemoriesFromInstagram"
+        component={MemoriesFromInstagramScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ShowingProfileLinks"
+        component={ShowingProfileLinksScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SyncingProfilePictures"
+        component={SyncingProfilePicturesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ManagingAvatars"
+        component={ManagingAvatarsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
       <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ headerShown: false }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
     </Stack.Navigator>

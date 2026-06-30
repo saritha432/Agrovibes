@@ -133,7 +133,7 @@ export function SettingsMenuScreen() {
           <SettingsRow
             title="Account Center"
             subtitle="Manage accounts, personal details, connected experiences, & preferences"
-            onPress={() => navigation.navigate("EditProfile")}
+            onPress={() => navigation.navigate("AccountCenter")}
             showDivider={false}
           />
         </SettingsSection>

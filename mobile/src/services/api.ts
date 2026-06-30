@@ -260,6 +260,24 @@ export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
+export async function fetchMyAccount(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token)) as {
+    user: AuthResponse["user"];
+    passwordUpdatedAt?: string | null;
+  };
+}
+
+export async function changeMyPassword(
+  token: string,
+  payload: { currentPassword: string; newPassword: string; logoutOtherDevices?: boolean }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/change-password`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { success: boolean; passwordUpdatedAt?: string };
+}
+
 export async function updateMyProfile(
   token: string,
   payload: {
