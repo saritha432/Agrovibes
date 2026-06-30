@@ -1,10 +1,12 @@
 import React from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { AccountCenterAddAction } from "../components/accountCenter/AccountCenterAddAction";
 import { AccountCenterSubLayout } from "../components/accountCenter/AccountCenterSubLayout";
+import { showAddConnectedAccountAlert } from "../components/accountCenter/showAddConnectedAccountAlert";
+import { useConnectedExperiences } from "../hooks/useConnectedExperiences";
 import type { RootStackParamList } from "../navigation/rootStackTypes";
 import { APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
@@ -23,11 +25,11 @@ type MenuItem = {
 };
 
 const MENU_ITEMS: MenuItem[] = [
-  { key: "sharing", title: "Sharing Across Profiles", icon: "person-outline", route: "SharingAcrossProfiles" },
-  { key: "memories", title: "Memories From Instagram", icon: "copy-outline", route: "MemoriesFromInstagram" },
+  { key: "sharing", title: "Sharing Across Profiles", icon: "person-add-outline", route: "SharingAcrossProfiles" },
+  { key: "memories", title: "Memories From Cropvibe", icon: "albums-outline", route: "MemoriesFromInstagram" },
   { key: "links", title: "Showing Links For Your Profiles", icon: "link-outline", route: "ShowingProfileLinks" },
   { key: "sync", title: "Syncing Profile Pictures", icon: "image-outline", route: "SyncingProfilePictures" },
-  { key: "avatars", title: "Managing Avatars", icon: "body-outline", route: "ManagingAvatars" }
+  { key: "avatars", title: "Managing Avatars", icon: "person-outline", route: "ManagingAvatars" }
 ];
 
 function ExperienceRow({
@@ -57,18 +59,15 @@ function ExperienceRow({
 
 export function ConnectedExperiencesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { user, applyState } = useConnectedExperiences();
 
-  const addAccounts = () => Alert.alert("Coming soon", "Account linking will be available in a future update.");
+  const addAccounts = () => {
+    if (!user) return;
+    showAddConnectedAccountAlert(user, applyState);
+  };
 
   return (
-    <AccountCenterSubLayout
-      title="Connected Experiences"
-      description={
-        <Text style={styles.description}>
-          Manage how your profiles and connected apps work together across cropvibe.
-        </Text>
-      }
-    >
+    <AccountCenterSubLayout title="Connected Experiences">
       <AccountCenterAddAction label="+ Add Accounts" onPress={addAccounts} />
 
       <View style={styles.card}>
@@ -87,11 +86,6 @@ export function ConnectedExperiencesScreen() {
 }
 
 const styles = StyleSheet.create({
-  description: {
-    color: "#97a0a8",
-    fontSize: 14,
-    lineHeight: 21
-  },
   card: {
     backgroundColor: APP_SURFACE,
     borderRadius: 14,

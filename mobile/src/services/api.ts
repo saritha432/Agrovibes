@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { buildLocalLoginSessionsFallback, isLocalLoginSessionId, LOGIN_ACTIVITY_DEPLOY_HINT } from "../utils/loginActivityFallback";
 import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
 import { prepareImageForUpload, prepareProfileImageForUpload } from "../utils/mediaUpload";
@@ -237,7 +238,11 @@ export async function authRegister(payload: {
   fullName: string;
   role?: string;
   username?: string;
-  phone: string;
+  phone?: string;
+  deviceName?: string;
+  platform?: string;
+  locationLabel?: string;
+  deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
 }) {
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/register`, {
     method: "POST",
@@ -247,7 +252,15 @@ export async function authRegister(payload: {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
-export async function authLogin(payload: { email?: string; identifier?: string; password: string }) {
+export async function authLogin(payload: {
+  email?: string;
+  identifier?: string;
+  password: string;
+  deviceName?: string;
+  platform?: string;
+  locationLabel?: string;
+  deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
+}) {
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -265,7 +278,14 @@ export async function sendPhoneOtp(payload: { phone: string }) {
   return (await parseJsonOrThrow(response)) as { success: boolean; phone: string; channel: "sms" | "whatsapp" };
 }
 
-export async function verifyPhoneOtp(payload: { phone: string; code: string }) {
+export async function verifyPhoneOtp(payload: {
+  phone: string;
+  code: string;
+  deviceName?: string;
+  platform?: string;
+  locationLabel?: string;
+  deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
+}) {
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -290,6 +310,158 @@ export async function changeMyPassword(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as { success: boolean; passwordUpdatedAt?: string };
+}
+
+export type LoginSessionPlatform = "android" | "ios" | "web" | "windows" | "unknown";
+
+export interface LoginSession {
+  id: string;
+  deviceName: string;
+  platform: LoginSessionPlatform;
+  locationLabel?: string | null;
+  isRecognized: boolean;
+  lastActiveAt: string;
+  createdAt: string;
+  isCurrent: boolean;
+}
+
+export interface LoginSessionsResponse {
+  sessions: LoginSession[];
+  platformSummaries: Array<{
+    platform: LoginSessionPlatform;
+    deviceName: string;
+    extraCount: number;
+    summary: string;
+  }>;
+  unrecognizedLoginCount: number;
+  hasUnrecognizedLogins: boolean;
+  refreshedToken?: string;
+  /** True when the server has not deployed session APIs yet (404). */
+  legacyFallback?: boolean;
+}
+
+export interface SecurityCheckupRecommendation {
+  key: string;
+  title: string;
+  subtitle: string;
+  route: "ProfilesPersonalDetails" | "WhereLoggedIn";
+}
+
+export interface SecurityCheckupResponse {
+  recommendationCount: number;
+  recommendations: SecurityCheckupRecommendation[];
+  passwordUpdatedAt?: string | null;
+  devicesReviewedAt?: string | null;
+  unrecognizedLoginCount: number;
+  sessions: LoginSession[];
+  contactComplete: boolean;
+  twoFactorEnabled: boolean;
+  legacyFallback?: boolean;
+}
+
+export async function fetchLoginSessions(
+  token: string,
+  device?: { deviceName?: string; platform?: string; locationLabel?: string }
+) {
+  const qs = new URLSearchParams();
+  if (device?.deviceName) qs.set("deviceName", device.deviceName);
+  if (device?.platform) qs.set("platform", device.platform);
+  if (device?.locationLabel) qs.set("locationLabel", device.locationLabel);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/sessions${suffix}`, token)) as LoginSessionsResponse;
+  } catch (error: unknown) {
+    const status = (error as { status?: number })?.status;
+    if (status === 404) {
+      return buildLocalLoginSessionsFallback(device);
+    }
+    throw error;
+  }
+}
+
+export async function fetchLoginSession(token: string, sessionId: string) {
+  if (isLocalLoginSessionId(sessionId)) {
+    const fallback = buildLocalLoginSessionsFallback();
+    const session = fallback.sessions[0];
+    return { session };
+  }
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/sessions/${encodeURIComponent(sessionId)}`, token)) as {
+      session: LoginSession;
+    };
+  } catch (error: unknown) {
+    const status = (error as { status?: number })?.status;
+    if (status === 404) {
+      const fallback = buildLocalLoginSessionsFallback();
+      return { session: fallback.sessions[0] };
+    }
+    throw error;
+  }
+}
+
+export async function revokeLoginSession(token: string, sessionId: string) {
+  if (isLocalLoginSessionId(sessionId)) {
+    const err: Error & { status?: number } = new Error(LOGIN_ACTIVITY_DEPLOY_HINT);
+    err.status = 404;
+    throw err;
+  }
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/sessions/${encodeURIComponent(sessionId)}/revoke`, token, {
+    method: "POST"
+  })) as { success: boolean; revokedSessionId: string; isCurrent: boolean };
+}
+
+export async function reportLoginSession(token: string, sessionId: string) {
+  if (isLocalLoginSessionId(sessionId)) {
+    const err: Error & { status?: number } = new Error(LOGIN_ACTIVITY_DEPLOY_HINT);
+    err.status = 404;
+    throw err;
+  }
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/sessions/${encodeURIComponent(sessionId)}/report`, token, {
+    method: "POST"
+  })) as { success: boolean; revokedSessionId: string; isCurrent: boolean };
+}
+
+export async function markDevicesReviewed(token: string) {
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/sessions/reviewed`, token, {
+      method: "POST"
+    })) as { success: boolean; reviewedAt: string };
+  } catch (error: unknown) {
+    if ((error as { status?: number })?.status === 404) {
+      return { success: false, reviewedAt: new Date().toISOString() };
+    }
+    throw error;
+  }
+}
+
+export async function fetchSecurityCheckup(token: string) {
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/security-checkup`, token)) as SecurityCheckupResponse;
+  } catch (error: unknown) {
+    const status = (error as { status?: number })?.status;
+    if (status !== 404) throw error;
+
+    let passwordUpdatedAt: string | null = null;
+    try {
+      const account = await fetchMyAccount(token);
+      passwordUpdatedAt = account.passwordUpdatedAt || null;
+    } catch {
+      passwordUpdatedAt = null;
+    }
+
+    const fallback = buildLocalLoginSessionsFallback();
+    return {
+      recommendationCount: 0,
+      recommendations: [],
+      passwordUpdatedAt,
+      devicesReviewedAt: null,
+      unrecognizedLoginCount: 0,
+      sessions: fallback.sessions,
+      contactComplete: true,
+      twoFactorEnabled: false,
+      legacyFallback: true
+    } satisfies SecurityCheckupResponse;
+  }
 }
 
 export async function updateMyProfile(

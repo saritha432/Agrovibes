@@ -7,7 +7,7 @@ import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../.
 
 type AccountCenterSubLayoutProps = {
   title: string;
-  description: React.ReactNode;
+  description?: React.ReactNode;
   children: React.ReactNode;
   contentStyle?: ViewStyle;
 };
@@ -32,7 +32,7 @@ export function AccountCenterSubLayout({ title, description, children, contentSt
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>{title}</Text>
-      <View style={styles.descriptionWrap}>{description}</View>
+        {description ? <View style={styles.descriptionWrap}>{description}</View> : null}
         {children}
       </ScrollView>
     </SafeAreaView>

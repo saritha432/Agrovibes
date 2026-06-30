@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
 import { clearReelPreviewCache } from "../utils/reelPreviewThumb";
+import { upsertSavedLogin } from "../utils/savedLogins";
 
 export type UserRole = "student" | "instructor" | "admin";
 
@@ -24,6 +25,7 @@ interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   signIn: (payload: { token: string; user: AuthUser }) => Promise<void>;
+  refreshToken: (token: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (patch: Partial<AuthUser>) => Promise<void>;
 }
@@ -72,6 +74,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(payload.token);
     setUser(payload.user);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    void upsertSavedLogin(payload.user);
+  }, []);
+
+  const refreshToken = React.useCallback(async (nextToken: string) => {
+    setToken(nextToken);
+    setUser((prev) => {
+      if (!prev) return prev;
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: nextToken, user: prev })).catch(() => {});
+      return prev;
+    });
   }, []);
 
   const signOut = React.useCallback(async () => {
@@ -96,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const value: AuthState = { token, user, loading, signIn, signOut, updateUser };
+  const value: AuthState = { token, user, loading, signIn, refreshToken, signOut, updateUser };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -16,6 +16,18 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
+const {
+  createAuthSession,
+  isSessionActive,
+  listUserSessions,
+  getUserSession,
+  revokeSession,
+  revokeOtherSessions,
+  markSessionUnrecognized,
+  markDevicesReviewed,
+  getSecurityCheckup,
+  sessionSummaryByPlatform
+} = require("../authSessions");
 const { isMediaStorageConfigured, uploadMediaBuffer, checkMediaStorageHealth, getMediaStorageProvider } = require("../mediaStorage");
 const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 const {
@@ -1389,6 +1401,23 @@ router.get("/v1/bootstrap", (_req, res) => {
   });
 });
 
+async function issueAuthToken(user, req, deviceInfo) {
+  const { sessionId } = await createAuthSession({
+    userId: user.id,
+    deviceInfo: deviceInfo || {},
+    req
+  });
+  const token = signJwt({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    fullName: user.fullName,
+    phone: user.phone,
+    sessionId
+  });
+  return token;
+}
+
 router.post("/v1/auth/register", async (req, res) => {
   try {
     await ensureLearnUsersTable();
@@ -1421,7 +1450,7 @@ router.post("/v1/auth/register", async (req, res) => {
     );
 
     const user = authUserFromRow(result.rows[0]);
-    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
+    const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
     res.status(201).json({ token, user });
   } catch (error) {
     const info = authRouteErrorInfo(error);
@@ -1520,7 +1549,7 @@ router.post("/v1/auth/login", async (req, res) => {
       }
     }
 
-    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
+    const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
     res.json({ token, user });
   } catch (error) {
     const info = authRouteErrorInfo(error);
@@ -1767,13 +1796,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
       }
     }
 
-    const token = signJwt({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      fullName: user.fullName,
-      phone: user.phone
-    });
+    const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
     res.json({ token, user, isNewUser });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -1940,6 +1963,124 @@ router.get("/v1/auth/me", authRequired, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile", error: error.message });
+  }
+});
+
+router.get("/v1/auth/sessions", authRequired, async (req, res) => {
+  try {
+    let currentSessionId = req.user.sessionId || null;
+    const deviceInfo = {
+      deviceName: req.query.deviceName,
+      platform: req.query.platform,
+      locationLabel: req.query.locationLabel
+    };
+    if (!currentSessionId || !(await isSessionActive(currentSessionId, req.user.userId))) {
+      const created = await createAuthSession({
+        userId: req.user.userId,
+        deviceInfo,
+        req
+      });
+      currentSessionId = created.sessionId;
+      const token = signJwt({
+        userId: req.user.userId,
+        email: req.user.email,
+        role: req.user.role,
+        fullName: req.user.fullName,
+        phone: req.user.phone,
+        sessionId: currentSessionId
+      });
+      res.setHeader("x-refresh-auth-token", token);
+    }
+
+    const sessions = await listUserSessions(req.user.userId, currentSessionId);
+    const summaries = sessionSummaryByPlatform(sessions);
+    const unrecognizedCount = sessions.filter((s) => !s.isRecognized && !s.isCurrent).length;
+    res.json({
+      sessions,
+      platformSummaries: summaries,
+      unrecognizedLoginCount: unrecognizedCount,
+      hasUnrecognizedLogins: unrecognizedCount > 0,
+      refreshedToken: res.getHeader("x-refresh-auth-token") || undefined
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load sessions", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/auth/sessions/:sessionId", authRequired, async (req, res) => {
+  try {
+    const session = await getUserSession(req.params.sessionId, req.user.userId);
+    if (!session) {
+      res.status(404).json({ message: "Session not found" });
+      return;
+    }
+    res.json({
+      session: {
+        ...session,
+        isCurrent: req.user.sessionId ? session.id === req.user.sessionId : false
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load session", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/:sessionId/revoke", authRequired, async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || "");
+    const revoked = await revokeSession(sessionId, req.user.userId);
+    if (!revoked) {
+      res.status(404).json({ message: "Session not found" });
+      return;
+    }
+    res.json({ success: true, revokedSessionId: sessionId, isCurrent: sessionId === req.user.sessionId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to revoke session", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/:sessionId/report", authRequired, async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || "");
+    const reported = await markSessionUnrecognized(sessionId, req.user.userId);
+    if (!reported) {
+      res.status(404).json({ message: "Session not found" });
+      return;
+    }
+    res.json({ success: true, revokedSessionId: sessionId, isCurrent: sessionId === req.user.sessionId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to report session", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/revoke-others", authRequired, async (req, res) => {
+  try {
+    const count = await revokeOtherSessions(req.user.userId, req.user.sessionId || null);
+    res.json({ success: true, revokedCount: count });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to revoke other sessions", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/reviewed", authRequired, async (req, res) => {
+  try {
+    await markDevicesReviewed(req.user.userId);
+    res.json({ success: true, reviewedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark devices reviewed", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/auth/security-checkup", authRequired, async (req, res) => {
+  try {
+    const checkup = await getSecurityCheckup(req.user.userId, req.user.sessionId || null);
+    if (!checkup) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    res.json(checkup);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load security checkup", error: error?.message || String(error) });
   }
 });
 
@@ -2187,6 +2328,10 @@ router.post("/v1/auth/me/change-password", authRequired, async (req, res) => {
       [passwordHash, req.user.userId]
     );
 
+    if (req.body?.logoutOtherDevices) {
+      await revokeOtherSessions(req.user.userId, req.user.sessionId || null);
+    }
+
     res.json({ success: true, passwordUpdatedAt: new Date().toISOString() });
   } catch (error) {
     res.status(500).json({ message: "Failed to change password", error: error?.message || String(error) });
@@ -2237,7 +2382,14 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
       res.status(404).json({ message: "User not found" });
       return;
     }
-    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName, phone: user.phone });
+    const token = signJwt({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      fullName: user.fullName,
+      phone: user.phone,
+      sessionId: req.user.sessionId
+    });
     res.json({ token, user });
   } catch (error) {
     const msg = String(error.message || "");

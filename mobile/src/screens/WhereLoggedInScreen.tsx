@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   AccountCenterCard,
@@ -10,25 +10,61 @@ import {
   AccountCenterSubLayout
 } from "../components/accountCenter/AccountCenterSubLayout";
 import { AccountCenterAvatar } from "../components/accountCenter/AccountCenterAvatar";
+import { LoginActivityDeployBanner } from "../components/accountCenter/LoginActivityDeployBanner";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/rootStackTypes";
+import { fetchLoginSessions, markDevicesReviewed } from "../services/api";
+import { getLoginDevicePayload } from "../utils/deviceInfo";
 import { APP_LIME } from "../theme/appColors";
-
-const LOGGED_IN_ACCOUNTS = [
-  { key: "android", deviceSummary: "OnePlus Nord | +30 More" },
-  { key: "ios", deviceSummary: "iPhone 17 Pro | +20 More" }
-] as const;
 
 export function WhereLoggedInScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { user } = useAuth();
+  const { user, token, refreshToken } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [hasUnrecognized, setHasUnrecognized] = useState(false);
+  const [platformSummaries, setPlatformSummaries] = useState<
+    Array<{ platform: string; deviceName: string; extraCount: number; summary: string }>
+  >([]);
+  const [error, setError] = useState<string | null>(null);
+  const [legacyFallback, setLegacyFallback] = useState(false);
 
   const displayName = useMemo(
     () => user?.fullName || user?.username || "Your profile",
     [user?.fullName, user?.username]
   );
 
-  const openLoginActivity = () => navigation.navigate("LoginActivity", { accountName: displayName });
+  const loadSessions = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setError(null);
+    try {
+      const data = await fetchLoginSessions(token, getLoginDevicePayload(user?.locationLabel));
+      if (data.refreshedToken) {
+        await refreshToken(data.refreshedToken);
+      }
+      setHasUnrecognized(data.hasUnrecognizedLogins);
+      setPlatformSummaries(data.platformSummaries);
+      setLegacyFallback(Boolean(data.legacyFallback));
+      if (!data.legacyFallback) {
+        await markDevicesReviewed(token);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load devices");
+    } finally {
+      setLoading(false);
+    }
+  }, [token, refreshToken, user?.locationLabel]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      void loadSessions();
+    }, [loadSessions])
+  );
+
+  const openLoginActivity = () => navigation.navigate("LoginActivity", { accountName: displayName, userId: user?.id });
 
   return (
     <AccountCenterSubLayout
@@ -39,27 +75,45 @@ export function WhereLoggedInScreen() {
         </Text>
       }
     >
-      <Pressable style={styles.alertBanner} onPress={openLoginActivity} accessibilityRole="button">
-        <Ionicons name="alert-circle" size={20} color={APP_LIME} />
-        <Text style={styles.alertText}>
-          We Detected Unrecognized Logins.{" "}
-          <Text style={styles.alertLink}>Review Devices</Text>
-        </Text>
-      </Pressable>
+      <LoginActivityDeployBanner visible={legacyFallback} />
+      {hasUnrecognized ? (
+        <Pressable style={styles.alertBanner} onPress={openLoginActivity} accessibilityRole="button">
+          <Ionicons name="alert-circle" size={20} color={APP_LIME} />
+          <Text style={styles.alertText}>
+            We Detected Unrecognized Logins.{" "}
+            <Text style={styles.alertLink}>Review Devices</Text>
+          </Text>
+        </Pressable>
+      ) : null}
 
       <AccountCenterSectionTitle title="Accounts" />
-      <AccountCenterCard>
-        {LOGGED_IN_ACCOUNTS.map((account, index) => (
-          <AccountCenterChevronRow
-            key={account.key}
-            title={displayName}
-            subtitle={account.deviceSummary}
-            onPress={openLoginActivity}
-            showDivider={index < LOGGED_IN_ACCOUNTS.length - 1}
-            left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
-          />
-        ))}
-      </AccountCenterCard>
+      {loading ? (
+        <ActivityIndicator color={APP_LIME} style={{ marginTop: 8 }} />
+      ) : error ? (
+        <Text style={styles.errorText}>{error}</Text>
+      ) : (
+        <AccountCenterCard>
+          {platformSummaries.length === 0 ? (
+            <AccountCenterChevronRow
+              title={displayName}
+              subtitle="This device only"
+              onPress={openLoginActivity}
+              left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
+            />
+          ) : (
+            platformSummaries.map((account, index) => (
+              <AccountCenterChevronRow
+                key={account.platform}
+                title={displayName}
+                subtitle={account.summary}
+                onPress={openLoginActivity}
+                showDivider={index < platformSummaries.length - 1}
+                left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
+              />
+            ))
+          )}
+        </AccountCenterCard>
+      )}
     </AccountCenterSubLayout>
   );
 }
@@ -81,5 +135,10 @@ const styles = StyleSheet.create({
     color: APP_LIME,
     fontWeight: "700",
     textDecorationLine: "underline"
+  },
+  errorText: {
+    color: "#f87171",
+    fontSize: 14,
+    lineHeight: 20
   }
 });
