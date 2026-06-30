@@ -21,6 +21,9 @@ export type LocalEngagementRecord = {
   recipientNameNorm: string;
   postId: number;
   isReel: boolean;
+  postThumbnailUrl?: string;
+  postImageUrl?: string;
+  postVideoUrl?: string;
   commentExcerpt?: string;
   read: boolean;
   createdAt: string;
@@ -121,6 +124,9 @@ export async function appendLocalEngagementNotification(payload: {
   recipientDisplayName: string;
   postId: number;
   isReel: boolean;
+  postThumbnailUrl?: string | null;
+  postImageUrl?: string | null;
+  postVideoUrl?: string | null;
   commentExcerpt?: string;
 }) {
   const recipientNameNorm = normalizeName(payload.recipientDisplayName);
@@ -136,6 +142,9 @@ export async function appendLocalEngagementNotification(payload: {
     recipientNameNorm,
     postId: payload.postId,
     isReel: payload.isReel,
+    postThumbnailUrl: String(payload.postThumbnailUrl || "").trim() || undefined,
+    postImageUrl: String(payload.postImageUrl || "").trim() || undefined,
+    postVideoUrl: String(payload.postVideoUrl || "").trim() || undefined,
     commentExcerpt: payload.commentExcerpt,
     read: false,
     createdAt: now

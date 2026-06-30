@@ -13,6 +13,7 @@ import { EditProfilePage } from "../pages/EditProfilePage";
 import { ProfilePage } from "../pages/ProfilePage";
 import { ReelsPage } from "../pages/ReelsPage";
 import { ReelWatchPage } from "../pages/ReelWatchPage";
+import { PublicProfilePage } from "../pages/PublicProfilePage";
 import { SearchPage } from "../pages/SearchPage";
 import { PrivacyPolicy } from "../pages/PrivacyPolicy";
 import { DeleteAccount } from "../pages/DeleteAccount";
@@ -40,6 +41,7 @@ export function AppRoutes() {
       <Route path="/delete-account" element={<DeleteAccount />} />
       <Route path="/child-safety" element={<ChildSafety />} />
       <Route path="/watch/:postId" element={<ReelWatchPage />} />
+      <Route path="/profile/:userIdOrHandle" element={<PublicProfilePage />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<HomePage />} />
         <Route path="search" element={<SearchPage />} />

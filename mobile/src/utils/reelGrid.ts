@@ -28,6 +28,12 @@ export function reelGridStillUri(post: HomePost): string | null {
   return null;
 }
 
+/** Portrait/square reels fill the slot; landscape reels show the full frame. */
+export function pickReelVideoFit(videoWidth: number, videoHeight: number): "cover" | "contain" {
+  if (!videoWidth || !videoHeight) return "cover";
+  return videoWidth > videoHeight ? "contain" : "cover";
+}
+
 export function postMatchesExploreQuery(post: HomePost, query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;

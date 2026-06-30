@@ -4,6 +4,7 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -388,9 +389,11 @@ export function DirectChatScreen() {
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [peerUsername, setPeerUsername] = useState(peerUsernameParam || "");
   const peerHandle = formatPeerHandle(peerUsername, peerKey);
-  const threadItems = useMemo(() => buildThreadListItems(messages), [messages]);
+  const threadItems = useMemo(() => [...buildThreadListItems(messages)].reverse(), [messages]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
   );
@@ -486,18 +489,33 @@ export function DirectChatScreen() {
   const reload = useCallback(async () => {
     if (!token) {
       setMessages([]);
+      setHasMoreOlder(false);
       return;
     }
-    const list = await fetchMessageThread(token, peerUserId);
+    const list = await fetchMessageThread(token, peerUserId, { limit: 40 });
     setMessages(list.messages || []);
+    setHasMoreOlder(!!list.hasMore);
     const next = list.peer?.avatarUrl != null && String(list.peer.avatarUrl).trim() ? String(list.peer.avatarUrl).trim() : null;
     if (next) setPeerAvatar(next);
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
   }, [token, peerUserId]);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const loadOlderMessages = useCallback(async () => {
+    if (!token || loadingOlder || !hasMoreOlder || messages.length === 0) return;
+    const oldestId = messages[0]?.id;
+    if (!oldestId) return;
+    setLoadingOlder(true);
+    try {
+      const list = await fetchMessageThread(token, peerUserId, { limit: 40, beforeId: oldestId });
+      setHasMoreOlder(!!list.hasMore);
+      setMessages((prev) => {
+        const existing = new Set(prev.map((item) => item.id));
+        const older = (list.messages || []).filter((item) => !existing.has(item.id));
+        return older.length ? [...older, ...prev] : prev;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasMoreOlder, loadingOlder, messages, peerUserId, token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -527,7 +545,6 @@ export function DirectChatScreen() {
         if (prev.some((item) => item.id === payload.message.id)) return prev;
         return [...prev, payload.message];
       });
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     });
   }, [peerUserId]);
 
@@ -544,7 +561,6 @@ export function DirectChatScreen() {
       if (prev.some((item) => item.id === message.id)) return prev;
       return [...prev, message];
     });
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, []);
 
   const isComposerSingleLine = !draft.includes("\n") && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT + 2;
@@ -944,16 +960,21 @@ export function DirectChatScreen() {
         ref={listRef}
         data={threadItems}
         keyExtractor={(item) => item.id}
+        inverted
         contentContainerStyle={styles.listContent}
         initialNumToRender={18}
         maxToRenderPerBatch={12}
         windowSize={9}
         removeClippedSubviews={Platform.OS === "android"}
-        onContentSizeChange={() => {
-          if (threadItems.length <= threadItemCountRef.current) return;
-          threadItemCountRef.current = threadItems.length;
-          listRef.current?.scrollToEnd({ animated: true });
-        }}
+        onEndReached={() => void loadOlderMessages()}
+        onEndReachedThreshold={0.15}
+        ListFooterComponent={
+          loadingOlder ? (
+            <View style={styles.olderLoader}>
+              <ActivityIndicator color={APP_LIME} size="small" />
+            </View>
+          ) : null
+        }
         onLayout={() => {
           threadItemCountRef.current = threadItems.length;
         }}
@@ -1320,6 +1341,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase"
   },
   listContent: { paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 },
+  olderLoader: { paddingVertical: 12, alignItems: "center" },
   bubbleRow: { marginBottom: 10, flexDirection: "row", width: "100%" },
   bubbleRowSelf: { justifyContent: "flex-end" },
   bubbleRowPeer: { justifyContent: "flex-start" },

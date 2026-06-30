@@ -11,6 +11,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -38,6 +39,7 @@ import { AppTopBar } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
 import { UserAvatar } from "../components/UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
+import { ReelSeekBar } from "../components/ReelSeekBar";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
@@ -48,6 +50,8 @@ import {
   fetchHomePostComments,
   fetchHomePostLikes,
   fetchHomePosts,
+  fetchHomePostsPage,
+  HOME_FEED_PAGE_SIZE,
   fetchSocialNotifications,
   type HomePostLiker,
   fetchHomeStories,
@@ -78,7 +82,14 @@ import {
   setLocalPostLikedByIdentity,
   type PostLiker
 } from "../social/localEngagementStore";
-import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
+import {
+  getLocalFollowNetworkByIdentity,
+  getLocalRelationshipMapByNames,
+  removeLocalFollowByIdentity,
+  sendLocalFollowRequestByIdentity
+} from "../social/localFollowStore";
+import { mergeHomeFeedPosts, readHomeFeedCache, writeHomeFeedCache } from "../social/homeFeedCache";
+import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
@@ -90,7 +101,7 @@ import {
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
-import { reelPlayerBackground } from "../utils/reelGrid";
+import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit } from "../utils/reelGrid";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 
 export type OpenCreateOptions = {
@@ -98,6 +109,14 @@ export type OpenCreateOptions = {
   scheduledLiveId?: number;
   autoStartLive?: boolean;
 };
+
+function localEngagementPostPreview(post: HomePost) {
+  return {
+    postThumbnailUrl: post.thumbnailUrl || null,
+    postImageUrl: post.imageUrl || post.imageUrls?.[0] || null,
+    postVideoUrl: post.videoUrl || null
+  };
+}
 
 interface HomeScreenProps {
   refreshToken?: number;
@@ -107,6 +126,9 @@ interface HomeScreenProps {
 }
 
 const postTints = ["#8a5b00", APP_LIME, "#8b3a62", "#105f75"];
+const REEL_DOUBLE_TAP_MS = 420;
+const REEL_SINGLE_TAP_DELAY_MS = 500;
+
 const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
 type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
 const likeActiveColor = APP_LIME;
@@ -246,6 +268,17 @@ function dismissedPostsStorageKey(userId: string | number | undefined) {
   return "agrovibes.feed.dismissedPosts.v1.anon";
 }
 
+function viewedStoriesStorageKey(userId: string | number | undefined) {
+  if (userId != null && String(userId) !== "" && Number(userId) > 0) {
+    return `agrovibes.stories.viewed.v1.${userId}`;
+  }
+  return "agrovibes.stories.viewed.v1.anon";
+}
+
+function storyIsUnviewed(story: HomeStory, viewedIds: Set<number>) {
+  return !story.viewed && !viewedIds.has(story.id);
+}
+
 function reelCreativeFilterTint(filter?: string): string | null {
   switch (String(filter || "").toLowerCase()) {
     case "warm":
@@ -289,6 +322,35 @@ function normalizeIdentity(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function storyViewerOwns(
+  story: HomeStory,
+  viewerId: number,
+  viewerNameKeys: Set<string>
+): boolean {
+  const sid = Number(story.userId);
+  if (Number.isFinite(viewerId) && viewerId > 0 && Number.isFinite(sid) && sid > 0) {
+    return sid === viewerId;
+  }
+  const storyName = normalizeIdentity(story.userName);
+  if (!storyName || storyName === "you") return false;
+  return viewerNameKeys.has(storyName);
+}
+
+/** Instagram-style: stories from people you follow (accepted), plus your own. */
+function storyIsFromAcceptedFollow(
+  story: HomeStory,
+  followingUserIds: Set<number>,
+  followingNameKeys: Set<string>
+): boolean {
+  const sid = Number(story.userId);
+  if (Number.isFinite(sid) && sid > 0) {
+    return followingUserIds.has(sid);
+  }
+  const storyName = normalizeIdentity(story.userName);
+  if (!storyName) return false;
+  return followingNameKeys.has(storyName);
 }
 
 function viewerOwnsPost(post: HomePost, viewer: { id: number; fullName?: string } | null) {
@@ -790,8 +852,8 @@ type ContainedExpoVideoProps = {
   preloadOnly?: boolean;
   containerWidth: number;
   containerHeight: number;
-  /** `cover` = full bleed (no side bars; may crop). `contain` = full frame visible (letterboxing). */
-  fit?: "contain" | "cover";
+  /** `cover` = full bleed. `contain` = full frame visible. `auto` = cover portrait, contain landscape. */
+  fit?: "contain" | "cover" | "auto";
   isLooping?: boolean;
   isMuted?: boolean;
   posterUri?: string;
@@ -809,7 +871,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   preloadOnly = false,
   containerWidth,
   containerHeight,
-  fit = "contain",
+  fit = "auto",
   isLooping = true,
   isMuted = false,
   posterUri,
@@ -817,8 +879,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   onStatusUpdate
 }: ContainedExpoVideoProps, ref) {
   const isWeb = Platform.OS === "web";
-  const isCover = fit === "cover";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const effectiveFit = useMemo((): "contain" | "cover" => {
+    if (fit === "cover" || fit === "contain") return fit;
+    if (!natural) return "cover";
+    return pickReelVideoFit(natural.width, natural.height);
+  }, [fit, natural]);
+  const isCover = effectiveFit === "cover";
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
@@ -870,7 +937,14 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     () => ({
       seekToRatio: async (ratio: number) => {
         const target = Math.max(0, Math.min(1, ratio));
-        const dur = durationRef.current;
+        let dur = durationRef.current;
+        if (!dur || !Number.isFinite(dur)) {
+          const status = await videoRef.current?.getStatusAsync();
+          if (status?.isLoaded) {
+            dur = Number(status.durationMillis || 0);
+            durationRef.current = dur;
+          }
+        }
         if (!dur || !Number.isFinite(dur)) return;
         await videoRef.current?.setPositionAsync(Math.round(dur * target));
       }
@@ -914,6 +988,9 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           if (status.isLoaded) {
             durationRef.current = Number(status.durationMillis || 0);
             const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
+            if (w > 0 && h > 0 && (fit === "auto" || !isCover)) {
+              setNatural((prev) => (prev?.width === w && prev?.height === h ? prev : { width: w, height: h }));
+            }
             if (isOversizedFeedVideo(w, h)) {
               setPlaybackBlocked(true);
               void videoRef.current?.pauseAsync().catch(() => {});
@@ -927,7 +1004,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           }
         }}
         onReadyForDisplay={
-          isWeb || isCover
+          isCover && fit !== "auto"
             ? undefined
             : (ev) => {
                 const dim = readVideoNaturalSize(ev);
@@ -940,21 +1017,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     </View>
   );
 });
-
-type ReelSeekBarProps = {
-  progressRatio: number;
-};
-
-/** Passive progress strip (no thumb, no scrub) — Instagram-style reel completion line. */
-function ReelSeekBar({ progressRatio }: ReelSeekBarProps) {
-  const clamp = (v: number) => Math.max(0, Math.min(1, v));
-  const safeRatio = clamp(progressRatio);
-  return (
-    <View style={styles.reelSeekTrack} pointerEvents="none">
-      <View style={[styles.reelSeekFill, { width: `${safeRatio * 100}%` }]} />
-    </View>
-  );
-}
 
 type ReelLikeBurstProps = {
   postId: number;
@@ -1065,15 +1127,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     (caption: string | null | undefined) => formatReelCaption(caption, language, t),
     [language, t]
   );
-  const { token, user } = useAuth();
+  const { token, user, refreshUser } = useAuth();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isFocused = useIsFocused();
   const appIsActive = useAppIsActive();
   const canPlayMedia = appIsActive && isFocused;
-  /** Android feed reels often draw under the status bar; insets.top can be 0 while the clock row still shows. */
-  const reelTopInset = useMemo(() => {
-    const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
-    return Math.max(insets.top, sbh);
+  /** Home feed header: Android window already clears the status bar (translucent: false). */
+  const homeTopInset = useMemo(() => {
+    if (Platform.OS === "android") return 0;
+    return Math.max(insets.top, 12) + 6;
+  }, [insets.top]);
+
+  /** Story / fullscreen reel chrome over translucent status bar — use full safe area, no cap. */
+  const modalTopInset = useMemo(() => {
+    if (Platform.OS === "android") {
+      const sbh = StatusBar.currentHeight ?? 0;
+      return Math.max(insets.top, sbh) + 8;
+    }
+    return Math.max(insets.top, 12) + 10;
   }, [insets.top]);
 
   const homeTabLabel = React.useCallback(
@@ -1110,10 +1182,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [t]
   );
 
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const feedNextCursorRef = useRef<number | null>(null);
+  const feedLoadMoreInFlightRef = useRef(false);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const [manualRefreshToken, setManualRefreshToken] = useState(0);
+  const refreshPendingRef = useRef(0);
+  const onPullRefresh = useCallback(() => {
+    refreshPendingRef.current = 2;
+    setIsPullRefreshing(true);
+    setManualRefreshToken((v) => v + 1);
+  }, []);
+
   const [feedShuffleSeed, setFeedShuffleSeed] = useState(() => Date.now());
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
@@ -1122,6 +1206,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const postsRef = useRef<HomePost[]>([]);
   postsRef.current = posts;
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
+  const [viewedStoriesHydrated, setViewedStoriesHydrated] = useState(false);
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [reelViewerOpen, setReelViewerOpen] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
@@ -1206,12 +1291,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [suggestedFollowDone, setSuggestedFollowDone] = useState<Set<number>>(new Set());
   const [suggestedDismissed, setSuggestedDismissed] = useState<Set<number>>(new Set());
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
+  const likeToggleInFlightRef = useRef<Record<number, boolean>>({});
+  const postLikedByIdRef = useRef<Record<number, boolean>>({});
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
   const [carouselPageByPostId, setCarouselPageByPostId] = useState<Record<number, number>>({});
   const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
   const [activeReelMusicPostId, setActiveReelMusicPostId] = useState<number | null>(null);
   /** Web: start muted (browser autoplay). Native: start with sound so reel / track audio is audible. */
   const [isReelMuted, setIsReelMuted] = useState(Platform.OS === "web");
+  const [reelUserPaused, setReelUserPaused] = useState(false);
   /** Ephemeral center icon in full-screen reel viewer after tap mute/unmute (Instagram-style). */
   const [reelMuteFeedback, setReelMuteFeedback] = useState<"muted" | "unmuted" | null>(null);
   const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
@@ -1219,7 +1307,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
   const [reelFrameWidth, setReelFrameWidth] = useState(0);
   const [storyViewport, setStoryViewport] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [storyHoldPaused, setStoryHoldPaused] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
+  const storyAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const storyPausedRef = useRef(false);
+  const storyProgressAtPauseRef = useRef(0);
+  const nextStoryRef = useRef<() => void>(() => {});
   const commentsFetchSeqRef = useRef(0);
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
   const lastActiveReelIdRef = useRef<number | null>(null);
@@ -1228,6 +1321,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const reelViewerOpenRef = useRef<typeof reelViewerOpen>(null);
   reelViewerOpenRef.current = reelViewerOpen;
   const reelMuteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    postLikedByIdRef.current = Object.fromEntries(posts.map((p) => [p.id, !!p.viewerHasLiked]));
+  }, [posts]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -1261,13 +1358,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setPlayingPostId(null);
         return;
       }
-      // Follow the pager slot itself (reel or photo). Do not prefer "any visible video" — that kept the
-      // previous reel playing when a photo slot was centered, so playback never switched every swipe.
       const primary = ordered[ordered.length - 1];
       setPlayingPostId(primary.post.id);
+      prefetchPostMedia(primary.post);
+      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 2);
     },
     []
   );
+
+  const tabPostsRef = useRef<HomePost[]>([]);
 
   const viewabilityCallbackRef = useRef(onViewableItemsChanged);
   viewabilityCallbackRef.current = onViewableItemsChanged;
@@ -1312,6 +1411,64 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
   }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
 
+  tabPostsRef.current = tabPosts;
+
+  useEffect(() => {
+    let cancelled = false;
+    void readHomeFeedCache(user?.id ?? "anon").then((cached) => {
+      if (!cancelled && cached?.length) setPosts(cached);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const applyLocalLikesToPosts = useCallback(
+    async (rows: HomePost[]) => {
+      const localLikes = await getLocalLikeStateForPosts(
+        localLikeViewerIdentity(user || {}),
+        rows.map((p) => p.id)
+      );
+      return rows.map((p) => ({
+        ...p,
+        viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
+        likesCount: token
+          ? Number(p.likesCount || 0)
+          : Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
+      }));
+    },
+    [token, user]
+  );
+
+  const loadMoreFeed = useCallback(async () => {
+    if (!feedHasMore || feedLoadMoreInFlightRef.current) return;
+    const cursor = feedNextCursorRef.current;
+    if (cursor == null) return;
+    feedLoadMoreInFlightRef.current = true;
+    setFeedLoadingMore(true);
+    try {
+      const page = await fetchHomePostsPage(token ?? null, { limit: HOME_FEED_PAGE_SIZE, cursor });
+      if (!page.posts.length) {
+        setFeedHasMore(false);
+        return;
+      }
+      const withLikes = await applyLocalLikesToPosts(page.posts);
+      setPosts((prev) => mergeHomeFeedPosts(withLikes, prev));
+      feedNextCursorRef.current = page.hasMore ? page.nextCursor : null;
+      setFeedHasMore(page.hasMore);
+      void writeHomeFeedCache(mergeHomeFeedPosts(withLikes, postsRef.current), user?.id ?? "anon");
+    } catch {
+      // keep scroll position and existing items
+    } finally {
+      feedLoadMoreInFlightRef.current = false;
+      setFeedLoadingMore(false);
+    }
+  }, [applyLocalLikesToPosts, feedHasMore, token]);
+
+  const onFeedEndReached = useCallback(() => {
+    void loadMoreFeed();
+  }, [loadMoreFeed]);
+
   useEffect(() => {
     let cancelled = false;
     setDismissedHydrated(false);
@@ -1344,6 +1501,39 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const key = dismissedPostsStorageKey(user?.id);
     void AsyncStorage.setItem(key, JSON.stringify(Array.from(new Set(dismissedPostIds)).slice(-400)));
   }, [user?.id, dismissedPostIds, dismissedHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setViewedStoriesHydrated(false);
+    setViewedStoryIds(new Set());
+    const key = viewedStoriesStorageKey(user?.id);
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (cancelled) return;
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown;
+          if (Array.isArray(parsed)) {
+            const ids = parsed.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0);
+            setViewedStoryIds(new Set(ids));
+          }
+        }
+      } catch {
+        if (!cancelled) setViewedStoryIds(new Set());
+      } finally {
+        if (!cancelled) setViewedStoriesHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!viewedStoriesHydrated) return;
+    const key = viewedStoriesStorageKey(user?.id);
+    void AsyncStorage.setItem(key, JSON.stringify(Array.from(viewedStoryIds).slice(-500)));
+  }, [user?.id, viewedStoryIds, viewedStoriesHydrated]);
 
   const showFriendsTab =
     socialNetworkHydrated && (followingUserIds.size > 0 || followerUserIds.size > 0);
@@ -1425,14 +1615,24 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useFocusEffect(
     useCallback(() => {
+      if (!token) return;
+      void refreshUser().catch(() => {});
+    }, [refreshUser, token])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       if (!token || !appIsActive) return;
       const mediaBusy = !!(reelViewerOpen || watchingLivePost || playingPostId != null);
       const pollMs = mediaBusy ? 30000 : 20000;
       const poll = () => {
         if (feedPollInFlightRef.current) return;
         feedPollInFlightRef.current = true;
-        void fetchHomePosts(token)
-          .then((data) => setPosts(data.posts))
+        void fetchHomePostsPage(token, { limit: HOME_FEED_PAGE_SIZE })
+          .then(async (page) => {
+            const withLikes = await applyLocalLikesToPosts(page.posts);
+            setPosts((prev) => mergeHomeFeedPosts(withLikes, prev));
+          })
           .catch(() => {})
           .finally(() => {
             feedPollInFlightRef.current = false;
@@ -1441,7 +1641,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       poll();
       const timer = setInterval(poll, pollMs);
       return () => clearInterval(timer);
-    }, [appIsActive, playingPostId, reelViewerOpen, token, watchingLivePost])
+    }, [appIsActive, applyLocalLikesToPosts, playingPostId, reelViewerOpen, token, watchingLivePost])
   );
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
@@ -1554,23 +1754,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         }
       }
 
-      if (merged.length === 0 && livePost.likesCount > 0) {
-        try {
-          const fresh = await fetchHomePosts(token ?? null);
-          const refreshed = fresh.posts.find((p) => p.id === livePost.id);
-          for (const row of refreshed?.recentLikers || []) {
-            pushLiker(mapApiLikerToPostLiker(row));
-          }
-          if (refreshed?.recentLikers?.length) {
-            setPosts((prev) =>
-              prev.map((p) => (p.id === livePost.id ? { ...p, recentLikers: refreshed.recentLikers } : p))
-            );
-          }
-        } catch {
-          // ignore
-        }
-      }
-
       const apiLikers: HomePostLiker[] = merged.map((l) => ({
         userId: l.userId || 0,
         fullName: l.userName,
@@ -1617,31 +1800,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [user?.fullName, user?.username]);
 
   const ownStories = useMemo(
-    () =>
-      stories.filter((s) => {
-        const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && Number.isFinite(sid) && sid > 0) {
-          return sid === currentUserId;
-        }
-        const storyName = normalizeIdentity(s.userName);
-        if (!storyName || storyName === "you") return false;
-        return currentUserStoryKeys.has(storyName);
-      }),
+    () => stories.filter((s) => storyViewerOwns(s, currentUserId, currentUserStoryKeys)),
     [currentUserId, currentUserStoryKeys, stories]
   );
-  const otherStories = useMemo(
-    () =>
-      stories.filter((s) => {
-        const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && Number.isFinite(sid) && sid > 0) {
-          return sid !== currentUserId;
-        }
-        const storyName = normalizeIdentity(s.userName);
-        if (!storyName || storyName === "you") return true;
-        return !currentUserStoryKeys.has(storyName);
-      }),
-    [currentUserId, currentUserStoryKeys, stories]
-  );
+  const followingNameKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const peer of followingSharePeers) {
+      const n = normalizeIdentity(peer.name);
+      if (n) keys.add(n);
+    }
+    return keys;
+  }, [followingSharePeers]);
+
+  const otherStories = useMemo(() => {
+    if (!token || !socialNetworkHydrated) return [];
+    return stories.filter((s) => {
+      if (storyViewerOwns(s, currentUserId, currentUserStoryKeys)) return false;
+      return storyIsFromAcceptedFollow(s, followingUserIds, followingNameKeys);
+    });
+  }, [
+    currentUserId,
+    currentUserStoryKeys,
+    followingNameKeys,
+    followingUserIds,
+    socialNetworkHydrated,
+    stories,
+    token
+  ]);
 
   const avatarLookup = useMemo(
     () => buildAvatarLookup(posts, user, socialAvatarsByUserId),
@@ -1694,6 +1879,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const closeStory = () => {
     setStoryOpen(false);
     setStoryPlaybackQueue([]);
+    storyPausedRef.current = false;
+    setStoryHoldPaused(false);
+    storyAnimRef.current?.stop();
     progress.stopAnimation();
     progress.setValue(0);
   };
@@ -1703,6 +1891,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       closeStory();
       return;
     }
+    storyPausedRef.current = false;
+    setStoryHoldPaused(false);
+    storyAnimRef.current?.stop();
     progress.stopAnimation();
     progress.setValue(0);
     setActiveStoryIndex((v) => v + 1);
@@ -1710,27 +1901,71 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const prevStory = () => {
     if (activeStoryIndex <= 0) return;
+    storyPausedRef.current = false;
+    setStoryHoldPaused(false);
+    storyAnimRef.current?.stop();
     progress.stopAnimation();
     progress.setValue(0);
     setActiveStoryIndex((v) => v - 1);
   };
 
+  nextStoryRef.current = nextStory;
+
+  const STORY_SEGMENT_MS = 7000;
+
+  const startStoryProgress = useCallback(
+    (from = 0) => {
+      progress.setValue(from);
+      const remaining = Math.max(250, (1 - from) * STORY_SEGMENT_MS);
+      storyAnimRef.current?.stop();
+      const anim = Animated.timing(progress, {
+        toValue: 1,
+        duration: remaining,
+        useNativeDriver: false
+      });
+      storyAnimRef.current = anim;
+      anim.start(({ finished }) => {
+        if (finished && !storyPausedRef.current) nextStoryRef.current();
+      });
+    },
+    [progress]
+  );
+
+  const pauseStoryHold = useCallback(() => {
+    if (storyPausedRef.current) return;
+    storyPausedRef.current = true;
+    setStoryHoldPaused(true);
+    storyAnimRef.current?.stop();
+    progress.stopAnimation((value) => {
+      storyProgressAtPauseRef.current = typeof value === "number" ? value : 0;
+    });
+  }, [progress]);
+
+  const resumeStoryHold = useCallback(() => {
+    if (!storyPausedRef.current) return;
+    storyPausedRef.current = false;
+    setStoryHoldPaused(false);
+    startStoryProgress(storyProgressAtPauseRef.current);
+  }, [startStoryProgress]);
+
   useEffect(() => {
     if (!isStoryOpen || storyPlaybackQueue.length === 0) return;
-    progress.setValue(0);
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: 7000,
-      useNativeDriver: false
-    }).start(({ finished }) => {
-      if (finished) nextStory();
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStoryOpen, activeStoryIndex, storyPlaybackQueue.length]);
+    storyPausedRef.current = false;
+    setStoryHoldPaused(false);
+    startStoryProgress(0);
+    return () => {
+      storyAnimRef.current?.stop();
+    };
+  }, [isStoryOpen, activeStoryIndex, storyPlaybackQueue.length, startStoryProgress]);
 
   useEffect(() => {
     let mounted = true;
-    fetchHomeStories()
+    const finishPullRefreshTask = () => {
+      if (refreshPendingRef.current <= 0) return;
+      refreshPendingRef.current -= 1;
+      if (refreshPendingRef.current <= 0) setIsPullRefreshing(false);
+    };
+    fetchHomeStories(token)
       .then((data) => {
         if (!mounted) return;
         const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
@@ -1739,11 +1974,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       .catch(() => {
         if (!mounted) return;
         setStories(applyViewedStories(mergeStories([], optimisticStories)));
+      })
+      .finally(() => {
+        if (mounted) finishPullRefreshTask();
       });
     return () => {
       mounted = false;
     };
-  }, [applyViewedStories, optimisticStories, refreshToken]);
+  }, [applyViewedStories, manualRefreshToken, optimisticStories, refreshToken, token]);
 
   useEffect(() => {
     if (!activeStory?.id || !isStoryOpen) return;
@@ -1758,39 +1996,40 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     let mounted = true;
+    const finishPullRefreshTask = () => {
+      if (refreshPendingRef.current <= 0) return;
+      refreshPendingRef.current -= 1;
+      if (refreshPendingRef.current <= 0) setIsPullRefreshing(false);
+    };
     (async () => {
       const pending = takePendingFeedPost?.();
       if (pending && isLivePost(pending) && (pending.liveStatus === "ended" || pending.videoUrl)) {
         setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending, liveStatus: "ended" as const } : p)));
       }
       try {
-        const data = await fetchHomePosts(token ?? null);
+        const data = await fetchHomePostsPage(token ?? null, { limit: HOME_FEED_PAGE_SIZE });
         if (!mounted) return;
+        feedNextCursorRef.current = data.hasMore ? data.nextCursor : null;
+        setFeedHasMore(data.hasMore);
         const merged = applyPendingHomePost(data.posts, pending);
-        const localLikes = await getLocalLikeStateForPosts(
-          localLikeViewerIdentity(user || {}),
-          merged.map((p) => p.id)
-        );
+        const withLikes = await applyLocalLikesToPosts(merged);
         if (!mounted) return;
+        const replaceFeed = refreshPendingRef.current > 0;
+        const nextPosts = replaceFeed ? withLikes : mergeHomeFeedPosts(withLikes, postsRef.current);
         setFeedShuffleSeed(Date.now());
-        setPosts(
-          merged.map((p) => ({
-            ...p,
-            viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
-            likesCount: token
-              ? Number(p.likesCount || 0)
-              : Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
-          }))
-        );
+        setPosts(nextPosts);
+        void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
       } catch {
         if (!mounted) return;
-        setPosts([]);
+        if (!postsRef.current.length) setPosts([]);
+      } finally {
+        if (mounted) finishPullRefreshTask();
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
+  }, [applyLocalLikesToPosts, manualRefreshToken, refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
 
   const relationshipAuthorKey = useMemo(() => {
     if (!user?.id) return "";
@@ -1848,7 +2087,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         return;
       }
       try {
-        const network = await fetchSocialNetwork(token, Number(user.id));
+        const [network, localNetwork] = await Promise.all([
+          fetchSocialNetwork(token, Number(user.id)),
+          getLocalFollowNetworkByIdentity({
+            name: user.fullName || "",
+            key: user.email || String(user.id)
+          })
+        ]);
         if (!mounted) return;
         const followingIds = new Set<number>();
         const followerIds = new Set<number>();
@@ -1861,15 +2106,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           if (Number.isFinite(uid) && uid > 0 && av) avatarMap.set(uid, av);
           return uid;
         };
-        for (const person of network.following || []) {
+        const mergedFollowing = [...(network.following || []), ...(localNetwork.following || [])];
+        const mergedFollowers = [...(network.followers || []), ...(localNetwork.followers || [])];
+        const seenFollowing = new Set<number>();
+        for (const person of mergedFollowing) {
           const uid = rememberAvatar(person);
-          if (Number.isFinite(uid) && uid > 0) {
+          if (Number.isFinite(uid) && uid > 0 && !seenFollowing.has(uid)) {
+            seenFollowing.add(uid);
             followingIds.add(uid);
             const name = String(person.name || "").trim();
             if (name) peers.push({ id: uid, name });
           }
         }
-        for (const person of network.followers || []) {
+        for (const person of mergedFollowers) {
           const uid = rememberAvatar(person);
           if (Number.isFinite(uid) && uid > 0) followerIds.add(uid);
         }
@@ -1988,6 +2237,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
         try {
           await unfollowUser(token, targetUserId);
+          setFollowingUserIds((prev) => {
+            if (!prev.has(targetUserId)) return prev;
+            const next = new Set(prev);
+            next.delete(targetUserId);
+            return next;
+          });
+          setFollowingSharePeers((prev) => prev.filter((p) => p.id !== targetUserId));
           setRelationships((prev) => ({
             ...prev,
             [targetUserId]: {
@@ -2023,6 +2279,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
       try {
         const data = await sendFollowRequest(token, targetUserId);
+        if (data.follow.status === "accepted") {
+          setFollowingUserIds((prev) => new Set(prev).add(targetUserId));
+        }
         setRelationships((prev) => ({
           ...prev,
           [targetUserId]: {
@@ -2278,6 +2537,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const togglePostLike = useCallback(
     async (post: HomePost) => {
+      if (likeToggleInFlightRef.current[post.id]) return;
+      likeToggleInFlightRef.current[post.id] = true;
       const likedNow = !!post.viewerHasLiked;
       const nextLiked = !likedNow;
       const prevSnapshot = { liked: likedNow, count: post.likesCount };
@@ -2321,9 +2582,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             actorName: user?.fullName || "Someone",
             recipientDisplayName: post.userName,
             postId: post.id,
-            isReel: !!post.videoUrl
+            isReel: !!post.videoUrl,
+            ...localEngagementPostPreview(post)
           });
         }
+        likeToggleInFlightRef.current[post.id] = false;
         return;
       }
 
@@ -2368,11 +2631,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             actorName: user?.fullName || "Someone",
             recipientDisplayName: post.userName,
             postId: post.id,
-            isReel: !!post.videoUrl
+            isReel: !!post.videoUrl,
+            ...localEngagementPostPreview(post)
           });
         }
       } finally {
         setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
+        likeToggleInFlightRef.current[post.id] = false;
       }
     },
     [token, user?.email, user?.fullName, user?.id, user?.username]
@@ -2381,23 +2646,45 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const likeReelFromDoubleTap = useCallback(
     (post: HomePost) => {
       triggerReelLikeBurst(post.id);
-      if (!post.viewerHasLiked) {
+      if (!postLikedByIdRef.current[post.id]) {
         void togglePostLike(post);
       }
     },
     [togglePostLike, triggerReelLikeBurst]
   );
 
+  const onPostMediaTap = useCallback(
+    (post: HomePost) => {
+      if (!postHasViewableMedia(post)) return;
+      const now = Date.now();
+      const lastTap = reelTapTsRef.current[post.id] || 0;
+      if (now - lastTap <= REEL_DOUBLE_TAP_MS) {
+        const pending = reelTapTimeoutRef.current[post.id];
+        if (pending) clearTimeout(pending);
+        reelTapTimeoutRef.current[post.id] = null;
+        reelTapTsRef.current[post.id] = 0;
+        if (!postLikedByIdRef.current[post.id]) {
+          void togglePostLike(post);
+        }
+        return;
+      }
+      reelTapTsRef.current[post.id] = now;
+      const pending = reelTapTimeoutRef.current[post.id];
+      if (pending) clearTimeout(pending);
+      reelTapTimeoutRef.current[post.id] = setTimeout(() => {
+        reelTapTimeoutRef.current[post.id] = null;
+        openPostFromFeed(post);
+      }, REEL_SINGLE_TAP_DELAY_MS);
+    },
+    [openPostFromFeed, togglePostLike]
+  );
+
   const onReelSurfaceTap = useCallback(
     (post: HomePost) => {
       if (!postHasViewableMedia(post)) return;
-      if (!post.videoUrl) {
-        openPostFromFeed(post);
-        return;
-      }
       const now = Date.now();
       const lastTap = reelTapTsRef.current[post.id] || 0;
-      if (now - lastTap <= 280) {
+      if (now - lastTap <= REEL_DOUBLE_TAP_MS) {
         const pending = reelTapTimeoutRef.current[post.id];
         if (pending) clearTimeout(pending);
         reelTapTimeoutRef.current[post.id] = null;
@@ -2408,18 +2695,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       reelTapTsRef.current[post.id] = now;
       const pending = reelTapTimeoutRef.current[post.id];
       if (pending) clearTimeout(pending);
-      const delay = reelViewerOpenRef.current ? 200 : 280;
+      const delay = reelViewerOpenRef.current ? 220 : REEL_SINGLE_TAP_DELAY_MS;
       reelTapTimeoutRef.current[post.id] = setTimeout(() => {
         reelTapTimeoutRef.current[post.id] = null;
         if (reelViewerOpenRef.current) {
-          setIsReelMuted((prev) => {
+          if (!post.videoUrl) return;
+          setReelUserPaused((prev) => {
             const next = !prev;
-            setReelMuteFeedback(next ? "muted" : "unmuted");
-            if (reelMuteFeedbackTimerRef.current) clearTimeout(reelMuteFeedbackTimerRef.current);
-            reelMuteFeedbackTimerRef.current = setTimeout(() => {
-              setReelMuteFeedback(null);
-              reelMuteFeedbackTimerRef.current = null;
-            }, 900);
+            setIsReelMuted(next);
+            setReelMuteFeedback(null);
             return next;
           });
         } else {
@@ -2443,8 +2727,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useEffect(() => {
     if (reelViewerOpen) {
       setIsReelMuted(false);
+      setReelUserPaused(false);
     } else {
       setIsReelMuted(true);
+      setReelUserPaused(false);
     }
     setReelMuteFeedback(null);
     if (reelMuteFeedbackTimerRef.current) {
@@ -2452,6 +2738,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       reelMuteFeedbackTimerRef.current = null;
     }
   }, [reelViewerOpen]);
+
+  useEffect(() => {
+    setReelUserPaused(false);
+  }, [playingPostId]);
 
   const togglePostSave = useCallback(
     async (post: HomePost) => {
@@ -2770,7 +3060,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           recipientDisplayName: replyTarget.user,
           postId: post.id,
           isReel: !!post.videoUrl,
-          commentExcerpt: excerpt
+          commentExcerpt: excerpt,
+          ...localEngagementPostPreview(post)
         });
       }
     } else if (!isOwnPost) {
@@ -2780,7 +3071,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         recipientDisplayName: post.userName,
         postId: post.id,
         isReel: !!post.videoUrl,
-        commentExcerpt: excerpt
+        commentExcerpt: excerpt,
+        ...localEngagementPostPreview(post)
       });
     }
   } finally {
@@ -2817,7 +3109,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const listHeader = useMemo(
     () => (
-      <View style={styles.homeTopChrome}>
+      <View style={[styles.homeTopChrome, { paddingTop: homeTopInset }]}>
         <AppTopBar />
 
         <ScrollView
@@ -2850,7 +3142,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               style={[
                 styles.storyRing,
                 ownPlayableStories.length
-                  ? ownPlayableStories.some((s) => !s.viewed)
+                  ? ownPlayableStories.some((s) => storyIsUnviewed(s, viewedStoryIds))
                     ? styles.storyRingNew
                     : styles.storyRingViewed
                   : (isReelSurfaceTab || isLiveTab)
@@ -2909,13 +3201,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   return;
                 }
                 setReelViewerOpen(null);
+                const storyIds = group.stories.map((s) => s.id);
                 setViewedStoryIds((prev) => {
-                  if (prev.has(first.id)) return prev;
                   const next = new Set(prev);
-                  next.add(first.id);
-                  return next;
+                  let changed = false;
+                  for (const id of storyIds) {
+                    if (!next.has(id)) {
+                      next.add(id);
+                      changed = true;
+                    }
+                  }
+                  return changed ? next : prev;
                 });
-                setStories((prev) => prev.map((s) => (s.id === first.id ? { ...s, viewed: true } : s)));
+                setStories((prev) =>
+                  prev.map((s) => (storyIds.includes(s.id) ? { ...s, viewed: true } : s))
+                );
                 const enriched = group.stories.map((s) => {
                   const av = storyAuthorAvatarUri(s, user, avatarLookup, posts) || group.avatarUrl;
                   return typeof av === "string" && av.trim() ? { ...s, avatarUrl: av.trim() } : s;
@@ -2928,7 +3228,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <View
                 style={[
                   styles.storyRing,
-                  group.stories.some((s) => !s.viewed) ? styles.storyRingNew : styles.storyRingViewed
+                  group.stories.some((s) => storyIsUnviewed(s, viewedStoryIds)) ? styles.storyRingNew : styles.storyRingViewed
                 ]}
               >
                 <View style={styles.storyInner}>
@@ -2950,63 +3250,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Pressable>
           ))}
 
-          {visibleSuggestedUsers.map((person) => {
-                const isDone = suggestedFollowDone.has(person.id);
-                const isBusy = suggestedFollowBusy[person.id];
-                const firstName = displayPersonName(person.fullName).split(" ")[0] || person.fullName;
-                return (
-                  <View key={`suggest-${person.id}`} style={styles.storyItem}>
-                    <Pressable
-                      style={styles.storySuggestPress}
-                      onPress={() =>
-                        navigateToPublicProfile({
-                          userId: person.id,
-                          userName: person.fullName,
-                          avatarUrl: person.avatarUrl ?? null
-                        })
-                      }
-                      onLongPress={() => handleDismissSuggested(person.id)}
-                      delayLongPress={400}
-                    >
-                      <View style={[styles.storyRing, styles.storyRingSuggest]}>
-                        <View style={styles.storyInner}>
-                          <UserAvatar
-                            uri={person.avatarUrl}
-                            name={person.fullName}
-                            size={56}
-                            borderRadius={28}
-                            style={styles.storyAvatarFill}
-                            textStyle={styles.storyAvatarInitial}
-                            fallbackBackgroundColor={STORY_FALLBACK_BG}
-                            initialsColor={STORY_FALLBACK_INITIAL}
-                          />
-                          <Pressable
-                            style={[
-                              styles.suggestAddBadge,
-                              isDone ? styles.suggestAddBadgeDone : null
-                            ]}
-                            onPress={(e) => {
-                              e.stopPropagation?.();
-                              if (!isDone && !isBusy) void handleFollowSuggested(person.id);
-                            }}
-                            disabled={isDone || isBusy}
-                            hitSlop={8}
-                          >
-                            <Ionicons
-                              name={isDone ? "checkmark" : "person-add"}
-                              size={11}
-                              color={isDone ? "#7a8690" : "#fff"}
-                            />
-                          </Pressable>
-                        </View>
-                      </View>
-                    </Pressable>
-                    <Text style={styles.storyNameDark} numberOfLines={1}>
-                      {firstName}
-                    </Text>
-                  </View>
-                );
-              })}
         </ScrollView>
 
         <View style={styles.homeTopTabsBarDark}>
@@ -3042,21 +3285,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       avatarLookup,
       displayPersonName,
       homeTabLabel,
+      homeTopInset,
       isReelSurfaceTab,
+      isLiveTab,
       onOpenCreate,
       openLiveStream,
       ownPlayableStories,
       posts,
       storyGroupsWithoutLive,
       user,
+      viewedStoryIds,
       visibleHomeTopTabs,
-      activeHomeTab,
-      visibleSuggestedUsers,
-      suggestedFollowDone,
-      suggestedFollowBusy,
-      handleDismissSuggested,
-      handleFollowSuggested,
-      displayPersonName
     ]
   );
 
@@ -3068,8 +3307,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         : reelSlotHeight > 0
           ? reelSlotHeight
           : Math.max(420, windowHeight * 0.62);
-      const isActive = playingPostId === post.id && !!post.videoUrl;
-      const shouldPlayReel = isActive && canPlayMedia;
+      const isActiveVideo = playingPostId === post.id && !!post.videoUrl;
+      const shouldPlayReel = isActiveVideo && canPlayMedia && (!reelViewerOpen || !reelUserPaused);
+      const showActiveVideo = isActiveVideo && canPlayMedia && (shouldPlayReel || !!(reelViewerOpen && reelUserPaused));
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -3096,12 +3336,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
       const activeIndex = reelRowPosts.findIndex((p) => p.id === playingPostId);
       const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
-      const nextPost = reelRowPosts[index + 1];
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
-      const thumbUri = post.thumbnailUrl || gallery[0] || nextPost?.thumbnailUrl || nextPost?.imageUrl || post.imageUrl;
-      const reelPoster =
-        post.thumbnailUrl || gallery[0] || post.imageUrl || nextPost?.thumbnailUrl || nextPost?.imageUrl;
+      const thumbUri = reelGridStillUri(post);
+      const reelPoster = reelGridStillUri(post);
       const reelProgress = reelProgressByPostId[post.id];
       const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
       const creativeMeta = post.creativeMeta || {};
@@ -3121,7 +3359,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
-          {post.videoUrl && shouldPlayReel ? (
+          {post.videoUrl && showActiveVideo ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
@@ -3129,24 +3367,30 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 }}
                 uri={post.videoUrl}
                 posterUri={reelPoster || undefined}
-                shouldPlay
+                shouldPlay={shouldPlayReel}
                 containerWidth={reelContentWidth}
                 containerHeight={pageH}
-                fit="cover"
+                fit="auto"
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
+              {reelViewerOpen && reelUserPaused && isActiveVideo ? (
+                <View style={styles.reelPauseOverlay} pointerEvents="none">
+                  <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
+                  <Ionicons name="play" size={48} color="#fff" />
+                </View>
+              ) : null}
             </Pressable>
           ) : post.videoUrl ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
               {reelPoster ? (
-                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
               ) : (
                 <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
               )}
-              {isActive || isNearActive ? (
+              {isActiveVideo || isNearActive ? (
                 <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
                   <Ionicons name="play" size={28} color="#fff" />
                 </View>
@@ -3200,7 +3444,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </ScrollView>
           ) : reelPoster ? (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "cover" : "contain"} />
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "contain" : "contain"} />
             </Pressable>
           ) : (
             <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
@@ -3369,8 +3613,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
             </View>
           {post.videoUrl ? (
-            <View style={styles.reelSeekWrap} pointerEvents="box-none">
-              <ReelSeekBar progressRatio={progressRatio} />
+            <View style={styles.reelSeekWrap} pointerEvents="auto">
+              <ReelSeekBar
+                progressRatio={progressRatio}
+                onSeek={(ratio) => {
+                  const duration = reelProgress?.duration;
+                  if (duration) {
+                    setReelProgressByPostId((prev) => ({
+                      ...prev,
+                      [post.id]: { position: ratio * duration, duration }
+                    }));
+                  }
+                  void reelVideoHandlesRef.current[post.id]?.seekToRatio(ratio);
+                }}
+              />
             </View>
           ) : null}
         </View>
@@ -3409,6 +3665,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       windowHeight,
       windowWidth,
       reelViewerOpen,
+      reelUserPaused,
       onReelSurfaceTap,
       displayFeedCopy,
       displayPersonName,
@@ -3485,7 +3742,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
           <View style={[styles.postMedia, { backgroundColor: postTints[index % postTints.length] }]}>
             {post.videoUrl ? (
-              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
+              <Pressable style={styles.videoTapArea} onPress={() => onPostMediaTap(post)}>
                 {shouldPlayReel ? (
                   <FeedPostVideo
                     uri={post.videoUrl}
@@ -3542,7 +3799,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                         alignItems: "center",
                         justifyContent: "center"
                       }}
-                      onPress={() => openPostFromFeed(post)}
+                      onPress={() => onPostMediaTap(post)}
                     >
                       <Image
                         style={{ width: feedMediaWidth, height: feedMediaWidth }}
@@ -3554,11 +3811,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </ScrollView>
               </View>
             ) : gallery[0] ? (
-              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
+              <Pressable style={styles.videoTapArea} onPress={() => onPostMediaTap(post)}>
                 <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
               </Pressable>
             ) : (
-              <Pressable style={styles.videoTapArea} onPress={() => openPostFromFeed(post)}>
+              <Pressable style={styles.videoTapArea} onPress={() => onPostMediaTap(post)}>
                 <Ionicons name="play-circle-outline" size={48} color="#fff" />
               </Pressable>
             )}
@@ -3628,7 +3885,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       likeActiveColor,
       likeBusyByPostId,
       openCommentsForPost,
-      openPostFromFeed,
+      onPostMediaTap,
       openPostLikesSheet,
       playingPostId,
       relationships,
@@ -3660,6 +3917,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         : t("emptyDefaultSub");
 
   const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
+
+  const feedListFooter = useMemo(() => {
+    if (!feedLoadingMore) return null;
+    return (
+      <View style={styles.feedLoadMoreFooter}>
+        <ActivityIndicator color={APP_LIME} />
+      </View>
+    );
+  }, [feedLoadingMore]);
+
+  useEffect(() => {
+    for (const post of tabPosts.slice(0, 4)) prefetchPostMedia(post);
+  }, [tabPosts]);
 
   return (
     <View style={[styles.screen, (isReelSurfaceTab || isLiveTab) ? styles.screenDark : null]}>
@@ -3708,15 +3978,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   keyExtractor={(item) => String(item.id)}
                   renderItem={renderFullScreenReel}
                   removeClippedSubviews
-                  initialNumToRender={2}
-                  maxToRenderPerBatch={2}
-                  windowSize={3}
+                  initialNumToRender={1}
+                  maxToRenderPerBatch={1}
+                  windowSize={2}
+                  updateCellsBatchingPeriod={16}
                   pagingEnabled
                   showsVerticalScrollIndicator={false}
                   snapToInterval={reelSlotHeight}
                   snapToAlignment="start"
                   decelerationRate="fast"
                   disableIntervalMomentum
+                  scrollEventThrottle={16}
+                  refreshControl={<RefreshControl refreshing={isPullRefreshing} onRefresh={onPullRefresh} tintColor={APP_LIME} />}
                   getItemLayout={(_data, index) => ({
                     length: reelSlotHeight,
                     offset: reelSlotHeight * index,
@@ -3726,6 +3999,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   viewabilityConfig={reelViewabilityConfig}
                   onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
                   extraData={`${playingPostId}-${reelSlotHeight}-${reelFrameWidth}`}
+                  onEndReached={onFeedEndReached}
+                  onEndReachedThreshold={0.65}
+                  ListFooterComponent={feedListFooter}
                   ListEmptyComponent={
                     <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
                       <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
@@ -3749,6 +4025,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={5}
+        refreshControl={<RefreshControl refreshing={isPullRefreshing} onRefresh={onPullRefresh} tintColor={APP_LIME} />}
+        onEndReached={onFeedEndReached}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={feedListFooter}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
@@ -3771,48 +4051,50 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         onRequestClose={closeStory}
       >
         <View style={styles.storyViewerRoot}>
-          <View style={styles.storyProgressRow}>
-            {storyPlaybackQueue.map((s, idx) => {
-              const isPast = idx < activeStoryIndex;
-              const isActive = idx === activeStoryIndex;
-              const width = isActive
-                ? progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] })
-                : "100%";
-              return (
-                <View key={s.id} style={styles.storyProgressTrack}>
-                  <Animated.View
-                    style={[
-                      styles.storyProgressFill,
-                      {
-                        width,
-                        opacity: isPast || isActive ? 1 : 0.35
-                      }
-                    ]}
-                  />
-                </View>
-              );
-            })}
-          </View>
-
-          <View style={styles.storyViewerTopRow}>
-            <View style={styles.storyViewerUser}>
-              <UserAvatar
-                uri={activeStoryAvatarUri}
-                name={activeStory?.userName || "U"}
-                size={34}
-                style={styles.storyViewerAvatar}
-                fallbackBackgroundColor={APP_LIME}
-                initialsColor="#fff"
-              />
-              <View>
-                <Text style={styles.storyViewerName}>
-                  {activeStory?.userName ? displayPersonName(activeStory.userName) : ""}
-                </Text>
-              </View>
+          <View style={[styles.storyViewerTopChrome, { paddingTop: modalTopInset }]}>
+            <View style={styles.storyProgressRow}>
+              {storyPlaybackQueue.map((s, idx) => {
+                const isPast = idx < activeStoryIndex;
+                const isActive = idx === activeStoryIndex;
+                const width = isActive
+                  ? progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] })
+                  : "100%";
+                return (
+                  <View key={s.id} style={styles.storyProgressTrack}>
+                    <Animated.View
+                      style={[
+                        styles.storyProgressFill,
+                        {
+                          width,
+                          opacity: isPast || isActive ? 1 : 0.35
+                        }
+                      ]}
+                    />
+                  </View>
+                );
+              })}
             </View>
-            <Pressable onPress={closeStory} hitSlop={10}>
-              <Ionicons name="close" size={26} color="#fff" />
-            </Pressable>
+
+            <View style={styles.storyViewerTopRow}>
+              <View style={styles.storyViewerUser}>
+                <UserAvatar
+                  uri={activeStoryAvatarUri}
+                  name={activeStory?.userName || "U"}
+                  size={34}
+                  style={styles.storyViewerAvatar}
+                  fallbackBackgroundColor={APP_LIME}
+                  initialsColor="#fff"
+                />
+                <View>
+                  <Text style={styles.storyViewerName}>
+                    {activeStory?.userName ? displayPersonName(activeStory.userName) : ""}
+                  </Text>
+                </View>
+              </View>
+              <Pressable onPress={closeStory} hitSlop={10}>
+                <Ionicons name="close" size={26} color="#fff" />
+              </Pressable>
+            </View>
           </View>
 
           <View
@@ -3827,7 +4109,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             {activeStory?.videoUrl ? (
               <ContainedExpoVideo
                 uri={activeStory.videoUrl}
-                shouldPlay
+                shouldPlay={!storyHoldPaused}
                 containerWidth={storyViewport.width || windowWidth}
                 containerHeight={storyViewport.height || Math.max(1, windowHeight - 140)}
                 fit="contain"
@@ -3840,8 +4122,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             ) : null}
 
             <View style={styles.storyTapZones}>
-              <Pressable style={styles.storyTapZone} onPress={prevStory} />
-              <Pressable style={styles.storyTapZone} onPress={nextStory} />
+              <Pressable
+                style={styles.storyTapZone}
+                onPress={prevStory}
+                onLongPress={pauseStoryHold}
+                onPressOut={resumeStoryHold}
+                delayLongPress={220}
+              />
+              <Pressable
+                style={styles.storyTapZone}
+                onPress={nextStory}
+                onLongPress={pauseStoryHold}
+                onPressOut={resumeStoryHold}
+                delayLongPress={220}
+              />
             </View>
           </View>
         </View>
@@ -3905,7 +4199,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       >
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 24 }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset }]}
             pointerEvents="box-none"
           >
             <Pressable
@@ -3918,7 +4212,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
           </View>
-          {reelMuteFeedback ? (
+          {reelMuteFeedback && !reelUserPaused ? (
             <View style={styles.reelMuteFeedbackLayer} pointerEvents="none">
               <View style={styles.reelMuteFeedbackBubble}>
                 <Ionicons
@@ -3956,7 +4250,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               onViewableItemsChanged={onViewableItemsChangedRef.current}
               viewabilityConfig={reelViewabilityConfig}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
-              extraData={`${playingPostId}-${windowHeight}-${reelViewerOpen.posts.length}`}
+              extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${reelViewerOpen.posts.length}`}
               initialNumToRender={Math.min(3, reelViewerOpen.posts.length || 1)}
               maxToRenderPerBatch={2}
               windowSize={3}
@@ -4148,6 +4442,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     const expanded = !!expandedReplyThreads[String(c.id)];
                     const shown = needsMoreLink && !expanded ? direct.slice(0, REPLY_PREVIEW_VISIBLE) : direct;
                     const moreCount = needsMoreLink && !expanded ? direct.length - REPLY_PREVIEW_VISIBLE : 0;
+                    const replyIndent = Math.min(4, depth + 1) * COMMENT_REPLY_INDENT;
 
                     return (
                       <React.Fragment key={c.id}>
@@ -4156,15 +4451,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                         {moreCount > 0 ? (
                           <Pressable
                             onPress={() => setExpandedReplyThreads((p) => ({ ...p, [String(c.id)]: true }))}
-                            style={[
-                              styles.viewMoreCommentsWrap,
-                              { marginLeft: Math.min(4, depth + 1) * COMMENT_REPLY_INDENT, paddingLeft: 0 }
-                            ]}
+                            style={[styles.viewMoreCommentsWrap, { marginLeft: replyIndent, paddingLeft: 0 }]}
                           >
                             <View style={styles.viewMoreCommentsLine} />
                             <Text style={styles.viewMoreCommentsText}>
                               View {moreCount} more {moreCount === 1 ? "reply" : "replies"}
                             </Text>
+                          </Pressable>
+                        ) : null}
+                        {needsMoreLink && expanded ? (
+                          <Pressable
+                            onPress={() => setExpandedReplyThreads((p) => ({ ...p, [String(c.id)]: false }))}
+                            style={[styles.viewMoreCommentsWrap, { marginLeft: replyIndent, paddingLeft: 0 }]}
+                          >
+                            <View style={styles.viewMoreCommentsLine} />
+                            <Text style={styles.hideRepliesText}>Hide replies</Text>
                           </Pressable>
                         ) : null}
                       </React.Fragment>
@@ -4388,7 +4689,7 @@ const styles = StyleSheet.create({
   storyRowScrollCompact: {
     flexGrow: 0,
     flexShrink: 0,
-    maxHeight: 140
+    maxHeight: 118
   },
   reelSlot: {
     flex: 1,
@@ -4483,6 +4784,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)"
+  },
+  reelPauseOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.28)",
+    zIndex: 6
+  },
+  reelPauseMuteIcon: {
+    marginBottom: 16,
+    opacity: 0.95
   },
   reelOverlayWrap: {
     position: "absolute",
@@ -4648,9 +4960,9 @@ const styles = StyleSheet.create({
   homeTopTabsRowDark: {
     flexDirection: "row",
     paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-    minHeight: 42,
+    paddingTop: 4,
+    paddingBottom: 4,
+    minHeight: 36,
     alignItems: "center",
     justifyContent: "space-between"
   },
@@ -4695,8 +5007,8 @@ const styles = StyleSheet.create({
   emptyTabSubDark: { marginTop: 6, color: "rgba(255,255,255,0.65)", fontWeight: "600" },
   storyRow: {
     paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 4,
     gap: 10
   },
   storyRowWrap: {
@@ -4712,7 +5024,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   storyRingNew: { backgroundColor: "#C9FF35" },
-  storyRingViewed: { backgroundColor: "#C9FF35" },
+  storyRingViewed: { backgroundColor: "rgba(255,255,255,0.28)" },
   storyRingEmptyDark: {
     backgroundColor: "transparent",
     borderWidth: 2,
@@ -4776,6 +5088,7 @@ const styles = StyleSheet.create({
   homeTopTabText: { fontSize: 14, color: "#374151", fontWeight: "500" },
   homeTopTabTextActive: { color: "#C9FF35", fontWeight: "700" },
   feedBottom: { paddingBottom: 100 },
+  feedLoadMoreFooter: { paddingVertical: 18, alignItems: "center" },
   postCard: {
     backgroundColor: "#fff",
     marginTop: 10,
@@ -4871,10 +5184,13 @@ const styles = StyleSheet.create({
   },
   reelCarouselDots: { bottom: 88 },
   storyViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
-  storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 12 },
+  storyViewerTopChrome: {
+    zIndex: 4
+  },
+  storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 4 },
   storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
-  storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 10 },
+  storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 },
   storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
   storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: APP_LIME, alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
@@ -5031,6 +5347,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#52525b"
   },
   viewMoreCommentsText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
+  hideRepliesText: { color: "#71717a", fontSize: 12, fontWeight: "700" },
   replyingToBanner: {
     flexDirection: "row",
     alignItems: "center",

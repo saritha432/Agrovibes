@@ -976,6 +976,8 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS creative_meta JSONB NOT NULL DEFAULT '{}'::jsonb`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_status TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_ended_at TIMESTAMPTZ`);
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   homePostsTableReady = true;
 }
 
@@ -1115,6 +1117,80 @@ function normalizeHomePostRow(row) {
     }
   }
   return sanitizeHomePostRowMedia(base);
+}
+
+function parseHomeFeedPagination(req) {
+  const limitRaw = req.query.limit;
+  const hasLimit = limitRaw != null && String(limitRaw).trim() !== "";
+  const limit = hasLimit
+    ? Math.min(Math.max(Number(limitRaw) || 10, 1), 50)
+    : 50;
+  const cursorRaw = Number(req.query.cursor);
+  const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+  return { limit, cursor };
+}
+
+function paginateHomeFeedRows(rows, limit) {
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = page.length ? page[page.length - 1].id : null;
+  return { page, nextCursor, hasMore };
+}
+
+function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
+  const videoClause = videoOnly
+    ? `AND p.video_url IS NOT NULL AND TRIM(p.video_url) <> ''`
+    : "";
+  const cursorClause =
+    cursorParamIndex != null ? `AND p.id < $${cursorParamIndex}` : "";
+  return `
+    SELECT
+      p.id,
+      COALESCE(p.user_id, u.id) AS "userId",
+      COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+      owner.username AS "username",
+      p.location,
+      p.caption,
+      p.likes_count AS "likesCount",
+      p.comments_count AS "commentsCount",
+      p.video_url AS "videoUrl",
+      p.image_url AS "imageUrl",
+      p.image_urls AS "image_urls",
+      p.thumbnail_url AS "thumbnailUrl",
+      p.created_at AS "createdAt",
+      p.tagged_user_ids AS "tagged_user_ids",
+      p.music_label AS "musicLabel",
+      p.music_audio_url AS "musicAudioUrl",
+      p.creative_meta AS "creativeMeta",
+      p.live_status AS "liveStatus",
+      p.live_ended_at AS "liveEndedAt",
+      COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
+      CASE
+        WHEN $1::integer IS NULL THEN false
+        ELSE EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
+        )
+      END AS "viewerHasLiked",
+      CASE
+        WHEN $1::integer IS NULL THEN false
+        ELSE EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+        )
+      END AS "viewerHasSaved"
+    FROM home_posts p
+    LEFT JOIN learn_users owner ON owner.id = p.user_id
+    LEFT JOIN LATERAL (
+      SELECT id, avatar_url
+      FROM learn_users
+      WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+      ORDER BY id ASC
+      LIMIT 1
+    ) u ON TRUE
+    WHERE 1=1 ${videoClause} ${cursorClause}
+    ORDER BY p.id DESC
+  `;
 }
 
 function liveKitHttpUrl(wssUrl) {
@@ -1331,6 +1407,44 @@ async function socialCountsForUser(userId) {
   return {
     followersCount: followersRes.rows[0]?.count || 0,
     followingCount: followingRes.rows[0]?.count || 0
+  };
+}
+
+async function socialListsForUser(userId) {
+  const targetUserId = Number(userId);
+  const [followersRes, followingRes] = await Promise.all([
+    query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.username), '') AS "username",
+             NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.follower_id
+      WHERE f.following_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    ),
+    query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.username), '') AS "username",
+             NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.following_id
+      WHERE f.follower_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    )
+  ]);
+  const mapRow = (row) => ({
+    name: row.fullName,
+    key: String(row.userId),
+    username: row.username || undefined,
+    avatarUrl: row.avatarUrl || undefined
+  });
+  return {
+    followers: followersRes.rows.map(mapRow),
+    following: followingRes.rows.map(mapRow)
   };
 }
 
@@ -2453,11 +2567,12 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
     }
     const profile = userRes.rows[0];
     const counts = await socialCountsForUser(targetUserId);
+    const lists = await socialListsForUser(targetUserId);
     const relation =
       Number(req.user.userId) === targetUserId
         ? { viewerStatus: "self", reverseStatus: "self", canFollowBack: false }
         : await relationshipForUsers(req.user.userId, targetUserId);
-    res.json({ ...profile, ...counts, ...relation });
+    res.json({ ...profile, ...counts, ...lists, ...relation });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile stats", error: error.message });
   }
@@ -2532,6 +2647,23 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
     res.json({ followers, following });
   } catch (error) {
     res.status(500).json({ message: "Failed to load follow network", error: error.message });
+  }
+});
+
+/** Public follower/following lists for any profile (read-only). */
+router.get("/v1/social/public-lists/:userId", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+
+    const lists = await socialListsForUser(targetUserId);
+    res.json(lists);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load public follow lists", error: error.message });
   }
 });
 
@@ -2960,6 +3092,9 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
           ELSE false
         END AS "postIsReel",
+        p.thumbnail_url AS "postThumbnailUrl",
+        p.image_url AS "postImageUrl",
+        p.video_url AS "postVideoUrl",
         p.live_status AS "postLiveStatus",
         p.live_ended_at AS "postLiveEndedAt"
       FROM social_notifications n
@@ -2975,26 +3110,39 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     );
 
     const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
-    const followAccepted = result.rows.filter((r) => r.type === "follow_accept" && !r.isRead);
-    const postLikes = result.rows.filter((r) => r.type === "post_like" && !r.isRead);
+    const followAccepted = result.rows.filter((r) => r.type === "follow_accept");
+    const postLikes = result.rows.filter((r) => r.type === "post_like");
     const postComments = result.rows.filter(
-      (r) => (r.type === "post_comment" || r.type === "comment_reply") && !r.isRead
+      (r) => r.type === "post_comment" || r.type === "comment_reply"
     );
     const liveStarts = result.rows.filter(
       (r) =>
-        (r.type === "live_start" ||
-          r.type === "live_scheduled" ||
-          r.type === "live_reminder" ||
-          r.type === "live_host_reminder") &&
-        !r.isRead
+        r.type === "live_start" ||
+        r.type === "live_scheduled" ||
+        r.type === "live_reminder" ||
+        r.type === "live_host_reminder"
     );
+    const unreadCount = result.rows.filter((r) => {
+      if (r.isRead) return false;
+      if (r.type === "follow_request") return r.followStatus === "pending";
+      return (
+        r.type === "follow_accept" ||
+        r.type === "post_like" ||
+        r.type === "post_comment" ||
+        r.type === "comment_reply" ||
+        r.type === "live_start" ||
+        r.type === "live_scheduled" ||
+        r.type === "live_reminder" ||
+        r.type === "live_host_reminder"
+      );
+    }).length;
     res.json({
       followRequests,
       followAccepted,
       postLikes,
       postComments,
       liveStarts,
-      unreadCount: followRequests.length + followAccepted.length + postLikes.length + postComments.length + liveStarts.length
+      unreadCount
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load notifications", error: error.message });
@@ -3174,6 +3322,12 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     await query(`UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`, [peerUserId, me]);
     emitMessagesRead({ readerId: me, peerUserId });
 
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const beforeId = Number(req.query.beforeId);
+    const beforeClause =
+      Number.isFinite(beforeId) && beforeId > 0 ? `AND id < $3` : "";
+    const params = Number.isFinite(beforeId) && beforeId > 0 ? [me, peerUserId, beforeId, limit] : [me, peerUserId, limit];
+
     const rows = await query(
       `
       SELECT
@@ -3185,11 +3339,28 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
       FROM direct_messages
       WHERE (sender_id = $1 AND receiver_id = $2)
          OR (sender_id = $2 AND receiver_id = $1)
-      ORDER BY created_at ASC
-      LIMIT 500
+      ${beforeClause}
+      ORDER BY created_at DESC
+      LIMIT ${Number.isFinite(beforeId) && beforeId > 0 ? "$4" : "$3"}
       `,
-      [me, peerUserId]
+      params
     );
+
+    const messages = rows.rows.slice().reverse();
+    const oldestId = messages.length ? Number(messages[0].id) : null;
+    let hasMore = false;
+    if (oldestId) {
+      const older = await query(
+        `
+        SELECT 1 FROM direct_messages
+        WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1))
+          AND id < $3
+        LIMIT 1
+        `,
+        [me, peerUserId, oldestId]
+      );
+      hasMore = older.rows.length > 0;
+    }
 
     res.json({
       peer: {
@@ -3199,7 +3370,8 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         phone: peerRes.rows[0].phone,
         avatarUrl: peerRes.rows[0].avatarUrl || undefined
       },
-      messages: rows.rows
+      messages,
+      hasMore
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load message thread", error: error.message });
@@ -3391,16 +3563,20 @@ router.get("/v1/community/questions", async (_req, res) => {
 
 const STORY_TTL_SQL = "24 hours";
 
-router.get("/v1/home/stories", async (_req, res) => {
+router.get("/v1/home/stories", authOptional, async (req, res) => {
   try {
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
+    const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:v2:${gen}`;
+    const cacheKey = `v1:home:stories:v4:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
       return;
     }
     await ensureHomeStoriesTable();
+    await ensureSocialFollowsTable();
     // Stories expire after 24 hours (Instagram-style). Remove expired rows so they no longer appear.
     await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
     const result = await query(
@@ -3441,9 +3617,22 @@ router.get("/v1/home/stories", async (_req, res) => {
         LIMIT 1
       ) nm ON TRUE
       WHERE s.created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
+        AND $1::integer IS NOT NULL
+        AND COALESCE(s.user_id, lu.id) IS NOT NULL
+        AND (
+          COALESCE(s.user_id, lu.id) = $1::integer
+          OR EXISTS (
+            SELECT 1
+            FROM social_follows sf
+            WHERE sf.follower_id = $1::integer
+              AND sf.following_id = COALESCE(s.user_id, lu.id)
+              AND sf.status = 'accepted'
+          )
+        )
       ORDER BY s.created_at DESC
       LIMIT 40
-      `
+      `,
+      [viewerId]
     );
 
     const body = { stories: result.rows.map(sanitizeStoryRowMedia) };
@@ -3532,8 +3721,9 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
     const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
+    const { limit, cursor } = parseHomeFeedPagination(req);
     const gen = await cacheGenString("home:posts:gen");
-    const cacheKey = `v1:home:posts:${gen}:${viewerKey}`;
+    const cacheKey = `v1:home:posts:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.posts)) {
       res.json(cached);
@@ -3545,82 +3735,76 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    const params = [viewerId];
+    if (cursor != null) params.push(cursor);
+    params.push(limit + 1);
+    const limitIdx = params.length;
     const result = await query(
-      `
-      SELECT
-        p.id,
-        COALESCE(p.user_id, u.id) AS "userId",
-        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
-        owner.username AS "username",
-        p.location,
-        p.caption,
-        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
-        p.comments_count AS "commentsCount",
-        p.video_url AS "videoUrl",
-        p.image_url AS "imageUrl",
-        p.image_urls AS "image_urls",
-        p.thumbnail_url AS "thumbnailUrl",
-        p.created_at AS "createdAt",
-        p.tagged_user_ids AS "tagged_user_ids",
-        p.music_label AS "musicLabel",
-        p.music_audio_url AS "musicAudioUrl",
-        p.creative_meta AS "creativeMeta",
-        p.live_status AS "liveStatus",
-        p.live_ended_at AS "liveEndedAt",
-        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
-        CASE
-          WHEN $1::integer IS NULL THEN false
-          ELSE EXISTS (
-            SELECT 1 FROM home_post_likes hpl
-            WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
-          )
-        END AS "viewerHasLiked",
-        CASE
-          WHEN $1::integer IS NULL THEN false
-          ELSE EXISTS (
-            SELECT 1 FROM home_post_saves hps
-            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
-          )
-        END AS "viewerHasSaved",
-        (
-          SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
-          FROM (
-            SELECT
-              lu2.id AS "userId",
-              lu2.full_name AS "fullName",
-              lu2.username AS "username",
-              lu2.avatar_url AS "avatarUrl"
-            FROM home_post_likes hpl2
-            JOIN learn_users lu2 ON lu2.id = hpl2.user_id
-            WHERE hpl2.post_id = p.id
-            ORDER BY hpl2.created_at DESC
-            LIMIT 50
-          ) t
-        ) AS "recentLikers"
-      FROM home_posts p
-      LEFT JOIN learn_users owner ON owner.id = p.user_id
-      LEFT JOIN LATERAL (
-        SELECT id, avatar_url
-        FROM learn_users
-        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
-        ORDER BY id ASC
-        LIMIT 1
-      ) u ON TRUE
-      ORDER BY p.created_at DESC
-      LIMIT 50
-      `,
-      [viewerId]
+      `${homeFeedListSql({ cursorParamIndex: cursor != null ? 2 : null })}
+      LIMIT $${limitIdx}`,
+      params
     );
 
-    const body = { posts: await enrichHomePostsLiveState(dedupeHomePostRows(result.rows)) };
+    const { page, nextCursor, hasMore } = paginateHomeFeedRows(result.rows, limit);
+    const body = {
+      posts: await enrichHomePostsLiveState(dedupeHomePostRows(page)),
+      nextCursor: hasMore ? nextCursor : null,
+      hasMore
+    };
     res.json(body);
-    await cacheSetJson(cacheKey, body, 10);
+    await cacheSetJson(cacheKey, body, 30);
   } catch (error) {
     res.json({
       posts: [],
+      nextCursor: null,
+      hasMore: false,
       source: "fallback",
       message: error.message
     });
+  }
+});
+
+router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
+  try {
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
+    const viewerKey = viewerId != null ? String(viewerId) : "anon";
+    const limitRaw = Number(req.query.limit);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 24, 1), 48);
+    const cursorRaw = Number(req.query.cursor);
+    const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+    const gen = await cacheGenString("home:posts:gen");
+    const cacheKey = `v1:home:posts:reels:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.posts)) {
+      res.json(cached);
+      return;
+    }
+
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const params = [viewerId];
+    if (cursor != null) params.push(cursor);
+    params.push(limit + 1);
+    const limitIdx = params.length;
+    const result = await query(
+      `${homeFeedListSql({ cursorParamIndex: cursor != null ? 2 : null, videoOnly: true })}
+      LIMIT $${limitIdx}`,
+      params
+    );
+
+    const { page, nextCursor, hasMore } = paginateHomeFeedRows(result.rows, limit);
+    const body = {
+      posts: await enrichHomePostsLiveState(dedupeHomePostRows(page)),
+      nextCursor: hasMore ? nextCursor : null,
+      hasMore
+    };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 45);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load reels", error: error.message });
   }
 });
 
