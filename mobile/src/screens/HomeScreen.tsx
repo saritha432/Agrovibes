@@ -1132,14 +1132,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   /** Home feed header: Android window already clears the status bar (translucent: false). */
   const homeTopInset = useMemo(() => {
     if (Platform.OS === "android") return 0;
-    return Math.min(insets.top + 6, 52);
+    return Math.max(insets.top, 12) + 6;
   }, [insets.top]);
 
-  /** Story / fullscreen reel chrome over translucent status bar. */
-  const reelTopInset = useMemo(() => {
-    const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
-    const safeTop = Platform.OS === "ios" ? insets.top : Math.max(insets.top, sbh);
-    return Math.min(safeTop, 48);
+  /** Story / fullscreen reel chrome over translucent status bar — use full safe area, no cap. */
+  const modalTopInset = useMemo(() => {
+    if (Platform.OS === "android") {
+      const sbh = StatusBar.currentHeight ?? 0;
+      return Math.max(insets.top, sbh) + 8;
+    }
+    return Math.max(insets.top, 12) + 10;
   }, [insets.top]);
 
   const homeTabLabel = React.useCallback(
@@ -3982,7 +3984,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         onRequestClose={closeStory}
       >
         <View style={styles.storyViewerRoot}>
-          <View style={[styles.storyViewerTopChrome, { paddingTop: reelTopInset + 4 }]}>
+          <View style={[styles.storyViewerTopChrome, { paddingTop: modalTopInset }]}>
             <View style={styles.storyProgressRow}>
               {storyPlaybackQueue.map((s, idx) => {
                 const isPast = idx < activeStoryIndex;
@@ -4130,7 +4132,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       >
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 8 }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset }]}
             pointerEvents="box-none"
           >
             <Pressable
