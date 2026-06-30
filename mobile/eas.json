@@ -4,19 +4,38 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true }
+      "cache": {
+        "key": "development-dev-client-v1"
+      },
+      "ios": {
+        "simulator": false
+      }
+    },
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      }
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
+      "cache": {
+        "key": "preview-no-dev-client-v1"
+      },
       "env": {
+        "NODE_ENV": "production",
         "INCLUDE_FIREBASE_PLUGINS": "1"
       },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
       },
-      "ios": { "simulator": false }
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2",
+        "simulator": false
+      }
     },
     "preview-simulator": {
       "distribution": "internal",
@@ -24,14 +43,22 @@
     },
     "production": {
       "channel": "production",
+      "cache": {
+        "key": "production-ios-xcode-26-v2"
+      },
       "env": {
+        "NODE_ENV": "production",
         "INCLUDE_FIREBASE_PLUGINS": "1"
       },
       "android": {
         "buildType": "app-bundle",
         "gradleCommand": ":app:bundleRelease"
       },
-      "ios": { "autoIncrement": true }
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2",
+        "autoIncrement": true,
+        "buildConfiguration": "Release"
+      }
     }
   },
   "submit": { "production": {} }

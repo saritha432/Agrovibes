@@ -76,7 +76,7 @@ export function AccountCenterScreen() {
 
   const settingsItems: MenuItem[] = [
     { key: "password", title: "Password And Security", icon: "key-outline", onPress: () => navigation.navigate("PasswordSecurity") },
-    { key: "connected", title: "Connected Experiences", icon: "git-network-outline", onPress: noop },
+    { key: "connected", title: "Connected Experiences", icon: "git-network-outline", onPress: () => navigation.navigate("ConnectedExperiences") },
     {
       key: "permissions",
       title: "Your Information And Permissions",

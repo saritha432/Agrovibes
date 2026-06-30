@@ -28,6 +28,19 @@ import { AccountCenterScreen } from "../screens/AccountCenterScreen";
 import { ProfilesPersonalDetailsScreen } from "../screens/ProfilesPersonalDetailsScreen";
 import { PasswordSecurityScreen } from "../screens/PasswordSecurityScreen";
 import { ChangePasswordScreen } from "../screens/ChangePasswordScreen";
+import { TwoFactorAuthScreen } from "../screens/TwoFactorAuthScreen";
+import { EmailVerificationScreen } from "../screens/EmailVerificationScreen";
+import { VerificationSelfieScreen } from "../screens/VerificationSelfieScreen";
+import { SaveLoginScreen } from "../screens/SaveLoginScreen";
+import { WhereLoggedInScreen } from "../screens/WhereLoggedInScreen";
+import { LoginActivityScreen } from "../screens/LoginActivityScreen";
+import { SecurityCheckupScreen } from "../screens/SecurityCheckupScreen";
+import { ConnectedExperiencesScreen } from "../screens/ConnectedExperiencesScreen";
+import { SharingAcrossProfilesScreen } from "../screens/SharingAcrossProfilesScreen";
+import { MemoriesFromInstagramScreen } from "../screens/MemoriesFromInstagramScreen";
+import { ShowingProfileLinksScreen } from "../screens/ShowingProfileLinksScreen";
+import { SyncingProfilePicturesScreen } from "../screens/SyncingProfilePicturesScreen";
+import { ManagingAvatarsScreen } from "../screens/ManagingAvatarsScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
 import { AboutScreen } from "../screens/AboutScreen";
 import type { RootStackParamList } from "./rootStackTypes";
@@ -109,6 +122,123 @@ export function RootNavigator() {
       <Stack.Screen
         name="ChangePassword"
         component={ChangePasswordScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="TwoFactorAuth"
+        component={TwoFactorAuthScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="EmailVerification"
+        component={EmailVerificationScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="VerificationSelfie"
+        component={VerificationSelfieScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SaveLogin"
+        component={SaveLoginScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="WhereLoggedIn"
+        component={WhereLoggedInScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="LoginActivity"
+        component={LoginActivityScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SecurityCheckup"
+        component={SecurityCheckupScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ConnectedExperiences"
+        component={ConnectedExperiencesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SharingAcrossProfiles"
+        component={SharingAcrossProfilesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="MemoriesFromInstagram"
+        component={MemoriesFromInstagramScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ShowingProfileLinks"
+        component={ShowingProfileLinksScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SyncingProfilePictures"
+        component={SyncingProfilePicturesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ManagingAvatars"
+        component={ManagingAvatarsScreen}
         options={{
           headerShown: false,
           animation: "slide_from_bottom",
