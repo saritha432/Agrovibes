@@ -3,7 +3,11 @@ import React from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import { fetchHomePost, type HomePost } from "../services/api";
 import { reelGridStillUri } from "../utils/reelGrid";
-import { resolveReelPreviewUri, staticReelPreviewUri } from "../utils/reelPreviewThumb";
+import {
+  resolveNotificationVideoThumbnail,
+  resolveReelPreviewUri,
+  staticReelPreviewUri
+} from "../utils/reelPreviewThumb";
 import { sanitizeHomePost } from "../utils/mediaUrls";
 
 type NotificationPostThumbProps = {
@@ -66,21 +70,27 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
         return;
       }
 
+      const id = Number(props.postId);
+
       if (String(post.videoUrl || "").trim()) {
-        const fromVideo = await resolveReelPreviewUri(post);
+        const fromVideo =
+          (await resolveNotificationVideoThumbnail(post.videoUrl, Number.isFinite(id) ? id : undefined)) ||
+          (await resolveReelPreviewUri(post));
         if (fromVideo) {
           applyUri(fromVideo);
           return;
         }
       }
 
-      const id = Number(props.postId);
       if (!Number.isFinite(id) || id <= 0) return;
       try {
         const { post: loaded } = await fetchHomePost(props.token ?? null, id);
         if (cancelled) return;
         const sanitized = sanitizeHomePost(loaded);
-        const fromLoaded = stillFromPost(sanitized) || (await resolveReelPreviewUri(sanitized));
+        const fromLoaded =
+          stillFromPost(sanitized) ||
+          (await resolveNotificationVideoThumbnail(sanitized.videoUrl, id)) ||
+          (await resolveReelPreviewUri(sanitized));
         applyUri(fromLoaded);
       } catch {
         // unavailable
