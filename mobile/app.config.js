@@ -27,6 +27,18 @@ function shouldIncludeFirebasePlugins() {
   );
 }
 
+function isStoreBuildProfile() {
+  const profile = String(process.env.EAS_BUILD_PROFILE || "").toLowerCase();
+  return profile === "preview" || profile === "production";
+}
+
+const DEV_CLIENT_AUTO_LINK_EXCLUDE = [
+  "expo-dev-client",
+  "expo-dev-menu",
+  "expo-dev-menu-interface",
+  "expo-dev-launcher"
+];
+
 function assertIosFirebaseConfig() {
   const buildingIos =
     process.env.EAS_BUILD_PLATFORM === "ios" ||
@@ -64,6 +76,9 @@ module.exports = () => {
 
   return {
     ...base,
+    ...(isStoreBuildProfile()
+      ? { autolinking: { exclude: DEV_CLIENT_AUTO_LINK_EXCLUDE } }
+      : {}),
     ios: {
       ...base.ios,
       googleServicesFile: IOS_GOOGLE_SERVICES_FILE

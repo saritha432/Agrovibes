@@ -74,7 +74,7 @@
         "NSPhotoLibraryAddUsageDescription": "Cropvibe saves media to your device only when you choose to download or save content.",
         "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
       },
-      "buildNumber": "2"
+      "buildNumber": "8"
     },
     "web": {
       "favicon": "./assets/logo.png"

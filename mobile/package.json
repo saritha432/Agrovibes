@@ -26,6 +26,7 @@
     "eas-build-post-install": "node scripts/eas-build-post-install.js",
     "build:android:preview": "node scripts/eas.js build --platform android --profile preview",
     "build:android:dev": "node scripts/eas.js build --platform android --profile development",
+    "build:ios:dev": "node scripts/eas.js build --platform ios --profile development",
     "prebuild:android": "node scripts/prebuild-android-release.js",
     "prebuild:android:dev": "npx expo prebuild --platform android --clean",
     "build:android:local": "cd android && gradlew.bat assembleRelease",
@@ -38,7 +39,7 @@
     "doctor": "npx expo-doctor",
     "generate:adaptive-icon": "node scripts/generate-adaptive-icon.cjs",
     "preview:adaptive-icon": "node scripts/preview-adaptive-icon.cjs",
-    "postinstall": "patch-package"
+    "postinstall": "node scripts/patch-expo-device-xcode26.js && patch-package"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^9.0.0",

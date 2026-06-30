@@ -16,15 +16,15 @@ export function PasswordSecurityScreen() {
 
   const loginItems = [
     { key: "change-password", title: "Change Password", onPress: () => navigation.navigate("ChangePassword") },
-    { key: "two-factor", title: "Two-Factor Authentication", onPress: noop },
-    { key: "verification-selfie", title: "Verification Selfie", onPress: noop },
-    { key: "saved-login", title: "Saved Login", onPress: noop }
+    { key: "two-factor", title: "Two-Factor Authentication", onPress: () => navigation.navigate("TwoFactorAuth") },
+    { key: "verification-selfie", title: "Verification Selfie", onPress: () => navigation.navigate("VerificationSelfie") },
+    { key: "saved-login", title: "Saved Login", onPress: () => navigation.navigate("SaveLogin") }
   ];
 
   const securityItems = [
-    { key: "where-logged-in", title: "Where You're Logged In", onPress: noop },
+    { key: "where-logged-in", title: "Where You're Logged In", onPress: () => navigation.navigate("WhereLoggedIn") },
     { key: "recent-emails", title: "Recent Emails", onPress: noop },
-    { key: "security-checkup", title: "Security Checkup", onPress: noop }
+    { key: "security-checkup", title: "Security Checkup", onPress: () => navigation.navigate("SecurityCheckup") }
   ];
 
   return (
