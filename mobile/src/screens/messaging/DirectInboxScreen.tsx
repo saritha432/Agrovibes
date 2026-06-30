@@ -138,6 +138,8 @@ export function DirectInboxScreen() {
     });
   };
 
+  const isThreadUnread = useCallback((thread: MessageThread) => Number(thread.unreadCount || 0) > 0, []);
+
   const listHeader = (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{t("messagesTitle")}</Text>
@@ -192,6 +194,7 @@ export function DirectInboxScreen() {
           renderItem={({ item }) => {
             const preview = previewMessage(item.lastMessage, t);
             const timeLabel = formatShortRelativeTime(new Date(item.lastAt).getTime());
+            const unread = isThreadUnread(item);
             return (
               <Pressable style={styles.row} onPress={() => openThread(item)}>
                 <UserAvatar
@@ -204,13 +207,13 @@ export function DirectInboxScreen() {
                   initialsColor={MUTED}
                 />
                 <View style={styles.rowBody}>
-                  <Text style={styles.peerName} numberOfLines={1}>
+                  <Text style={[styles.peerName, unread ? styles.peerNameUnread : null]} numberOfLines={1}>
                     {item.peerName}
                   </Text>
                   <View style={styles.previewRow}>
-                    <Text style={styles.preview} numberOfLines={1}>
+                    <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={1}>
                       {preview}
-                      <Text style={styles.previewMeta}> • {timeLabel}</Text>
+                      <Text style={[styles.previewMeta, unread ? styles.previewMetaUnread : null]}> • {timeLabel}</Text>
                     </Text>
                   </View>
                 </View>
@@ -287,6 +290,7 @@ const styles = StyleSheet.create({
   },
   rowBody: { flex: 1, minWidth: 0, gap: 4 },
   peerName: { fontSize: 15, fontWeight: "700", color: TEXT },
+  peerNameUnread: { fontWeight: "900", color: TEXT },
   previewRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -298,9 +302,17 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontWeight: "400"
   },
+  previewUnread: {
+    color: "#e8e8e8",
+    fontWeight: "800"
+  },
   previewMeta: {
     color: MUTED,
     fontWeight: "400"
+  },
+  previewMetaUnread: {
+    color: "#bdbdbd",
+    fontWeight: "700"
   },
   emptyWrap: { flex: 1 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },

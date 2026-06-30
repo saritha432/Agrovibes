@@ -37,7 +37,7 @@ const styles = StyleSheet.create({
     backgroundColor: APP_DARK_BG,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    paddingTop: 10
+    paddingTop: 7
   },
   logoImage: { width: 132, height: 28, maxWidth: "46%" },
   iconBadge: {

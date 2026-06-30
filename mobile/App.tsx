@@ -21,6 +21,7 @@ import { SocketChatBootstrap } from "./src/messaging/SocketChatBootstrap";
 import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
 import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
+import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
 
 export default function App() {
   const { ready: fontsReady } = useAppFonts();
@@ -46,8 +47,14 @@ export default function App() {
             <CartProvider>
               <NavigationContainer
                 ref={navigationRef}
-                onReady={() => trackNavigationScreen()}
-                onStateChange={() => trackNavigationScreen()}
+                onReady={() => {
+                  trackNavigationScreen();
+                  runPendingNotificationNavigation();
+                }}
+                onStateChange={() => {
+                  trackNavigationScreen();
+                  runPendingNotificationNavigation();
+                }}
               >
                 <RootNavigator />
               </NavigationContainer>

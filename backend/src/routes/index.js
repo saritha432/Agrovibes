@@ -1321,6 +1321,44 @@ async function socialCountsForUser(userId) {
   };
 }
 
+async function socialListsForUser(userId) {
+  const targetUserId = Number(userId);
+  const [followersRes, followingRes] = await Promise.all([
+    query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.username), '') AS "username",
+             NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.follower_id
+      WHERE f.following_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    ),
+    query(
+      `
+      SELECT u.id AS "userId", u.full_name AS "fullName", NULLIF(TRIM(u.username), '') AS "username",
+             NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl"
+      FROM social_follows f
+      JOIN learn_users u ON u.id = f.following_id
+      WHERE f.follower_id = $1 AND f.status = 'accepted'
+      ORDER BY u.full_name ASC
+      `,
+      [targetUserId]
+    )
+  ]);
+  const mapRow = (row) => ({
+    name: row.fullName,
+    key: String(row.userId),
+    username: row.username || undefined,
+    avatarUrl: row.avatarUrl || undefined
+  });
+  return {
+    followers: followersRes.rows.map(mapRow),
+    following: followingRes.rows.map(mapRow)
+  };
+}
+
 async function relationshipForUsers(viewerUserId, targetUserId) {
   const viewerId = Number(viewerUserId);
   const targetId = Number(targetUserId);
@@ -2227,11 +2265,12 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
     }
     const profile = userRes.rows[0];
     const counts = await socialCountsForUser(targetUserId);
+    const lists = await socialListsForUser(targetUserId);
     const relation =
       Number(req.user.userId) === targetUserId
         ? { viewerStatus: "self", reverseStatus: "self", canFollowBack: false }
         : await relationshipForUsers(req.user.userId, targetUserId);
-    res.json({ ...profile, ...counts, ...relation });
+    res.json({ ...profile, ...counts, ...lists, ...relation });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile stats", error: error.message });
   }
@@ -2306,6 +2345,23 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
     res.json({ followers, following });
   } catch (error) {
     res.status(500).json({ message: "Failed to load follow network", error: error.message });
+  }
+});
+
+/** Public follower/following lists for any profile (read-only). */
+router.get("/v1/social/public-lists/:userId", authRequired, async (req, res) => {
+  try {
+    await ensureSocialFollowsTable();
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+
+    const lists = await socialListsForUser(targetUserId);
+    res.json(lists);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load public follow lists", error: error.message });
   }
 });
 
@@ -2734,6 +2790,9 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
           ELSE false
         END AS "postIsReel",
+        p.thumbnail_url AS "postThumbnailUrl",
+        p.image_url AS "postImageUrl",
+        p.video_url AS "postVideoUrl",
         p.live_status AS "postLiveStatus",
         p.live_ended_at AS "postLiveEndedAt"
       FROM social_notifications n
@@ -2948,6 +3007,12 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     await query(`UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`, [peerUserId, me]);
     emitMessagesRead({ readerId: me, peerUserId });
 
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const beforeId = Number(req.query.beforeId);
+    const beforeClause =
+      Number.isFinite(beforeId) && beforeId > 0 ? `AND id < $3` : "";
+    const params = Number.isFinite(beforeId) && beforeId > 0 ? [me, peerUserId, beforeId, limit] : [me, peerUserId, limit];
+
     const rows = await query(
       `
       SELECT
@@ -2959,11 +3024,28 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
       FROM direct_messages
       WHERE (sender_id = $1 AND receiver_id = $2)
          OR (sender_id = $2 AND receiver_id = $1)
-      ORDER BY created_at ASC
-      LIMIT 500
+      ${beforeClause}
+      ORDER BY created_at DESC
+      LIMIT ${Number.isFinite(beforeId) && beforeId > 0 ? "$4" : "$3"}
       `,
-      [me, peerUserId]
+      params
     );
+
+    const messages = rows.rows.slice().reverse();
+    const oldestId = messages.length ? Number(messages[0].id) : null;
+    let hasMore = false;
+    if (oldestId) {
+      const older = await query(
+        `
+        SELECT 1 FROM direct_messages
+        WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1))
+          AND id < $3
+        LIMIT 1
+        `,
+        [me, peerUserId, oldestId]
+      );
+      hasMore = older.rows.length > 0;
+    }
 
     res.json({
       peer: {
@@ -2973,7 +3055,8 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         phone: peerRes.rows[0].phone,
         avatarUrl: peerRes.rows[0].avatarUrl || undefined
       },
-      messages: rows.rows
+      messages,
+      hasMore
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load message thread", error: error.message });

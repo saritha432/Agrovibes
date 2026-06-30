@@ -33,6 +33,7 @@ import {
   fetchMyHomePosts,
   fetchUserHomePosts,
   fetchProfileStats,
+  fetchPublicSocialLists,
   fetchSocialNetwork,
   fetchTaggedHomePosts,
   getWebAppOrigin,
@@ -55,6 +56,8 @@ import {
 import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
 import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
+import { ReelGridTile } from "../components/ReelGridTile";
+import { useReelGridAutoplay } from "../hooks/useReelGridAutoplay";
 import { APP_LIME } from "../theme/appColors";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { isReelPost, reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
@@ -73,36 +76,15 @@ const PROFILE_ASSETS = {
   menu: require("../../assets/menu-icon.svg")
 } as const;
 
-const PROFILE_TAB_ICONS = {
-  Posts: {
-    inactive: require("../../assets/feed.svg"),
-    active: require("../../assets/feed-active.svg")
-  },
-  Reels: {
-    inactive: require("../../assets/reels.svg"),
-    active: require("../../assets/reels-active.svg")
-  },
-  Saved: {
-    inactive: require("../../assets/reshare.svg"),
-    active: require("../../assets/reshare-active.svg")
-  },
-  Tagged: {
-    inactive: require("../../assets/tag.svg"),
-    active: require("../../assets/tag-active.svg")
-  }
-} as const;
-
-const PROFILE_TAB_FALLBACKS: Record<
+const PROFILE_TAB_ICONS: Record<
   GalleryTab,
   { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap }
 > = {
   Posts: { active: "grid", inactive: "grid-outline" },
   Reels: { active: "film", inactive: "film-outline" },
-  Saved: { active: "bookmark", inactive: "bookmark-outline" },
-  Tagged: { active: "person", inactive: "person-outline" }
+  Saved: { active: "repeat", inactive: "repeat-outline" },
+  Tagged: { active: "person-circle", inactive: "person-circle-outline" }
 };
-
-const VIDEO_GRID_ICON = require("../../assets/video-icon.svg");
 
 type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
@@ -193,8 +175,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (tab === "Saved" || tab === "Tagged" || tab === "Reels" || tab === "Posts") return tab;
     return "Posts";
   });
-  const [activeReelIndex, setActiveReelIndex] = useState<number | null>(null);
-  const [playingReelId, setPlayingReelId] = useState<number | null>(null);
+  const [publicListLoading, setPublicListLoading] = useState(false);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
   const [shareProfileOpen, setShareProfileOpen] = useState(false);
   const [shareBusyByUserId, setShareBusyByUserId] = useState<Record<number, boolean>>({});
@@ -502,6 +483,24 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         if (!mounted) return;
         setFollowersCount(Number(stats.followersCount || 0));
         setFollowingCount(Number(stats.followingCount || 0));
+        setFollowersList(
+          (stats.followers || []).map((person) => ({
+            name: person.name,
+            key: person.key,
+            avatarUrl: person.avatarUrl,
+            viewerStatus: "none" as const,
+            canFollowBack: false
+          }))
+        );
+        setFollowingList(
+          (stats.following || []).map((person) => ({
+            name: person.name,
+            key: person.key,
+            avatarUrl: person.avatarUrl,
+            viewerStatus: "accepted" as const,
+            canFollowBack: false as const
+          }))
+        );
         setIsFollowingPublic(stats.viewerStatus === "accepted" || stats.viewerStatus === "pending");
         setPublicUsername(stats.username ? String(stats.username) : null);
         setPublicBio(String(stats.bio || "").trim());
@@ -530,6 +529,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => isReelPost(p));
     return userPosts;
   }, [activeGalleryTab, savedPosts, taggedPosts, userPosts]);
+
+  const { playingPostId: profilePlayingPostId, markVideoFailed: markProfileVideoFailed } = useReelGridAutoplay(
+    visiblePosts,
+    { enabled: activeGalleryTab === "Posts" || activeGalleryTab === "Reels" }
+  );
 
   const handleGalleryTabPress = useCallback(
     (tabKey: GalleryTab) => {
@@ -576,7 +580,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         if (cancelled) return;
         setPreviewUriByPostId((prev) => (prev[postId] === uri ? prev : { ...prev, [postId]: uri }));
       },
-      { maxConcurrent: 2, isCancelled: () => cancelled }
+      { maxConcurrent: 4, isCancelled: () => cancelled }
     );
     return () => {
       cancelled = true;
@@ -665,31 +669,26 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const renderProfileGridItem = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const tileHeight = isReelTab ? reelTileHeight : gridTileSize;
+      if (post.videoUrl) {
+        return (
+          <ReelGridTile
+            post={post}
+            width={gridTileSize}
+            height={tileHeight}
+            backgroundColor={profileTileBackground(index)}
+            previewUri={previewUriByPostId[post.id]}
+            isPlaying={profilePlayingPostId === post.id}
+            onPress={() => openProfilePostsViewer(post)}
+            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
+            onVideoError={markProfileVideoFailed}
+          />
+        );
+      }
+      const galleryFirst = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls[0] : null;
       const tileStyle = [
         styles.gridTile,
         { width: gridTileSize, height: tileHeight, backgroundColor: profileTileBackground(index) }
       ];
-      if (post.videoUrl) {
-        const stillUri = reelGridStillUri(post) || previewUriByPostId[post.id] || null;
-        return (
-          <Pressable
-            key={post.id}
-            style={tileStyle}
-            onPress={() => openProfilePostsViewer(post)}
-            onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
-          >
-            {stillUri ? (
-              <Image source={{ uri: stillUri }} style={styles.gridImage} resizeMode="cover" />
-            ) : (
-              <View style={[styles.gridImage, styles.gridVideoPlaceholder, { backgroundColor: profileTileBackground(index) }]} />
-            )}
-            <View style={styles.gridPlayBadge} pointerEvents="none">
-              <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={LIME} fallbackName="videocam" />
-            </View>
-          </Pressable>
-        );
-      }
-      const galleryFirst = post.imageUrls && post.imageUrls.length > 0 ? post.imageUrls[0] : null;
       const cover = post.imageUrl || galleryFirst || null;
       const canOpen = !!cover;
       return (
@@ -719,8 +718,41 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       isReelTab,
       openProfilePostsViewer,
       previewUriByPostId,
+      profilePlayingPostId,
+      markProfileVideoFailed,
       reelTileHeight
     ]
+  );
+
+  const openFollowList = useCallback(
+    async (type: "followers" | "following") => {
+      setActiveListType(type);
+      if (!isPublicProfileView || !token || !publicUserId) return;
+      if ((type === "followers" ? followersList : followingList).length > 0) return;
+      setPublicListLoading(true);
+      try {
+        const lists = await fetchPublicSocialLists(token, publicUserId);
+        setFollowersList(
+          (lists.followers || []).map((person) => ({
+            ...person,
+            viewerStatus: "none" as const,
+            canFollowBack: false
+          }))
+        );
+        setFollowingList(
+          (lists.following || []).map((person) => ({
+            ...person,
+            viewerStatus: "accepted" as const,
+            canFollowBack: false as const
+          }))
+        );
+      } catch {
+        /* keep lists from profile-stats if fetch fails */
+      } finally {
+        setPublicListLoading(false);
+      }
+    },
+    [followersList, followingList, isPublicProfileView, publicUserId, token]
   );
 
   const profileSubject = useMemo(() => {
@@ -1029,14 +1061,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                 </View>
                 {isPublicProfileView ? (
                   <>
-                    <View style={styles.statItem}>
+                    <Pressable style={styles.statItem} onPress={() => void openFollowList("followers")}>
                       <Text style={styles.statValue}>{formatStatCount(profileModel?.followers ?? 0)}</Text>
                       <Text style={styles.statLabel}>{t("followers")}</Text>
-                    </View>
-                    <View style={styles.statItem}>
+                    </Pressable>
+                    <Pressable style={styles.statItem} onPress={() => void openFollowList("following")}>
                       <Text style={styles.statValue}>{formatStatCount(profileModel?.following ?? 0)}</Text>
                       <Text style={styles.statLabel}>{t("profileFollowing")}</Text>
-                    </View>
+                    </Pressable>
                   </>
                 ) : (
                   <>
@@ -1098,11 +1130,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
               const active = activeGalleryTab === tabKey;
               return (
                 <Pressable key={tabKey} style={styles.iconTab} onPress={() => handleGalleryTabPress(tabKey)}>
-                  <SvgAssetIcon
-                    module={active ? icons.active : icons.inactive}
+                  <Ionicons
+                    name={active ? icons.active : icons.inactive}
                     size={PROFILE_TAB_ICON}
                     color={active ? LIME : TEXT}
-                    fallbackName={active ? PROFILE_TAB_FALLBACKS[tabKey].active : PROFILE_TAB_FALLBACKS[tabKey].inactive}
                   />
                   {active ? <View style={styles.iconTabUnderline} /> : <View style={styles.iconTabSpacer} />}
                 </Pressable>
@@ -1122,6 +1153,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       isFollowingPublic,
       isInstructor,
       isPublicProfileView,
+      openFollowList,
       openPublicMessage,
       profileModel?.followers,
       profileModel?.following,
@@ -1213,6 +1245,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             windowSize={5}
             removeClippedSubviews={Platform.OS === "android"}
             showsVerticalScrollIndicator={false}
+            extraData={`${profilePlayingPostId}-${Object.keys(previewUriByPostId).length}`}
           />
         ) : null}
       </SafeAreaView>
@@ -1347,7 +1380,9 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
               bounces={false}
             >
               {(activeListType === "followers" ? followersList : followingList).length === 0 ? (
-                <Text style={styles.sheetEmpty}>{t("noUsersFound")}</Text>
+                <Text style={styles.sheetEmpty}>
+                  {publicListLoading ? "Loading…" : t("noUsersFound")}
+                </Text>
               ) : (
                 (activeListType === "followers" ? followersList : followingList).map((person, idx) => {
                   const rowId = personUniqueId(person);
@@ -1366,7 +1401,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                       <Text style={styles.personName} numberOfLines={2}>
                         {person.name}
                       </Text>
-                      {activeListType === "followers" ? (
+                      {isPublicProfileView ? null : activeListType === "followers" ? (
                         <View style={styles.personActionsRow} collapsable={false}>
                           <Pressable style={styles.messageBtn} onPress={() => openPersonChat(person)}>
                             <Text style={styles.messageBtnText}>Message</Text>

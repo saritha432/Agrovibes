@@ -5,8 +5,28 @@
       "destination": "https://agrovibes.onrender.com/api/share/reel/:id"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!\\.well-known).*)",
       "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/.well-known/assetlinks.json",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "source": "/.well-known/apple-app-site-association",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
+      ]
     }
   ]
 }

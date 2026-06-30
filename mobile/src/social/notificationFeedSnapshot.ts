@@ -57,7 +57,10 @@ export async function fetchNotificationFeedSnapshot(params: {
       id: n.id,
       type: "post_like",
       postIsReel: n.isReel,
-      postId: n.postId
+      postId: n.postId,
+      postThumbnailUrl: n.postThumbnailUrl,
+      postImageUrl: n.postImageUrl,
+      postVideoUrl: n.postVideoUrl
     }))
   ];
   const postComments = [
@@ -69,6 +72,9 @@ export async function fetchNotificationFeedSnapshot(params: {
       type: n.type,
       postIsReel: n.isReel,
       postId: n.postId,
+      postThumbnailUrl: n.postThumbnailUrl,
+      postImageUrl: n.postImageUrl,
+      postVideoUrl: n.postVideoUrl,
       commentExcerpt: n.commentExcerpt
     }))
   ];

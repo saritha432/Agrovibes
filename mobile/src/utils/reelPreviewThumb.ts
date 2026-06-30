@@ -6,14 +6,7 @@ import { videoPlaybackUrl } from "./videoPlaybackUrl";
 const PREVIEW_CACHE_MAX = 80;
 const previewCache = new Map<string, string>();
 const inFlight = new Map<string, Promise<string | null>>();
-
-function canGenerateVideoThumbnail(uri: string): boolean {
-  const trimmed = String(uri || "").trim();
-  if (!trimmed) return false;
-  // Android MediaMetadataRetriever often native-crashes on remote URLs (setDataSource 0x80000000).
-  if (Platform.OS === "android" && /^https?:\/\//i.test(trimmed)) return false;
-  return trimmed.startsWith("file://") || trimmed.startsWith("content://");
-}
+const skippedPreviewKeys = new Set<string>();
 
 function cacheSet(key: string, uri: string) {
   if (previewCache.size >= PREVIEW_CACHE_MAX && !previewCache.has(key)) {
@@ -26,8 +19,8 @@ function cacheSet(key: string, uri: string) {
 export function clearReelPreviewCache() {
   previewCache.clear();
   inFlight.clear();
+  skippedPreviewKeys.clear();
 }
-const skippedPreviewKeys = new Set<string>();
 
 export function staticReelPreviewUri(post: HomePost): string | null {
   const thumb = String(post.thumbnailUrl || "").trim();
@@ -54,17 +47,17 @@ export async function resolveReelPreviewUri(post: HomePost): Promise<string | nu
   if (Platform.OS === "web") return null;
 
   const playbackUri = videoPlaybackUrl(video);
-  if (!canGenerateVideoThumbnail(playbackUri)) return null;
-
   const task = (async () => {
     try {
-      const { uri } = await VideoThumbnails.getThumbnailAsync(playbackUri, {
-        time: 600,
-        quality: 0.78
-      });
-      cacheSet(cacheKey, uri);
-      return uri;
+      const thumb = await getNativeVideoThumbnail(playbackUri, { time: 600, quality: 0.78 });
+      if (!thumb?.uri) {
+        skippedPreviewKeys.add(cacheKey);
+        return null;
+      }
+      cacheSet(cacheKey, thumb.uri);
+      return thumb.uri;
     } catch {
+      skippedPreviewKeys.add(cacheKey);
       return null;
     } finally {
       inFlight.delete(cacheKey);
@@ -97,13 +90,4 @@ export async function hydrateReelPreviews(
   };
 
   await Promise.all(Array.from({ length: Math.min(maxConcurrent, queue.length || 1) }, () => worker()));
-  const playbackSource = videoPlaybackUrl(video);
-  const thumb = await getNativeVideoThumbnail(playbackSource, { time: 600, quality: 0.78 });
-  if (!thumb?.uri) {
-    skippedPreviewKeys.add(cacheKey);
-    return null;
-  }
-
-  previewCache.set(cacheKey, thumb.uri);
-  return thumb.uri;
 }

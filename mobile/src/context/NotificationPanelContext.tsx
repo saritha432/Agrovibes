@@ -26,6 +26,7 @@ import {
   flattenNotificationFeedSnapshot
 } from "../social/notificationFeedSnapshot";
 import { APP_LIME } from "../theme/appColors";
+import { NotificationPostThumb } from "../components/NotificationPostThumb";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive } from "../navigation/navigationRef";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
@@ -329,16 +330,68 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   }, [loadNotifications, persistLastSeenMs, token]);
 
   const onRespond = async (entry: any, action: "accept" | "decline") => {
+    if (action === "accept") {
+      setPending((prev) => filterOutNotificationEntry(prev, entry));
+    }
     if (entry?.isLocal) {
       await respondLocalFollowRequest(String(entry.id), action);
-      await loadNotifications();
+      void loadNotifications();
       return;
     }
     if (token && entry?.followId) {
       await respondToFollowRequest(token, Number(entry.followId), action);
-      await loadNotifications();
+      void loadNotifications();
     }
   };
+
+  const queueFollowBackPrompt = useCallback((entry: any) => {
+    const key = entry.actorId ? `id:${entry.actorId}` : `name:${String(entry.actorName || "").toLowerCase()}`;
+    setFollowBackPromptByKey((prev) => ({ ...prev, [key]: true }));
+    setFollowBackQueue((prev) => {
+      if (prev.some((x) => (x.actorId ? `id:${x.actorId}` : `name:${String(x.actorName || "").toLowerCase()}`) === key)) {
+        return prev;
+      }
+      return [{ ...entry, createdAt: entry.createdAt || new Date().toISOString() }, ...prev];
+    });
+  }, []);
+
+  const handleAcceptFollowRequest = useCallback(
+    (entry: any) => {
+      const key = entry.actorId ? `id:${entry.actorId}` : `name:${String(entry.actorName || "").toLowerCase()}`;
+      queueFollowBackPrompt(entry);
+      void (async () => {
+        await onRespond(entry, "accept");
+        let viewerSt: "none" | "pending" | "accepted" = "none";
+        if (token && entry.actorId && user?.fullName) {
+          try {
+            const data = await fetchRelationships(token, [Number(entry.actorId)]);
+            const rs = data.relationships?.[Number(entry.actorId)]?.viewerStatus;
+            if (rs === "accepted" || rs === "pending" || rs === "declined" || rs === "none") {
+              viewerSt = rs === "declined" ? "none" : rs;
+            }
+          } catch {
+            /* use local */
+          }
+        }
+        if (viewerSt !== "accepted" && viewerSt !== "pending" && user?.fullName) {
+          const lm = await getLocalRelationshipMapByNames(
+            { name: user.fullName, key: user.email || String(user.id || "") },
+            [String(entry.actorName || "")]
+          );
+          const ls = lm[String(entry.actorName || "").toLowerCase()]?.viewerStatus;
+          if (ls === "accepted" || ls === "pending") viewerSt = ls;
+        }
+        setFollowBackStatusByKey((prev) => ({ ...prev, [key]: viewerSt }));
+        if (viewerSt === "accepted" || viewerSt === "pending") {
+          setFollowBackQueue((prev) =>
+            prev.filter((x) => (x.actorId ? `id:${x.actorId}` : `name:${String(x.actorName || "").toLowerCase()}`) !== key)
+          );
+          setFollowBackPromptByKey((prev) => ({ ...prev, [key]: false }));
+        }
+      })();
+    },
+    [onRespond, queueFollowBackPrompt, token, user?.email, user?.fullName, user?.id]
+  );
 
   const onFollowBack = async (entry: any) => {
     const key = entry.actorId ? `id:${entry.actorId}` : `name:${String(entry.actorName || "").toLowerCase()}`;
@@ -510,43 +563,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     <View key={item.key} style={styles.row}>
                       <Text style={styles.rowText}>{t("notifFollowRequest", { name: String(n.actorName || "") })}</Text>
                       <View style={styles.rowActions}>
-                        <Pressable
-                          style={styles.acceptBtn}
-                          onPress={async () => {
-                            await onRespond(n, "accept");
-                            const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-                            let viewerSt: "none" | "pending" | "accepted" = "none";
-                            if (token && n.actorId && user?.fullName) {
-                              try {
-                                const data = await fetchRelationships(token, [Number(n.actorId)]);
-                                const rs = data.relationships?.[Number(n.actorId)]?.viewerStatus;
-                                if (rs === "accepted" || rs === "pending" || rs === "declined" || rs === "none") {
-                                  viewerSt = rs === "declined" ? "none" : rs;
-                                }
-                              } catch {
-                                /* use local */
-                              }
-                            }
-                            if (viewerSt !== "accepted" && viewerSt !== "pending" && user?.fullName) {
-                              const lm = await getLocalRelationshipMapByNames(
-                                { name: user.fullName, key: user.email || String(user.id || "") },
-                                [String(n.actorName || "")]
-                              );
-                              const ls = lm[String(n.actorName || "").toLowerCase()]?.viewerStatus;
-                              if (ls === "accepted" || ls === "pending") viewerSt = ls;
-                            }
-                            setFollowBackStatusByKey((prev) => ({ ...prev, [key]: viewerSt }));
-                            if (viewerSt === "accepted" || viewerSt === "pending") {
-                              await loadNotifications();
-                              return;
-                            }
-                            setFollowBackPromptByKey((prev) => ({ ...prev, [key]: true }));
-                            setFollowBackQueue((prev) => {
-                              if (prev.some((x) => (x.actorId ? `id:${x.actorId}` : `name:${String(x.actorName || "").toLowerCase()}`) === key)) return prev;
-                              return [...prev, n];
-                            });
-                          }}
-                        >
+                        <Pressable style={styles.acceptBtn} onPress={() => handleAcceptFollowRequest(n)}>
                           <Text style={styles.acceptText}>{t("accept")}</Text>
                         </Pressable>
                         <Pressable style={styles.declineBtn} onPress={() => onRespond(n, "decline")}>
@@ -670,6 +687,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
                       <Ionicons name="heart" size={16} color={APP_LIME} />
                       <Text style={styles.rowText}>{postActivityLabel(n)}</Text>
+                      <NotificationPostThumb
+                        postId={n.postId}
+                        postThumbnailUrl={n.postThumbnailUrl}
+                        postImageUrl={n.postImageUrl}
+                        postVideoUrl={n.postVideoUrl}
+                        postIsReel={n.postIsReel}
+                      />
                     </Pressable>
                   );
                 }
@@ -677,6 +701,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
                     <Ionicons name="chatbubble-ellipses" size={16} color="#0ea5e9" />
                     <Text style={styles.rowText}>{postActivityLabel(n)}</Text>
+                    <NotificationPostThumb
+                      postId={n.postId}
+                      postThumbnailUrl={n.postThumbnailUrl}
+                      postImageUrl={n.postImageUrl}
+                      postVideoUrl={n.postVideoUrl}
+                      postIsReel={n.postIsReel}
+                    />
                   </Pressable>
                 );
               })}
@@ -711,7 +742,7 @@ const styles = StyleSheet.create({
   declineBtn: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   declineText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
   followBackBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  followBackText: { color: "#fff", fontWeight: "900", fontSize: 12 },
+  followBackText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
   followingPill: { backgroundColor: "#1f6f43", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
@@ -744,7 +775,8 @@ const styles = StyleSheet.create({
     borderColor: "#3a424c",
     borderRadius: 10,
     backgroundColor: "#252a30",
-    padding: 10
+    padding: 10,
+    minHeight: 76
   },
   liveStartRow: {
     flexDirection: "row",
