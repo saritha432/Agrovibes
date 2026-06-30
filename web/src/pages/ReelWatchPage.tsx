@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import { fetchHomePost } from "../api/home";
 import type { HomePost } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { getWebAppOrigin } from "../api/client";
+import { buildReelDeepLinkUrls, openReelInApp, pickReelAppOpenUrl } from "../utils/appDeepLink";
 import { resolveWebVideoUrl } from "../utils/videoUrl";
 import "./ReelWatchPage.css";
 
@@ -23,6 +25,8 @@ export function ReelWatchPage() {
   const [post, setPost] = useState<HomePost | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const triedAppOpenRef = useRef(false);
+  const webOrigin = getWebAppOrigin();
 
   const load = useCallback(async () => {
     const id = Number(postId);
@@ -48,17 +52,41 @@ export function ReelWatchPage() {
     void load();
   }, [load]);
 
-  const appLink = post ? `agrovibes://reel/${post.id}` : "";
+  const numericPostId = Number(postId);
+  const appLink =
+    Number.isFinite(numericPostId) && numericPostId > 0
+      ? pickReelAppOpenUrl(numericPostId, webOrigin)
+      : post
+        ? pickReelAppOpenUrl(post.id, webOrigin)
+        : "";
+
+  useEffect(() => {
+    if (triedAppOpenRef.current) return;
+    const id = Number(postId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    triedAppOpenRef.current = true;
+    openReelInApp(id, webOrigin);
+  }, [postId, webOrigin]);
+
+  const handleOpenApp = (event: React.MouseEvent) => {
+    event.preventDefault();
+    const id = post?.id ?? numericPostId;
+    if (!Number.isFinite(id) || id <= 0) return;
+    openReelInApp(id, webOrigin);
+  };
+
+  const watchUrl =
+    Number.isFinite(numericPostId) && numericPostId > 0
+      ? buildReelDeepLinkUrls(numericPostId, webOrigin).httpsWatchUrl
+      : "";
 
   return (
     <div className="reel-watch">
       <header className="reel-watch__header">
-        <Link to="/" className="reel-watch__brand">
-          Cropvibe
-        </Link>
+        <span className="reel-watch__brand">Cropvibe</span>
         {appLink ? (
-          <a className="reel-watch__open-app" href={appLink}>
-            Open app
+          <a className="reel-watch__open-app" href={appLink} onClick={handleOpenApp}>
+            Open in app
           </a>
         ) : null}
       </header>
@@ -88,6 +116,14 @@ export function ReelWatchPage() {
           <div className="reel-watch__meta">
             <strong>{post.userName}</strong>
             {stripCaption(post.caption) ? <p>{stripCaption(post.caption)}</p> : null}
+            {watchUrl ? (
+              <p className="reel-watch__hint">
+                Prefer the app?{" "}
+                <a href={appLink} onClick={handleOpenApp}>
+                  Open in Cropvibe
+                </a>
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}

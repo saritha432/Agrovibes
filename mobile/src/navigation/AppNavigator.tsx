@@ -16,10 +16,15 @@ import { LearnStackNavigator } from "./LearnStackNavigator";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
 import { subscribeOpenLiveCreate } from "./liveCreateBridge";
 import { runPendingNotificationNavigation } from "../push/notificationNavigation";
+import { takePersistedReelDeepLink } from "./pendingReelDeepLink";
+import { fetchHomePost } from "../services/api";
+import { queueOpenSharedPostViewer } from "./sharedPostViewerBridge";
+import { useAuth } from "../auth/AuthContext";
 
 const Tab = createBottomTabNavigator();
 
 export function AppNavigator() {
+  const { token } = useAuth();
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [homeRefreshToken, setHomeRefreshToken] = useState(0);
   const [createPresetType, setCreatePresetType] = useState<CreateType | null>(null);
@@ -46,7 +51,17 @@ export function AppNavigator() {
 
   useEffect(() => {
     runPendingNotificationNavigation();
-  }, []);
+    void (async () => {
+      const postId = await takePersistedReelDeepLink();
+      if (!postId) return;
+      try {
+        const { post } = await fetchHomePost(token ?? null, postId);
+        queueOpenSharedPostViewer(post, true);
+      } catch {
+        // unavailable
+      }
+    })();
+  }, [token]);
 
   return (
     <NotificationPanelProvider>

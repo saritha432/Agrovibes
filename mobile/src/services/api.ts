@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
 import { prepareImageForUpload, prepareProfileImageForUpload } from "../utils/mediaUpload";
+import { resolveWebAppOrigin } from "../utils/webAppOrigin";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
@@ -80,25 +81,10 @@ export const API_BASE_URL = resolveApiBaseUrl();
 
 /**
  * Public web app origin for share / deep links (no trailing slash).
- * Set `EXPO_PUBLIC_WEB_BASE_URL` for native builds (EAS env). On web, the current
- * `window.location.origin` is used when env is unset so a new Vercel URL works without a rebuild.
+ * Set `EXPO_PUBLIC_WEB_BASE_URL` for native builds (EAS env).
  */
 export function getWebAppOrigin(): string {
-  const raw = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_WEB_BASE_URL;
-  const fromEnv = typeof raw === "string" ? raw.trim().replace(/\/$/, "") : "";
-  if (fromEnv) return fromEnv;
-
-  const loc = (globalThis as { location?: { protocol?: string; hostname?: string; port?: string } }).location;
-  if (typeof loc?.hostname === "string" && loc.hostname.length > 0) {
-    const host = loc.hostname;
-    if (host !== "localhost" && host !== "127.0.0.1") {
-      const port = loc.port ? `:${loc.port}` : "";
-      const protocol = loc.protocol && loc.protocol.length > 0 ? loc.protocol : "https:";
-      return `${protocol}//${host}${port}`;
-    }
-  }
-
-  return "https://agrovibes.app";
+  return resolveWebAppOrigin();
 }
 
 export interface AuthResponse {
@@ -310,6 +296,10 @@ export async function updateMyProfile(
   })) as AuthResponse;
 }
 
+export async function fetchAuthMe(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token)) as { user: AuthResponse["user"] };
+}
+
 export async function fetchAdminUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.set("search", params.search);
@@ -491,6 +481,9 @@ export interface SocialPostActivityNotification {
   actorName: string;
   postId: number | null;
   postIsReel?: boolean;
+  postThumbnailUrl?: string | null;
+  postImageUrl?: string | null;
+  postVideoUrl?: string | null;
   commentExcerpt?: string | null;
 }
 
@@ -557,8 +550,10 @@ export async function fetchCommunityQuestions() {
   return (await response.json()) as { questions: CommunityQuestion[] };
 }
 
-export async function fetchHomeStories() {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`);
+export async function fetchHomeStories(token?: string | null) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/stories`, { headers });
   if (!response.ok) {
     throw new Error("Failed to load home stories");
   }
@@ -1041,6 +1036,8 @@ export async function fetchProfileStats(token: string, userId: number) {
     reelsCount: number;
     followersCount: number;
     followingCount: number;
+    followers?: Array<{ name: string; key?: string; username?: string; avatarUrl?: string | null }>;
+    following?: Array<{ name: string; key?: string; username?: string; avatarUrl?: string | null }>;
     viewerStatus: FollowStatus;
     reverseStatus: FollowStatus;
     canFollowBack: boolean;
@@ -1158,10 +1155,29 @@ export async function fetchMessageThreads(token: string) {
   };
 }
 
-export async function fetchMessageThread(token: string, peerUserId: number) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token)) as {
+export async function fetchMessageThread(
+  token: string,
+  peerUserId: number,
+  options?: { limit?: number; beforeId?: number }
+) {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.beforeId) params.set("beforeId", String(options.beforeId));
+  const qs = params.toString();
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}${qs ? `?${qs}` : ""}`,
+    token
+  )) as {
     peer: { id: number; fullName: string; email?: string; phone?: string; avatarUrl?: string | null };
     messages: DirectMessageItem[];
+    hasMore?: boolean;
+  };
+}
+
+export async function fetchPublicSocialLists(token: string, userId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/public-lists/${encodeURIComponent(String(userId))}`, token)) as {
+    followers: Array<{ name: string; key?: string; username?: string; avatarUrl?: string | null }>;
+    following: Array<{ name: string; key?: string; username?: string; avatarUrl?: string | null }>;
   };
 }
 

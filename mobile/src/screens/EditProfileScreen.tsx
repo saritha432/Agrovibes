@@ -298,8 +298,11 @@ export function EditProfileScreen() {
           <View style={styles.grabBar} />
 
           <View style={styles.headerRow}>
+            <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.headerBackBtn}>
+              <Ionicons name="chevron-back" size={24} color={TEXT} />
+            </Pressable>
             <Text style={styles.headerTitle}>{t("editProfileTitle")}</Text>
-            <Pressable onPress={save} disabled={isSaving} hitSlop={8}>
+            <Pressable onPress={save} disabled={isSaving} hitSlop={8} style={styles.headerBackBtn}>
               <Text style={[styles.headerSave, isSaving ? styles.headerSaveDisabled : null]}>
                 {isSaving ? t("saving") : t("saveProfile")}
               </Text>
@@ -536,7 +539,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 12
   },
-  headerTitle: { color: TEXT, fontSize: 18, fontWeight: "800" },
+  headerBackBtn: {
+    width: 36,
+    alignItems: "flex-start",
+    justifyContent: "center"
+  },
+  headerTitle: { flex: 1, color: TEXT, fontSize: 18, fontWeight: "800", textAlign: "center" },
   headerSave: { color: ACCENT, fontSize: 16, fontWeight: "800" },
   headerSaveDisabled: { opacity: 0.55 },
   scrollContent: { paddingHorizontal: 16 },

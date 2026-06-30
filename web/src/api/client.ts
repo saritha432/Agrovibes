@@ -49,7 +49,7 @@ export function getWebAppOrigin(): string {
       return window.location.origin;
     }
   }
-  return "https://agrovibes.app";
+  return "https://www.cropvibe.com";
 }
 
 export async function fetchWithRetry(

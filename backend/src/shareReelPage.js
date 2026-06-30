@@ -1,3 +1,5 @@
+const { buildReelDeepLinkUrls } = require("./appDeepLinkUrls");
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -21,7 +23,7 @@ function getWebAppOrigin() {
     .map((part) => part.trim())
     .find((part) => part.startsWith("http"));
   if (cors) return cors.replace(/\/$/, "");
-  return "https://agrovibes.app";
+  return "https://www.cropvibe.com";
 }
 
 function stripReelCaptionPrefix(caption) {
@@ -41,50 +43,73 @@ function reelShareImage(post) {
   return first || "";
 }
 
-function isSocialCrawler(userAgent) {
+/** Bots that fetch HTML for link previews only — no JS, no app redirect. */
+function isLinkPreviewBot(userAgent) {
   const ua = String(userAgent || "").toLowerCase();
   return (
     ua.includes("facebookexternalhit") ||
-    ua.includes("whatsapp") ||
     ua.includes("twitterbot") ||
     ua.includes("linkedinbot") ||
     ua.includes("slackbot") ||
-    ua.includes("telegrambot") ||
     ua.includes("discordbot") ||
-    ua.includes("googlebot")
+    ua.includes("telegrambot") ||
+    ua.includes("googlebot") ||
+    ua.includes("bingbot")
   );
+}
+
+function buildOpenAppScript(urls) {
+  return `
+    <script>
+      (function () {
+        var appUrl = ${JSON.stringify(urls.customSchemeUrl)};
+        var androidIntent = ${JSON.stringify(urls.androidIntentUrl)};
+        var androidCustom = ${JSON.stringify(urls.androidCustomIntentUrl)};
+        var webUrl = ${JSON.stringify(urls.httpsWatchUrl)};
+        var ua = navigator.userAgent || "";
+        var isAndroid = /android/i.test(ua);
+        var started = Date.now();
+        var opened = false;
+
+        function tryOpen(url) {
+          if (!url || opened) return;
+          opened = true;
+          try { window.location.href = url; } catch (e) {}
+        }
+
+        if (isAndroid) {
+          tryOpen(androidIntent);
+          setTimeout(function () { tryOpen(androidCustom); }, 120);
+          setTimeout(function () { tryOpen(appUrl); }, 280);
+        } else {
+          tryOpen(appUrl);
+        }
+
+        setTimeout(function () {
+          if (document.hidden || document.visibilityState === "hidden") return;
+          if (Date.now() - started < 2200) {
+            window.location.replace(webUrl);
+          }
+        }, 1800);
+      })();
+    </script>`;
 }
 
 function buildShareReelHtml(post, { postId, userAgent }) {
   const webOrigin = getWebAppOrigin();
-  const shareUrl = `${webOrigin}/reel/${encodeURIComponent(String(postId))}`;
-  const watchUrl = `${webOrigin}/watch/${encodeURIComponent(String(postId))}`;
-  const appUrl = `agrovibes://reel/${encodeURIComponent(String(postId))}`;
+  const urls = buildReelDeepLinkUrls(postId, webOrigin);
   const author = escapeHtml(post?.userName || "Cropvibe");
   const caption = escapeHtml(stripReelCaptionPrefix(post?.caption) || "Watch this reel on Cropvibe");
   const title = `${author} on Cropvibe`;
   const image = reelShareImage(post);
   const imageTag = image ? `<meta property="og:image" content="${escapeHtml(image)}" />` : "";
-  const crawler = isSocialCrawler(userAgent);
-
-  const redirectScript = crawler
+  const previewBot = isLinkPreviewBot(userAgent);
+  const openAppHref = escapeHtml(urls.androidIntentUrl);
+  const openAppOnClick = previewBot
     ? ""
-    : `
-    <script>
-      (function () {
-        var appUrl = ${JSON.stringify(appUrl)};
-        var webUrl = ${JSON.stringify(watchUrl)};
-        var started = Date.now();
-        try {
-          window.location.href = appUrl;
-        } catch (e) {}
-        setTimeout(function () {
-          if (Date.now() - started < 1600) {
-            window.location.replace(webUrl);
-          }
-        }, 900);
-      })();
-    </script>`;
+    : `onclick="event.preventDefault();var u=/android/i.test(navigator.userAgent)?${JSON.stringify(urls.androidIntentUrl)}:${JSON.stringify(urls.customSchemeUrl)};window.location.href=u;return false;"`;
+
+  const redirectScript = previewBot ? "" : buildOpenAppScript(urls);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -97,7 +122,7 @@ function buildShareReelHtml(post, { postId, userAgent }) {
   <meta property="og:site_name" content="Cropvibe" />
   <meta property="og:title" content="${escapeHtml(title)}" />
   <meta property="og:description" content="${caption}" />
-  <meta property="og:url" content="${escapeHtml(shareUrl)}" />
+  <meta property="og:url" content="${escapeHtml(urls.httpsReelUrl)}" />
   ${imageTag}
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${escapeHtml(title)}" />
@@ -106,7 +131,18 @@ function buildShareReelHtml(post, { postId, userAgent }) {
   <style>
     body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #f5f5f5; }
     .wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; text-align: center; }
-    a { color: #c9ff35; }
+    .btn {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 12px 22px;
+      border-radius: 999px;
+      background: #c9ff35;
+      color: #111;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    .sub { margin-top: 14px; color: #aaa; font-size: 14px; }
+    .sub a { color: #c9ff35; }
   </style>
   ${redirectScript}
 </head>
@@ -114,7 +150,8 @@ function buildShareReelHtml(post, { postId, userAgent }) {
   <div class="wrap">
     <h1>${author}</h1>
     <p>${caption}</p>
-    <p><a href="${escapeHtml(watchUrl)}">Open in Cropvibe</a></p>
+    <a class="btn" href="${openAppHref}" ${openAppOnClick}>Open in Cropvibe</a>
+    <p class="sub">No app? <a href="${escapeHtml(urls.httpsWatchUrl)}">Watch in browser</a></p>
   </div>
 </body>
 </html>`;
@@ -124,5 +161,6 @@ module.exports = {
   buildShareReelHtml,
   getWebAppOrigin,
   stripReelCaptionPrefix,
-  reelShareImage
+  reelShareImage,
+  isLinkPreviewBot
 };

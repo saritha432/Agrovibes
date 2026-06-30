@@ -36,13 +36,33 @@
           "data": [
             {
               "scheme": "https",
-              "host": "agrovibes.app",
+              "host": "www.cropvibe.com",
               "pathPrefix": "/reel"
             },
             {
               "scheme": "https",
-              "host": "agrovibes.app",
+              "host": "www.cropvibe.com",
               "pathPrefix": "/watch"
+            },
+            {
+              "scheme": "https",
+              "host": "www.cropvibe.com",
+              "pathPrefix": "/profile"
+            },
+            {
+              "scheme": "https",
+              "host": "cropvibe.com",
+              "pathPrefix": "/reel"
+            },
+            {
+              "scheme": "https",
+              "host": "cropvibe.com",
+              "pathPrefix": "/watch"
+            },
+            {
+              "scheme": "https",
+              "host": "cropvibe.com",
+              "pathPrefix": "/profile"
             }
           ],
           "category": [

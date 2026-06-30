@@ -70,3 +70,14 @@
   color: #d4d4d4;
   line-height: 1.5;
 }
+
+.reel-watch__hint {
+  margin-top: 14px !important;
+  font-size: 14px;
+  color: #b5b5b5 !important;
+}
+
+.reel-watch__hint a {
+  color: #c9ff35;
+  font-weight: 700;
+}

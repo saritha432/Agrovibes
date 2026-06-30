@@ -1,7 +1,6 @@
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Keyboard,
   Platform,
   Pressable,
@@ -20,7 +19,8 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
-import { SvgAssetIcon } from "../components/SvgAssetIcon";
+import { ReelGridTile } from "../components/ReelGridTile";
+import { useReelGridAutoplay } from "../hooks/useReelGridAutoplay";
 import { UserAvatar } from "../components/UserAvatar";
 import { formatDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
@@ -29,9 +29,11 @@ import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navi
 import {
   fetchHomePosts,
   fetchUsers,
+  sendFollowRequest,
+  type FollowStatus,
   type HomePost
 } from "../services/api";
-import { isReelPost, reelGridStillUri, reelGridTileBackground } from "../utils/reelGrid";
+import { isReelPost, reelGridTileBackground } from "../utils/reelGrid";
 import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
@@ -49,7 +51,6 @@ const RECENT_USERS_KEY = "discover.recentUsers.v1";
 const RECENT_SEARCHES_KEY = "discover.recentSearches.v1";
 const MAX_RECENT_USERS = 12;
 const MAX_RECENT_SEARCHES = 10;
-const VIDEO_GRID_ICON = require("../../assets/video-icon.svg");
 
 type SearchUser = {
   id?: number;
@@ -57,6 +58,8 @@ type SearchUser = {
   name: string;
   username?: string | null;
   avatarUrl?: string | null;
+  viewerStatus?: FollowStatus;
+  reverseStatus?: FollowStatus;
 };
 
 function normalizeName(value: string) {
@@ -106,6 +109,8 @@ function buildSearchUserList(
     fullName: string;
     username?: string | null;
     avatarUrl?: string | null;
+    viewerStatus?: FollowStatus;
+    reverseStatus?: FollowStatus;
   }>,
   self?: { id?: number; fullName?: string | null; username?: string | null } | null
 ) {
@@ -125,7 +130,9 @@ function buildSearchUserList(
       key: String(remoteUser.id),
       name: displayName,
       username: remoteUser.username,
-      avatarUrl: remoteUser.avatarUrl
+      avatarUrl: remoteUser.avatarUrl,
+      viewerStatus: remoteUser.viewerStatus,
+      reverseStatus: remoteUser.reverseStatus
     });
   }
 
@@ -212,11 +219,16 @@ export function UserSearchScreen() {
   const [previewUriByPostId, setPreviewUriByPostId] = useState<Record<number, string>>({});
   const [loadingExplore, setLoadingExplore] = useState(false);
   const [exploreViewer, setExploreViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+  const [followBusyById, setFollowBusyById] = useState<Record<number, boolean>>({});
 
   const trimmedQuery = query.trim();
   const isTyping = query.length > 0;
-  const showSearchChrome = searchFocused || isTyping;
   const showTypeahead = isTyping;
+  const { playingPostId, markVideoFailed } = useReelGridAutoplay(explorePosts, {
+    enabled: !showTypeahead && explorePosts.length > 0,
+    intervalMs: 8000
+  });
+
   const gridTileSize = (width - GRID_GAP * 2) / GRID_COLUMNS;
   const reelTileHeight = Math.round(gridTileSize * (16 / 9));
 
@@ -265,7 +277,9 @@ export function UserSearchScreen() {
                 key: String(remoteUser.id),
                 name: displayName,
                 username: remoteUser.username,
-                avatarUrl: remoteUser.avatarUrl
+                avatarUrl: remoteUser.avatarUrl,
+                viewerStatus: remoteUser.viewerStatus,
+                reverseStatus: remoteUser.reverseStatus
               });
             }
             setUsers(sortUsersForSearch(list, needle));
@@ -354,7 +368,7 @@ export function UserSearchScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    const batch = explorePosts.slice(0, 24);
+    const batch = explorePosts;
     if (!batch.length) return;
     void hydrateReelPreviews(
       batch,
@@ -362,7 +376,7 @@ export function UserSearchScreen() {
         if (cancelled) return;
         setPreviewUriByPostId((prev) => (prev[postId] === uri ? prev : { ...prev, [postId]: uri }));
       },
-      { maxConcurrent: 2, isCancelled: () => cancelled }
+      { maxConcurrent: 4, isCancelled: () => cancelled }
     );
     return () => {
       cancelled = true;
@@ -402,15 +416,6 @@ export function UserSearchScreen() {
     } catch {
       /* ignore */
     }
-  }, []);
-
-  const exitSearch = useCallback(() => {
-    searchInputRef.current?.blur();
-    Keyboard.dismiss();
-    setSearchFocused(false);
-    setQuery("");
-    setUsers([]);
-    setLoadingUsers(false);
   }, []);
 
   const addRecentSearch = useCallback(
@@ -499,6 +504,44 @@ export function UserSearchScreen() {
     [persistRecentUsers, user?.id]
   );
 
+  const followStatusLabel = useCallback(
+    (person: SearchUser) => {
+      const status = person.viewerStatus;
+      if (status === "accepted") return t("following");
+      if (status === "pending") return t("requested");
+      if (followBusyById[Number(person.id) || 0]) return t("followBusy");
+      return t("follow");
+    },
+    [followBusyById, t]
+  );
+
+  const toggleFollowUser = useCallback(
+    async (person: SearchUser) => {
+      const targetId = Number(person.id);
+      if (!token || !Number.isFinite(targetId) || targetId <= 0) return;
+      if (person.viewerStatus === "accepted" || person.viewerStatus === "pending") return;
+      setFollowBusyById((prev) => ({ ...prev, [targetId]: true }));
+      try {
+        const data = await sendFollowRequest(token, targetId);
+        const nextStatus = data.follow?.status === "accepted" ? "accepted" : "pending";
+        const patch = (list: SearchUser[]) =>
+          list.map((row) => (row.id === targetId ? { ...row, viewerStatus: nextStatus as FollowStatus } : row));
+        setUsers(patch);
+        setSuggestedUsers(patch);
+        setUserDirectory(patch);
+      } catch {
+        /* ignore */
+      } finally {
+        setFollowBusyById((prev) => {
+          const next = { ...prev };
+          delete next[targetId];
+          return next;
+        });
+      }
+    },
+    [token]
+  );
+
   const renderAccountMeta = useCallback(
     (person: SearchUser, highlightQuery?: string) => {
       const primary = accountPrimaryLabel(person, language, t);
@@ -538,22 +581,39 @@ export function UserSearchScreen() {
   );
 
   const renderUserRow = useCallback(
-    ({ item, highlightQuery }: { item: SearchUser; highlightQuery?: string }) => (
-      <View style={styles.userRow}>
-        <Pressable style={styles.userRowMain} onPress={() => openUserProfile(item)}>
-          <UserAvatar
-            uri={item.avatarUrl}
-            name={item.name}
-            size={44}
-            borderRadius={22}
-            fallbackBackgroundColor={SEARCH_BG}
-            initialsColor={MUTED}
-          />
-          {renderAccountMeta(item, highlightQuery)}
-        </Pressable>
-      </View>
-    ),
-    [openUserProfile, renderAccountMeta]
+    ({ item, highlightQuery }: { item: SearchUser; highlightQuery?: string }) => {
+      const hasFollowAction = !!item.id && item.id !== Number(user?.id);
+      const isFollowing = item.viewerStatus === "accepted";
+      const isRequested = item.viewerStatus === "pending";
+
+      return (
+        <View style={styles.userRow}>
+          <Pressable style={styles.userRowMain} onPress={() => openUserProfile(item)}>
+            <UserAvatar
+              uri={item.avatarUrl}
+              name={item.name}
+              size={44}
+              borderRadius={22}
+              fallbackBackgroundColor={SEARCH_BG}
+              initialsColor={MUTED}
+            />
+            {renderAccountMeta(item, highlightQuery)}
+          </Pressable>
+          {hasFollowAction ? (
+            <Pressable
+              style={[styles.followBtn, isFollowing || isRequested ? styles.followBtnMuted : null]}
+              onPress={() => void toggleFollowUser(item)}
+              disabled={isFollowing || isRequested || !!followBusyById[Number(item.id)]}
+            >
+              <Text style={[styles.followBtnText, isFollowing || isRequested ? styles.followBtnTextMuted : null]}>
+                {followStatusLabel(item)}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      );
+    },
+    [followBusyById, followStatusLabel, openUserProfile, renderAccountMeta, toggleFollowUser, user?.id]
   );
 
   const openExplorePost = useCallback(
@@ -565,31 +625,19 @@ export function UserSearchScreen() {
   );
 
   const renderExploreTile = useCallback(
-    ({ item: post, index }: { item: HomePost; index: number }) => {
-      const tileStyle = [
-        styles.gridTile,
-        {
-          width: gridTileSize,
-          height: reelTileHeight,
-          backgroundColor: reelGridTileBackground(index, GRID_COLUMNS)
-        }
-      ];
-      const coverUri = reelGridStillUri(post) || previewUriByPostId[post.id] || null;
-
-      return (
-        <Pressable style={tileStyle} onPress={() => openExplorePost(post)}>
-          {coverUri ? (
-            <Image source={{ uri: coverUri }} style={styles.gridImage} resizeMode="cover" />
-          ) : (
-            <View style={[styles.gridImage, styles.gridPlaceholder]} />
-          )}
-          <View style={styles.gridPlayBadge} pointerEvents="none">
-            <SvgAssetIcon module={VIDEO_GRID_ICON} size={20} color={SEARCH_ICON} fallbackName="videocam" />
-          </View>
-        </Pressable>
-      );
-    },
-    [gridTileSize, openExplorePost, previewUriByPostId, reelTileHeight]
+    ({ item: post, index }: { item: HomePost; index: number }) => (
+      <ReelGridTile
+        post={post}
+        width={gridTileSize}
+        height={reelTileHeight}
+        backgroundColor={reelGridTileBackground(index, GRID_COLUMNS)}
+        previewUri={previewUriByPostId[post.id]}
+        isPlaying={playingPostId === post.id}
+        onPress={() => openExplorePost(post)}
+        onVideoError={markVideoFailed}
+      />
+    ),
+    [gridTileSize, markVideoFailed, openExplorePost, playingPostId, previewUriByPostId, reelTileHeight]
   );
 
   const renderTypeaheadPanel = () => (
@@ -659,21 +707,16 @@ export function UserSearchScreen() {
           {query.length > 0 ? (
             <Pressable
               hitSlop={8}
-              onPress={(event) => {
-                event.stopPropagation?.();
+              onPress={() => {
                 setQuery("");
                 setUsers([]);
+                searchInputRef.current?.focus();
               }}
             >
               <Ionicons name="close-circle" size={18} color={MUTED} />
             </Pressable>
           ) : null}
         </View>
-        {showSearchChrome ? (
-          <Pressable hitSlop={8} onPress={exitSearch} style={styles.cancelBtn}>
-            <Text style={styles.cancelBtnText}>{t("cancel")}</Text>
-          </Pressable>
-        ) : null}
       </View>
 
       <View style={styles.body}>
@@ -696,6 +739,7 @@ export function UserSearchScreen() {
             maxToRenderPerBatch={9}
             windowSize={5}
             removeClippedSubviews={Platform.OS === "android"}
+            extraData={`${playingPostId}-${Object.keys(previewUriByPostId).length}`}
             ListEmptyComponent={
               !loadingExplore ? (
                 <View style={styles.exploreEmpty}>
@@ -738,8 +782,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginHorizontal: 12,
     marginTop: 8,
-    marginBottom: 6,
-    gap: 10
+    marginBottom: 6
   },
   searchWrap: {
     flex: 1,
@@ -750,15 +793,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: 8
-  },
-  cancelBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 2
-  },
-  cancelBtnText: {
-    color: TEXT,
-    fontSize: 16,
-    fontWeight: "600"
   },
   body: {
     flex: 1,
