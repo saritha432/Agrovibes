@@ -1,53 +1,55 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { Alert, StyleSheet, Text } from "react-native";
-import { AccountCenterAddAction } from "../components/accountCenter/AccountCenterAddAction";
-import { AccountCenterAvatar } from "../components/accountCenter/AccountCenterAvatar";
-import {
-  AccountCenterCard,
-  AccountCenterChevronRow,
-  AccountCenterSectionTitle,
-  AccountCenterSubLayout
-} from "../components/accountCenter/AccountCenterSubLayout";
-import { CONNECTED_ACCOUNT_SUBTITLES } from "../components/accountCenter/connectedExperiencesData";
-import { useAuth } from "../auth/AuthContext";
+import { AccountCenterSubLayout } from "../components/accountCenter/AccountCenterSubLayout";
+import { ProfileLinksCard } from "../components/accountCenter/ConnectedExperienceCards";
+import { showAddConnectedAccountAlert } from "../components/accountCenter/showAddConnectedAccountAlert";
+import { useConnectedExperiences } from "../hooks/useConnectedExperiences";
+import { toggleShowLinksOnAccount } from "../utils/connectedExperiencesStorage";
 
 export function ShowingProfileLinksScreen() {
-  const { user } = useAuth();
+  const { state, loading, user, applyState } = useConnectedExperiences();
 
-  const displayName = useMemo(
-    () => user?.fullName || user?.username || "Your profile",
-    [user?.fullName, user?.username]
-  );
+  const addAccounts = () => {
+    if (!user) return;
+    showAddConnectedAccountAlert(user, applyState);
+  };
 
-  const addAccounts = () => Alert.alert("Coming soon", "Account linking will be available in a future update.");
+  const openAccount = async (accountId: string, accountName: string) => {
+    if (!user) return;
+    const enabled = state?.showLinksOnAccountIds.includes(accountId);
+    Alert.alert(
+      accountName,
+      enabled
+        ? "Profile links are currently shown on this profile."
+        : "Profile links are hidden on this profile.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: enabled ? "Hide Links" : "Show Links",
+          onPress: async () => {
+            const next = await toggleShowLinksOnAccount(user, accountId);
+            applyState(next);
+          }
+        }
+      ]
+    );
+  };
 
   return (
     <AccountCenterSubLayout
       title="Showing Links For Your Profiles"
       description={
         <Text style={styles.description}>
-          Choose where to show links for your profiles so your audience can discover them more easily.
+          Choose where to show links for your profiles, so your audience can discover them more easily.
         </Text>
       }
     >
-      <AccountCenterSectionTitle title="Show Links On" />
-      <AccountCenterCard>
-        <AccountCenterChevronRow
-          title={displayName}
-          subtitle={CONNECTED_ACCOUNT_SUBTITLES.main}
-          onPress={() => {}}
-          showDivider
-          left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
-        />
-        <AccountCenterChevronRow
-          title={displayName}
-          subtitle={CONNECTED_ACCOUNT_SUBTITLES.whatsapp}
-          onPress={() => {}}
-          left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
-        />
-      </AccountCenterCard>
-
-      <AccountCenterAddAction label="+ Add Accounts" onPress={addAccounts} />
+      <ProfileLinksCard
+        accounts={state?.accounts || []}
+        loading={loading}
+        onPressAccount={(account) => void openAccount(account.id, account.displayName)}
+        onAddAccounts={addAccounts}
+      />
     </AccountCenterSubLayout>
   );
 }

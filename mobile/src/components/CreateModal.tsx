@@ -1100,14 +1100,19 @@ export function CreateModal({
     try {
       await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
-      try {
-        const thumb = await getNativeVideoThumbnail(asset.uri, { time: 400, quality: 0.72 });
-        if (thumb?.uri) {
-          const { url } = await uploadImageFile(thumb.uri);
-          derivedThumb = url;
+      for (const time of [400, 0, 1200]) {
+        try {
+          const thumb = await getNativeVideoThumbnail(asset.uri, { time, quality: 0.72 });
+          if (thumb?.uri) {
+            const { url } = await uploadImageFile(thumb.uri);
+            if (url) {
+              derivedThumb = url;
+              break;
+            }
+          }
+        } catch {
+          /* try next frame */
         }
-      } catch {
-        /* Optional thumbnail; live grid can still show a placeholder. */
       }
       const { url: mediaUrl } = await uploadPickedMedia(asset.uri, asset);
       const liveCaption = caption.trim() || liveScheduleTopic.trim() || "Live stream";
@@ -1651,20 +1656,27 @@ export function CreateModal({
         if (videos.length === 1) {
           const v = videos[0];
           await assertVideoUnderUploadLimit(v.uri);
-          let derivedThumb: string | undefined;
-          if (!thumbnailUrl.trim()) {
-            try {
-              const thumb = await getNativeVideoThumbnail(v.uri, {
-                time: 400,
-                quality: 0.72
-              });
-              if (thumb?.uri) {
-                const { url } = await uploadImageFile(thumb.uri);
-                derivedThumb = url;
+          let derivedThumb: string | undefined = thumbnailUrl.trim() || undefined;
+          if (!derivedThumb) {
+            for (const time of [400, 0, 1200]) {
+              try {
+                const thumb = await getNativeVideoThumbnail(v.uri, { time, quality: 0.72 });
+                if (thumb?.uri) {
+                  const { url } = await uploadImageFile(thumb.uri);
+                  if (url) {
+                    derivedThumb = url;
+                    break;
+                  }
+                }
+              } catch {
+                /* try next frame */
               }
-            } catch {
-              /* grid can fall back to muted video preview on device */
             }
+          }
+          if (createType === "reel" && !derivedThumb) {
+            setErrorText("Could not create reel preview. Try again.");
+            setSubmitting(false);
+            return;
           }
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           const reelAudio =
@@ -1693,7 +1705,7 @@ export function CreateModal({
             location: resolvedLocation,
             caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
             videoUrl: mediaUrl,
-            thumbnailUrl: thumbnailUrl.trim() || derivedThumb || undefined,
+            thumbnailUrl: derivedThumb,
             ...(taggedIds.length ? { taggedUserIds: taggedIds } : {}),
             ...reelAudio,
             ...reelCreative

@@ -1,25 +1,25 @@
-import React, { useMemo } from "react";
-import { Alert, StyleSheet, Text } from "react-native";
+import React from "react";
+import { StyleSheet, Text } from "react-native";
 import { AccountCenterAddAction } from "../components/accountCenter/AccountCenterAddAction";
-import { AccountCenterAvatar } from "../components/accountCenter/AccountCenterAvatar";
-import {
-  AccountCenterCard,
-  AccountCenterChevronRow,
-  AccountCenterSectionTitle,
-  AccountCenterSubLayout
-} from "../components/accountCenter/AccountCenterSubLayout";
-import { CONNECTED_ACCOUNT_SUBTITLES } from "../components/accountCenter/connectedExperiencesData";
-import { useAuth } from "../auth/AuthContext";
+import { ConnectedAccountRows } from "../components/accountCenter/ConnectedAccountRows";
+import { AccountCenterSubLayout } from "../components/accountCenter/AccountCenterSubLayout";
+import { showAddConnectedAccountAlert } from "../components/accountCenter/showAddConnectedAccountAlert";
+import { useConnectedExperiences } from "../hooks/useConnectedExperiences";
+import { setSharingFromAccount } from "../utils/connectedExperiencesStorage";
 
 export function SharingAcrossProfilesScreen() {
-  const { user } = useAuth();
+  const { state, loading, user, applyState } = useConnectedExperiences();
 
-  const displayName = useMemo(
-    () => user?.fullName || user?.username || "Your profile",
-    [user?.fullName, user?.username]
-  );
+  const addAccounts = () => {
+    if (!user) return;
+    showAddConnectedAccountAlert(user, applyState);
+  };
 
-  const addAccounts = () => Alert.alert("Coming soon", "Account linking will be available in a future update.");
+  const selectShareFrom = async (accountId: string) => {
+    if (!user) return;
+    const next = await setSharingFromAccount(user, accountId);
+    applyState(next);
+  };
 
   return (
     <AccountCenterSubLayout
@@ -31,22 +31,14 @@ export function SharingAcrossProfilesScreen() {
       }
       contentStyle={styles.content}
     >
-      <AccountCenterSectionTitle title="Share From" />
-      <AccountCenterCard>
-        <AccountCenterChevronRow
-          title={displayName}
-          subtitle={CONNECTED_ACCOUNT_SUBTITLES.main}
-          onPress={() => {}}
-          showDivider
-          left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
-        />
-        <AccountCenterChevronRow
-          title={displayName}
-          subtitle={CONNECTED_ACCOUNT_SUBTITLES.whatsapp}
-          onPress={() => {}}
-          left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
-        />
-      </AccountCenterCard>
+      <ConnectedAccountRows
+        title="Share From"
+        accounts={state?.accounts || []}
+        loading={loading}
+        selectedIds={state?.sharingFromAccountId ? [state.sharingFromAccountId] : []}
+        selectionMode="single"
+        onPressAccount={(account) => void selectShareFrom(account.id)}
+      />
 
       <AccountCenterAddAction label="+ Add Accounts" onPress={addAccounts} />
 

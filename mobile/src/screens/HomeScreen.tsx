@@ -50,6 +50,8 @@ import {
   fetchHomePostComments,
   fetchHomePostLikes,
   fetchHomePosts,
+  fetchHomePostsPage,
+  HOME_FEED_PAGE_SIZE,
   fetchSocialNotifications,
   type HomePostLiker,
   fetchHomeStories,
@@ -86,6 +88,8 @@ import {
   removeLocalFollowByIdentity,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
+import { mergeHomeFeedPosts, readHomeFeedCache, writeHomeFeedCache } from "../social/homeFeedCache";
+import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
@@ -1181,6 +1185,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [feedHasMore, setFeedHasMore] = useState(true);
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const feedNextCursorRef = useRef<number | null>(null);
+  const feedLoadMoreInFlightRef = useRef(false);
   const [isPullRefreshing, setIsPullRefreshing] = useState(false);
   const [manualRefreshToken, setManualRefreshToken] = useState(0);
   const refreshPendingRef = useRef(0);
@@ -1350,13 +1358,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setPlayingPostId(null);
         return;
       }
-      // Follow the pager slot itself (reel or photo). Do not prefer "any visible video" — that kept the
-      // previous reel playing when a photo slot was centered, so playback never switched every swipe.
       const primary = ordered[ordered.length - 1];
       setPlayingPostId(primary.post.id);
+      prefetchPostMedia(primary.post);
+      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 2);
     },
     []
   );
+
+  const tabPostsRef = useRef<HomePost[]>([]);
 
   const viewabilityCallbackRef = useRef(onViewableItemsChanged);
   viewabilityCallbackRef.current = onViewableItemsChanged;
@@ -1400,6 +1410,64 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     }
     return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
   }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
+
+  tabPostsRef.current = tabPosts;
+
+  useEffect(() => {
+    let cancelled = false;
+    void readHomeFeedCache(user?.id ?? "anon").then((cached) => {
+      if (!cancelled && cached?.length) setPosts(cached);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const applyLocalLikesToPosts = useCallback(
+    async (rows: HomePost[]) => {
+      const localLikes = await getLocalLikeStateForPosts(
+        localLikeViewerIdentity(user || {}),
+        rows.map((p) => p.id)
+      );
+      return rows.map((p) => ({
+        ...p,
+        viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
+        likesCount: token
+          ? Number(p.likesCount || 0)
+          : Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
+      }));
+    },
+    [token, user]
+  );
+
+  const loadMoreFeed = useCallback(async () => {
+    if (!feedHasMore || feedLoadMoreInFlightRef.current) return;
+    const cursor = feedNextCursorRef.current;
+    if (cursor == null) return;
+    feedLoadMoreInFlightRef.current = true;
+    setFeedLoadingMore(true);
+    try {
+      const page = await fetchHomePostsPage(token ?? null, { limit: HOME_FEED_PAGE_SIZE, cursor });
+      if (!page.posts.length) {
+        setFeedHasMore(false);
+        return;
+      }
+      const withLikes = await applyLocalLikesToPosts(page.posts);
+      setPosts((prev) => mergeHomeFeedPosts(withLikes, prev));
+      feedNextCursorRef.current = page.hasMore ? page.nextCursor : null;
+      setFeedHasMore(page.hasMore);
+      void writeHomeFeedCache(mergeHomeFeedPosts(withLikes, postsRef.current), user?.id ?? "anon");
+    } catch {
+      // keep scroll position and existing items
+    } finally {
+      feedLoadMoreInFlightRef.current = false;
+      setFeedLoadingMore(false);
+    }
+  }, [applyLocalLikesToPosts, feedHasMore, token]);
+
+  const onFeedEndReached = useCallback(() => {
+    void loadMoreFeed();
+  }, [loadMoreFeed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1560,8 +1628,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const poll = () => {
         if (feedPollInFlightRef.current) return;
         feedPollInFlightRef.current = true;
-        void fetchHomePosts(token)
-          .then((data) => setPosts(data.posts))
+        void fetchHomePostsPage(token, { limit: HOME_FEED_PAGE_SIZE })
+          .then(async (page) => {
+            const withLikes = await applyLocalLikesToPosts(page.posts);
+            setPosts((prev) => mergeHomeFeedPosts(withLikes, prev));
+          })
           .catch(() => {})
           .finally(() => {
             feedPollInFlightRef.current = false;
@@ -1570,7 +1641,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       poll();
       const timer = setInterval(poll, pollMs);
       return () => clearInterval(timer);
-    }, [appIsActive, playingPostId, reelViewerOpen, token, watchingLivePost])
+    }, [appIsActive, applyLocalLikesToPosts, playingPostId, reelViewerOpen, token, watchingLivePost])
   );
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
@@ -1677,23 +1748,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               userName: String(n.actorName || "").trim() || "User",
               avatarUrl: n.actorId ? socialAvatarsByUserId.get(Number(n.actorId)) : undefined
             });
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (merged.length === 0 && livePost.likesCount > 0) {
-        try {
-          const fresh = await fetchHomePosts(token ?? null);
-          const refreshed = fresh.posts.find((p) => p.id === livePost.id);
-          for (const row of refreshed?.recentLikers || []) {
-            pushLiker(mapApiLikerToPostLiker(row));
-          }
-          if (refreshed?.recentLikers?.length) {
-            setPosts((prev) =>
-              prev.map((p) => (p.id === livePost.id ? { ...p, recentLikers: refreshed.recentLikers } : p))
-            );
           }
         } catch {
           // ignore
@@ -1953,27 +2007,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending, liveStatus: "ended" as const } : p)));
       }
       try {
-        const data = await fetchHomePosts(token ?? null);
+        const data = await fetchHomePostsPage(token ?? null, { limit: HOME_FEED_PAGE_SIZE });
         if (!mounted) return;
+        feedNextCursorRef.current = data.hasMore ? data.nextCursor : null;
+        setFeedHasMore(data.hasMore);
         const merged = applyPendingHomePost(data.posts, pending);
-        const localLikes = await getLocalLikeStateForPosts(
-          localLikeViewerIdentity(user || {}),
-          merged.map((p) => p.id)
-        );
+        const withLikes = await applyLocalLikesToPosts(merged);
         if (!mounted) return;
+        const replaceFeed = refreshPendingRef.current > 0;
+        const nextPosts = replaceFeed ? withLikes : mergeHomeFeedPosts(withLikes, postsRef.current);
         setFeedShuffleSeed(Date.now());
-        setPosts(
-          merged.map((p) => ({
-            ...p,
-            viewerHasLiked: !!p.viewerHasLiked || localLikes.likedPostIds.has(p.id),
-            likesCount: token
-              ? Number(p.likesCount || 0)
-              : Math.max(Number(p.likesCount || 0), Number(localLikes.likesCountByPost[p.id] || 0))
-          }))
-        );
+        setPosts(nextPosts);
+        void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
       } catch {
         if (!mounted) return;
-        setPosts([]);
+        if (!postsRef.current.length) setPosts([]);
       } finally {
         if (mounted) finishPullRefreshTask();
       }
@@ -1981,7 +2029,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return () => {
       mounted = false;
     };
-  }, [manualRefreshToken, refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
+  }, [applyLocalLikesToPosts, manualRefreshToken, refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
 
   const relationshipAuthorKey = useMemo(() => {
     if (!user?.id) return "";
@@ -3870,6 +3918,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
 
+  const feedListFooter = useMemo(() => {
+    if (!feedLoadingMore) return null;
+    return (
+      <View style={styles.feedLoadMoreFooter}>
+        <ActivityIndicator color={APP_LIME} />
+      </View>
+    );
+  }, [feedLoadingMore]);
+
+  useEffect(() => {
+    for (const post of tabPosts.slice(0, 4)) prefetchPostMedia(post);
+  }, [tabPosts]);
+
   return (
     <View style={[styles.screen, (isReelSurfaceTab || isLiveTab) ? styles.screenDark : null]}>
       <Animated.View style={{ flex: 1, opacity: tabFadeAnim, transform: [{ translateY: tabSlideAnim }, { scale: tabScaleAnim }] }}>
@@ -3938,6 +3999,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   viewabilityConfig={reelViewabilityConfig}
                   onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
                   extraData={`${playingPostId}-${reelSlotHeight}-${reelFrameWidth}`}
+                  onEndReached={onFeedEndReached}
+                  onEndReachedThreshold={0.65}
+                  ListFooterComponent={feedListFooter}
                   ListEmptyComponent={
                     <View style={[styles.emptyTabWrap, styles.emptyTabWrapDark]}>
                       <Text style={styles.emptyTabTitleDark}>{emptyTabTitle}</Text>
@@ -3962,6 +4026,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         maxToRenderPerBatch={4}
         windowSize={5}
         refreshControl={<RefreshControl refreshing={isPullRefreshing} onRefresh={onPullRefresh} tintColor={APP_LIME} />}
+        onEndReached={onFeedEndReached}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={feedListFooter}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
@@ -5021,6 +5088,7 @@ const styles = StyleSheet.create({
   homeTopTabText: { fontSize: 14, color: "#374151", fontWeight: "500" },
   homeTopTabTextActive: { color: "#C9FF35", fontWeight: "700" },
   feedBottom: { paddingBottom: 100 },
+  feedLoadMoreFooter: { paddingVertical: 18, alignItems: "center" },
   postCard: {
     backgroundColor: "#fff",
     marginTop: 10,

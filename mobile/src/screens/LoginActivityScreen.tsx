@@ -1,50 +1,65 @@
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useRoute } from "@react-navigation/native";
+import React, { useCallback, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   AccountCenterCard,
   AccountCenterChevronRow,
   AccountCenterSectionTitle,
   AccountCenterSubLayout
 } from "../components/accountCenter/AccountCenterSubLayout";
+import { LoginDeviceIcon } from "../components/accountCenter/LoginDeviceIcon";
+import { LoginActivityDeployBanner } from "../components/accountCenter/LoginActivityDeployBanner";
+import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/rootStackTypes";
-import { APP_LIME } from "../theme/appColors";
-
-type DevicePlatform = "android" | "ios" | "windows";
-
-type LoginDevice = {
-  key: string;
-  platform: DevicePlatform;
-  name: string;
-  detail: string;
-};
-
-const DEVICES: LoginDevice[] = [
-  { key: "oneplus", platform: "android", name: "OnePlus Nord", detail: "Hyderabad, India | Yesterday at 11:29" },
-  { key: "moto", platform: "android", name: "Motorola Moto X4", detail: "Chanda Nagar, India | 10 August 2023" },
-  { key: "iphone", platform: "ios", name: "iPhone 17 Pro", detail: "Hyderabad, India | 2 days ago" },
-  { key: "windows", platform: "windows", name: "Windows PC", detail: "Secunderabad, India | 5 August 2023" }
-];
-
-function platformIcon(platform: DevicePlatform): keyof typeof Ionicons.glyphMap {
-  if (platform === "ios") return "logo-apple";
-  if (platform === "windows") return "logo-windows";
-  return "logo-android";
-}
-
-function DeviceIcon({ platform }: { platform: DevicePlatform }) {
-  return (
-    <View style={styles.deviceIconWrap}>
-      <Ionicons name={platformIcon(platform)} size={22} color={APP_LIME} />
-    </View>
-  );
-}
+import { fetchLoginSessions, type LoginSession } from "../services/api";
+import { formatSessionDetail } from "../utils/loginActivityFormatters";
+import { getLoginDevicePayload } from "../utils/deviceInfo";
+import { APP_LIME, APP_TEXT_MUTED } from "../theme/appColors";
 
 export function LoginActivityScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "LoginActivity">>();
+  const { token, refreshToken, user } = useAuth();
   const accountName = route.params?.accountName;
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentDevice, setCurrentDevice] = useState<LoginSession | null>(null);
+  const [otherDevices, setOtherDevices] = useState<LoginSession[]>([]);
+  const [legacyFallback, setLegacyFallback] = useState(false);
+
+  const loadSessions = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setError(null);
+    try {
+      const data = await fetchLoginSessions(token, getLoginDevicePayload(user?.locationLabel));
+      if (data.refreshedToken) {
+        await refreshToken(data.refreshedToken);
+      }
+      const current = data.sessions.find((session) => session.isCurrent) || null;
+      const others = data.sessions.filter((session) => !session.isCurrent);
+      setCurrentDevice(current);
+      setOtherDevices(others);
+      setLegacyFallback(Boolean(data.legacyFallback));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load login activity");
+    } finally {
+      setLoading(false);
+    }
+  }, [token, refreshToken, user?.locationLabel]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      void loadSessions();
+    }, [loadSessions])
+  );
+
+  const openDevice = (sessionId: string) => navigation.navigate("LoginDeviceDetail", { sessionId });
 
   return (
     <AccountCenterSubLayout
@@ -56,28 +71,77 @@ export function LoginActivityScreen() {
         </Text>
       }
     >
-      <AccountCenterSectionTitle title="Logins On Other Devices" />
-      <AccountCenterCard>
-        {DEVICES.map((device, index) => (
-          <AccountCenterChevronRow
-            key={device.key}
-            title={device.name}
-            subtitle={device.detail}
-            onPress={() => {}}
-            showDivider={index < DEVICES.length - 1}
-            left={<DeviceIcon platform={device.platform} />}
-          />
-        ))}
-      </AccountCenterCard>
+      <LoginActivityDeployBanner visible={legacyFallback} />
+      {loading ? (
+        <ActivityIndicator color={APP_LIME} style={{ marginTop: 8 }} />
+      ) : error ? (
+        <Text style={styles.errorText}>{error}</Text>
+      ) : (
+        <>
+          {currentDevice ? (
+            <>
+              <AccountCenterSectionTitle title="This Device" />
+              <AccountCenterCard>
+                <AccountCenterChevronRow
+                  title={currentDevice.deviceName}
+                  subtitle={formatSessionDetail(currentDevice.locationLabel, currentDevice.lastActiveAt)}
+                  onPress={() => openDevice(currentDevice.id)}
+                  left={<LoginDeviceIcon platform={currentDevice.platform} />}
+                  titleColor={APP_LIME}
+                />
+              </AccountCenterCard>
+            </>
+          ) : null}
+
+          <AccountCenterSectionTitle title="Logins On Other Devices" />
+          <AccountCenterCard>
+            {otherDevices.length === 0 ? (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyText}>No other active logins.</Text>
+              </View>
+            ) : (
+              otherDevices.map((device, index) => (
+                <AccountCenterChevronRow
+                  key={device.id}
+                  title={device.deviceName}
+                  subtitle={formatSessionDetail(device.locationLabel, device.lastActiveAt)}
+                  onPress={() => openDevice(device.id)}
+                  showDivider={index < otherDevices.length - 1}
+                  left={<LoginDeviceIcon platform={device.platform} />}
+                  titleColor={!device.isRecognized ? "#fbbf24" : undefined}
+                />
+              ))
+            )}
+          </AccountCenterCard>
+
+          {otherDevices.some((device) => !device.isRecognized) ? (
+            <Text style={styles.hintText}>Unrecognized devices are highlighted in amber.</Text>
+          ) : null}
+        </>
+      )}
     </AccountCenterSubLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  deviceIconWrap: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center"
+  errorText: {
+    color: "#f87171",
+    fontSize: 14,
+    lineHeight: 20
+  },
+  emptyWrap: {
+    paddingHorizontal: 14,
+    paddingVertical: 18
+  },
+  emptyText: {
+    color: APP_TEXT_MUTED,
+    fontSize: 14,
+    lineHeight: 20
+  },
+  hintText: {
+    color: APP_TEXT_MUTED,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 12
   }
 });

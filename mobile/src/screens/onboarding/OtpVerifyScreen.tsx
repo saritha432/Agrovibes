@@ -8,6 +8,7 @@ import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { sendPhoneOtp, verifyPhoneOtp } from "../../services/api";
+import { getLoginDevicePayload } from "../../utils/deviceInfo";
 import { APP_LIME } from "../../theme/appColors";
 
 const GREEN = APP_LIME;
@@ -40,7 +41,7 @@ export function OtpVerifyScreen() {
     setLoading(true);
     setError("");
     try {
-      const auth = await verifyPhoneOtp({ phone, code: digits });
+      const auth = await verifyPhoneOtp({ phone, code: digits, ...getLoginDevicePayload() });
       await signIn({ token: auth.token, user: auth.user });
       if (!auth.isNewUser && auth?.user?.id != null) {
         await markLaunchSetupComplete(auth.user.id);

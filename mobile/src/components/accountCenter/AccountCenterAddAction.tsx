@@ -4,14 +4,16 @@ import { APP_LIME } from "../../theme/appColors";
 
 export function AccountCenterAddAction({
   label,
-  onPress
+  onPress,
+  compact
 }: {
   label: string;
   onPress?: () => void;
+  compact?: boolean;
 }) {
   return (
     <Pressable
-      style={styles.button}
+      style={[styles.button, compact ? styles.buttonCompact : null]}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -30,6 +32,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16
+  },
+  buttonCompact: {
+    marginBottom: 0,
+    borderWidth: 0,
+    minHeight: 52
   },
   label: {
     color: APP_LIME,

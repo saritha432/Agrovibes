@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import { markLaunchSetupComplete } from "../onboarding/launchSetup";
 import { authLogin, authRegister, formatAuthError } from "../services/api";
+import { getLoginDevicePayload } from "../utils/deviceInfo";
 import { APP_LIME } from "../theme/appColors";
 
 type Mode = "login" | "register";
@@ -30,10 +31,11 @@ export function AuthScreen() {
     setLoading(true);
     setError(null);
     try {
+      const deviceInfo = getLoginDevicePayload();
       const payload =
         mode === "login"
-          ? await authLogin({ email, password })
-          : await authRegister({ email, password, fullName, role });
+          ? await authLogin({ email, password, ...deviceInfo })
+          : await authRegister({ email, password, fullName, role, ...deviceInfo });
       await signIn({ token: payload.token, user: payload.user as any });
       if (mode === "login" && (payload.user as any)?.id != null) {
         await markLaunchSetupComplete((payload.user as any).id);
