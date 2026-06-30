@@ -11,6 +11,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -79,7 +80,12 @@ import {
   setLocalPostLikedByIdentity,
   type PostLiker
 } from "../social/localEngagementStore";
-import { getLocalRelationshipMapByNames, removeLocalFollowByIdentity, sendLocalFollowRequestByIdentity } from "../social/localFollowStore";
+import {
+  getLocalFollowNetworkByIdentity,
+  getLocalRelationshipMapByNames,
+  removeLocalFollowByIdentity,
+  sendLocalFollowRequestByIdentity
+} from "../social/localFollowStore";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
@@ -312,6 +318,35 @@ function normalizeIdentity(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function storyViewerOwns(
+  story: HomeStory,
+  viewerId: number,
+  viewerNameKeys: Set<string>
+): boolean {
+  const sid = Number(story.userId);
+  if (Number.isFinite(viewerId) && viewerId > 0 && Number.isFinite(sid) && sid > 0) {
+    return sid === viewerId;
+  }
+  const storyName = normalizeIdentity(story.userName);
+  if (!storyName || storyName === "you") return false;
+  return viewerNameKeys.has(storyName);
+}
+
+/** Instagram-style: stories from people you follow (accepted), plus your own. */
+function storyIsFromAcceptedFollow(
+  story: HomeStory,
+  followingUserIds: Set<number>,
+  followingNameKeys: Set<string>
+): boolean {
+  const sid = Number(story.userId);
+  if (Number.isFinite(sid) && sid > 0) {
+    return followingUserIds.has(sid);
+  }
+  const storyName = normalizeIdentity(story.userName);
+  if (!storyName) return false;
+  return followingNameKeys.has(storyName);
 }
 
 function viewerOwnsPost(post: HomePost, viewer: { id: number; fullName?: string } | null) {
@@ -1094,14 +1129,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const isFocused = useIsFocused();
   const appIsActive = useAppIsActive();
   const canPlayMedia = appIsActive && isFocused;
-  /** Status-bar / notch inset plus extra breathing room on taller screens. */
+  /** Home feed header: Android window already clears the status bar (translucent: false). */
+  const homeTopInset = useMemo(() => {
+    if (Platform.OS === "android") return 0;
+    return Math.min(insets.top + 6, 52);
+  }, [insets.top]);
+
+  /** Story / fullscreen reel chrome over translucent status bar. */
   const reelTopInset = useMemo(() => {
     const sbh = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
-    const safeTop = Math.max(insets.top, sbh);
-    const tallBonus =
-      windowHeight >= 860 ? 12 : windowHeight >= 780 ? 8 : windowHeight >= 700 ? 4 : 0;
-    return safeTop + tallBonus + 8;
-  }, [insets.top, windowHeight]);
+    const safeTop = Platform.OS === "ios" ? insets.top : Math.max(insets.top, sbh);
+    return Math.min(safeTop, 48);
+  }, [insets.top]);
 
   const homeTabLabel = React.useCallback(
     (tab: HomeTopTab) => {
@@ -1140,6 +1179,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const feedMediaWidth = windowWidth - 20;
   const [stories, setStories] = useState<HomeStory[]>([]);
   const [posts, setPosts] = useState<HomePost[]>([]);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const [manualRefreshToken, setManualRefreshToken] = useState(0);
+  const refreshPendingRef = useRef(0);
+  const onPullRefresh = useCallback(() => {
+    refreshPendingRef.current = 2;
+    setIsPullRefreshing(true);
+    setManualRefreshToken((v) => v + 1);
+  }, []);
+
   const [feedShuffleSeed, setFeedShuffleSeed] = useState(() => Date.now());
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
@@ -1696,31 +1744,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [user?.fullName, user?.username]);
 
   const ownStories = useMemo(
-    () =>
-      stories.filter((s) => {
-        const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && Number.isFinite(sid) && sid > 0) {
-          return sid === currentUserId;
-        }
-        const storyName = normalizeIdentity(s.userName);
-        if (!storyName || storyName === "you") return false;
-        return currentUserStoryKeys.has(storyName);
-      }),
+    () => stories.filter((s) => storyViewerOwns(s, currentUserId, currentUserStoryKeys)),
     [currentUserId, currentUserStoryKeys, stories]
   );
-  const otherStories = useMemo(
-    () =>
-      stories.filter((s) => {
-        const sid = Number(s.userId);
-        if (Number.isFinite(currentUserId) && currentUserId > 0 && Number.isFinite(sid) && sid > 0) {
-          return sid !== currentUserId;
-        }
-        const storyName = normalizeIdentity(s.userName);
-        if (!storyName || storyName === "you") return true;
-        return !currentUserStoryKeys.has(storyName);
-      }),
-    [currentUserId, currentUserStoryKeys, stories]
-  );
+  const followingNameKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const peer of followingSharePeers) {
+      const n = normalizeIdentity(peer.name);
+      if (n) keys.add(n);
+    }
+    return keys;
+  }, [followingSharePeers]);
+
+  const otherStories = useMemo(() => {
+    if (!token || !socialNetworkHydrated) return [];
+    return stories.filter((s) => {
+      if (storyViewerOwns(s, currentUserId, currentUserStoryKeys)) return false;
+      return storyIsFromAcceptedFollow(s, followingUserIds, followingNameKeys);
+    });
+  }, [
+    currentUserId,
+    currentUserStoryKeys,
+    followingNameKeys,
+    followingUserIds,
+    socialNetworkHydrated,
+    stories,
+    token
+  ]);
 
   const avatarLookup = useMemo(
     () => buildAvatarLookup(posts, user, socialAvatarsByUserId),
@@ -1854,6 +1904,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     let mounted = true;
+    const finishPullRefreshTask = () => {
+      if (refreshPendingRef.current <= 0) return;
+      refreshPendingRef.current -= 1;
+      if (refreshPendingRef.current <= 0) setIsPullRefreshing(false);
+    };
     fetchHomeStories(token)
       .then((data) => {
         if (!mounted) return;
@@ -1863,11 +1918,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       .catch(() => {
         if (!mounted) return;
         setStories(applyViewedStories(mergeStories([], optimisticStories)));
+      })
+      .finally(() => {
+        if (mounted) finishPullRefreshTask();
       });
     return () => {
       mounted = false;
     };
-  }, [applyViewedStories, optimisticStories, refreshToken, token]);
+  }, [applyViewedStories, manualRefreshToken, optimisticStories, refreshToken, token]);
 
   useEffect(() => {
     if (!activeStory?.id || !isStoryOpen) return;
@@ -1882,6 +1940,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     let mounted = true;
+    const finishPullRefreshTask = () => {
+      if (refreshPendingRef.current <= 0) return;
+      refreshPendingRef.current -= 1;
+      if (refreshPendingRef.current <= 0) setIsPullRefreshing(false);
+    };
     (async () => {
       const pending = takePendingFeedPost?.();
       if (pending && isLivePost(pending) && (pending.liveStatus === "ended" || pending.videoUrl)) {
@@ -1909,12 +1972,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       } catch {
         if (!mounted) return;
         setPosts([]);
+      } finally {
+        if (mounted) finishPullRefreshTask();
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
+  }, [manualRefreshToken, refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
 
   const relationshipAuthorKey = useMemo(() => {
     if (!user?.id) return "";
@@ -1972,7 +2037,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         return;
       }
       try {
-        const network = await fetchSocialNetwork(token, Number(user.id));
+        const [network, localNetwork] = await Promise.all([
+          fetchSocialNetwork(token, Number(user.id)),
+          getLocalFollowNetworkByIdentity({
+            name: user.fullName || "",
+            key: user.email || String(user.id)
+          })
+        ]);
         if (!mounted) return;
         const followingIds = new Set<number>();
         const followerIds = new Set<number>();
@@ -1985,15 +2056,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           if (Number.isFinite(uid) && uid > 0 && av) avatarMap.set(uid, av);
           return uid;
         };
-        for (const person of network.following || []) {
+        const mergedFollowing = [...(network.following || []), ...(localNetwork.following || [])];
+        const mergedFollowers = [...(network.followers || []), ...(localNetwork.followers || [])];
+        const seenFollowing = new Set<number>();
+        for (const person of mergedFollowing) {
           const uid = rememberAvatar(person);
-          if (Number.isFinite(uid) && uid > 0) {
+          if (Number.isFinite(uid) && uid > 0 && !seenFollowing.has(uid)) {
+            seenFollowing.add(uid);
             followingIds.add(uid);
             const name = String(person.name || "").trim();
             if (name) peers.push({ id: uid, name });
           }
         }
-        for (const person of network.followers || []) {
+        for (const person of mergedFollowers) {
           const uid = rememberAvatar(person);
           if (Number.isFinite(uid) && uid > 0) followerIds.add(uid);
         }
@@ -2112,6 +2187,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
         try {
           await unfollowUser(token, targetUserId);
+          setFollowingUserIds((prev) => {
+            if (!prev.has(targetUserId)) return prev;
+            const next = new Set(prev);
+            next.delete(targetUserId);
+            return next;
+          });
+          setFollowingSharePeers((prev) => prev.filter((p) => p.id !== targetUserId));
           setRelationships((prev) => ({
             ...prev,
             [targetUserId]: {
@@ -2147,6 +2229,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
       try {
         const data = await sendFollowRequest(token, targetUserId);
+        if (data.follow.status === "accepted") {
+          setFollowingUserIds((prev) => new Set(prev).add(targetUserId));
+        }
         setRelationships((prev) => ({
           ...prev,
           [targetUserId]: {
@@ -2974,7 +3059,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const listHeader = useMemo(
     () => (
-      <View style={[styles.homeTopChrome, { paddingTop: reelTopInset }]}>
+      <View style={[styles.homeTopChrome, { paddingTop: homeTopInset }]}>
         <AppTopBar />
 
         <ScrollView
@@ -3150,7 +3235,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       avatarLookup,
       displayPersonName,
       homeTabLabel,
+      homeTopInset,
       isReelSurfaceTab,
+      isLiveTab,
       onOpenCreate,
       openLiveStream,
       ownPlayableStories,
@@ -3828,15 +3915,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   keyExtractor={(item) => String(item.id)}
                   renderItem={renderFullScreenReel}
                   removeClippedSubviews
-                  initialNumToRender={2}
-                  maxToRenderPerBatch={2}
-                  windowSize={3}
+                  initialNumToRender={1}
+                  maxToRenderPerBatch={1}
+                  windowSize={2}
+                  updateCellsBatchingPeriod={16}
                   pagingEnabled
                   showsVerticalScrollIndicator={false}
                   snapToInterval={reelSlotHeight}
                   snapToAlignment="start"
                   decelerationRate="fast"
                   disableIntervalMomentum
+                  scrollEventThrottle={16}
+                  refreshControl={<RefreshControl refreshing={isPullRefreshing} onRefresh={onPullRefresh} tintColor={APP_LIME} />}
                   getItemLayout={(_data, index) => ({
                     length: reelSlotHeight,
                     offset: reelSlotHeight * index,
@@ -3869,6 +3959,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         initialNumToRender={4}
         maxToRenderPerBatch={4}
         windowSize={5}
+        refreshControl={<RefreshControl refreshing={isPullRefreshing} onRefresh={onPullRefresh} tintColor={APP_LIME} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
             <View style={[styles.emptyTabWrap, isReelSurfaceTab ? styles.emptyTabWrapDark : null]}>
@@ -3891,7 +3982,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         onRequestClose={closeStory}
       >
         <View style={styles.storyViewerRoot}>
-          <View style={[styles.storyViewerTopChrome, { paddingTop: reelTopInset + 6 }]}>
+          <View style={[styles.storyViewerTopChrome, { paddingTop: reelTopInset + 4 }]}>
             <View style={styles.storyProgressRow}>
               {storyPlaybackQueue.map((s, idx) => {
                 const isPast = idx < activeStoryIndex;
@@ -4039,7 +4130,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       >
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 16 }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 8 }]}
             pointerEvents="box-none"
           >
             <Pressable
@@ -4529,7 +4620,7 @@ const styles = StyleSheet.create({
   storyRowScrollCompact: {
     flexGrow: 0,
     flexShrink: 0,
-    maxHeight: 140
+    maxHeight: 118
   },
   reelSlot: {
     flex: 1,
@@ -4800,9 +4891,9 @@ const styles = StyleSheet.create({
   homeTopTabsRowDark: {
     flexDirection: "row",
     paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-    minHeight: 42,
+    paddingTop: 4,
+    paddingBottom: 4,
+    minHeight: 36,
     alignItems: "center",
     justifyContent: "space-between"
   },
@@ -4847,8 +4938,8 @@ const styles = StyleSheet.create({
   emptyTabSubDark: { marginTop: 6, color: "rgba(255,255,255,0.65)", fontWeight: "600" },
   storyRow: {
     paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 4,
     gap: 10
   },
   storyRowWrap: {

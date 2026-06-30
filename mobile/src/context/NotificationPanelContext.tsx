@@ -5,9 +5,9 @@ import { useAppIsActive } from "../hooks/useAppIsActive";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
 import {
+  fetchHomePost,
   fetchMessageThreads,
   fetchRelationships,
-  markAllSocialNotificationsRead,
   markSocialNotificationRead,
   respondToFollowRequest,
   sendFollowRequest
@@ -27,8 +27,10 @@ import {
 } from "../social/notificationFeedSnapshot";
 import { APP_LIME } from "../theme/appColors";
 import { NotificationPostThumb } from "../components/NotificationPostThumb";
+import { SwipeToDeleteRow } from "../components/SwipeToDeleteRow";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive } from "../navigation/navigationRef";
+import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenLiveCreate } from "../navigation/liveCreateBridge";
 
@@ -83,9 +85,16 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     return `agrovibes.notifications.lastSeen.v2.${identity}`;
   }, [user?.email, user?.fullName, viewerUserId]);
 
+  const dismissedStorageKey = useMemo(() => {
+    if (viewerUserId) return `agrovibes.notifications.dismissed.v1.uid.${viewerUserId}`;
+    const identity = String(user?.email || user?.fullName || "guest").toLowerCase();
+    return `agrovibes.notifications.dismissed.v1.${identity}`;
+  }, [user?.email, user?.fullName, viewerUserId]);
+
   const lastSeenMsRef = useRef(0);
   lastSeenMsRef.current = lastSeenMs;
   const dismissedIdsRef = useRef<Set<string>>(new Set());
+  const [dismissedReady, setDismissedReady] = useState(false);
 
   const persistLastSeenMs = useCallback(
     async (ms: number) => {
@@ -132,6 +141,34 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     return list.filter((n) => !dismissed.has(String(n?.id)));
   }, []);
 
+  const mergeNotificationEntries = useCallback((prev: any[], incoming: any[]) => {
+    const byKey = new Map<string, any>();
+    const put = (row: any) => {
+      const key = `${row?.isLocal ? "l" : "r"}:${String(row?.id ?? "")}`;
+      if (!key.endsWith(":")) byKey.set(key, row);
+    };
+    for (const row of prev) put(row);
+    for (const row of incoming) put(row);
+    return [...byKey.values()].sort((a, b) => {
+      const ta = Date.parse(String(a?.createdAt || "")) || 0;
+      const tb = Date.parse(String(b?.createdAt || "")) || 0;
+      return tb - ta;
+    });
+  }, []);
+
+  const persistDismissedId = useCallback(
+    async (entryId: string) => {
+      if (!entryId) return;
+      dismissedIdsRef.current.add(entryId);
+      try {
+        await AsyncStorage.setItem(dismissedStorageKey, JSON.stringify([...dismissedIdsRef.current]));
+      } catch {
+        // no-op
+      }
+    },
+    [dismissedStorageKey]
+  );
+
   const optimisticDismissNotification = useCallback(
     (entry: any) => {
       bumpLastSeenFromEntry(entry);
@@ -141,6 +178,9 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       setAccepted((prev) => filterOutNotificationEntry(prev, entry));
       setDeclined((prev) => filterOutNotificationEntry(prev, entry));
       setPending((prev) => filterOutNotificationEntry(prev, entry));
+
+      const entryId = notificationEntryId(entry);
+      if (entryId) void persistDismissedId(entryId);
 
       if (entry?.isLocal) {
         const id = String(entry.id);
@@ -155,14 +195,17 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         return;
       }
 
-      const entryId = notificationEntryId(entry);
-      if (entryId) dismissedIdsRef.current.add(entryId);
-
       if (token && typeof entry.id === "number") {
         void markSocialNotificationRead(token, Number(entry.id)).catch(() => {});
       }
     },
-    [bumpLastSeenFromEntry, filterOutNotificationEntry, notificationEntryId, token]
+    [
+      bumpLastSeenFromEntry,
+      filterOutNotificationEntry,
+      notificationEntryId,
+      persistDismissedId,
+      token
+    ]
   );
 
   const loadNotifications = useCallback(async () => {
@@ -196,11 +239,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     });
     const mergedPending = filterDismissedNotifications(snap.pending);
     setPending(mergedPending);
-    setAccepted(filterDismissedNotifications(snap.accepted));
-    setDeclined(filterDismissedNotifications(snap.declined));
-    setPostLikes(filterDismissedNotifications(snap.postLikes));
-    setPostComments(filterDismissedNotifications(snap.postComments));
-    setLiveStarts(filterDismissedNotifications(snap.liveStarts));
+    setAccepted((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.accepted)));
+    setDeclined((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.declined)));
+    setPostLikes((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postLikes)));
+    setPostComments((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postComments)));
+    setLiveStarts((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.liveStarts)));
 
     const fbQueue = followBackQueueRef.current;
     const nameSet = new Set<string>();
@@ -258,14 +301,37 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         })
       );
     }
-  }, [filterDismissedNotifications, token, user?.email, user?.fullName, user?.id, viewerUserId]);
+  }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id, viewerUserId]);
 
   useEffect(() => {
-    if (!appIsActive) return;
+    if (!appIsActive || !dismissedReady) return;
     loadNotifications();
     const timer = setInterval(loadNotifications, 4000);
     return () => clearInterval(timer);
-  }, [appIsActive, loadNotifications]);
+  }, [appIsActive, dismissedReady, loadNotifications]);
+
+  useEffect(() => {
+    let mounted = true;
+    setDismissedReady(false);
+    void (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(dismissedStorageKey);
+        if (!mounted) return;
+        const parsed = raw ? JSON.parse(raw) : [];
+        dismissedIdsRef.current = new Set(
+          Array.isArray(parsed) ? parsed.map((id) => String(id)).filter(Boolean) : []
+        );
+      } catch {
+        if (!mounted) return;
+        dismissedIdsRef.current = new Set();
+      } finally {
+        if (mounted) setDismissedReady(true);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [dismissedStorageKey]);
 
   useEffect(() => {
     let mounted = true;
@@ -317,17 +383,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     const now = Date.now();
     void persistLastSeenMs(now);
     setSheetOpen(false);
-    if (token) {
-      void (async () => {
-        try {
-          await markAllSocialNotificationsRead(token);
-        } catch {
-          // Badge already cleared via lastSeenMs; server sync may retry on next poll.
-        }
-        await loadNotifications();
-      })();
-    }
-  }, [loadNotifications, persistLastSeenMs, token]);
+  }, [persistLastSeenMs]);
 
   const onRespond = async (entry: any, action: "accept" | "decline") => {
     if (action === "accept") {
@@ -412,21 +468,60 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
   };
 
-  const onMarkAcceptedRead = (entry: any) => {
-    optimisticDismissNotification(entry);
-  };
-
-  const onMarkDeclinedRead = (entry: any) => {
-    optimisticDismissNotification(entry);
-  };
-
-  const onMarkPostActivityRead = (entry: any) => {
-    optimisticDismissNotification(entry);
-  };
+  const onOpenPostFromNotification = useCallback(
+    (entry: any) => {
+      const postId = Number(entry?.postId);
+      if (!Number.isFinite(postId) || postId <= 0) return;
+      bumpLastSeenFromEntry(entry);
+      setSheetOpen(false);
+      navigateToJoinLive();
+      void (async () => {
+        try {
+          const { post } = await fetchHomePost(token ?? null, postId);
+          queueOpenSharedPostViewer(post, true);
+        } catch {
+          // Post may have been removed.
+        }
+      })();
+    },
+    [bumpLastSeenFromEntry, token]
+  );
 
   const onDismissNotification = (entry: any) => {
     optimisticDismissNotification(entry);
   };
+
+  const dismissibleRow = (key: string, onDelete: () => void, row: React.ReactNode) => (
+    <SwipeToDeleteRow key={key} onDelete={onDelete} deleteLabel={t("deleteConfirm")}>
+      {row}
+    </SwipeToDeleteRow>
+  );
+
+  const renderPostActivityNotification = (
+    itemKey: string,
+    entry: any,
+    icon: "heart" | "chatbubble-ellipses" | "chatbubble",
+    iconColor: string
+  ) =>
+    dismissibleRow(
+      itemKey,
+      () => onDismissNotification(entry),
+      <View style={styles.activityRow}>
+        <Pressable style={styles.activityMain} onPress={() => onOpenPostFromNotification(entry)}>
+          <Ionicons name={icon} size={16} color={iconColor} />
+          <Text style={styles.rowText}>{postActivityLabel(entry)}</Text>
+        </Pressable>
+        <NotificationPostThumb
+          postId={entry.postId}
+          postThumbnailUrl={entry.postThumbnailUrl}
+          postImageUrl={entry.postImageUrl}
+          postVideoUrl={entry.postVideoUrl}
+          postIsReel={entry.postIsReel}
+          token={token}
+          onPress={() => onOpenPostFromNotification(entry)}
+        />
+      </View>
+    );
 
   const onJoinLive = async (entry: any) => {
     const postId = Number(entry?.postId);
@@ -524,7 +619,10 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       items.push({ kind, createdAt: n.createdAt || "", entry: n, key: `live-${kind}-${String(n.id)}` });
     }
     for (const n of postLikes) items.push({ kind: "post_like", createdAt: n.createdAt || "", entry: n, key: `like-${n.isLocal ? n.id : `r-${n.id}`}` });
-    for (const n of postComments) items.push({ kind: "post_comment", createdAt: n.createdAt || "", entry: n, key: `cmt-${n.isLocal ? n.id : `r-${n.id}`}` });
+    for (const n of postComments) {
+      const kind = n.type === "comment_reply" ? "comment_reply" : "post_comment";
+      items.push({ kind, createdAt: n.createdAt || "", entry: n, key: `cmt-${n.isLocal ? n.id : `r-${n.id}`}` });
+    }
     items.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
     return items;
   }, [accepted, declined, followBackQueue, liveStarts, pending, postComments, postLikes]);
@@ -603,38 +701,36 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   );
                 }
                 if (item.kind === "accepted") {
-                  return (
-                    <Pressable key={item.key} style={styles.acceptedRow} onPress={() => onMarkAcceptedRead(n)}>
+                  return dismissibleRow(
+                    item.key,
+                    () => onDismissNotification(n),
+                    <View style={styles.acceptedRow}>
                       <Ionicons name="checkmark-circle" size={16} color={APP_LIME} />
                       <Text style={styles.rowText}>{t("notifAcceptedRequest", { name: String(n.actorName || "") })}</Text>
-                    </Pressable>
+                    </View>
                   );
                 }
                 if (item.kind === "declined") {
-                  return (
-                    <Pressable key={item.key} style={styles.declinedRow} onPress={() => onMarkDeclinedRead(n)}>
+                  return dismissibleRow(
+                    item.key,
+                    () => onDismissNotification(n),
+                    <View style={styles.declinedRow}>
                       <Ionicons name="close-circle" size={16} color="#ef4444" />
                       <Text style={styles.rowText}>{t("notifDeclinedRequest", { name: String(n.actorName || "") })}</Text>
-                    </Pressable>
+                    </View>
                   );
                 }
                 if (item.kind === "live_host_reminder") {
-                  return (
-                    <View key={item.key} style={styles.liveStartRow}>
+                  return dismissibleRow(
+                    item.key,
+                    () => onDismissNotification(n),
+                    <View style={styles.liveStartRow}>
                       <Pressable style={styles.liveStartMain} onPress={() => onStartScheduledLiveFromNotif(n)}>
                         <Ionicons name="calendar" size={16} color={APP_LIME} />
                         <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
                       </Pressable>
                       <Pressable style={styles.joinLiveBtn} onPress={() => onStartScheduledLiveFromNotif(n)}>
                         <Text style={styles.joinLiveText}>{t("goLive")}</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.dismissBtn}
-                        onPress={() => onDismissNotification(n)}
-                        hitSlop={8}
-                        accessibilityLabel="Dismiss notification"
-                      >
-                        <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
                       </Pressable>
                     </View>
                   );
@@ -647,11 +743,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   const postId = Number(n.postId);
                   const liveEnded = item.kind === "live_start" && isLivePostEnded(n);
                   const canJoin = item.kind === "live_start" && Number.isFinite(postId) && postId > 0 && !liveEnded;
-                  return (
-                    <View key={item.key} style={styles.liveStartRow}>
+                  return dismissibleRow(
+                    item.key,
+                    () => onDismissNotification(n),
+                    <View style={styles.liveStartRow}>
                       <Pressable
                         style={styles.liveStartMain}
-                        onPress={() => (canJoin ? void onJoinLive(n) : void onDismissNotification(n))}
+                        onPress={() => (canJoin ? void onJoinLive(n) : undefined)}
                       >
                         <Ionicons
                           name="radio"
@@ -671,45 +769,21 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                           <Text style={styles.liveEndedBadgeText}>{t("liveEndedBadge")}</Text>
                         </View>
                       ) : null}
-                      <Pressable
-                        style={styles.dismissBtn}
-                        onPress={() => onDismissNotification(n)}
-                        hitSlop={8}
-                        accessibilityLabel="Dismiss notification"
-                      >
-                        <Ionicons name="close" size={18} color="rgba(255,255,255,0.55)" />
-                      </Pressable>
                     </View>
                   );
                 }
                 if (item.kind === "post_like") {
-                  return (
-                    <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
-                      <Ionicons name="heart" size={16} color={APP_LIME} />
-                      <Text style={styles.rowText}>{postActivityLabel(n)}</Text>
-                      <NotificationPostThumb
-                        postId={n.postId}
-                        postThumbnailUrl={n.postThumbnailUrl}
-                        postImageUrl={n.postImageUrl}
-                        postVideoUrl={n.postVideoUrl}
-                        postIsReel={n.postIsReel}
-                      />
-                    </Pressable>
+                  return renderPostActivityNotification(item.key, n, "heart", APP_LIME);
+                }
+                if (item.kind === "post_comment" || item.kind === "comment_reply") {
+                  return renderPostActivityNotification(
+                    item.key,
+                    n,
+                    item.kind === "comment_reply" ? "chatbubble" : "chatbubble-ellipses",
+                    "#0ea5e9"
                   );
                 }
-                return (
-                  <Pressable key={item.key} style={styles.activityRow} onPress={() => onMarkPostActivityRead(n)}>
-                    <Ionicons name="chatbubble-ellipses" size={16} color="#0ea5e9" />
-                    <Text style={styles.rowText}>{postActivityLabel(n)}</Text>
-                    <NotificationPostThumb
-                      postId={n.postId}
-                      postThumbnailUrl={n.postThumbnailUrl}
-                      postImageUrl={n.postImageUrl}
-                      postVideoUrl={n.postVideoUrl}
-                      postIsReel={n.postIsReel}
-                    />
-                  </Pressable>
-                );
+                return null;
               })}
             </ScrollView>
           </Pressable>
@@ -778,6 +852,13 @@ const styles = StyleSheet.create({
     padding: 10,
     minHeight: 76
   },
+  activityMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0
+  },
   liveStartRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -798,13 +879,5 @@ const styles = StyleSheet.create({
     paddingVertical: 8
   },
   liveEndedBadgeText: { color: "rgba(255,255,255,0.5)", fontWeight: "800", fontSize: 12 },
-  rowTextMuted: { color: "rgba(255,255,255,0.45)" },
-  dismissBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)"
-  }
+  rowTextMuted: { color: "rgba(255,255,255,0.45)" }
 });

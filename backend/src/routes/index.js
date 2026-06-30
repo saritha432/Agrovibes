@@ -2808,26 +2808,39 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     );
 
     const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
-    const followAccepted = result.rows.filter((r) => r.type === "follow_accept" && !r.isRead);
-    const postLikes = result.rows.filter((r) => r.type === "post_like" && !r.isRead);
+    const followAccepted = result.rows.filter((r) => r.type === "follow_accept");
+    const postLikes = result.rows.filter((r) => r.type === "post_like");
     const postComments = result.rows.filter(
-      (r) => (r.type === "post_comment" || r.type === "comment_reply") && !r.isRead
+      (r) => r.type === "post_comment" || r.type === "comment_reply"
     );
     const liveStarts = result.rows.filter(
       (r) =>
-        (r.type === "live_start" ||
-          r.type === "live_scheduled" ||
-          r.type === "live_reminder" ||
-          r.type === "live_host_reminder") &&
-        !r.isRead
+        r.type === "live_start" ||
+        r.type === "live_scheduled" ||
+        r.type === "live_reminder" ||
+        r.type === "live_host_reminder"
     );
+    const unreadCount = result.rows.filter((r) => {
+      if (r.isRead) return false;
+      if (r.type === "follow_request") return r.followStatus === "pending";
+      return (
+        r.type === "follow_accept" ||
+        r.type === "post_like" ||
+        r.type === "post_comment" ||
+        r.type === "comment_reply" ||
+        r.type === "live_start" ||
+        r.type === "live_scheduled" ||
+        r.type === "live_reminder" ||
+        r.type === "live_host_reminder"
+      );
+    }).length;
     res.json({
       followRequests,
       followAccepted,
       postLikes,
       postComments,
       liveStarts,
-      unreadCount: followRequests.length + followAccepted.length + postLikes.length + postComments.length + liveStarts.length
+      unreadCount
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load notifications", error: error.message });
@@ -3254,7 +3267,7 @@ router.get("/v1/home/stories", authOptional, async (req, res) => {
     const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:v3:${gen}:${viewerKey}`;
+    const cacheKey = `v1:home:stories:v4:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);

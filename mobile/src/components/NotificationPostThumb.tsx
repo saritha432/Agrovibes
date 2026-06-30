@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Image, StyleSheet, View } from "react-native";
-import type { HomePost } from "../services/api";
+import { Image, Pressable, StyleSheet, View } from "react-native";
+import { fetchHomePost, type HomePost } from "../services/api";
+import { reelGridStillUri } from "../utils/reelGrid";
 import { resolveReelPreviewUri, staticReelPreviewUri } from "../utils/reelPreviewThumb";
+import { sanitizeHomePost } from "../utils/mediaUrls";
 
 type NotificationPostThumbProps = {
   postId?: number | null;
@@ -10,12 +12,19 @@ type NotificationPostThumbProps = {
   postImageUrl?: string | null;
   postVideoUrl?: string | null;
   postIsReel?: boolean;
+  token?: string | null;
+  onPress?: () => void;
 };
+
+function stillFromPost(post: HomePost | null): string | null {
+  if (!post) return null;
+  return staticReelPreviewUri(post) || reelGridStillUri(post);
+}
 
 function toPreviewPost(props: NotificationPostThumbProps): HomePost | null {
   const id = Number(props.postId);
   if (!Number.isFinite(id) || id <= 0) return null;
-  return {
+  return sanitizeHomePost({
     id,
     userName: "",
     location: "",
@@ -25,65 +34,112 @@ function toPreviewPost(props: NotificationPostThumbProps): HomePost | null {
     thumbnailUrl: props.postThumbnailUrl || undefined,
     imageUrl: props.postImageUrl || undefined,
     videoUrl: props.postVideoUrl || undefined
-  };
+  });
 }
 
+/** Notification reel/post thumb — one still at a time; extracts a video frame only when no image URL exists. */
 export function NotificationPostThumb(props: NotificationPostThumbProps) {
-  const post = React.useMemo(() => toPreviewPost(props), [props]);
-  const [previewUri, setPreviewUri] = React.useState<string | null>(() =>
-    post ? staticReelPreviewUri(post) : null
-  );
+  const post = React.useMemo(() => toPreviewPost(props), [
+    props.postId,
+    props.postThumbnailUrl,
+    props.postImageUrl,
+    props.postVideoUrl
+  ]);
+  const [previewUri, setPreviewUri] = React.useState<string | null>(() => stillFromPost(post));
 
   React.useEffect(() => {
-    if (!post) {
-      setPreviewUri(null);
-      return;
-    }
-    const staticUri = staticReelPreviewUri(post);
-    if (staticUri) {
-      setPreviewUri(staticUri);
-      return;
-    }
-    if (!String(post.videoUrl || "").trim()) {
-      setPreviewUri(null);
-      return;
-    }
     let cancelled = false;
-    void resolveReelPreviewUri(post).then((uri) => {
+
+    const applyUri = (uri: string | null) => {
       if (!cancelled && uri) setPreviewUri(uri);
-    });
+    };
+
+    const load = async () => {
+      if (!post) {
+        setPreviewUri(null);
+        return;
+      }
+
+      const staticUri = stillFromPost(post);
+      if (staticUri) {
+        setPreviewUri(staticUri);
+        return;
+      }
+
+      if (String(post.videoUrl || "").trim()) {
+        const fromVideo = await resolveReelPreviewUri(post);
+        if (fromVideo) {
+          applyUri(fromVideo);
+          return;
+        }
+      }
+
+      const id = Number(props.postId);
+      if (!Number.isFinite(id) || id <= 0) return;
+      try {
+        const { post: loaded } = await fetchHomePost(props.token ?? null, id);
+        if (cancelled) return;
+        const sanitized = sanitizeHomePost(loaded);
+        const fromLoaded = stillFromPost(sanitized) || (await resolveReelPreviewUri(sanitized));
+        applyUri(fromLoaded);
+      } catch {
+        // unavailable
+      }
+    };
+
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [post?.id, post?.thumbnailUrl, post?.imageUrl, post?.videoUrl]);
+  }, [post, props.postId, props.postThumbnailUrl, props.postImageUrl, props.postVideoUrl, props.token]);
 
   if (!post) return null;
 
-  return (
-    <View style={styles.wrap} accessibilityIgnoresInvertColors>
+  const content = (
+    <>
       {previewUri ? (
         <Image source={{ uri: previewUri }} style={styles.image} resizeMode="cover" />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <Ionicons
             name={props.postIsReel || post.videoUrl ? "play" : "image-outline"}
-            size={16}
+            size={18}
             color="rgba(255,255,255,0.45)"
           />
         </View>
       )}
-    </View>
+      {props.postIsReel || post.videoUrl ? (
+        <View style={styles.playBadge} pointerEvents="none">
+          <Ionicons name="play" size={10} color="#111" />
+        </View>
+      ) : null}
+    </>
   );
+
+  if (props.onPress) {
+    return (
+      <Pressable
+        style={styles.wrap}
+        onPress={props.onPress}
+        accessibilityRole="button"
+        accessibilityLabel="Open post"
+      >
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.wrap}>{content}</View>;
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    width: 44,
-    height: 56,
+    width: 52,
+    height: 66,
     borderRadius: 8,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderColor: "rgba(255,255,255,0.18)",
     backgroundColor: "#111"
   },
   image: {
@@ -94,5 +150,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#1a1a1a"
+  },
+  playBadge: {
+    position: "absolute",
+    left: 5,
+    bottom: 5,
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    backgroundColor: "#c9ff35",
+    alignItems: "center",
+    justifyContent: "center"
   }
 });

@@ -36,8 +36,8 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     backgroundColor: APP_DARK_BG,
     paddingHorizontal: 10,
-    paddingVertical: 7,
-    paddingTop: 7
+    paddingVertical: 4,
+    paddingTop: 4
   },
   logoImage: { width: 132, height: 28, maxWidth: "46%" },
   iconBadge: {
