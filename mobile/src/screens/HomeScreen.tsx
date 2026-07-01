@@ -94,6 +94,7 @@ import {
   formatDisplayName,
   formatFeedText,
   formatReelCaption,
+  resolvePersonDisplayName,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
@@ -1218,7 +1219,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       }
       navigateToPublicProfile({
         userId: postUserId > 0 ? postUserId : undefined,
-        userName: post.userName,
+        userName: resolvePersonDisplayName({ fullName: post.userName, fallback: post.userName }),
         avatarUrl: post.authorAvatarUrl ?? null
       });
     },
@@ -1315,8 +1316,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const reelMuteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    postLikedByIdRef.current = Object.fromEntries(posts.map((p) => [p.id, !!p.viewerHasLiked]));
+    for (const p of posts) {
+      if (postLikedByIdRef.current[p.id] === undefined) {
+        postLikedByIdRef.current[p.id] = !!p.viewerHasLiked;
+      }
+    }
   }, [posts]);
+
+  useEffect(() => {
+    if (!reelViewerOpen?.posts.length) return;
+    for (const p of reelViewerOpen.posts) {
+      postLikedByIdRef.current[p.id] = !!p.viewerHasLiked;
+    }
+  }, [reelViewerOpen?.posts]);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -2487,13 +2499,31 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [applyViewedStories, onOpenCreate, token, user?.avatarUrl, user?.fullName, user?.id, t]
   );
 
+  const readPostEngagement = useCallback((postId: number, fallback?: HomePost) => {
+    const fromOpen = reelViewerOpenRef.current?.posts.find((p) => p.id === postId);
+    const fromFeed = postsRef.current.find((p) => p.id === postId);
+    const p = fromOpen || fromFeed || fallback;
+    const liked = !!(postLikedByIdRef.current[postId] ?? p?.viewerHasLiked);
+    const count = Math.max(0, Number(p?.likesCount) || 0);
+    return { liked, count };
+  }, []);
+
+  const updatePostById = useCallback((postId: number, updater: (p: HomePost) => HomePost) => {
+    setPosts((prev) => prev.map((p) => (p.id === postId ? updater(p) : p)));
+    setReelViewerOpen((open) => {
+      if (!open?.posts.some((p) => p.id === postId)) return open;
+      return { ...open, posts: open.posts.map((p) => (p.id === postId ? updater(p) : p)) };
+    });
+  }, []);
+
   const togglePostLike = useCallback(
     async (post: HomePost) => {
-      if (likeToggleInFlightRef.current[post.id]) return;
-      likeToggleInFlightRef.current[post.id] = true;
-      const likedNow = !!post.viewerHasLiked;
+      const postId = post.id;
+      if (likeToggleInFlightRef.current[postId]) return;
+      likeToggleInFlightRef.current[postId] = true;
+      const { liked: likedNow, count: countNow } = readPostEngagement(postId, post);
       const nextLiked = !likedNow;
-      const prevSnapshot = { liked: likedNow, count: post.likesCount };
+      const prevSnapshot = { liked: likedNow, count: countNow };
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
       const postUserId = Number(post.userId);
@@ -2502,30 +2532,36 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         (!postUserId && normalizedPostName && normalizedPostName === normalizedCurrentUserName);
 
       const applyOptimistic = () => {
-        setPosts((prev) =>
-          prev.map((p) =>
-            p.id === post.id
-              ? { ...p, viewerHasLiked: nextLiked, likesCount: Math.max(0, p.likesCount + (nextLiked ? 1 : -1)) }
-              : p
-          )
-        );
+        updatePostById(post.id, (p) => ({
+          ...p,
+          viewerHasLiked: nextLiked,
+          likesCount: Math.max(0, p.likesCount + (nextLiked ? 1 : -1))
+        }));
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [post.id]: nextLiked };
       };
 
       const revert = () => {
-        setPosts((prev) =>
-          prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: prevSnapshot.liked, likesCount: prevSnapshot.count } : p))
-        );
+        updatePostById(post.id, (p) => ({
+          ...p,
+          viewerHasLiked: prevSnapshot.liked,
+          likesCount: prevSnapshot.count
+        }));
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [post.id]: prevSnapshot.liked };
       };
 
       applyOptimistic();
-      const localResult = await setLocalPostLikedByIdentity(
+      void setLocalPostLikedByIdentity(
         post.id,
         localLikeViewerIdentity(user || {}),
         nextLiked
-      );
-      setPosts((prev) =>
-        prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: localResult.liked, likesCount: localResult.likesCount } : p))
-      );
+      ).then((localResult) => {
+        updatePostById(post.id, (p) => ({
+          ...p,
+          viewerHasLiked: localResult.liked,
+          likesCount: Math.max(0, Number(localResult.likesCount ?? p.likesCount) || 0)
+        }));
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [post.id]: localResult.liked };
+      });
 
       if (!token) {
         if (nextLiked && !isOwnPost) {
@@ -2546,33 +2582,31 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       try {
         const res = nextLiked ? await likeHomePost(token, post.id) : await unlikeHomePost(token, post.id);
         const me = viewerAsPostLiker(user || {});
-        setPosts((prev) =>
-          prev.map((p) => {
-            if (p.id !== post.id) return p;
-            let recentLikers = [...(p.recentLikers || [])];
-            if (res.liked && me?.userId) {
-              if (!recentLikers.some((l) => Number(l.userId) === me.userId)) {
-                recentLikers = [
-                  {
-                    userId: me.userId,
-                    fullName: me.userName,
-                    username: user?.username || me.userName,
-                    avatarUrl: me.avatarUrl
-                  },
-                  ...recentLikers
-                ];
-              }
-            } else if (me?.userId) {
-              recentLikers = recentLikers.filter((l) => Number(l.userId) !== me.userId);
+        updatePostById(post.id, (p) => {
+          let recentLikers = [...(p.recentLikers || [])];
+          if (res.liked && me?.userId) {
+            if (!recentLikers.some((l) => Number(l.userId) === me.userId)) {
+              recentLikers = [
+                {
+                  userId: me.userId,
+                  fullName: me.userName,
+                  username: user?.username || me.userName,
+                  avatarUrl: me.avatarUrl
+                },
+                ...recentLikers
+              ];
             }
-            return {
-              ...p,
-              viewerHasLiked: res.liked,
-              likesCount: res.likesCount,
-              recentLikers
-            };
-          })
-        );
+          } else if (me?.userId) {
+            recentLikers = recentLikers.filter((l) => Number(l.userId) !== me.userId);
+          }
+          return {
+            ...p,
+            viewerHasLiked: res.liked,
+            likesCount: res.likesCount,
+            recentLikers
+          };
+        });
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [post.id]: res.liked };
         await setLocalPostLikedByIdentity(post.id, localLikeViewerIdentity(user || {}), res.liked);
       } catch {
         revert();
@@ -2592,17 +2626,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         likeToggleInFlightRef.current[post.id] = false;
       }
     },
-    [token, user?.email, user?.fullName, user?.id, user?.username]
+    [readPostEngagement, token, updatePostById, user?.email, user?.fullName, user?.id, user?.username]
   );
 
   const likeReelFromDoubleTap = useCallback(
     (post: HomePost) => {
       triggerReelLikeBurst(post.id);
-      if (!postLikedByIdRef.current[post.id]) {
-        void togglePostLike(post);
-      }
+      const { liked } = readPostEngagement(post.id, post);
+      if (!liked) void togglePostLike(post);
     },
-    [togglePostLike, triggerReelLikeBurst]
+    [readPostEngagement, togglePostLike, triggerReelLikeBurst]
   );
 
   const onPostMediaTap = useCallback(
@@ -3509,7 +3542,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <View style={styles.reelActionItem}>
                 <Pressable
                   onPress={() => {
-                    if (!post.viewerHasLiked) triggerReelLikeBurst(post.id);
+                    const liked = !!(postLikedByIdRef.current[post.id] ?? post.viewerHasLiked);
+                    if (!liked) triggerReelLikeBurst(post.id);
                     void togglePostLike(post);
                   }}
                   disabled={!!likeBusyByPostId[post.id]}
@@ -4183,7 +4217,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               onViewableItemsChanged={onViewableItemsChangedRef.current}
               viewabilityConfig={reelViewabilityConfig}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
-              extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${reelViewerOpen.posts.length}`}
+              extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${reelViewerOpen.posts
+                .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
+                .join(",")}`}
               initialNumToRender={Math.min(3, reelViewerOpen.posts.length || 1)}
               maxToRenderPerBatch={2}
               windowSize={3}

@@ -27,6 +27,7 @@ import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { useLanguage } from "../localization/LanguageContext";
+import { resolvePersonDisplayName, looksLikePhoneNumber } from "../localization/feedDisplay";
 import {
   fetchHomePosts,
   fetchSavedHomePosts,
@@ -43,6 +44,7 @@ import {
   sendFollowRequest,
   sendDirectMessage,
   unfollowUser,
+  type FollowStatus
 } from "../services/api";
 import {
   getLocalFollowCountsByIdentity,
@@ -145,9 +147,12 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const { user, token, signOut, refreshUser } = useAuth();
   const { t } = useLanguage();
   const [publicUsername, setPublicUsername] = useState<string | null>(null);
+  const [publicFullName, setPublicFullName] = useState<string | null>(null);
+  const [publicFollowStatus, setPublicFollowStatus] = useState<FollowStatus>("none");
+  const [publicReverseStatus, setPublicReverseStatus] = useState<FollowStatus>("none");
+  const [publicCanFollowBack, setPublicCanFollowBack] = useState(false);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
   const [publicBio, setPublicBio] = useState("");
-  const [isFollowingPublic, setIsFollowingPublic] = useState(false);
   const [followPublicBusy, setFollowPublicBusy] = useState(false);
   const [userPosts, setUserPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
@@ -470,57 +475,74 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     void refreshMergedFollowStats();
   }, [isPublicProfileView, refreshMergedFollowStats]);
 
-  useEffect(() => {
-    if (!isPublicProfileView) return;
-    let mounted = true;
-    if (!(token && publicUserId)) {
-      setFollowersCount(0);
-      setFollowingCount(0);
-      return;
-    }
-    fetchProfileStats(token, publicUserId)
-      .then((stats) => {
-        if (!mounted) return;
-        setFollowersCount(Number(stats.followersCount || 0));
-        setFollowingCount(Number(stats.followingCount || 0));
-        setFollowersList(
-          (stats.followers || []).map((person) => ({
-            name: person.name,
-            key: person.key,
-            avatarUrl: person.avatarUrl,
-            viewerStatus: "none" as const,
-            canFollowBack: false
-          }))
-        );
-        setFollowingList(
-          (stats.following || []).map((person) => ({
-            name: person.name,
-            key: person.key,
-            avatarUrl: person.avatarUrl,
-            viewerStatus: "accepted" as const,
-            canFollowBack: false as const
-          }))
-        );
-        setIsFollowingPublic(stats.viewerStatus === "accepted" || stats.viewerStatus === "pending");
-        setPublicUsername(stats.username ? String(stats.username) : null);
-        setPublicBio(String(stats.bio || "").trim());
-        const fromApi =
-          stats.avatarUrl != null && String(stats.avatarUrl).trim().length > 0 ? String(stats.avatarUrl).trim() : null;
-        const fromRoute =
-          publicAvatarFromRoute != null && String(publicAvatarFromRoute).trim().length > 0
-            ? String(publicAvatarFromRoute).trim()
-            : null;
-        setPublicAvatarUrl(fromApi ?? fromRoute);
-      })
-      .catch(() => {
-        if (!mounted) return;
+  const loadPublicProfileStats = useCallback(async () => {
+    if (!isPublicProfileView || !token || !publicUserId) {
+      if (isPublicProfileView) {
         setFollowersCount(0);
         setFollowingCount(0);
-      });
-    return () => {
-      mounted = false;
-    };
+      }
+      return;
+    }
+    try {
+      const stats = await fetchProfileStats(token, publicUserId);
+      setFollowersCount(Number(stats.followersCount || 0));
+      setFollowingCount(Number(stats.followingCount || 0));
+      setFollowersList(
+        (stats.followers || []).map((person) => ({
+          name: person.name,
+          key: person.key,
+          avatarUrl: person.avatarUrl,
+          viewerStatus: "none" as const,
+          canFollowBack: false
+        }))
+      );
+      setFollowingList(
+        (stats.following || []).map((person) => ({
+          name: person.name,
+          key: person.key,
+          avatarUrl: person.avatarUrl,
+          viewerStatus: "accepted" as const,
+          canFollowBack: false as const
+        }))
+      );
+      const viewerStatusRaw = stats.viewerStatus === "self" ? "accepted" : stats.viewerStatus || "none";
+      const reverseStatusRaw = stats.reverseStatus === "self" ? "accepted" : stats.reverseStatus || "none";
+      const viewerStatus = viewerStatusRaw === "declined" ? "none" : viewerStatusRaw;
+      const reverseStatus = reverseStatusRaw === "declined" ? "none" : reverseStatusRaw;
+      setPublicFollowStatus(viewerStatus);
+      setPublicReverseStatus(reverseStatus);
+      setPublicCanFollowBack(!!stats.canFollowBack);
+      setPublicFullName(
+        resolvePersonDisplayName({
+          fullName: stats.fullName,
+          username: stats.username
+        })
+      );
+      setPublicUsername(stats.username ? String(stats.username) : null);
+      setPublicBio(String(stats.bio || "").trim());
+      const fromApi =
+        stats.avatarUrl != null && String(stats.avatarUrl).trim().length > 0 ? String(stats.avatarUrl).trim() : null;
+      const fromRoute =
+        publicAvatarFromRoute != null && String(publicAvatarFromRoute).trim().length > 0
+          ? String(publicAvatarFromRoute).trim()
+          : null;
+      setPublicAvatarUrl(fromApi ?? fromRoute);
+    } catch {
+      setFollowersCount(0);
+      setFollowingCount(0);
+    }
   }, [isPublicProfileView, publicAvatarFromRoute, publicUserId, token]);
+
+  useEffect(() => {
+    void loadPublicProfileStats();
+  }, [loadPublicProfileStats]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isPublicProfileView) return;
+      void loadPublicProfileStats();
+    }, [isPublicProfileView, loadPublicProfileStats])
+  );
 
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Posts") return userPosts;
@@ -757,10 +779,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const profileSubject = useMemo(() => {
     if (isPublicProfileView) {
-      if (!publicUserName) return null;
+      const displayName = resolvePersonDisplayName({
+        fullName: publicFullName,
+        username: publicUsername,
+        fallback: looksLikePhoneNumber(publicUserName) ? null : publicUserName
+      });
       return {
         id: publicUserId,
-        fullName: publicUserName,
+        fullName: displayName,
         username: publicUsername,
         avatarUrl: publicAvatarUrl,
         bio: publicBio
@@ -769,7 +795,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (!user) return null;
     return {
       id: user.id,
-      fullName: user.fullName,
+      fullName: resolvePersonDisplayName({ fullName: user.fullName, username: user.username }),
       username: user.username,
       avatarUrl: user.avatarUrl,
       bio: user.bio
@@ -778,6 +804,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     isPublicProfileView,
     publicAvatarUrl,
     publicBio,
+    publicFullName,
     publicUserId,
     publicUserName,
     publicUsername,
@@ -993,28 +1020,66 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   };
 
   const profileHeaderName = isPublicProfileView
-    ? publicUsername || publicUserName
-    : user?.username || user?.fullName || "";
+    ? resolvePersonDisplayName({
+        fullName: publicFullName,
+        username: publicUsername,
+        fallback: looksLikePhoneNumber(publicUserName) ? null : publicUserName
+      })
+    : resolvePersonDisplayName({
+        fullName: user?.fullName,
+        username: user?.username
+      });
+
+  const publicFollowLabel = useMemo(() => {
+    if (publicFollowStatus === "accepted") return t("following");
+    if (publicFollowStatus === "pending") return t("requested");
+    if (publicCanFollowBack) return t("followBackCapital");
+    return followPublicBusy ? t("followBusy") : t("follow");
+  }, [followPublicBusy, publicCanFollowBack, publicFollowStatus, t]);
+
+  const publicFollowDisabled = followPublicBusy || publicFollowStatus === "pending";
 
   const followPublicUser = async () => {
-    if (!user?.fullName || isFollowingPublic || followPublicBusy) return;
+    if (!user?.fullName || publicFollowDisabled || publicFollowStatus === "accepted") return;
     setFollowPublicBusy(true);
     try {
       if (token && publicUserId) {
-        await sendFollowRequest(token, publicUserId);
+        const data = await sendFollowRequest(token, publicUserId);
+        const nextStatus = data.follow?.status === "accepted" ? "accepted" : "pending";
+        setPublicFollowStatus(nextStatus);
+        if (nextStatus === "accepted") {
+          setFollowersCount((v) => v + 1);
+        }
       } else {
         await sendLocalFollowRequestByIdentity(
           { name: user.fullName, key: user.email || String(user.id || "") },
-          { name: publicUserName, key: publicUserKey || (publicUserId ? String(publicUserId) : undefined) }
+          { name: profileHeaderName, key: publicUserKey || (publicUserId ? String(publicUserId) : undefined) }
         );
+        setPublicFollowStatus("pending");
       }
-      setIsFollowingPublic(true);
-      setFollowersCount((v) => v + 1);
     } catch {
       Alert.alert(t("followFailed"), t("tryAgainMoment"));
     } finally {
       setFollowPublicBusy(false);
     }
+  };
+
+  const onPublicFollowPress = async () => {
+    if (!token || !publicUserId || followPublicBusy || publicFollowStatus === "pending") return;
+    if (publicFollowStatus === "accepted") {
+      setFollowPublicBusy(true);
+      try {
+        await unfollowUser(token, publicUserId);
+        setPublicFollowStatus("none");
+        setPublicCanFollowBack(publicReverseStatus === "accepted");
+      } catch {
+        Alert.alert(t("followFailed"), t("tryAgainMoment"));
+      } finally {
+        setFollowPublicBusy(false);
+      }
+      return;
+    }
+    await followPublicUser();
   };
 
   const openPublicMessage = () => {
@@ -1024,7 +1089,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     }
     navigation.navigate("DirectChat", {
       peerUserId: publicUserId,
-      peerName: publicUserName,
+      peerName: profileHeaderName,
       peerKey: publicUserKey || String(publicUserId),
       peerAvatarUrl: publicAvatarUrl
     });
@@ -1092,12 +1157,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             <View style={styles.profileActionsRow}>
               <Pressable
                 style={styles.profileActionBtn}
-                onPress={() => void followPublicUser()}
-                disabled={isFollowingPublic || followPublicBusy}
+                onPress={() => void onPublicFollowPress()}
+                disabled={publicFollowDisabled}
               >
-                <Text style={styles.profileActionBtnText}>
-                  {isFollowingPublic ? t("following") : followPublicBusy ? t("followBusy") : t("follow")}
-                </Text>
+                <Text style={styles.profileActionBtnText}>{publicFollowLabel}</Text>
               </Pressable>
               <Pressable style={styles.profileActionBtn} onPress={openPublicMessage}>
                 <Text style={styles.profileActionBtnText}>{t("messageBtn")}</Text>
@@ -1150,7 +1213,6 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       galleryTabs,
       handleGalleryTabPress,
       handleShareProfile,
-      isFollowingPublic,
       isInstructor,
       isPublicProfileView,
       openFollowList,
@@ -1162,6 +1224,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       profileSubject?.bio,
       profileSubject?.fullName,
       profileSubject?.username,
+      publicFollowLabel,
+      publicFollowDisabled,
       t
     ]
   );

@@ -29,6 +29,37 @@ function isMostlyLatin(text: string): boolean {
   return letters.length > 0 && !hasIndicScript(text);
 }
 
+/** True when a label is only digits / phone formatting — never show as a person's name. */
+export function looksLikePhoneNumber(value: string): boolean {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return false;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return false;
+  const letters = trimmed.match(/[a-zA-Z\u0900-\u097F\u0C00-\u0C7F]/g);
+  return !letters || letters.length === 0;
+}
+
+/** Prefer real names; skip phone numbers and synthetic emails used as identifiers. */
+export function resolvePersonDisplayName(options: {
+  fullName?: string | null;
+  username?: string | null;
+  fallback?: string | null;
+}): string {
+  const candidates = [options.fullName, options.username, options.fallback]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+  for (const candidate of candidates) {
+    if (looksLikePhoneNumber(candidate)) continue;
+    if (candidate.includes("@phone.agrovibes")) continue;
+    return candidate;
+  }
+  const bareUsername = String(options.username || "")
+    .trim()
+    .replace(/^@+/, "");
+  if (bareUsername && !looksLikePhoneNumber(bareUsername)) return bareUsername;
+  return "User";
+}
+
 /** Remove internal type markers added at publish time ([POST], [REEL], [LIVE], [STORY]). */
 export function stripInternalCaptionPrefix(caption?: string | null): string {
   return String(caption || "")
@@ -65,8 +96,8 @@ export function formatFeedText(text: string, language: AppLanguage, t: Translate
  * Person names: only system labels (You, User N, Farmer). Real names are not phonetic-transliterated.
  */
 export function formatDisplayName(name: string, language: AppLanguage, t: TranslateFn): string {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) return trimmed;
+  const trimmed = resolvePersonDisplayName({ fullName: name, fallback: name });
+  if (!trimmed || trimmed === "User") return trimmed;
 
   const knownKey = lookupKnownFeedKey(trimmed);
   if (knownKey) return t(knownKey);

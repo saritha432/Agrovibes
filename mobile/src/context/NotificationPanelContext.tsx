@@ -293,13 +293,6 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         next[key] = st;
       }
       setFollowBackStatusByKey(next);
-      setFollowBackQueue((prev) =>
-        prev.filter((n) => {
-          const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-          const st = next[key] || "none";
-          return st === "none";
-        })
-      );
     }
   }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id, viewerUserId]);
 
@@ -438,16 +431,19 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
           if (ls === "accepted" || ls === "pending") viewerSt = ls;
         }
         setFollowBackStatusByKey((prev) => ({ ...prev, [key]: viewerSt }));
-        if (viewerSt === "accepted" || viewerSt === "pending") {
-          setFollowBackQueue((prev) =>
-            prev.filter((x) => (x.actorId ? `id:${x.actorId}` : `name:${String(x.actorName || "").toLowerCase()}`) !== key)
-          );
-          setFollowBackPromptByKey((prev) => ({ ...prev, [key]: false }));
-        }
       })();
     },
     [onRespond, queueFollowBackPrompt, token, user?.email, user?.fullName, user?.id]
   );
+
+  const onDismissFollowBack = useCallback((entry: any) => {
+    const key = entry.actorId ? `id:${entry.actorId}` : `name:${String(entry.actorName || "").toLowerCase()}`;
+    setFollowBackQueue((prev) =>
+      prev.filter((x) => (x.actorId ? `id:${x.actorId}` : `name:${String(x.actorName || "").toLowerCase()}`) !== key)
+    );
+    setFollowBackPromptByKey((prev) => ({ ...prev, [key]: false }));
+    optimisticDismissNotification(entry);
+  }, [optimisticDismissNotification]);
 
   const onFollowBack = async (entry: any) => {
     const key = entry.actorId ? `id:${entry.actorId}` : `name:${String(entry.actorName || "").toLowerCase()}`;
@@ -675,8 +671,10 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
                   const status = followBackStatusByKey[key] || "none";
                   const showPrompt = followBackPromptByKey[key] === true;
-                  return (
-                    <View key={item.key} style={styles.row}>
+                  return dismissibleRow(
+                    item.key,
+                    () => onDismissFollowBack(n),
+                    <View style={styles.row}>
                       <Text style={styles.rowText}>{t("notifNowFollowing", { name: String(n.actorName || "") })}</Text>
                       <View style={styles.rowActions}>
                         {status === "accepted" ? (

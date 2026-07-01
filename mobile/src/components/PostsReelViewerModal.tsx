@@ -37,6 +37,7 @@ import {
   formatDisplayName,
   formatFeedText,
   formatReelCaption,
+  resolvePersonDisplayName,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import {
@@ -501,6 +502,8 @@ export function PostsReelViewerModal({
   const [likeBusyByPostId, setLikeBusyByPostId] = useState<Record<number, boolean>>({});
   const likeToggleInFlightRef = useRef<Record<number, boolean>>({});
   const postLikedByIdRef = useRef<Record<number, boolean>>({});
+  const viewerPostsRef = useRef(viewerPosts);
+  viewerPostsRef.current = viewerPosts;
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
   const [carouselPageByPostId, setCarouselPageByPostId] = useState<Record<number, number>>({});
   const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
@@ -522,8 +525,17 @@ export function PostsReelViewerModal({
   const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
 
   useEffect(() => {
-    postLikedByIdRef.current = Object.fromEntries(viewerPosts.map((p) => [p.id, !!p.viewerHasLiked]));
+    for (const p of viewerPosts) {
+      postLikedByIdRef.current[p.id] = !!p.viewerHasLiked;
+    }
   }, [viewerPosts]);
+
+  const readPostEngagement = useCallback((postId: number, fallback?: HomePost) => {
+    const p = viewerPostsRef.current.find((row) => row.id === postId) || fallback;
+    const liked = !!(postLikedByIdRef.current[postId] ?? p?.viewerHasLiked);
+    const count = Math.max(0, Number(p?.likesCount) || 0);
+    return { liked, count };
+  }, []);
 
   const displayPersonName = useCallback((name: string) => formatDisplayName(name, language, t), [language, t]);
   const displayFeedCopy = useCallback((text: string) => formatFeedText(text, language, t), [language, t]);
@@ -543,7 +555,7 @@ export function PostsReelViewerModal({
       }
       navigateToPublicProfile({
         userId: postUserId > 0 ? postUserId : undefined,
-        userName: post.userName,
+        userName: resolvePersonDisplayName({ fullName: post.userName, fallback: post.userName }),
         avatarUrl: post.authorAvatarUrl ?? null
       });
     },
@@ -607,49 +619,66 @@ export function PostsReelViewerModal({
 
   const togglePostLike = useCallback(
     async (post: HomePost) => {
-      if (likeToggleInFlightRef.current[post.id]) return;
-      likeToggleInFlightRef.current[post.id] = true;
-      const likedNow = !!post.viewerHasLiked;
+      const postId = post.id;
+      if (likeToggleInFlightRef.current[postId]) return;
+      likeToggleInFlightRef.current[postId] = true;
+      const { liked: likedNow, count: countNow } = readPostEngagement(postId, post);
       const nextLiked = !likedNow;
-      const prevSnapshot = { liked: likedNow, count: post.likesCount };
+      const prevSnapshot = { liked: likedNow, count: countNow };
 
       applyPosts((prev) =>
         prev.map((p) =>
-          p.id === post.id
+          p.id === postId
             ? { ...p, viewerHasLiked: nextLiked, likesCount: Math.max(0, p.likesCount + (nextLiked ? 1 : -1)) }
             : p
         )
       );
+      postLikedByIdRef.current = { ...postLikedByIdRef.current, [postId]: nextLiked };
 
-      await setLocalPostLikedByIdentity(post.id, {
+      void setLocalPostLikedByIdentity(post.id, {
         name: user?.fullName || user?.username || "You",
         key: user?.username || user?.email || "",
         userId: user?.id
-      }, nextLiked);
+      }, nextLiked).then((localResult) => {
+        applyPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  viewerHasLiked: localResult.liked,
+                  likesCount: Math.max(0, Number(localResult.likesCount ?? p.likesCount) || 0)
+                }
+              : p
+          )
+        );
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [postId]: localResult.liked };
+      });
 
       if (!token) {
-        likeToggleInFlightRef.current[post.id] = false;
+        likeToggleInFlightRef.current[postId] = false;
         return;
       }
 
-      setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: true }));
+      setLikeBusyByPostId((prev) => ({ ...prev, [postId]: true }));
       try {
-        const res = nextLiked ? await likeHomePost(token, post.id) : await unlikeHomePost(token, post.id);
+        const res = nextLiked ? await likeHomePost(token, postId) : await unlikeHomePost(token, postId);
         applyPosts((prev) =>
           prev.map((p) =>
-            p.id === post.id ? { ...p, viewerHasLiked: res.liked, likesCount: res.likesCount ?? p.likesCount } : p
+            p.id === postId ? { ...p, viewerHasLiked: res.liked, likesCount: res.likesCount ?? p.likesCount } : p
           )
         );
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [postId]: res.liked };
       } catch {
         applyPosts((prev) =>
-          prev.map((p) => (p.id === post.id ? { ...p, viewerHasLiked: prevSnapshot.liked, likesCount: prevSnapshot.count } : p))
+          prev.map((p) => (p.id === postId ? { ...p, viewerHasLiked: prevSnapshot.liked, likesCount: prevSnapshot.count } : p))
         );
+        postLikedByIdRef.current = { ...postLikedByIdRef.current, [postId]: prevSnapshot.liked };
       } finally {
-        setLikeBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
-        likeToggleInFlightRef.current[post.id] = false;
+        setLikeBusyByPostId((prev) => ({ ...prev, [postId]: false }));
+        likeToggleInFlightRef.current[postId] = false;
       }
     },
-    [applyPosts, token, user?.email, user?.fullName, user?.id, user?.username]
+    [applyPosts, readPostEngagement, token, user?.email, user?.fullName, user?.id, user?.username]
   );
 
   const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
@@ -1142,7 +1171,9 @@ export function PostsReelViewerModal({
                   animated: false
                 });
               }}
-              extraData={`${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${viewerPosts.length}`}
+              extraData={`${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${viewerPosts
+                .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
+                .join(",")}`}
               initialNumToRender={Math.min(3, viewerPosts.length || 1)}
               maxToRenderPerBatch={2}
               windowSize={3}

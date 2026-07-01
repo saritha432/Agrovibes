@@ -67,9 +67,33 @@ function fireSocialPushToFollowers(payload) {
   });
 }
 
+function looksLikePhoneNumber(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return false;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return false;
+  const letters = trimmed.match(/[a-zA-Z\u0900-\u097F\u0C00-\u0C7F]/g);
+  return !letters || letters.length === 0;
+}
+
+function sanitizePersonDisplayName(fullName, username) {
+  const candidates = [fullName, username].map((v) => String(v || "").trim()).filter(Boolean);
+  for (const candidate of candidates) {
+    if (looksLikePhoneNumber(candidate)) continue;
+    if (candidate.includes("@phone.agrovibes")) continue;
+    return candidate;
+  }
+  const bareUsername = String(username || "")
+    .trim()
+    .replace(/^@+/, "");
+  if (bareUsername && !looksLikePhoneNumber(bareUsername)) return bareUsername;
+  return "User";
+}
+
 async function actorDisplayName(userId) {
-  const result = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
-  return String(result.rows[0]?.full_name || "Someone").trim() || "Someone";
+  const result = await query(`SELECT full_name, username FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
+  const row = result.rows[0];
+  return sanitizePersonDisplayName(row?.full_name, row?.username);
 }
 
 const uploadsRootDir = path.join(process.cwd(), "uploads");
@@ -1349,7 +1373,7 @@ async function socialListsForUser(userId) {
     )
   ]);
   const mapRow = (row) => ({
-    name: row.fullName,
+    name: sanitizePersonDisplayName(row.fullName, row.username),
     key: String(row.userId),
     username: row.username || undefined,
     avatarUrl: row.avatarUrl || undefined
@@ -2156,6 +2180,7 @@ router.get("/v1/users", authRequired, async (req, res) => {
 
     const users = result.rows.map(({ totalCount, reverseStatus, ...row }) => ({
       ...row,
+      fullName: sanitizePersonDisplayName(row.fullName, row.username),
       canFollowBack: reverseStatus === "accepted" && row.viewerStatus !== "accepted" && row.viewerStatus !== "pending"
     }));
     const total = Number(result.rows[0]?.totalCount || 0);
@@ -2338,6 +2363,7 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
       return;
     }
     const profile = userRes.rows[0];
+    profile.fullName = sanitizePersonDisplayName(profile.fullName, profile.username);
     const counts = await socialCountsForUser(targetUserId);
     const lists = await socialListsForUser(targetUserId);
     const relation =

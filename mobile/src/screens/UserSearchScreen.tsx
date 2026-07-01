@@ -22,7 +22,7 @@ import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
 import { useReelGridAutoplay } from "../hooks/useReelGridAutoplay";
 import { UserAvatar } from "../components/UserAvatar";
-import { formatDisplayName } from "../localization/feedDisplay";
+import { formatDisplayName, resolvePersonDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
 import type { AppLanguage } from "../localization/LanguageContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
@@ -121,7 +121,10 @@ function buildSearchUserList(
 
   for (const remoteUser of remoteUsers) {
     if (remoteUser.id === selfId) continue;
-    const displayName = remoteUser.fullName || remoteUser.username || "";
+    const displayName = resolvePersonDisplayName({
+      fullName: remoteUser.fullName,
+      username: remoteUser.username
+    });
     const n = normalizeName(displayName);
     if (!n || n === selfName || seen.has(String(remoteUser.id))) continue;
     seen.add(String(remoteUser.id));
