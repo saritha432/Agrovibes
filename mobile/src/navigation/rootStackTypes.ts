@@ -53,7 +53,8 @@ export type RootStackParamList = {
   VerificationSelfie: undefined;
   SaveLogin: undefined;
   WhereLoggedIn: undefined;
-  LoginActivity: { accountName?: string } | undefined;
+  LoginActivity: { accountName?: string; userId?: number } | undefined;
+  LoginDeviceDetail: { sessionId: string };
   SecurityCheckup: undefined;
   ConnectedExperiences: undefined;
   SharingAcrossProfiles: undefined;
@@ -61,6 +62,23 @@ export type RootStackParamList = {
   ShowingProfileLinks: undefined;
   SyncingProfilePictures: undefined;
   ManagingAvatars: undefined;
+  YourInformationPermissions: undefined;
+  AboutAccountsCentre: undefined;
+  SearchHistory: undefined;
+  AutoClearSearchHistory: undefined;
+  HowAutoClearingWorks: undefined;
+  ActivityOffCropvibe: undefined;
+  ActivityAcrossPartners: undefined;
+  ConfirmItsYou: {
+    title?: string;
+    description?: string;
+    action?: "clearOffCropvibeActivity" | "managePartnerActivity" | "disconnectFutureActivity";
+    profileId?: string;
+  };
+  ClearPreviousActivity: undefined;
+  WhatYouShouldKnow: undefined;
+  UploadContacts: undefined;
+  ConnectedApps: undefined;
   Privacy: undefined;
   About: undefined;
 };

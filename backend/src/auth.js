@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const { isSessionActive, touchSession } = require("./authSessions");
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const JWT_ISSUER = "agrovibes";
@@ -29,7 +30,7 @@ function authOptional(req, _res, next) {
   next();
 }
 
-function authRequired(req, res, next) {
+async function authRequired(req, res, next) {
   const token = readBearerToken(req);
   if (!token) {
     res.status(401).json({ message: "Missing auth token" });
@@ -37,6 +38,16 @@ function authRequired(req, res, next) {
   }
   try {
     req.user = jwt.verify(token, JWT_SECRET, { issuer: JWT_ISSUER });
+    const sessionId = req.user?.sessionId;
+    const userId = req.user?.userId;
+    if (sessionId && userId) {
+      const active = await isSessionActive(sessionId, userId);
+      if (!active) {
+        res.status(401).json({ message: "Session expired", code: "SESSION_REVOKED" });
+        return;
+      }
+      void touchSession(sessionId);
+    }
     next();
   } catch (e) {
     res.status(401).json({ message: "Invalid auth token", error: e.message });

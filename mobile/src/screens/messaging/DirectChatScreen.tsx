@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
+import { ensureMediaLibraryAccess } from "../../utils/mediaLibraryPermission";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -675,8 +676,8 @@ export function DirectChatScreen() {
 
   const openGallery = useCallback(async () => {
     if (!token || attachBusy || isRecordingVoice) return;
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
+    const access = await ensureMediaLibraryAccess();
+    if (!access.granted) {
       Alert.alert(t("permissionNeeded"), t("galleryPermissionMsg"));
       return;
     }

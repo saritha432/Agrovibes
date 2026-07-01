@@ -16,6 +16,18 @@ const crypto = require("crypto");
 const multer = require("multer");
 const { AccessToken, RoomServiceClient } = require("livekit-server-sdk");
 const { signJwt, authOptional, authRequired, requireRole } = require("../auth");
+const {
+  createAuthSession,
+  isSessionActive,
+  listUserSessions,
+  getUserSession,
+  revokeSession,
+  revokeOtherSessions,
+  markSessionUnrecognized,
+  markDevicesReviewed,
+  getSecurityCheckup,
+  sessionSummaryByPlatform
+} = require("../authSessions");
 const { isMediaStorageConfigured, uploadMediaBuffer, checkMediaStorageHealth, getMediaStorageProvider } = require("../mediaStorage");
 const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 const {
@@ -988,6 +1000,8 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS creative_meta JSONB NOT NULL DEFAULT '{}'::jsonb`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_status TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_ended_at TIMESTAMPTZ`);
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   homePostsTableReady = true;
 }
 
@@ -1127,6 +1141,80 @@ function normalizeHomePostRow(row) {
     }
   }
   return sanitizeHomePostRowMedia(base);
+}
+
+function parseHomeFeedPagination(req) {
+  const limitRaw = req.query.limit;
+  const hasLimit = limitRaw != null && String(limitRaw).trim() !== "";
+  const limit = hasLimit
+    ? Math.min(Math.max(Number(limitRaw) || 10, 1), 50)
+    : 50;
+  const cursorRaw = Number(req.query.cursor);
+  const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+  return { limit, cursor };
+}
+
+function paginateHomeFeedRows(rows, limit) {
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = page.length ? page[page.length - 1].id : null;
+  return { page, nextCursor, hasMore };
+}
+
+function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
+  const videoClause = videoOnly
+    ? `AND p.video_url IS NOT NULL AND TRIM(p.video_url) <> ''`
+    : "";
+  const cursorClause =
+    cursorParamIndex != null ? `AND p.id < $${cursorParamIndex}` : "";
+  return `
+    SELECT
+      p.id,
+      COALESCE(p.user_id, u.id) AS "userId",
+      COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+      owner.username AS "username",
+      p.location,
+      p.caption,
+      p.likes_count AS "likesCount",
+      p.comments_count AS "commentsCount",
+      p.video_url AS "videoUrl",
+      p.image_url AS "imageUrl",
+      p.image_urls AS "image_urls",
+      p.thumbnail_url AS "thumbnailUrl",
+      p.created_at AS "createdAt",
+      p.tagged_user_ids AS "tagged_user_ids",
+      p.music_label AS "musicLabel",
+      p.music_audio_url AS "musicAudioUrl",
+      p.creative_meta AS "creativeMeta",
+      p.live_status AS "liveStatus",
+      p.live_ended_at AS "liveEndedAt",
+      COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
+      CASE
+        WHEN $1::integer IS NULL THEN false
+        ELSE EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
+        )
+      END AS "viewerHasLiked",
+      CASE
+        WHEN $1::integer IS NULL THEN false
+        ELSE EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1::integer
+        )
+      END AS "viewerHasSaved"
+    FROM home_posts p
+    LEFT JOIN learn_users owner ON owner.id = p.user_id
+    LEFT JOIN LATERAL (
+      SELECT id, avatar_url
+      FROM learn_users
+      WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+      ORDER BY id ASC
+      LIMIT 1
+    ) u ON TRUE
+    WHERE 1=1 ${videoClause} ${cursorClause}
+    ORDER BY p.id DESC
+  `;
 }
 
 function liveKitHttpUrl(wssUrl) {
@@ -1451,6 +1539,23 @@ router.get("/v1/bootstrap", (_req, res) => {
   });
 });
 
+async function issueAuthToken(user, req, deviceInfo) {
+  const { sessionId } = await createAuthSession({
+    userId: user.id,
+    deviceInfo: deviceInfo || {},
+    req
+  });
+  const token = signJwt({
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    fullName: user.fullName,
+    phone: user.phone,
+    sessionId
+  });
+  return token;
+}
+
 router.post("/v1/auth/register", async (req, res) => {
   try {
     await ensureLearnUsersTable();
@@ -1483,7 +1588,7 @@ router.post("/v1/auth/register", async (req, res) => {
     );
 
     const user = authUserFromRow(result.rows[0]);
-    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
+    const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
     res.status(201).json({ token, user });
   } catch (error) {
     const info = authRouteErrorInfo(error);
@@ -1582,7 +1687,7 @@ router.post("/v1/auth/login", async (req, res) => {
       }
     }
 
-    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName });
+    const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
     res.json({ token, user });
   } catch (error) {
     const info = authRouteErrorInfo(error);
@@ -1829,13 +1934,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
       }
     }
 
-    const token = signJwt({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      fullName: user.fullName,
-      phone: user.phone
-    });
+    const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
     res.json({ token, user, isNewUser });
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -2002,6 +2101,124 @@ router.get("/v1/auth/me", authRequired, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile", error: error.message });
+  }
+});
+
+router.get("/v1/auth/sessions", authRequired, async (req, res) => {
+  try {
+    let currentSessionId = req.user.sessionId || null;
+    const deviceInfo = {
+      deviceName: req.query.deviceName,
+      platform: req.query.platform,
+      locationLabel: req.query.locationLabel
+    };
+    if (!currentSessionId || !(await isSessionActive(currentSessionId, req.user.userId))) {
+      const created = await createAuthSession({
+        userId: req.user.userId,
+        deviceInfo,
+        req
+      });
+      currentSessionId = created.sessionId;
+      const token = signJwt({
+        userId: req.user.userId,
+        email: req.user.email,
+        role: req.user.role,
+        fullName: req.user.fullName,
+        phone: req.user.phone,
+        sessionId: currentSessionId
+      });
+      res.setHeader("x-refresh-auth-token", token);
+    }
+
+    const sessions = await listUserSessions(req.user.userId, currentSessionId);
+    const summaries = sessionSummaryByPlatform(sessions);
+    const unrecognizedCount = sessions.filter((s) => !s.isRecognized && !s.isCurrent).length;
+    res.json({
+      sessions,
+      platformSummaries: summaries,
+      unrecognizedLoginCount: unrecognizedCount,
+      hasUnrecognizedLogins: unrecognizedCount > 0,
+      refreshedToken: res.getHeader("x-refresh-auth-token") || undefined
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load sessions", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/auth/sessions/:sessionId", authRequired, async (req, res) => {
+  try {
+    const session = await getUserSession(req.params.sessionId, req.user.userId);
+    if (!session) {
+      res.status(404).json({ message: "Session not found" });
+      return;
+    }
+    res.json({
+      session: {
+        ...session,
+        isCurrent: req.user.sessionId ? session.id === req.user.sessionId : false
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load session", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/:sessionId/revoke", authRequired, async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || "");
+    const revoked = await revokeSession(sessionId, req.user.userId);
+    if (!revoked) {
+      res.status(404).json({ message: "Session not found" });
+      return;
+    }
+    res.json({ success: true, revokedSessionId: sessionId, isCurrent: sessionId === req.user.sessionId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to revoke session", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/:sessionId/report", authRequired, async (req, res) => {
+  try {
+    const sessionId = String(req.params.sessionId || "");
+    const reported = await markSessionUnrecognized(sessionId, req.user.userId);
+    if (!reported) {
+      res.status(404).json({ message: "Session not found" });
+      return;
+    }
+    res.json({ success: true, revokedSessionId: sessionId, isCurrent: sessionId === req.user.sessionId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to report session", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/revoke-others", authRequired, async (req, res) => {
+  try {
+    const count = await revokeOtherSessions(req.user.userId, req.user.sessionId || null);
+    res.json({ success: true, revokedCount: count });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to revoke other sessions", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/sessions/reviewed", authRequired, async (req, res) => {
+  try {
+    await markDevicesReviewed(req.user.userId);
+    res.json({ success: true, reviewedAt: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark devices reviewed", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/auth/security-checkup", authRequired, async (req, res) => {
+  try {
+    const checkup = await getSecurityCheckup(req.user.userId, req.user.sessionId || null);
+    if (!checkup) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    res.json(checkup);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load security checkup", error: error?.message || String(error) });
   }
 });
 
@@ -2250,6 +2467,10 @@ router.post("/v1/auth/me/change-password", authRequired, async (req, res) => {
       [passwordHash, req.user.userId]
     );
 
+    if (req.body?.logoutOtherDevices) {
+      await revokeOtherSessions(req.user.userId, req.user.sessionId || null);
+    }
+
     res.json({ success: true, passwordUpdatedAt: new Date().toISOString() });
   } catch (error) {
     res.status(500).json({ message: "Failed to change password", error: error?.message || String(error) });
@@ -2300,7 +2521,14 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
       res.status(404).json({ message: "User not found" });
       return;
     }
-    const token = signJwt({ userId: user.id, email: user.email, role: user.role, fullName: user.fullName, phone: user.phone });
+    const token = signJwt({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      fullName: user.fullName,
+      phone: user.phone,
+      sessionId: req.user.sessionId
+    });
     res.json({ token, user });
   } catch (error) {
     const msg = String(error.message || "");
@@ -3519,8 +3747,9 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
     const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
+    const { limit, cursor } = parseHomeFeedPagination(req);
     const gen = await cacheGenString("home:posts:gen");
-    const cacheKey = `v1:home:posts:${gen}:${viewerKey}`;
+    const cacheKey = `v1:home:posts:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.posts)) {
       res.json(cached);
@@ -3532,82 +3761,76 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    const params = [viewerId];
+    if (cursor != null) params.push(cursor);
+    params.push(limit + 1);
+    const limitIdx = params.length;
     const result = await query(
-      `
-      SELECT
-        p.id,
-        COALESCE(p.user_id, u.id) AS "userId",
-        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
-        owner.username AS "username",
-        p.location,
-        p.caption,
-        (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
-        p.comments_count AS "commentsCount",
-        p.video_url AS "videoUrl",
-        p.image_url AS "imageUrl",
-        p.image_urls AS "image_urls",
-        p.thumbnail_url AS "thumbnailUrl",
-        p.created_at AS "createdAt",
-        p.tagged_user_ids AS "tagged_user_ids",
-        p.music_label AS "musicLabel",
-        p.music_audio_url AS "musicAudioUrl",
-        p.creative_meta AS "creativeMeta",
-        p.live_status AS "liveStatus",
-        p.live_ended_at AS "liveEndedAt",
-        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
-        CASE
-          WHEN $1::integer IS NULL THEN false
-          ELSE EXISTS (
-            SELECT 1 FROM home_post_likes hpl
-            WHERE hpl.post_id = p.id AND hpl.user_id = $1::integer
-          )
-        END AS "viewerHasLiked",
-        CASE
-          WHEN $1::integer IS NULL THEN false
-          ELSE EXISTS (
-            SELECT 1 FROM home_post_saves hps
-            WHERE hps.post_id = p.id AND hps.user_id = $1::integer
-          )
-        END AS "viewerHasSaved",
-        (
-          SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
-          FROM (
-            SELECT
-              lu2.id AS "userId",
-              lu2.full_name AS "fullName",
-              lu2.username AS "username",
-              lu2.avatar_url AS "avatarUrl"
-            FROM home_post_likes hpl2
-            JOIN learn_users lu2 ON lu2.id = hpl2.user_id
-            WHERE hpl2.post_id = p.id
-            ORDER BY hpl2.created_at DESC
-            LIMIT 50
-          ) t
-        ) AS "recentLikers"
-      FROM home_posts p
-      LEFT JOIN learn_users owner ON owner.id = p.user_id
-      LEFT JOIN LATERAL (
-        SELECT id, avatar_url
-        FROM learn_users
-        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
-        ORDER BY id ASC
-        LIMIT 1
-      ) u ON TRUE
-      ORDER BY p.created_at DESC
-      LIMIT 50
-      `,
-      [viewerId]
+      `${homeFeedListSql({ cursorParamIndex: cursor != null ? 2 : null })}
+      LIMIT $${limitIdx}`,
+      params
     );
 
-    const body = { posts: await enrichHomePostsLiveState(dedupeHomePostRows(result.rows)) };
+    const { page, nextCursor, hasMore } = paginateHomeFeedRows(result.rows, limit);
+    const body = {
+      posts: await enrichHomePostsLiveState(dedupeHomePostRows(page)),
+      nextCursor: hasMore ? nextCursor : null,
+      hasMore
+    };
     res.json(body);
-    await cacheSetJson(cacheKey, body, 10);
+    await cacheSetJson(cacheKey, body, 30);
   } catch (error) {
     res.json({
       posts: [],
+      nextCursor: null,
+      hasMore: false,
       source: "fallback",
       message: error.message
     });
+  }
+});
+
+router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
+  try {
+    const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
+    const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
+    const viewerKey = viewerId != null ? String(viewerId) : "anon";
+    const limitRaw = Number(req.query.limit);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 24, 1), 48);
+    const cursorRaw = Number(req.query.cursor);
+    const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+    const gen = await cacheGenString("home:posts:gen");
+    const cacheKey = `v1:home:posts:reels:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
+    const cached = await cacheGetJson(cacheKey);
+    if (cached && Array.isArray(cached.posts)) {
+      res.json(cached);
+      return;
+    }
+
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const params = [viewerId];
+    if (cursor != null) params.push(cursor);
+    params.push(limit + 1);
+    const limitIdx = params.length;
+    const result = await query(
+      `${homeFeedListSql({ cursorParamIndex: cursor != null ? 2 : null, videoOnly: true })}
+      LIMIT $${limitIdx}`,
+      params
+    );
+
+    const { page, nextCursor, hasMore } = paginateHomeFeedRows(result.rows, limit);
+    const body = {
+      posts: await enrichHomePostsLiveState(dedupeHomePostRows(page)),
+      nextCursor: hasMore ? nextCursor : null,
+      hasMore
+    };
+    res.json(body);
+    await cacheSetJson(cacheKey, body, 45);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load reels", error: error.message });
   }
 });
 
@@ -4868,7 +5091,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
       FROM home_post_comments c
       JOIN learn_users u ON u.id = c.user_id
       WHERE c.post_id = $1
-      ORDER BY c.created_at ASC
+      ORDER BY c.created_at DESC
       `,
       [postId]
     );

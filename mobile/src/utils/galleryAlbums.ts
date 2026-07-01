@@ -1,4 +1,6 @@
+import { Platform } from "react-native";
 import * as MediaLibrary from "expo-media-library";
+import { ensureMediaLibraryAccess } from "./mediaLibraryPermission";
 
 export type GalleryAlbum = {
   id: string;
@@ -16,8 +18,23 @@ export type GalleryGridAsset = {
 
 const RECENTS_ID = "";
 
+async function resolveAssetDisplayUri(asset: MediaLibrary.Asset): Promise<string> {
+  if (Platform.OS !== "android") return asset.uri;
+  try {
+    const info = await MediaLibrary.getAssetInfoAsync(asset);
+    return info.localUri || info.uri || asset.uri;
+  } catch {
+    return asset.uri;
+  }
+}
+
+export function defaultPostGallerySelection(assets: GalleryGridAsset[]): string[] {
+  const first = assets.find((a) => a.mediaType === "image");
+  return first ? [first.id] : [];
+}
+
 export async function fetchGalleryAlbums(): Promise<GalleryAlbum[]> {
-  const perm = await MediaLibrary.requestPermissionsAsync();
+  const perm = await ensureMediaLibraryAccess();
   if (!perm.granted) {
     return [{ id: RECENTS_ID, title: "Recents", assetCount: 0 }];
   }
@@ -64,7 +81,7 @@ export async function fetchGalleryAssets(
   albumId: string | null,
   mode: "post" | "story" | "reel" | "live"
 ): Promise<GalleryGridAsset[]> {
-  const perm = await MediaLibrary.requestPermissionsAsync();
+  const perm = await ensureMediaLibraryAccess();
   if (!perm.granted) return [];
 
   const mediaType =
@@ -81,13 +98,16 @@ export async function fetchGalleryAssets(
     ...(albumId ? { album: albumId } : {})
   });
 
-  return result.assets.map((a) => ({
-    id: a.id,
-    uri: a.uri,
-    mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "image",
-    filename: a.filename,
-    duration: a.duration
-  }));
+  const mapped = await Promise.all(
+    result.assets.map(async (a) => ({
+      id: a.id,
+      uri: await resolveAssetDisplayUri(a),
+      mediaType: a.mediaType === MediaLibrary.MediaType.video ? ("video" as const) : ("image" as const),
+      filename: a.filename,
+      duration: a.duration
+    }))
+  );
+  return mapped;
 }
 
 export function recentsAlbumId() {

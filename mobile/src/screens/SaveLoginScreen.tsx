@@ -1,6 +1,6 @@
-import React, { useMemo } from "react";
-import { Text } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import React, { useCallback, useState } from "react";
+import { ActivityIndicator, Text } from "react-native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   AccountCenterCard,
@@ -10,16 +10,43 @@ import {
 import { AccountCenterAvatar } from "../components/accountCenter/AccountCenterAvatar";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/rootStackTypes";
-
-const ACCOUNT_TYPES = ["Media Account", "Business Account", "educator account"] as const;
+import { readSavedLogins, type SavedLoginAccount } from "../utils/savedLogins";
+import { roleAccountLabel } from "../utils/loginActivityFormatters";
 
 export function SaveLoginScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user } = useAuth();
+  const [accounts, setAccounts] = useState<SavedLoginAccount[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const displayName = useMemo(
-    () => user?.fullName || user?.username || "Your profile",
-    [user?.fullName, user?.username]
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const saved = await readSavedLogins();
+        if (!active) return;
+        if (saved.length > 0) {
+          setAccounts(saved);
+        } else if (user) {
+          setAccounts([
+            {
+              userId: user.id,
+              displayName: user.fullName || user.username || "Your profile",
+              accountType: roleAccountLabel(user.role),
+              avatarUrl: user.avatarUrl,
+              role: user.role,
+              lastUsedAt: new Date().toISOString()
+            }
+          ]);
+        } else {
+          setAccounts([]);
+        }
+        setLoading(false);
+      })();
+      return () => {
+        active = false;
+      };
+    }, [user])
   );
 
   return (
@@ -31,18 +58,27 @@ export function SaveLoginScreen() {
         </Text>
       }
     >
-      <AccountCenterCard>
-        {ACCOUNT_TYPES.map((accountType, index) => (
-          <AccountCenterChevronRow
-            key={accountType}
-            title={displayName}
-            subtitle={accountType}
-            onPress={() => navigation.navigate("LoginActivity", { accountName: displayName })}
-            showDivider={index < ACCOUNT_TYPES.length - 1}
-            left={<AccountCenterAvatar label={displayName} avatarUrl={user?.avatarUrl} />}
-          />
-        ))}
-      </AccountCenterCard>
+      {loading ? (
+        <ActivityIndicator color="#C9FF35" style={{ marginTop: 12 }} />
+      ) : (
+        <AccountCenterCard>
+          {accounts.map((account, index) => (
+            <AccountCenterChevronRow
+              key={`${account.userId}-${account.accountType}`}
+              title={account.displayName}
+              subtitle={account.accountType}
+              onPress={() =>
+                navigation.navigate("LoginActivity", {
+                  accountName: account.displayName,
+                  userId: account.userId
+                })
+              }
+              showDivider={index < accounts.length - 1}
+              left={<AccountCenterAvatar label={account.displayName} avatarUrl={account.avatarUrl} />}
+            />
+          ))}
+        </AccountCenterCard>
+      )}
     </AccountCenterSubLayout>
   );
 }

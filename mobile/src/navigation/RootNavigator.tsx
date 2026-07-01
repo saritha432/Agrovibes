@@ -34,6 +34,7 @@ import { VerificationSelfieScreen } from "../screens/VerificationSelfieScreen";
 import { SaveLoginScreen } from "../screens/SaveLoginScreen";
 import { WhereLoggedInScreen } from "../screens/WhereLoggedInScreen";
 import { LoginActivityScreen } from "../screens/LoginActivityScreen";
+import { LoginDeviceDetailScreen } from "../screens/LoginDeviceDetailScreen";
 import { SecurityCheckupScreen } from "../screens/SecurityCheckupScreen";
 import { ConnectedExperiencesScreen } from "../screens/ConnectedExperiencesScreen";
 import { SharingAcrossProfilesScreen } from "../screens/SharingAcrossProfilesScreen";
@@ -41,6 +42,18 @@ import { MemoriesFromInstagramScreen } from "../screens/MemoriesFromInstagramScr
 import { ShowingProfileLinksScreen } from "../screens/ShowingProfileLinksScreen";
 import { SyncingProfilePicturesScreen } from "../screens/SyncingProfilePicturesScreen";
 import { ManagingAvatarsScreen } from "../screens/ManagingAvatarsScreen";
+import { YourInformationPermissionsScreen } from "../screens/YourInformationPermissionsScreen";
+import { AboutAccountsCentreScreen } from "../screens/AboutAccountsCentreScreen";
+import { SearchHistoryScreen } from "../screens/SearchHistoryScreen";
+import { AutoClearSearchHistoryScreen } from "../screens/AutoClearSearchHistoryScreen";
+import { HowAutoClearingWorksScreen } from "../screens/HowAutoClearingWorksScreen";
+import { ActivityOffCropvibeScreen } from "../screens/ActivityOffCropvibeScreen";
+import { ActivityAcrossPartnersScreen } from "../screens/ActivityAcrossPartnersScreen";
+import { ConfirmItsYouScreen } from "../screens/ConfirmItsYouScreen";
+import { ClearPreviousActivityScreen } from "../screens/ClearPreviousActivityScreen";
+import { WhatYouShouldKnowScreen } from "../screens/WhatYouShouldKnowScreen";
+import { UploadContactsScreen } from "../screens/UploadContactsScreen";
+import { ConnectedAppsScreen } from "../screens/ConnectedAppsScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
 import { AboutScreen } from "../screens/AboutScreen";
 import type { RootStackParamList } from "./rootStackTypes";
@@ -183,6 +196,15 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen
+        name="LoginDeviceDetail"
+        component={LoginDeviceDetailScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
         name="SecurityCheckup"
         component={SecurityCheckupScreen}
         options={{
@@ -239,6 +261,114 @@ export function RootNavigator() {
       <Stack.Screen
         name="ManagingAvatars"
         component={ManagingAvatarsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="YourInformationPermissions"
+        component={YourInformationPermissionsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="AboutAccountsCentre"
+        component={AboutAccountsCentreScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="SearchHistory"
+        component={SearchHistoryScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="AutoClearSearchHistory"
+        component={AutoClearSearchHistoryScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="HowAutoClearingWorks"
+        component={HowAutoClearingWorksScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ActivityOffCropvibe"
+        component={ActivityOffCropvibeScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ActivityAcrossPartners"
+        component={ActivityAcrossPartnersScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ConfirmItsYou"
+        component={ConfirmItsYouScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ClearPreviousActivity"
+        component={ClearPreviousActivityScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="WhatYouShouldKnow"
+        component={WhatYouShouldKnowScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="UploadContacts"
+        component={UploadContactsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_bottom",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="ConnectedApps"
+        component={ConnectedAppsScreen}
         options={{
           headerShown: false,
           animation: "slide_from_bottom",

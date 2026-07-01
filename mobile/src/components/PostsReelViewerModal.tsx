@@ -55,7 +55,7 @@ import {
 } from "../social/localEngagementStore";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 
-import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit } from "../utils/reelGrid";
+import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
@@ -477,7 +477,7 @@ function mergeRemoteAndLocalComments(remote: HomeCommentRow[], local: HomeCommen
   return merged.sort((a, b) => {
     const ta = Date.parse(a.createdAt || "") || 0;
     const tb = Date.parse(b.createdAt || "") || 0;
-    return ta - tb || String(a.id).localeCompare(String(b.id));
+    return tb - ta || String(b.id).localeCompare(String(a.id));
   });
 }
 
@@ -769,7 +769,8 @@ export function PostsReelViewerModal({
         };
         setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
-          return { ...prev, [post.id]: [...list.filter((c) => String(c.id) !== row.id), row] };
+          const withoutDup = list.filter((c) => String(c.id) !== row.id);
+          return { ...prev, [post.id]: [row, ...withoutDup] };
         });
         applyPosts((prev) =>
           prev.map((p) => (p.id === post.id ? { ...p, commentsCount: res.commentsCount ?? (p.commentsCount ?? 0) + 1 } : p))
@@ -791,7 +792,8 @@ export function PostsReelViewerModal({
     if (!localRow) return;
     setCommentsByPost((prev) => {
       const list = prev[post.id] ?? [];
-      return { ...prev, [post.id]: [...list, normalizeCommentRow(localRow as HomeCommentRow & Record<string, unknown>)] };
+      const row = normalizeCommentRow(localRow as HomeCommentRow & Record<string, unknown>);
+      return { ...prev, [post.id]: [row, ...list] };
     });
     applyPosts((prev) =>
       prev.map((p) => (p.id === post.id ? { ...p, commentsCount: (p.commentsCount ?? 0) + 1 } : p))
@@ -913,6 +915,7 @@ export function PostsReelViewerModal({
       const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
       const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
+      const showVolumeControl = postShowsVolumeControl(post);
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
 
@@ -1053,9 +1056,11 @@ export function PostsReelViewerModal({
               <Pressable style={styles.reelActionItem} onPress={() => setOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
-              <Pressable style={styles.reelActionItem} onPress={() => setIsReelMuted((v) => !v)}>
-                <Ionicons name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"} size={REEL_ACTION_ICON} color="#fff" />
-              </Pressable>
+              {showVolumeControl ? (
+                <Pressable style={styles.reelActionItem} onPress={() => setIsReelMuted((v) => !v)}>
+                  <Ionicons name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"} size={REEL_ACTION_ICON} color="#fff" />
+                </Pressable>
+              ) : null}
               {thumbUri ? (
                 <Image source={{ uri: thumbUri }} style={styles.reelDiscThumb} />
               ) : (
@@ -1137,7 +1142,9 @@ export function PostsReelViewerModal({
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
           </View>
-          {reelMuteFeedback && !reelUserPaused ? (
+          {reelMuteFeedback &&
+          !reelUserPaused &&
+          postShowsVolumeControl(viewerPosts.find((p) => p.id === effectivePlayingId) ?? {}) ? (
             <View style={styles.reelMuteFeedbackLayer} pointerEvents="none">
               <View style={styles.reelMuteFeedbackBubble}>
                 <Ionicons name={reelMuteFeedback === "muted" ? "volume-mute" : "volume-high"} size={44} color="#fff" />

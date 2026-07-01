@@ -27,13 +27,13 @@ import { useLanguage } from "../localization/LanguageContext";
 import type { AppLanguage } from "../localization/LanguageContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import {
-  fetchHomePosts,
+  fetchHomeReelsExplore,
   fetchUsers,
   sendFollowRequest,
   type FollowStatus,
   type HomePost
 } from "../services/api";
-import { isReelPost, reelGridTileBackground } from "../utils/reelGrid";
+import { reelGridTileBackground } from "../utils/reelGrid";
 import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
@@ -347,16 +347,8 @@ export function UserSearchScreen() {
   const loadExplorePosts = useCallback(async () => {
     setLoadingExplore(true);
     try {
-      const { posts } = await fetchHomePosts(token);
-      const reels = posts
-        .filter((post) => isReelPost(post))
-        .sort((a, b) => {
-          const aTime = Date.parse(String(a.createdAt || "")) || 0;
-          const bTime = Date.parse(String(b.createdAt || "")) || 0;
-          return bTime - aTime || b.id - a.id;
-        })
-        .slice(0, EXPLORE_REELS_LIMIT);
-      setExplorePosts(reels);
+      const { posts } = await fetchHomeReelsExplore(token, { limit: EXPLORE_REELS_LIMIT });
+      setExplorePosts(posts);
     } catch {
       setExplorePosts([]);
     } finally {

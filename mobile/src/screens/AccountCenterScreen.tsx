@@ -1,6 +1,6 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -81,7 +81,7 @@ export function AccountCenterScreen() {
       key: "permissions",
       title: "Your Information And Permissions",
       icon: "shield-checkmark-outline",
-      onPress: () => navigation.navigate("Privacy")
+      onPress: () => navigation.navigate("YourInformationPermissions")
     },
     { key: "ads", title: "Ad Preferences", icon: "megaphone-outline", onPress: noop },
     { key: "pay", title: "CropvibePay", icon: "wallet-outline", onPress: noop },
@@ -115,7 +115,7 @@ export function AccountCenterScreen() {
           Manage your connected experience & account settings across cropvibe.{" "}
           <Text
             style={styles.learnMore}
-            onPress={() => void Linking.openURL("https://www.cropvibe.com/privacy-policy")}
+            onPress={() => navigation.navigate("AboutAccountsCentre")}
           >
             Learn More
           </Text>

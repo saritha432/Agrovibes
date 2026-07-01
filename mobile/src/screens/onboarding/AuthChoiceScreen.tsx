@@ -9,6 +9,7 @@ import { useLanguage } from "../../localization/LanguageContext";
 import { markLaunchSetupComplete } from "../../onboarding/launchSetup";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister, formatAuthError } from "../../services/api";
+import { getLoginDevicePayload } from "../../utils/deviceInfo";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
 
 const GREEN = APP_LIME;
@@ -91,17 +92,20 @@ export function AuthChoiceScreen() {
     setErrorText("");
     try {
       const mobile = resolvePhoneLocalDigits(digits);
+      const deviceInfo = getLoginDevicePayload();
       const auth =
         mode === "register"
           ? await authRegister({
               phone: mobile,
               password: password.trim(),
               fullName: fullName.trim(),
-              role: "student"
+              role: "student",
+              ...deviceInfo
             })
           : await authLogin({
               identifier: mobile,
-              password: password.trim()
+              password: password.trim(),
+              ...deviceInfo
             });
       await signIn(auth);
       if (mode === "login" && auth?.user?.id != null) {
