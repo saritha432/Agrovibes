@@ -890,6 +890,17 @@ export function PostsReelViewerModal({
 
   const effectivePlayingId = playingPostId ?? intendedPlayingId;
 
+  const reelTopInset = useMemo(() => {
+    const sbh = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
+    const webPad = Platform.OS === "web" ? 12 : 0;
+    return Math.max(insets.top, sbh, webPad) + 12;
+  }, [insets.top]);
+
+  const reelBottomInset = useMemo(() => {
+    if (Platform.OS === "android") return Math.max(insets.bottom, 24);
+    return Math.max(insets.bottom, 16);
+  }, [insets.bottom]);
+
   const renderReelPage = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const pageH = windowHeight;
@@ -917,11 +928,19 @@ export function PostsReelViewerModal({
       const showVolumeControl = postShowsVolumeControl(post);
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
+      const mediaContentH = pageH - reelTopInset - reelBottomInset;
+      const mediaFrameStyle = {
+        position: "absolute" as const,
+        left: 0,
+        right: 0,
+        top: reelTopInset,
+        bottom: reelBottomInset
+      };
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && isActiveVideo ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
@@ -929,7 +948,7 @@ export function PostsReelViewerModal({
                 uri={videoPlaybackUrl(post.videoUrl)}
                 shouldPlay={shouldPlayVideo}
                 containerWidth={reelContentWidth}
-                containerHeight={pageH}
+                containerHeight={mediaContentH}
                 fit="auto"
                 posterUri={reelPoster || undefined}
                 isLooping
@@ -944,7 +963,7 @@ export function PostsReelViewerModal({
               ) : null}
             </Pressable>
           ) : post.videoUrl && reelPoster ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
             </Pressable>
           ) : isCarousel ? (
@@ -953,7 +972,7 @@ export function PostsReelViewerModal({
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={{ width: reelContentWidth, height: pageH }}
+              style={{ width: reelContentWidth, height: mediaContentH, position: "absolute", left: 0, right: 0, top: reelTopInset }}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -966,19 +985,19 @@ export function PostsReelViewerModal({
               {gallery.map((uri, i) => (
                 <Pressable
                   key={`profile-reel-carousel-${post.id}-${i}`}
-                  style={{ width: reelContentWidth, height: pageH, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}
+                  style={{ width: reelContentWidth, height: mediaContentH, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}
                   onPress={() => onReelSurfaceTap(post)}
                 >
-                  <Image source={{ uri }} style={{ width: reelContentWidth, height: pageH }} resizeMode="contain" />
+                  <Image source={{ uri }} style={{ width: reelContentWidth, height: mediaContentH }} resizeMode="contain" />
                 </Pressable>
               ))}
             </ScrollView>
           ) : reelPoster ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
             </Pressable>
           ) : (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
@@ -992,7 +1011,7 @@ export function PostsReelViewerModal({
           ) : null}
           <LinearGradient colors={["transparent", "rgba(0,0,0,0.45)", "rgba(0,0,0,0.92)"]} locations={[0.25, 0.55, 1]} style={styles.reelGradient} pointerEvents="none" />
           <ReelLikeBurst postId={post.id} trigger={reelLikeBurstByPostId[post.id] || 0} seenRef={reelLikeBurstSeenRef} />
-          <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]} pointerEvents="box-none">
+          <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, reelBottomInset + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               <View style={styles.reelUserFollowRow}>
                 <Pressable
@@ -1109,6 +1128,8 @@ export function PostsReelViewerModal({
       triggerReelLikeBurst,
       user,
       viewerPosts,
+      reelBottomInset,
+      reelTopInset,
       windowHeight,
       windowWidth
     ]
@@ -1116,11 +1137,6 @@ export function PostsReelViewerModal({
 
   const safeInitialIndex =
     visible && viewerPosts.length > 0 ? Math.max(0, Math.min(initialIndex, viewerPosts.length - 1)) : 0;
-  const reelTopInset = React.useMemo(() => {
-    const sbh = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
-    const webPad = Platform.OS === "web" ? 12 : 0;
-    return Math.max(insets.top, sbh, webPad);
-  }, [insets.top]);
 
   useEffect(() => {
     if (!visible || windowHeight <= 0 || safeInitialIndex <= 0) return;

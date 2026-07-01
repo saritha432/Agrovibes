@@ -1146,10 +1146,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const modalTopInset = useMemo(() => {
     if (Platform.OS === "android") {
       const sbh = StatusBar.currentHeight ?? 0;
-      return Math.max(insets.top, sbh) + 8;
+      return Math.max(insets.top, sbh) + 12;
     }
-    return Math.max(insets.top, 12) + 10;
+    return Math.max(insets.top, 12) + 14;
   }, [insets.top]);
+
+  /** Keep reel actions above Android gesture / 3-button navigation bar. */
+  const modalBottomInset = useMemo(() => {
+    if (Platform.OS === "android") return Math.max(insets.bottom, 24);
+    return Math.max(insets.bottom, 16);
+  }, [insets.bottom]);
 
   const homeTabLabel = React.useCallback(
     (tab: HomeTopTab) => {
@@ -3411,11 +3417,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const hasMusicTrack = postHasAttachedMusic(post);
       const showVolumeControl = postShowsVolumeControl(post);
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
+      const fullscreenSafeTop = reelViewerOpen ? modalTopInset : 0;
+      const fullscreenSafeBottom = reelViewerOpen ? modalBottomInset : 0;
+      const mediaContentH = pageH - fullscreenSafeTop - fullscreenSafeBottom;
+      const mediaFrameStyle = reelViewerOpen
+        ? { position: "absolute" as const, left: 0, right: 0, top: fullscreenSafeTop, bottom: fullscreenSafeBottom }
+        : StyleSheet.absoluteFillObject;
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && showActiveVideo ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
@@ -3424,7 +3436,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 posterUri={reelPoster || undefined}
                 shouldPlay={shouldPlayReel}
                 containerWidth={reelContentWidth}
-                containerHeight={pageH}
+                containerHeight={mediaContentH}
                 fit="auto"
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
@@ -3439,7 +3451,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               ) : null}
             </Pressable>
           ) : post.videoUrl ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {reelPoster ? (
                 <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
               ) : (
@@ -3457,7 +3469,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={{ width: reelContentWidth, height: pageH }}
+              style={[
+                { width: reelContentWidth, height: mediaContentH },
+                reelViewerOpen ? { position: "absolute", left: 0, right: 0, top: fullscreenSafeTop } : { height: pageH }
+              ]}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -3482,7 +3497,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   key={`reel-carousel-${post.id}-${i}-${uri.slice(-24)}`}
                   style={{
                     width: reelContentWidth,
-                    height: pageH,
+                    height: mediaContentH,
                     backgroundColor: "#000",
                     alignItems: "center",
                     justifyContent: "center"
@@ -3491,18 +3506,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <Image
                     source={{ uri }}
-                    style={{ width: reelContentWidth, height: pageH }}
+                    style={{ width: reelContentWidth, height: mediaContentH }}
                     resizeMode="contain"
                   />
                 </Pressable>
               ))}
             </ScrollView>
           ) : reelPoster ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "contain" : "contain"} />
             </Pressable>
           ) : (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
@@ -3546,7 +3561,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             seenRef={reelLikeBurstSeenRef}
           />
           <View
-              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]}
+              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, (reelViewerOpen ? modalBottomInset : insets.bottom) + 14) }]}
               pointerEvents="box-none"
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
@@ -3671,7 +3686,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
             </View>
           {post.videoUrl ? (
-            <View style={styles.reelSeekWrap} pointerEvents="auto">
+            <View style={[styles.reelSeekWrap, reelViewerOpen ? { bottom: modalBottomInset } : null]} pointerEvents="auto">
               <ReelSeekBar
                 progressRatio={progressRatio}
                 onSeek={(ratio) => {
@@ -3696,6 +3711,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
+      modalBottomInset,
+      modalTopInset,
       isReelMuted,
       legacyFollowStateByName,
       legacyRelationshipByName,

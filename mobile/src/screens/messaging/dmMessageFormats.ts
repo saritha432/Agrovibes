@@ -14,12 +14,26 @@ export type DmCallPayload = {
   direction: "outgoing" | "incoming";
 };
 
-export type DmMediaPayload = {
+export type DmMediaItem = {
   kind: "image" | "video";
   url: string;
   width?: number;
   height?: number;
 };
+
+export type DmMediaPayload = DmMediaItem | { items: DmMediaItem[] };
+
+export function dmMediaIsAlbum(payload: DmMediaPayload): payload is { items: DmMediaItem[] } {
+  return "items" in payload && Array.isArray(payload.items) && payload.items.length > 1;
+}
+
+export function dmMediaItems(payload: DmMediaPayload): DmMediaItem[] {
+  return dmMediaIsAlbum(payload) ? payload.items : [payload];
+}
+
+export function dmMediaPrimaryItem(payload: DmMediaPayload): DmMediaItem {
+  return dmMediaItems(payload)[0];
+}
 
 export type DmVoicePayload = {
   url: string;
@@ -38,8 +52,14 @@ export type DmReactPayload = {
   emoji: string;
 };
 
-export function buildDmMediaMessage(payload: DmMediaPayload) {
+export function buildDmMediaMessage(payload: DmMediaItem) {
   return `${DM_MEDIA_PREFIX}\n${JSON.stringify(payload)}`;
+}
+
+export function buildDmMediaAlbumMessage(items: DmMediaItem[]) {
+  if (items.length === 0) return "";
+  if (items.length === 1) return buildDmMediaMessage(items[0]);
+  return `${DM_MEDIA_PREFIX}\n${JSON.stringify({ items })}`;
 }
 
 export function buildDmVoiceMessage(payload: DmVoicePayload) {
@@ -60,6 +80,26 @@ export function parseDmMediaMessage(body: string): DmMediaPayload | null {
   if (!jsonText.startsWith("{")) return null;
   try {
     const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const itemsRaw = parsed.items;
+    if (Array.isArray(itemsRaw) && itemsRaw.length > 0) {
+      const items: DmMediaItem[] = [];
+      for (const entry of itemsRaw) {
+        if (!entry || typeof entry !== "object") continue;
+        const row = entry as Record<string, unknown>;
+        const url = String(row.url || "").trim();
+        const kind = row.kind === "video" ? "video" : row.kind === "image" ? "image" : null;
+        if (!url || !kind) continue;
+        items.push({
+          kind,
+          url,
+          width: Number(row.width) || undefined,
+          height: Number(row.height) || undefined
+        });
+      }
+      if (!items.length) return null;
+      if (items.length === 1) return items[0];
+      return { items };
+    }
     const url = String(parsed.url || "").trim();
     const kind = parsed.kind === "video" ? "video" : parsed.kind === "image" ? "image" : null;
     if (!url || !kind) return null;
@@ -127,6 +167,29 @@ export function dmMessageCopyText(body: string, t: (key: string) => string): str
   return formatDmInboxPreview(body, t);
 }
 
+/** Short preview for reply composer + quote chips (includes media labels). */
+export function dmReplyPreviewForMessage(body: string, t: (key: string) => string): string {
+  const media = parseDmMediaMessage(body);
+  if (media) {
+    if (dmMediaIsAlbum(media)) {
+      const count = media.items.length;
+      return count > 1 ? `${count} ${t("sharedMedia")}` : t("sharedMedia");
+    }
+    return media.kind === "video" ? t("sharedVideo") : t("sharedMedia");
+  }
+  const voice = parseDmVoiceMessage(body);
+  if (voice) return t("voiceMessage");
+  const call = parseDmCallMessage(body);
+  if (call) return formatDmCallLabel(call, t);
+  if (String(body || "").startsWith("[Cropvibe Reel]") || String(body || "").startsWith("[AgroVibe Reel]")) {
+    return t("sharedReel");
+  }
+  if (String(body || "").startsWith("[Cropvibe Profile]")) return t("sharedProfile");
+  if (String(body || "").startsWith("[Cropvibe Live]")) return t("sharedLive");
+  const plain = formatDmInboxPreview(body, t);
+  return plain.length > 120 ? `${plain.slice(0, 117)}…` : plain;
+}
+
 export function formatVoiceDuration(ms?: number) {
   const totalSec = Math.max(0, Math.round((ms || 0) / 1000));
   const m = Math.floor(totalSec / 60);
@@ -191,6 +254,10 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
 
   const media = parseDmMediaMessage(text);
   if (media) {
+    if (dmMediaIsAlbum(media)) {
+      const count = media.items.length;
+      return count > 1 ? `${count} ${t("sharedMedia")}` : t("sharedMedia");
+    }
     return media.kind === "video" ? t("sharedVideo") : t("sharedMedia");
   }
 

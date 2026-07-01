@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { ensureMediaLibraryAccess } from "../../utils/mediaLibraryPermission";
 import { LinearGradient } from "expo-linear-gradient";
@@ -10,11 +10,13 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -23,6 +25,7 @@ import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navig
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
 import { CallHistoryBubble } from "../../components/CallHistoryBubble";
+import { ChatMediaAlbumBubble } from "../../components/ChatMediaAlbumBubble";
 import { ChatMediaBubble } from "../../components/ChatMediaBubble";
 import { ChatVoiceNoteBubble } from "../../components/ChatVoiceNoteBubble";
 import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
@@ -46,6 +49,7 @@ import {
   type LiveSharePayload
 } from "./liveShareMessage";
 import { APP_LIME } from "../../theme/appColors";
+import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { useLanguage } from "../../localization/LanguageContext";
 import { DirectCallView, type CallDirection, type CallEndResult, type DirectCallMode } from "./DirectCallView";
 import { ChatMessageActionSheet } from "./ChatMessageActionSheet";
@@ -53,18 +57,24 @@ import { ForwardMessageModal } from "./ForwardMessageModal";
 import { SwipeReplyMessageRow } from "./SwipeReplyMessageRow";
 import {
   buildDmCallMessage,
+  buildDmMediaAlbumMessage,
   buildDmMediaMessage,
   buildDmReactMessage,
   buildDmReplyMessage,
   buildDmVoiceMessage,
   dmMessageCopyText,
+  dmMediaIsAlbum,
+  dmMediaItems,
+  dmMediaPrimaryItem,
+  dmReplyPreviewForMessage,
   formatDmInboxPreview,
   formatVoiceDuration,
   parseDmCallMessage,
   parseDmMediaMessage,
   parseDmReactMessage,
   parseDmReplyMessage,
-  parseDmVoiceMessage
+  parseDmVoiceMessage,
+  type DmMediaItem
 } from "./dmMessageFormats";
 
 const BG = "#262626";
@@ -203,6 +213,23 @@ function formatPeerHandle(username?: string | null, peerKey?: string) {
 
 function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function dmReplyQuoteThumbUri(body: string, hydratedPost?: HomePost | null): string | undefined {
+  const media = parseDmMediaMessage(body);
+  if (media) return dmMediaPrimaryItem(media).url;
+  if (hydratedPost) {
+    return (
+      hydratedPost.thumbnailUrl ||
+      hydratedPost.imageUrl ||
+      (hydratedPost.imageUrls && hydratedPost.imageUrls.length > 0 ? hydratedPost.imageUrls[0] : undefined)
+    );
+  }
+  const post = parseSharedCropvibeContent(body);
+  if (post) {
+    return post.thumbnailUrl || post.imageUrl || (post.imageUrls && post.imageUrls[0]) || undefined;
+  }
+  return undefined;
 }
 
 function parseSharedCropvibeContent(body: string): HomePost | null {
@@ -384,6 +411,7 @@ async function hydrateSharedPostsById(postIds: number[], token: string): Promise
 
 export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
   const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall } = route.params;
@@ -395,6 +423,11 @@ export function DirectChatScreen() {
   const [peerUsername, setPeerUsername] = useState(peerUsernameParam || "");
   const peerHandle = formatPeerHandle(peerUsername, peerKey);
   const threadItems = useMemo(() => [...buildThreadListItems(messages)].reverse(), [messages]);
+  const messagesById = useMemo(() => {
+    const map = new Map<number, DirectMessageItem>();
+    for (const message of messages) map.set(message.id, message);
+    return map;
+  }, [messages]);
   const [peerAvatar, setPeerAvatar] = useState<string | null>(() =>
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
   );
@@ -408,6 +441,7 @@ export function DirectChatScreen() {
   } | null>(null);
   const callHistorySentRef = useRef(false);
   const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+  const [chatMediaViewer, setChatMediaViewer] = useState<{ items: DmMediaItem[]; index: number } | null>(null);
   const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
   const [attachBusy, setAttachBusy] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -607,13 +641,27 @@ export function DirectChatScreen() {
       const isSelf = item.senderId === user?.id;
       setReplyTarget({
         messageId: item.id,
-        preview: formatDmInboxPreview(item.body, t) || "Message",
+        preview: dmReplyPreviewForMessage(item.body, t) || "Message",
         authorName: isSelf ? "You" : peerName,
         replyLabel: isSelf ? "yourself" : peerName
       });
     },
     [peerName, t, user?.id]
   );
+
+  const openChatMedia = useCallback((items: DmMediaItem[], index = 0) => {
+    if (!items.length) return;
+    setChatMediaViewer({ items, index: Math.max(0, Math.min(index, items.length - 1)) });
+  }, []);
+
+  const openPeerProfile = useCallback(() => {
+    if (!peerUserId) return;
+    navigation.navigate("PublicProfile", {
+      userId: peerUserId,
+      userName: peerName,
+      avatarUrl: peerAvatar || undefined
+    });
+  }, [navigation, peerAvatar, peerName, peerUserId]);
 
   const openMessageActions = useCallback((item: DirectMessageItem) => {
     if (parseDmCallMessage(item.body) || parseDmReactMessage(item.body)) return;
@@ -646,23 +694,25 @@ export function DirectChatScreen() {
     return !parseDmCallMessage(body) && !parseDmReactMessage(body);
   }, []);
 
-  const sendPickedAsset = useCallback(
-    async (asset: ImagePicker.ImagePickerAsset) => {
-      if (!token || attachBusy) return;
+  const sendPickedAssets = useCallback(
+    async (assets: ImagePicker.ImagePickerAsset[]) => {
+      if (!token || attachBusy || !assets.length) return;
       setAttachBusy(true);
       try {
-        const { url } = await uploadPickedMedia(asset.uri, asset);
-        const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
-        const result = await sendDirectMessage(
-          token,
-          peerUserId,
-          buildDmMediaMessage({
+        const uploaded: DmMediaItem[] = [];
+        for (const asset of assets) {
+          const { url } = await uploadPickedMedia(asset.uri, asset);
+          const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
+          uploaded.push({
             kind: isVideo ? "video" : "image",
             url,
             width: asset.width,
             height: asset.height
-          })
-        );
+          });
+        }
+        const body =
+          uploaded.length > 1 ? buildDmMediaAlbumMessage(uploaded) : buildDmMediaMessage(uploaded[0]);
+        const result = await sendDirectMessage(token, peerUserId, body);
         if (result.message) appendSentMessage(result.message);
         else if (!socketConnected) await reload();
       } catch (error) {
@@ -674,6 +724,13 @@ export function DirectChatScreen() {
     [attachBusy, appendSentMessage, peerUserId, reload, socketConnected, t, token]
   );
 
+  const sendPickedAsset = useCallback(
+    async (asset: ImagePicker.ImagePickerAsset) => {
+      await sendPickedAssets([asset]);
+    },
+    [sendPickedAssets]
+  );
+
   const openGallery = useCallback(async () => {
     if (!token || attachBusy || isRecordingVoice) return;
     const access = await ensureMediaLibraryAccess();
@@ -682,13 +739,14 @@ export function DirectChatScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.85,
-      allowsMultipleSelection: false
+      allowsMultipleSelection: true,
+      selectionLimit: 10
     });
-    if (result.canceled || !result.assets[0]) return;
-    await sendPickedAsset(result.assets[0]);
-  }, [attachBusy, isRecordingVoice, sendPickedAsset, t, token]);
+    if (result.canceled || !result.assets.length) return;
+    await sendPickedAssets(result.assets);
+  }, [attachBusy, isRecordingVoice, sendPickedAssets, t, token]);
 
   const openCamera = useCallback(async () => {
     if (!token || attachBusy || isRecordingVoice) return;
@@ -918,6 +976,30 @@ export function DirectChatScreen() {
     [mergeHydratedPost, token]
   );
 
+  const openReplyTarget = useCallback(
+    (replyToId: number) => {
+      const original = messagesById.get(replyToId);
+      if (original) {
+        const media = parseDmMediaMessage(original.body);
+        if (media) {
+          openChatMedia(dmMediaItems(media), 0);
+          return;
+        }
+        if (parseSharedCropvibeContent(original.body)) {
+          void openSharedCropvibeCard(original.body);
+          return;
+        }
+      }
+      const idx = threadItems.findIndex(
+        (item) => item.type === "message" && item.message.id === replyToId
+      );
+      if (idx >= 0) {
+        listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+      }
+    },
+    [messagesById, openChatMedia, openSharedCropvibeCard, threadItems]
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -928,25 +1010,27 @@ export function DirectChatScreen() {
         <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={28} color={TEXT} />
         </Pressable>
-        <UserAvatar
-          uri={peerAvatar}
-          name={peerName}
-          size={40}
-          borderRadius={20}
-          style={styles.headerAvatar}
-          fallbackBackgroundColor="#3a3f46"
-          initialsColor={TEXT}
-        />
-        <View style={styles.headerMeta}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {peerName}
-          </Text>
-          {peerHandle ? (
-            <Text style={styles.headerHandle} numberOfLines={1}>
-              {peerHandle}
+        <Pressable style={styles.headerProfileTap} onPress={openPeerProfile}>
+          <UserAvatar
+            uri={peerAvatar}
+            name={peerName}
+            size={40}
+            borderRadius={20}
+            style={styles.headerAvatar}
+            fallbackBackgroundColor="#3a3f46"
+            initialsColor={TEXT}
+          />
+          <View style={styles.headerMeta}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {peerName}
             </Text>
-          ) : null}
-        </View>
+            {peerHandle ? (
+              <Text style={styles.headerHandle} numberOfLines={1}>
+                {peerHandle}
+              </Text>
+            ) : null}
+          </View>
+        </Pressable>
         <View style={styles.headerRight}>
           <Pressable hitSlop={8} onPress={openVoiceCall} style={styles.headerAction}>
             <ChatAssetIcon icon="voiceCall" size={HEADER_CALL_ICON} />
@@ -1001,6 +1085,17 @@ export function DirectChatScreen() {
           const sharedCall = parseDmCallMessage(messageItem.body);
           const sharedReply = parseDmReplyMessage(messageItem.body);
           const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice || sharedCall);
+          const repliedToMessage = sharedReply ? messagesById.get(sharedReply.replyToId) : undefined;
+          const replyQuotePreview = repliedToMessage
+            ? dmReplyPreviewForMessage(repliedToMessage.body, t)
+            : sharedReply?.replyPreview;
+          const replyQuoteParsedPost = repliedToMessage ? parseSharedCropvibeContent(repliedToMessage.body) : null;
+          const replyQuoteThumb = repliedToMessage
+            ? dmReplyQuoteThumbUri(
+                repliedToMessage.body,
+                replyQuoteParsedPost ? mergeHydratedPost(replyQuoteParsedPost) : null
+              )
+            : undefined;
           return (
             <SwipeReplyMessageRow
               rowStyle={[styles.bubbleRow, isSelf ? styles.bubbleRowSelf : styles.bubbleRowPeer]}
@@ -1014,9 +1109,7 @@ export function DirectChatScreen() {
             >
               {sharedReply ? (
                 <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
-                  {isSelf
-                    ? "You replied"
-                    : `${sharedReply.replyAuthor === "You" ? peerName : sharedReply.replyAuthor} replied`}
+                  {isSelf ? "You replied" : `${peerName} replied`}
                 </Text>
               ) : null}
               <View
@@ -1029,6 +1122,8 @@ export function DirectChatScreen() {
                   <Pressable
                     style={styles.sharedReelCard}
                     onPress={() => void joinSharedLive(sharedLive)}
+                    onLongPress={() => openMessageActions(messageItem)}
+                    delayLongPress={280}
                     disabled={!isJoinableLiveShare(sharedLive)}
                   >
                     <View style={styles.sharedLiveMediaWrap}>
@@ -1067,23 +1162,43 @@ export function DirectChatScreen() {
                     language={language}
                     t={t}
                     onPress={() => void openSharedCropvibeCard(messageItem.body)}
+                    onLongPress={() => openMessageActions(messageItem)}
                   />
                 ) : sharedMedia ? (
-                  <ChatMediaBubble media={sharedMedia} isSelf={isSelf} />
+                  dmMediaIsAlbum(sharedMedia) ? (
+                    <ChatMediaAlbumBubble
+                      items={sharedMedia.items}
+                      onPress={(index) => openChatMedia(sharedMedia.items, index)}
+                      onLongPress={() => openMessageActions(messageItem)}
+                    />
+                  ) : (
+                    <ChatMediaBubble
+                      media={sharedMedia}
+                      isSelf={isSelf}
+                      onPress={() => openChatMedia([sharedMedia], 0)}
+                      onLongPress={() => openMessageActions(messageItem)}
+                    />
+                  )
                 ) : sharedVoice ? (
                   <ChatVoiceNoteBubble voice={sharedVoice} isSelf={isSelf} />
                 ) : sharedCall ? (
                   <CallHistoryBubble call={sharedCall} isSelf={isSelf} t={t} />
                 ) : sharedReply ? (
                   <>
-                    <View style={[styles.replyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}>
+                    <Pressable
+                      style={[styles.replyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}
+                      onPress={() => openReplyTarget(sharedReply.replyToId)}
+                    >
+                      {replyQuoteThumb ? (
+                        <Image source={{ uri: replyQuoteThumb }} style={styles.replyQuoteThumb} resizeMode="cover" />
+                      ) : null}
                       <Text
                         style={[styles.replyQuoteText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}
                         numberOfLines={2}
                       >
-                        {sharedReply.replyPreview}
+                        {replyQuotePreview || sharedReply.replyPreview}
                       </Text>
-                    </View>
+                    </Pressable>
                     <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
                       {sharedReply.text}
                     </Text>
@@ -1091,6 +1206,8 @@ export function DirectChatScreen() {
                 ) : sharedProfile ? (
                   <Pressable
                     style={styles.sharedProfileCard}
+                    onLongPress={() => openMessageActions(messageItem)}
+                    delayLongPress={280}
                     onPress={() => {
                       if (!sharedProfile.userId) return;
                       navigation.navigate("PublicProfile", {
@@ -1303,6 +1420,73 @@ export function DirectChatScreen() {
           setSharedReelViewer((prev) => (prev ? { ...prev, posts } : null));
         }}
       />
+
+      <Modal
+        visible={chatMediaViewer != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setChatMediaViewer(null)}
+      >
+        <View style={styles.chatMediaViewerBackdrop}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setChatMediaViewer(null)} />
+          <Pressable
+            style={[styles.chatMediaViewerClose, { top: insets.top + 8 }]}
+            onPress={() => setChatMediaViewer(null)}
+            hitSlop={12}
+          >
+            <Ionicons name="close" size={28} color="#fff" />
+          </Pressable>
+          {chatMediaViewer && chatMediaViewer.items.length > 1 ? (
+            <FlatList
+              data={chatMediaViewer.items}
+              horizontal
+              pagingEnabled
+              initialScrollIndex={chatMediaViewer.index}
+              getItemLayout={(_data, index) => ({
+                length: windowWidth,
+                offset: windowWidth * index,
+                index
+              })}
+              keyExtractor={(item, index) => `${item.url}-${index}`}
+              showsHorizontalScrollIndicator={false}
+              renderItem={({ item }) =>
+                item.kind === "image" ? (
+                  <Image
+                    source={{ uri: item.url }}
+                    style={[styles.chatMediaViewerMedia, { width: windowWidth }]}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <Video
+                    source={{ uri: videoPlaybackUrl(item.url) }}
+                    style={[styles.chatMediaViewerMedia, { width: windowWidth }]}
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay
+                    useNativeControls
+                  />
+                )
+              }
+              onScrollToIndexFailed={() => {
+                // no-op
+              }}
+            />
+          ) : chatMediaViewer?.items[0]?.kind === "image" ? (
+            <Image
+              source={{ uri: chatMediaViewer.items[0].url }}
+              style={styles.chatMediaViewerMedia}
+              resizeMode="contain"
+            />
+          ) : chatMediaViewer?.items[0]?.kind === "video" ? (
+            <Video
+              source={{ uri: videoPlaybackUrl(chatMediaViewer.items[0].url) }}
+              style={styles.chatMediaViewerMedia}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              useNativeControls
+            />
+          ) : null}
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1320,6 +1504,13 @@ const styles = StyleSheet.create({
     gap: 10
   },
   headerBack: { width: 28, alignItems: "flex-start" },
+  headerProfileTap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
   headerMeta: { flex: 1, minWidth: 0, justifyContent: "center" },
   headerAvatar: {
     width: 40,
@@ -1457,11 +1648,39 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2,
     paddingLeft: 8,
     marginBottom: 6,
-    opacity: 0.9
+    opacity: 0.9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
   },
   replyQuoteSelf: { borderLeftColor: YELLOW },
   replyQuotePeer: { borderLeftColor: "rgba(255,255,255,0.45)" },
-  replyQuoteText: { fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  replyQuoteThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+    backgroundColor: "#1a1a1a"
+  },
+  replyQuoteText: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  chatMediaViewerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.94)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  chatMediaViewerClose: {
+    position: "absolute",
+    right: 16,
+    zIndex: 2,
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  chatMediaViewerMedia: {
+    height: "82%",
+    maxWidth: 720
+  },
   reactionRow: {
     flexDirection: "row",
     flexWrap: "wrap",

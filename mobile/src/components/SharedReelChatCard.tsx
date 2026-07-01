@@ -18,11 +18,12 @@ type TranslateFn = (key: string, params?: Record<string, string | number>) => st
 type SharedReelChatCardProps = {
   post: HomePost;
   onPress: () => void;
+  onLongPress?: () => void;
   language: AppLanguage;
   t: TranslateFn;
 };
 
-export function SharedReelChatCard({ post, onPress, language, t }: SharedReelChatCardProps) {
+export function SharedReelChatCard({ post, onPress, onLongPress, language, t }: SharedReelChatCardProps) {
   const videoUrl = String(post.videoUrl || "").trim();
   const isVideo = !!videoUrl;
   const [previewUri, setPreviewUri] = React.useState<string | null>(() => staticReelPreviewUri(post));
@@ -50,7 +51,7 @@ export function SharedReelChatCard({ post, onPress, language, t }: SharedReelCha
   const label = sharedReelCardCaption(post.caption);
 
   return (
-    <Pressable style={styles.card} onPress={onPress} accessibilityRole="button">
+    <Pressable style={styles.card} onPress={onPress} onLongPress={onLongPress} delayLongPress={280} accessibilityRole="button">
       <View style={styles.mediaWrap}>
         {previewUri ? (
           <Image source={{ uri: previewUri }} style={styles.media} resizeMode="cover" />
