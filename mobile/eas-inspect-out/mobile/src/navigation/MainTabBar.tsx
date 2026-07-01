@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
   wrap: {
     backgroundColor: TAB_BG,
     borderTopWidth: 0,
-    paddingTop: 5
+    // paddingTop: 5
   },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 6 },
   logoTab: {
