@@ -1334,12 +1334,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [posts]);
 
   useEffect(() => {
-
     if (!reelViewerOpen?.posts.length) return;
     for (const p of reelViewerOpen.posts) {
       postLikedByIdRef.current[p.id] = !!p.viewerHasLiked;
     }
   }, [reelViewerOpen?.posts]);
+
+  useEffect(() => {
     return subscribeFeedPlaybackSuspended((suspended) => {
       setFeedPlaybackSuspended(suspended);
       if (!suspended && Platform.OS !== "web") {
