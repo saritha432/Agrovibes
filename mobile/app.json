@@ -19,7 +19,7 @@
     "androidStatusBar": {
       "backgroundColor": "#262626",
       "barStyle": "light-content",
-      "translucent": false
+      "translucent": true
     },
     "assetBundlePatterns": [],
     "android": {

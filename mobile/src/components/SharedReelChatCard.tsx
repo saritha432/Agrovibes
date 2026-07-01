@@ -66,7 +66,11 @@ export function SharedReelChatCard({ post, onPress, language, t }: SharedReelCha
           />
         ) : (
           <View style={[styles.media, styles.placeholder]}>
-            <Ionicons name="videocam-outline" size={32} color="rgba(255,255,255,0.35)" />
+            <Ionicons
+              name={isVideo ? "videocam-outline" : "images-outline"}
+              size={32}
+              color="rgba(255,255,255,0.35)"
+            />
           </View>
         )}
 

@@ -206,7 +206,7 @@ function formatMsgTime(ts: number) {
 }
 
 function parseSharedCropvibeContent(body: string): HomePost | null {
-  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]"];
+  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]", "[Cropvibe Post]"];
   let jsonText = "";
   let matched = false;
   for (const p of prefixes) {
@@ -272,8 +272,8 @@ function parseSharedCropvibeContent(body: string): HomePost | null {
       // fall through
     }
   }
-  const link = lines.find((line) => line.includes("/reel/")) || "";
-  const idMatch = link.match(/\/reel\/(\d+)/i);
+  const link = lines.find((line) => /\/(reel|watch)\//i.test(line)) || "";
+  const idMatch = link.match(/\/(?:reel|watch)\/(\d+)/i);
   const legacyId = idMatch ? Number(idMatch[1]) : NaN;
   if (!Number.isFinite(legacyId) || legacyId <= 0) return null;
   return {

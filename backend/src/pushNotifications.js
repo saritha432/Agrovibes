@@ -204,6 +204,10 @@ function directMessagePushPayload(body) {
     return { excerpt: "Reel", imageUrl: null };
   }
 
+  if (text.startsWith("[Cropvibe Post]")) {
+    return { excerpt: "Post", imageUrl: null };
+  }
+
   if (text.startsWith("[Cropvibe Profile]")) {
     return { excerpt: "Profile", imageUrl: null };
   }

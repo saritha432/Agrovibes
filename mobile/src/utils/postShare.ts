@@ -1,21 +1,56 @@
 import { Linking, Share } from "react-native";
 import { getWebAppOrigin, type HomePost } from "../services/api";
 
+export function postShareKind(post: HomePost): "reel" | "post" {
+  const cap = String(post.caption || "").trim();
+  if (/^\[REEL\]/i.test(cap)) return "reel";
+  if (/^\[POST\]/i.test(cap)) return "post";
+  return String(post.videoUrl || "").trim() ? "reel" : "post";
+}
+
+export function buildPostSharePrefix(post: HomePost) {
+  return postShareKind(post) === "reel" ? "[Cropvibe Reel]" : "[Cropvibe Post]";
+}
+
 export function buildPostShareLink(post: HomePost) {
+  const segment = postShareKind(post) === "reel" ? "reel" : "watch";
+  return `${getWebAppOrigin()}/${segment}/${encodeURIComponent(String(post.id))}`;
+}
+
+/** Public link used for WhatsApp / system share previews (always /reel/ for one OG page). */
+export function buildExternalShareLink(post: HomePost) {
   return `${getWebAppOrigin()}/reel/${encodeURIComponent(String(post.id))}`;
+}
+
+export function stripShareCaption(caption?: string | null) {
+  return String(caption || "")
+    .replace(/^\[(?:POST|REEL|LIVE|STORY)\]\s*/i, "")
+    .trim();
+}
+
+/** Instagram-style text: `user on Cropvibe: "caption..."` + link */
+export function buildInstagramStyleShareText(post: HomePost, authorName?: string) {
+  const author = String(authorName || post.userName || "Someone").trim() || "Someone";
+  const cap = stripShareCaption(post.caption);
+  const snippet = cap.length > 80 ? `${cap.slice(0, 77).trim()}...` : cap;
+  const quote = snippet ? `: "${snippet}"` : "";
+  return `${author} on Cropvibe${quote}\n${buildExternalShareLink(post)}`;
 }
 
 export function buildPostShareMessage(
   post: HomePost,
-  opts: { intro: string; caption: string }
+  opts?: { intro?: string; caption?: string; authorName?: string }
 ) {
-  const link = buildPostShareLink(post);
-  const caption = opts.caption ? `\n${opts.caption}` : "";
-  return `${opts.intro}${caption}\n${link}`;
+  if (opts?.intro || opts?.caption) {
+    const link = buildExternalShareLink(post);
+    const caption = opts.caption ? `\n${opts.caption}` : "";
+    return `${opts.intro}${caption}\n${link}`;
+  }
+  return buildInstagramStyleShareText(post, opts?.authorName);
 }
 
-export function buildReelChatMessage(post: HomePost) {
-  return `[Cropvibe Reel]\n${JSON.stringify({
+export function buildPostChatMessage(post: HomePost) {
+  return `${buildPostSharePrefix(post)}\n${JSON.stringify({
     id: post.id,
     userId: post.userId ?? null,
     userName: post.userName,
@@ -35,9 +70,13 @@ export function buildReelChatMessage(post: HomePost) {
     createdAt: post.createdAt || new Date().toISOString(),
     viewerHasLiked: post.viewerHasLiked,
     viewerHasSaved: post.viewerHasSaved,
-    link: buildPostShareLink(post)
+    link: buildExternalShareLink(post),
+    kind: postShareKind(post)
   })}`;
 }
+
+/** @deprecated Use buildPostChatMessage */
+export const buildReelChatMessage = buildPostChatMessage;
 
 export async function openExternalWithFallback(primaryUrl: string, fallbackUrl: string) {
   try {

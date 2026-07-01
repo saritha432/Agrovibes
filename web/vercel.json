@@ -5,6 +5,10 @@
       "destination": "https://agrovibes.onrender.com/api/share/reel/:id"
     },
     {
+      "source": "/watch/:id",
+      "destination": "https://agrovibes.onrender.com/api/share/watch/:id"
+    },
+    {
       "source": "/((?!\\.well-known).*)",
       "destination": "/index.html"
     }

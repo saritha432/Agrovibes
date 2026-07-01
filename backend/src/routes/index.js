@@ -5840,13 +5840,13 @@ router.post("/v1/payments/razorpay/verify", (req, res) => {
   res.json({ ok: true, mock: false });
 });
 
-router.get("/share/reel/:postId", async (req, res) => {
+async function handleSharePostPage(req, res, sharePath = "reel") {
   try {
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
     const postId = Number(req.params.postId);
     if (!Number.isFinite(postId) || postId <= 0) {
-      res.status(400).send("Invalid reel link");
+      res.status(400).send("Invalid link");
       return;
     }
     const result = await query(
@@ -5867,7 +5867,7 @@ router.get("/share/reel/:postId", async (req, res) => {
       [postId]
     );
     if (!result.rows[0]) {
-      res.status(404).send("Reel not found");
+      res.status(404).send("Post not found");
       return;
     }
     const post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
@@ -5876,12 +5876,16 @@ router.get("/share/reel/:postId", async (req, res) => {
     res.send(
       buildShareReelHtml(post, {
         postId,
-        userAgent: req.headers["user-agent"] || ""
+        userAgent: req.headers["user-agent"] || "",
+        sharePath
       })
     );
   } catch (error) {
-    res.status(500).send("Failed to load reel");
+    res.status(500).send("Failed to load post");
   }
-});
+}
+
+router.get("/share/reel/:postId", (req, res) => void handleSharePostPage(req, res, "reel"));
+router.get("/share/watch/:postId", (req, res) => void handleSharePostPage(req, res, "watch"));
 
 module.exports = router;

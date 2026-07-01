@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { formatDisplayName, formatReelCaption, stripInternalCaptionPrefix } from "../localization/feedDisplay";
+import { formatDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   fetchMessageThreads,
@@ -27,7 +27,10 @@ import { APP_LIME } from "../theme/appColors";
 import {
   buildPostShareLink,
   buildPostShareMessage,
-  buildReelChatMessage,
+  buildPostChatMessage,
+  buildExternalShareLink,
+  buildInstagramStyleShareText,
+  postShareKind,
   sharePostToMessenger,
   sharePostToSnapchat,
   sharePostToSystem,
@@ -79,6 +82,8 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
   );
   const [search, setSearch] = React.useState("");
   const [busyUserId, setBusyUserId] = React.useState<number | null>(null);
+  const [sendingSelected, setSendingSelected] = React.useState(false);
+  const [selectedIds, setSelectedIds] = React.useState<Set<number>>(() => new Set());
   const [recipients, setRecipients] = React.useState<SharePeer[]>([]);
 
   const gridItemWidth = React.useMemo(() => {
@@ -88,7 +93,10 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
 
   React.useEffect(() => {
     if (!visible || !token || !user?.id) {
-      if (!visible) setSearch("");
+      if (!visible) {
+        setSearch("");
+        setSelectedIds(new Set());
+      }
       return;
     }
     let cancelled = false;
@@ -151,12 +159,10 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
 
   const shareText = React.useMemo(() => {
     if (!post) return "";
-    const caption = formatReelCaption(stripInternalCaptionPrefix(post.caption || ""), appLanguage, t);
-    const intro = t("shareReelMessage", { name: formatDisplayName(post.userName, appLanguage, t) });
-    return buildPostShareMessage(post, { intro, caption });
+    return buildInstagramStyleShareText(post, formatDisplayName(post.userName, appLanguage, t));
   }, [appLanguage, post, t]);
 
-  const shareLink = React.useMemo(() => (post ? buildPostShareLink(post) : ""), [post]);
+  const shareLink = React.useMemo(() => (post ? buildExternalShareLink(post) : ""), [post]);
 
   const filteredRecipients = React.useMemo(() => {
     const q = normalizeIdentity(search);
@@ -165,18 +171,59 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
       .slice(0, 48);
   }, [recipients, search]);
 
+  const toggleRecipient = (recipientId: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(recipientId)) next.delete(recipientId);
+      else next.add(recipientId);
+      return next;
+    });
+  };
+
   const sendToChat = async (recipient: SharePeer) => {
     if (!token || !post) return;
     setBusyUserId(recipient.id);
     try {
-      await sendDirectMessage(token, recipient.id, buildReelChatMessage(post));
+      await sendDirectMessage(token, recipient.id, buildPostChatMessage(post));
       onClose();
       setSearch("");
-      Alert.alert(t("sentTitle"), t("reelSentTo", { name: formatDisplayName(recipient.name, appLanguage, t) }));
+      setSelectedIds(new Set());
+      const kind = postShareKind(post);
+      Alert.alert(
+        t("sentTitle"),
+        kind === "reel"
+          ? t("reelSentTo", { name: formatDisplayName(recipient.name, appLanguage, t) })
+          : t("postSentTo", { name: formatDisplayName(recipient.name, appLanguage, t) })
+      );
     } catch {
       Alert.alert(t("sendFailed"), t("sendFailedReel"));
     } finally {
       setBusyUserId(null);
+    }
+  };
+
+  const sendSelected = async () => {
+    if (!token || !post || selectedIds.size === 0 || sendingSelected) return;
+    const targets = recipients.filter((r) => selectedIds.has(r.id));
+    if (!targets.length) return;
+    setSendingSelected(true);
+    try {
+      await Promise.all(targets.map((recipient) => sendDirectMessage(token, recipient.id, buildPostChatMessage(post))));
+      onClose();
+      setSearch("");
+      setSelectedIds(new Set());
+      Alert.alert(
+        t("sentTitle"),
+        targets.length === 1
+          ? postShareKind(post) === "reel"
+            ? t("reelSentTo", { name: formatDisplayName(targets[0].name, appLanguage, t) })
+            : t("postSentTo", { name: formatDisplayName(targets[0].name, appLanguage, t) })
+          : t("shareSentToMany", { count: targets.length })
+      );
+    } catch {
+      Alert.alert(t("sendFailed"), t("sendFailedReel"));
+    } finally {
+      setSendingSelected(false);
     }
   };
 
@@ -282,6 +329,19 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
         >
           <View style={styles.handle} />
 
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t("share")}</Text>
+            <Pressable
+              style={[styles.sendBtn, selectedIds.size > 0 && !sendingSelected ? styles.sendBtnActive : styles.sendBtnDisabled]}
+              onPress={() => void sendSelected()}
+              disabled={selectedIds.size === 0 || sendingSelected}
+            >
+              <Text style={[styles.sendBtnText, selectedIds.size > 0 ? styles.sendBtnTextActive : null]}>
+                {sendingSelected ? "..." : t("send")}
+              </Text>
+            </Pressable>
+          </View>
+
           <View style={styles.searchRow}>
             <Ionicons name="search" size={18} color={APP_LIME} />
             <TextInput
@@ -304,34 +364,45 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
           >
             {filteredRecipients.length ? (
               <View style={styles.peopleGrid}>
-                {filteredRecipients.map((recipient) => (
+                {filteredRecipients.map((recipient) => {
+                  const selected = selectedIds.has(recipient.id);
+                  return (
                   <Pressable
                     key={recipient.id}
                     style={[styles.personItem, { width: gridItemWidth }]}
-                    onPress={() => void sendToChat(recipient)}
-                    disabled={busyUserId === recipient.id}
+                    onPress={() => toggleRecipient(recipient.id)}
+                    onLongPress={() => void sendToChat(recipient)}
+                    disabled={busyUserId === recipient.id || sendingSelected}
                   >
-                    <View style={styles.personAvatarWrap}>
+                    <View style={[styles.personAvatarWrap, selected ? styles.personAvatarSelected : null]}>
                       {busyUserId === recipient.id ? (
                         <View style={styles.personAvatarBusy}>
                           <Ionicons name="checkmark" size={22} color={APP_LIME} />
                         </View>
                       ) : (
-                        <UserAvatar
-                          uri={recipient.avatarUrl}
-                          name={recipient.name}
-                          size={AVATAR_SIZE}
-                          borderRadius={AVATAR_SIZE / 2}
-                          fallbackBackgroundColor="#3a3a3c"
-                          initialsColor="#f5f5f5"
-                        />
+                        <>
+                          <UserAvatar
+                            uri={recipient.avatarUrl}
+                            name={recipient.name}
+                            size={AVATAR_SIZE}
+                            borderRadius={AVATAR_SIZE / 2}
+                            fallbackBackgroundColor="#3a3a3c"
+                            initialsColor="#f5f5f5"
+                          />
+                          {selected ? (
+                            <View style={styles.personSelectedBadge}>
+                              <Ionicons name="checkmark" size={14} color="#111" />
+                            </View>
+                          ) : null}
+                        </>
                       )}
                     </View>
                     <Text style={styles.personName} numberOfLines={2}>
                       {recipient.name}
                     </Text>
                   </Pressable>
-                ))}
+                  );
+                })}
               </View>
             ) : (
               <Text style={styles.emptyText}>{t("noChatsFound")}</Text>
@@ -381,7 +452,40 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: APP_LIME,
-    marginBottom: 16
+    marginBottom: 12
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12
+  },
+  sheetTitle: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800"
+  },
+  sendBtn: {
+    minWidth: 64,
+    height: 34,
+    borderRadius: 17,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  sendBtnActive: {
+    backgroundColor: APP_LIME
+  },
+  sendBtnDisabled: {
+    backgroundColor: "#2c2c2e"
+  },
+  sendBtnText: {
+    color: "#8e9499",
+    fontSize: 14,
+    fontWeight: "800"
+  },
+  sendBtnTextActive: {
+    color: "#111111"
   },
   searchRow: {
     height: 44,
@@ -423,6 +527,23 @@ const styles = StyleSheet.create({
     height: AVATAR_SIZE,
     borderRadius: AVATAR_SIZE / 2,
     overflow: "hidden"
+  },
+  personAvatarSelected: {
+    borderWidth: 2,
+    borderColor: APP_LIME
+  },
+  personSelectedBadge: {
+    position: "absolute",
+    right: 2,
+    bottom: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#121212"
   },
   personAvatarBusy: {
     width: AVATAR_SIZE,

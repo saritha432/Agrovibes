@@ -24,6 +24,7 @@ import {
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
@@ -36,7 +37,7 @@ import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBr
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
-import { AppTopBar } from "../components/AppTopBar";
+import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
 import { UserAvatar } from "../components/UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
@@ -1136,20 +1137,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const appIsActive = useAppIsActive();
   const [feedPlaybackSuspended, setFeedPlaybackSuspended] = useState(false);
   const canPlayMedia = appIsActive && isFocused && !feedPlaybackSuspended;
-  /** Home feed header: Android window already clears the status bar (translucent: false). */
-  const homeTopInset = useMemo(() => {
-    if (Platform.OS === "android") return 0;
-    return Math.max(insets.top, 12) + 6;
-  }, [insets.top]);
 
-  /** Story / fullscreen reel chrome over translucent status bar — use full safe area, no cap. */
-  const modalTopInset = useMemo(() => {
-    if (Platform.OS === "android") {
-      const sbh = StatusBar.currentHeight ?? 0;
-      return Math.max(insets.top, sbh) + 8;
-    }
-    return Math.max(insets.top, 12) + 10;
-  }, [insets.top]);
+  const modalTopInset = useModalTopChromeInset();
 
   const homeTabLabel = React.useCallback(
     (tab: HomeTopTab) => {
@@ -1583,6 +1572,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
   const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends";
   const isLiveTab = activeHomeTab === "live";
+
+  const feedKeepsScreenOn =
+    canPlayMedia &&
+    playingPostId != null &&
+    (isReelSurfaceTab || !!reelViewerOpen || isStoryOpen || isLiveTab);
+
+  useEffect(() => {
+    if (!feedKeepsScreenOn) {
+      deactivateKeepAwake("feed-reels");
+      return;
+    }
+    void activateKeepAwakeAsync("feed-reels");
+    return () => {
+      deactivateKeepAwake("feed-reels");
+    };
+  }, [feedKeepsScreenOn]);
 
   const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
     if (!postHasViewableMedia(post)) return;
@@ -3163,7 +3168,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const listHeader = useMemo(
     () => (
-      <View style={[styles.homeTopChrome, { paddingTop: homeTopInset }]}>
+      <View style={styles.homeTopChrome}>
         <AppTopBar />
 
         <ScrollView
@@ -3339,7 +3344,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       avatarLookup,
       displayPersonName,
       homeTabLabel,
-      homeTopInset,
       isReelSurfaceTab,
       isLiveTab,
       onOpenCreate,
@@ -4171,7 +4175,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 uri={activeStory.videoUrl}
                 shouldPlay={!storyHoldPaused}
                 containerWidth={storyViewport.width || windowWidth}
-                containerHeight={storyViewport.height || Math.max(1, windowHeight - 140)}
+                containerHeight={storyViewport.height || windowHeight}
                 fit="contain"
                 isLooping={false}
                 isMuted={false}
@@ -5249,6 +5253,10 @@ const styles = StyleSheet.create({
   reelCarouselDots: { bottom: 88 },
   storyViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
   storyViewerTopChrome: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
     zIndex: 4
   },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 4 },
@@ -5261,7 +5269,6 @@ const styles = StyleSheet.create({
   storyViewerName: { color: "#fff", fontWeight: "800" },
   storyViewerBody: {
     flex: 1,
-    marginTop: 10,
     minHeight: 0,
     width: "100%",
     alignSelf: "stretch",

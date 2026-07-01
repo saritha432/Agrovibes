@@ -10,7 +10,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  StatusBar,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +20,7 @@ import {
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
@@ -30,7 +30,7 @@ import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUr
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import { UserAvatar } from "./UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
-import { PostShareSheet } from "./PostShareSheet";
+import { PostShareSheet, type SharePeer } from "./PostShareSheet";
 import { ReelSeekBar } from "./ReelSeekBar";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -54,6 +54,7 @@ import {
   setLocalPostLikedByIdentity
 } from "../social/localEngagementStore";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
+import { useModalTopChromeInset } from "./AppTopBar";
 
 import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
 const REEL_LIKE_COLOR = "#ffffff";
@@ -78,6 +79,8 @@ export type PostsReelViewerModalProps = {
   onPostsChange: (posts: HomePost[]) => void;
   /** When true, viewer can delete posts owned by the signed-in user (profile Posts/Reels tabs). */
   canDeleteOwnPosts?: boolean;
+  followingPeers?: SharePeer[];
+  onAddToStory?: (post: HomePost) => void | Promise<void>;
 };
 
 function normalizeIdentity(value: string) {
@@ -487,7 +490,9 @@ export function PostsReelViewerModal({
   initialIndex,
   onClose,
   onPostsChange,
-  canDeleteOwnPosts = false
+  canDeleteOwnPosts = false,
+  followingPeers,
+  onAddToStory
 }: PostsReelViewerModalProps) {
   const { user, token } = useAuth();
   const { t, language } = useLanguage();
@@ -529,6 +534,18 @@ export function PostsReelViewerModal({
       postLikedByIdRef.current[p.id] = !!p.viewerHasLiked;
     }
   }, [viewerPosts]);
+
+  useEffect(() => {
+    const keepOn = visible && playingPostId != null && !reelUserPaused;
+    if (!keepOn) {
+      deactivateKeepAwake("reel-viewer");
+      return;
+    }
+    void activateKeepAwakeAsync("reel-viewer");
+    return () => {
+      deactivateKeepAwake("reel-viewer");
+    };
+  }, [visible, playingPostId, reelUserPaused]);
 
   const readPostEngagement = useCallback((postId: number, fallback?: HomePost) => {
     const p = viewerPostsRef.current.find((row) => row.id === postId) || fallback;
@@ -1116,11 +1133,7 @@ export function PostsReelViewerModal({
 
   const safeInitialIndex =
     visible && viewerPosts.length > 0 ? Math.max(0, Math.min(initialIndex, viewerPosts.length - 1)) : 0;
-  const reelTopInset = React.useMemo(() => {
-    const sbh = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
-    const webPad = Platform.OS === "web" ? 12 : 0;
-    return Math.max(insets.top, sbh, webPad);
-  }, [insets.top]);
+  const modalTopInset = useModalTopChromeInset();
 
   useEffect(() => {
     if (!visible || windowHeight <= 0 || safeInitialIndex <= 0) return;
@@ -1136,7 +1149,7 @@ export function PostsReelViewerModal({
     <>
       <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={onClose}>
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
-          <View style={[styles.reelViewerTopChrome, { paddingTop: reelTopInset + 24 }]} pointerEvents="box-none">
+          <View style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset }]} pointerEvents="box-none">
             <Pressable onPress={onClose} hitSlop={14} style={styles.reelViewerBackBtn} accessibilityRole="button" accessibilityLabel="Go back">
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
@@ -1267,6 +1280,8 @@ export function PostsReelViewerModal({
         visible={!!shareTargetPost}
         post={shareTargetPost}
         onClose={() => setShareTargetPost(null)}
+        followingPeers={followingPeers}
+        onAddToStory={onAddToStory}
       />
     </>
   );

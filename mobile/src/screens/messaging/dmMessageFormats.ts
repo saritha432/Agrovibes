@@ -212,6 +212,7 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
 
   if (text.startsWith("[Cropvibe Live]")) return t("sharedLive");
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return t("sharedReel");
+  if (text.startsWith("[Cropvibe Post]")) return t("sharedPost");
   if (text.startsWith("[Cropvibe Profile]")) return t("sharedProfile");
 
   return text;
