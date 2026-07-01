@@ -645,8 +645,7 @@ export function PostsReelViewerModal({
             p.id === postId
               ? {
                   ...p,
-                  viewerHasLiked: localResult.liked,
-                  likesCount: Math.max(0, Number(localResult.likesCount ?? p.likesCount) || 0)
+                  viewerHasLiked: localResult.liked
                 }
               : p
           )

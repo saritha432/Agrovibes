@@ -2627,8 +2627,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ).then((localResult) => {
         updatePostById(post.id, (p) => ({
           ...p,
-          viewerHasLiked: localResult.liked,
-          likesCount: Math.max(0, Number(localResult.likesCount ?? p.likesCount) || 0)
+          viewerHasLiked: localResult.liked
         }));
         postLikedByIdRef.current = { ...postLikedByIdRef.current, [post.id]: localResult.liked };
       });
@@ -4275,7 +4274,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           </View>
           {reelMuteFeedback &&
           !reelUserPaused &&
-          postShowsVolumeControl(reelViewerOpen?.posts.find((p) => p.id === playingPostId) ?? {}) ? (
+          reelViewerOpen?.posts.some((p) => p.id === playingPostId && postShowsVolumeControl(p)) ? (
             <View style={styles.reelMuteFeedbackLayer} pointerEvents="none">
               <View style={styles.reelMuteFeedbackBubble}>
                 <Ionicons
