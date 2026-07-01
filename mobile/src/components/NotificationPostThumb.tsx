@@ -1,14 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import { ResizeMode, Video } from "expo-av";
 import React from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import { fetchHomePost, type HomePost } from "../services/api";
 import { reelGridStillUri } from "../utils/reelGrid";
-import {
-  resolveNotificationVideoThumbnail,
-  resolveReelPreviewUri,
-  staticReelPreviewUri
-} from "../utils/reelPreviewThumb";
+import { staticReelPreviewUri } from "../utils/reelPreviewThumb";
 import { sanitizeHomePost } from "../utils/mediaUrls";
+import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
 type NotificationPostThumbProps = {
   postId?: number | null;
@@ -41,7 +39,64 @@ function toPreviewPost(props: NotificationPostThumbProps): HomePost | null {
   });
 }
 
-/** Notification reel/post thumb — one still at a time; extracts a video frame only when no image URL exists. */
+/** Paused video frame — reliable reel preview when no thumbnail image exists. */
+function NotificationVideoFrame({ uri }: { uri: string }) {
+  const videoRef = React.useRef<Video | null>(null);
+  const [ready, setReady] = React.useState(false);
+  const playback = videoPlaybackUrl(uri);
+
+  React.useEffect(() => {
+    setReady(false);
+  }, [playback]);
+
+  const primeFrame = React.useCallback(async () => {
+    const player = videoRef.current;
+    if (!player) return;
+    try {
+      await player.setPositionAsync(400);
+      await player.pauseAsync();
+      setReady(true);
+    } catch {
+      setReady(true);
+    }
+  }, []);
+
+  if (!playback) {
+    return (
+      <View style={[styles.image, styles.placeholder]}>
+        <Ionicons name="play" size={18} color="rgba(255,255,255,0.45)" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.image}>
+      {!ready ? (
+        <View style={[StyleSheet.absoluteFillObject, styles.placeholder]}>
+          <Ionicons name="play" size={18} color="rgba(255,255,255,0.45)" />
+        </View>
+      ) : null}
+      <Video
+        ref={videoRef}
+        source={{ uri: playback }}
+        style={[StyleSheet.absoluteFillObject, ready ? null : styles.hiddenVideo]}
+        resizeMode={ResizeMode.COVER}
+        isMuted
+        shouldPlay={false}
+        isLooping={false}
+        useNativeControls={false}
+        onLoad={() => {
+          void primeFrame();
+        }}
+        onReadyForDisplay={() => {
+          void primeFrame();
+        }}
+        onError={() => setReady(false)}
+      />
+    </View>
+  );
+}
+
 export function NotificationPostThumb(props: NotificationPostThumbProps) {
   const post = React.useMemo(() => toPreviewPost(props), [
     props.postId,
@@ -49,55 +104,46 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
     props.postImageUrl,
     props.postVideoUrl
   ]);
-  const [previewUri, setPreviewUri] = React.useState<string | null>(() => stillFromPost(post));
+  const [imageUri, setImageUri] = React.useState<string | null>(() => stillFromPost(post));
+  const [videoUri, setVideoUri] = React.useState<string | null>(() => String(post?.videoUrl || "").trim() || null);
 
   React.useEffect(() => {
     let cancelled = false;
 
-    const applyUri = (uri: string | null) => {
-      if (!cancelled && uri) setPreviewUri(uri);
+    const applyPost = (next: HomePost | null) => {
+      if (!next || cancelled) return;
+      const still = stillFromPost(next);
+      const video = String(next.videoUrl || "").trim();
+      if (still) setImageUri(still);
+      if (video) setVideoUri(video);
     };
 
-    const load = async () => {
-      if (!post) {
-        setPreviewUri(null);
-        return;
-      }
+    applyPost(post);
 
-      const staticUri = stillFromPost(post);
-      if (staticUri) {
-        setPreviewUri(staticUri);
-        return;
-      }
+    const id = Number(props.postId);
+    if (!Number.isFinite(id) || id <= 0) return () => {
+      cancelled = true;
+    };
 
-      const id = Number(props.postId);
+    const needsFetch =
+      !stillFromPost(post) && !String(post?.videoUrl || "").trim();
 
-      if (String(post.videoUrl || "").trim()) {
-        const fromVideo =
-          (await resolveNotificationVideoThumbnail(post.videoUrl, Number.isFinite(id) ? id : undefined)) ||
-          (await resolveReelPreviewUri(post));
-        if (fromVideo) {
-          applyUri(fromVideo);
-          return;
-        }
-      }
+    if (!needsFetch) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
-      if (!Number.isFinite(id) || id <= 0) return;
+    void (async () => {
       try {
         const { post: loaded } = await fetchHomePost(props.token ?? null, id);
         if (cancelled) return;
-        const sanitized = sanitizeHomePost(loaded);
-        const fromLoaded =
-          stillFromPost(sanitized) ||
-          (await resolveNotificationVideoThumbnail(sanitized.videoUrl, id)) ||
-          (await resolveReelPreviewUri(sanitized));
-        applyUri(fromLoaded);
+        applyPost(sanitizeHomePost(loaded));
       } catch {
         // unavailable
       }
-    };
+    })();
 
-    void load();
     return () => {
       cancelled = true;
     };
@@ -105,20 +151,25 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
 
   if (!post) return null;
 
+  const isReel = props.postIsReel || !!videoUri;
+  const showVideo = !imageUri && !!videoUri;
+
   const content = (
     <>
-      {previewUri ? (
-        <Image source={{ uri: previewUri }} style={styles.image} resizeMode="cover" />
+      {imageUri ? (
+        <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+      ) : showVideo ? (
+        <NotificationVideoFrame uri={videoUri} />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <Ionicons
-            name={props.postIsReel || post.videoUrl ? "play" : "image-outline"}
+            name={isReel ? "play" : "image-outline"}
             size={18}
             color="rgba(255,255,255,0.45)"
           />
         </View>
       )}
-      {props.postIsReel || post.videoUrl ? (
+      {isReel ? (
         <View style={styles.playBadge} pointerEvents="none">
           <Ionicons name="play" size={10} color="#111" />
         </View>
@@ -155,6 +206,9 @@ const styles = StyleSheet.create({
   image: {
     width: "100%",
     height: "100%"
+  },
+  hiddenVideo: {
+    opacity: 0
   },
   placeholder: {
     alignItems: "center",
