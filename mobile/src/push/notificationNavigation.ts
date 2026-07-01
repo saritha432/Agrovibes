@@ -1,8 +1,9 @@
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { sendDirectMessage } from "../services/api";
+import { sendDirectMessage, fetchHomePost } from "../services/api";
 import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
+import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
 
@@ -85,6 +86,21 @@ async function clearNotificationReplyUi(response: Notifications.NotificationResp
   }
 }
 
+function scheduleOpenPost(postId: number, authToken?: string | null) {
+  scheduleNotificationNavigation(() => {
+    navigateToJoinLive();
+    void (async () => {
+      try {
+        const token = await resolveAuthToken(authToken);
+        const { post } = await fetchHomePost(token, postId);
+        queueOpenSharedPostViewer(post, true);
+      } catch {
+        // Post may have been removed or network failed.
+      }
+    })();
+  });
+}
+
 async function handleInlineReply(
   response: Notifications.NotificationResponse,
   options?: { authToken?: string | null }
@@ -130,54 +146,66 @@ export async function handleNotificationResponse(
     return;
   }
 
+  let scheduled = false;
+  const schedule = (action: () => void) => {
+    scheduled = true;
+    scheduleNotificationNavigation(action);
+  };
+
   if (type === "incoming_call") {
     const callerId = peerIdFromData(data);
     const roomName = String(data.roomName || "").trim();
     const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
-    if (!callerId || !roomName) return;
-    scheduleNotificationNavigation(() => {
-      navigateToDirectChat({
-        peerUserId: callerId,
-        peerName: title,
-        incomingCall: { roomName, mode, callerId }
+    if (callerId && roomName) {
+      schedule(() => {
+        navigateToDirectChat({
+          peerUserId: callerId,
+          peerName: title,
+          incomingCall: { roomName, mode, callerId }
+        });
       });
-    });
-    return;
-  }
-
-  if (type === "live_share") {
+    }
+  } else if (type === "live_share") {
     const postId = Number(data.postId);
     const senderId = peerIdFromData(data);
     if (Number.isFinite(postId) && postId > 0) {
-      scheduleNotificationNavigation(() => {
+      schedule(() => {
         queueJoinLive(postId);
         navigateToJoinLive();
       });
-      return;
-    }
-    if (senderId) {
-      scheduleNotificationNavigation(() => {
+    } else if (senderId) {
+      schedule(() => {
         navigateToDirectChat({ peerUserId: senderId, peerName: title });
       });
-      return;
+    } else {
+      schedule(() => navigateToDirectInbox());
     }
-    scheduleNotificationNavigation(() => navigateToDirectInbox());
-    return;
-  }
-
-  if (type === "direct_message") {
+  } else if (type === "direct_message") {
     const senderId = peerIdFromData(data);
     if (senderId) {
-      scheduleNotificationNavigation(() => {
+      schedule(() => {
         navigateToDirectChat({ peerUserId: senderId, peerName: title });
       });
-      return;
+    } else {
+      schedule(() => navigateToDirectInbox());
     }
-    scheduleNotificationNavigation(() => navigateToDirectInbox());
-    return;
+  } else if (type === "live_start" || type === "live_scheduled" || type === "live_reminder") {
+    const postId = Number(data.postId);
+    schedule(() => {
+      navigateToJoinLive();
+      if (Number.isFinite(postId) && postId > 0) {
+        queueJoinLive(postId);
+      }
+    });
+  } else if (type === "post_like" || type === "post_comment" || type === "comment_reply") {
+    const postId = Number(data.postId);
+    if (Number.isFinite(postId) && postId > 0) {
+      scheduleOpenPost(postId, options?.authToken);
+      scheduled = true;
+    }
   }
 
-  if (type === "live_start" || type === "live_scheduled" || type === "live_reminder") {
-    scheduleNotificationNavigation(() => navigateToJoinLive());
+  if (scheduled) {
+    runPendingNotificationNavigation();
   }
 }

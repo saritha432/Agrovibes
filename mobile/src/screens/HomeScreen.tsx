@@ -33,6 +33,7 @@ import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navi
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
+import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar } from "../components/AppTopBar";
@@ -101,7 +102,7 @@ import {
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
-import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit } from "../utils/reelGrid";
+import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postHasAttachedMusic, postShowsVolumeControl } from "../utils/reelGrid";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 
 export type OpenCreateOptions = {
@@ -552,8 +553,8 @@ const STORY_TTL_MS = 24 * 60 * 60 * 1000;
 function sortCommentsByTime(a: HomeCommentRow, b: HomeCommentRow) {
   const ta = Date.parse(a.createdAt || "") || 0;
   const tb = Date.parse(b.createdAt || "") || 0;
-  if (ta !== tb) return ta - tb;
-  return String(a.id).localeCompare(String(b.id));
+  if (ta !== tb) return tb - ta;
+  return String(b.id).localeCompare(String(a.id));
 }
 
 /** Roots = top-level comments; children map = direct replies only (sorted). */
@@ -1132,7 +1133,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isFocused = useIsFocused();
   const appIsActive = useAppIsActive();
-  const canPlayMedia = appIsActive && isFocused;
+  const [feedPlaybackSuspended, setFeedPlaybackSuspended] = useState(false);
+  const canPlayMedia = appIsActive && isFocused && !feedPlaybackSuspended;
   /** Home feed header: Android window already clears the status bar (translucent: false). */
   const homeTopInset = useMemo(() => {
     if (Platform.OS === "android") return 0;
@@ -1325,6 +1327,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useEffect(() => {
     postLikedByIdRef.current = Object.fromEntries(posts.map((p) => [p.id, !!p.viewerHasLiked]));
   }, [posts]);
+
+  useEffect(() => {
+    return subscribeFeedPlaybackSuspended((suspended) => {
+      setFeedPlaybackSuspended(suspended);
+      if (!suspended && Platform.OS !== "web") {
+        void Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+          shouldDuckAndroid: true,
+          interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+          playThroughEarpieceAndroid: false
+        });
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -1610,7 +1629,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setWatchingLivePost(post);
   }, []);
 
-  const activeLivePosts = useMemo(() => buildLiveFeed(posts), [posts]);
+  const activeLivePosts = useMemo(
+    () => buildLiveFeed(posts, viewerUserId, followingUserIds),
+    [posts, viewerUserId, followingUserIds]
+  );
   const feedPollInFlightRef = useRef(false);
 
   useFocusEffect(
@@ -3006,7 +3028,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setCommentsByPost((prev) => {
           const list = prev[post.id] ?? [];
           const withoutDup = list.filter((c) => String(c.id) !== row.id);
-          return { ...prev, [post.id]: [...withoutDup, row] };
+          return { ...prev, [post.id]: [row, ...withoutDup] };
         });
         setPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, commentsCount: res.commentsCount } : p)));
         setCommentDraft("");
@@ -3026,7 +3048,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       return {
         ...prev,
         [post.id]: [
-          ...list,
           {
             id: `c-${Date.now()}`,
             user: user?.fullName || "You",
@@ -3035,7 +3056,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             createdAt: nowIso,
             parentCommentId: parentIdStr,
             ...(user?.avatarUrl && String(user.avatarUrl).trim() ? { avatarUrl: String(user.avatarUrl).trim() } : {})
-          }
+          },
+          ...list
         ]
       };
     });
@@ -3354,7 +3376,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
       const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
-      const hasMusicTrack = !!post.musicAudioUrl?.trim();
+      const hasMusicTrack = postHasAttachedMusic(post);
+      const showVolumeControl = postShowsVolumeControl(post);
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
 
       return (
@@ -3593,18 +3616,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
-              <Pressable
-                style={styles.reelActionItem}
-                onPress={() => setIsReelMuted((v) => !v)}
-                accessibilityRole="button"
-                accessibilityLabel={isReelMuted ? "Unmute reel" : "Mute reel"}
-              >
-                <Ionicons
-                  name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"}
-                  size={REEL_ACTION_ICON}
-                  color="#fff"
-                />
-              </Pressable>
+              {showVolumeControl ? (
+                <Pressable
+                  style={styles.reelActionItem}
+                  onPress={() => setIsReelMuted((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={isReelMuted ? "Unmute reel" : "Mute reel"}
+                >
+                  <Ionicons
+                    name={isReelMuted ? "volume-mute-outline" : "volume-high-outline"}
+                    size={REEL_ACTION_ICON}
+                    color="#fff"
+                  />
+                </Pressable>
+              ) : null}
               {thumbUri ? (
                 <Image source={{ uri: thumbUri }} style={styles.reelDiscThumb} />
               ) : (
@@ -3939,6 +3964,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           {listHeader}
           <LiveHomeSection
             posts={posts}
+            viewerUserId={viewerUserId}
+            followingUserIds={followingUserIds}
             joinPostId={liveJoinPostId}
             onJoinConsumed={() => setLiveJoinPostId(null)}
             onOpenCreate={() => onOpenCreate?.("live")}
@@ -4212,7 +4239,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
           </View>
-          {reelMuteFeedback && !reelUserPaused ? (
+          {reelMuteFeedback &&
+          !reelUserPaused &&
+          postShowsVolumeControl(reelViewerOpen?.posts.find((p) => p.id === playingPostId) ?? {}) ? (
             <View style={styles.reelMuteFeedbackLayer} pointerEvents="none">
               <View style={styles.reelMuteFeedbackBubble}>
                 <Ionicons

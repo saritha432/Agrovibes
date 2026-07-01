@@ -17,6 +17,16 @@ export function isReelPost(post: HomePost): boolean {
   return Boolean(String(post.videoUrl || "").trim());
 }
 
+/** True when the creator attached a separate music/audio track (plays alongside muted video). */
+export function postHasAttachedMusic(post: HomePost): boolean {
+  return Boolean(String(post.musicAudioUrl ?? "").trim());
+}
+
+/** Show volume/mute control when the post can play audio (video soundtrack or attached music). */
+export function postShowsVolumeControl(post: HomePost): boolean {
+  return postHasAttachedMusic(post) || Boolean(String(post.videoUrl ?? "").trim());
+}
+
 /** Prefer a still image in explore/profile reel grids. */
 export function reelGridStillUri(post: HomePost): string | null {
   const th = post.thumbnailUrl?.trim();

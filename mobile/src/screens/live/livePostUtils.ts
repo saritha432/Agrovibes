@@ -25,8 +25,25 @@ export function findJoinableLivePost(posts: HomePost[], postId: number): HomePos
   return null;
 }
 
-export function buildLiveFeed(posts: HomePost[]): HomePost[] {
-  return posts.filter((p) => isActiveLiveStream(p));
+export function viewerCanSeeLivePost(
+  post: HomePost,
+  viewerUserId: number | undefined,
+  followingUserIds: ReadonlySet<number>
+): boolean {
+  const uid = Number(post.userId);
+  if (!Number.isFinite(uid) || uid <= 0) return false;
+  if (viewerUserId && uid === viewerUserId) return true;
+  return followingUserIds.has(uid);
+}
+
+export function buildLiveFeed(
+  posts: HomePost[],
+  viewerUserId?: number,
+  followingUserIds?: ReadonlySet<number>
+): HomePost[] {
+  const active = posts.filter((p) => isActiveLiveStream(p));
+  if (!followingUserIds) return active;
+  return active.filter((p) => viewerCanSeeLivePost(p, viewerUserId, followingUserIds));
 }
 
 export function buildCompletedLiveFeed(posts: HomePost[]): HomePost[] {

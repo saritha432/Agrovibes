@@ -15,6 +15,7 @@ import type { OpenCreateOptions } from "../screens/HomeScreen";
 import { LearnStackNavigator } from "./LearnStackNavigator";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
 import { subscribeOpenLiveCreate } from "./liveCreateBridge";
+import { setFeedPlaybackSuspended } from "./feedPlaybackBridge";
 import { runPendingNotificationNavigation } from "../push/notificationNavigation";
 import { takePersistedReelDeepLink } from "./pendingReelDeepLink";
 import { fetchHomePost } from "../services/api";
@@ -48,6 +49,11 @@ export function AppNavigator() {
       setCreateOpen(true);
     });
   }, []);
+
+  useEffect(() => {
+    setFeedPlaybackSuspended(isCreateOpen);
+    return () => setFeedPlaybackSuspended(false);
+  }, [isCreateOpen]);
 
   useEffect(() => {
     runPendingNotificationNavigation();

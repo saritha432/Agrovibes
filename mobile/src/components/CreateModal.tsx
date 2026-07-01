@@ -8,6 +8,7 @@ import {
   FlatList,
   Image,
   InteractionManager,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -19,10 +20,9 @@ import {
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { Audio, ResizeMode, Video } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
 import { getNativeVideoThumbnail } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
 import {
@@ -49,10 +49,12 @@ import { LiveKitRoomView } from "../screens/live/LiveKitRoomView";
 import {
   fetchGalleryAlbums,
   fetchGalleryAssets,
+  defaultPostGallerySelection,
   recentsAlbumId,
   type GalleryAlbum,
   type GalleryGridAsset
 } from "../utils/galleryAlbums";
+import { ensureMediaLibraryAccess } from "../utils/mediaLibraryPermission";
 import { APP_LIME, APP_LIME_SOFT_BG } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { UserAvatar } from "./UserAvatar";
@@ -636,6 +638,17 @@ export function CreateModal({
       void stopAudioPreview();
       return;
     }
+    if (Platform.OS !== "web") {
+      void Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: false
+      });
+    }
     setCreateType(initialType === "story" || initialType === "live" ? null : initialType);
     setCreateStep("preview");
     const entry = initialType ?? "story";
@@ -688,7 +701,6 @@ export function CreateModal({
     setAudioSearchError("");
     setComposedImageUri(null);
     setEntrySelectedIds([]);
-    setEntryMultiSelect(false);
     setCaptureEntryView("camera");
     setPostLocation("");
     setLocationDraft("");
@@ -770,6 +782,13 @@ export function CreateModal({
       setGalleryAlbums(albums);
       const assets = await fetchGalleryAssets(selectedAlbumId, entryType);
       setRecentGridAssets(assets);
+      if (entryType === "post") {
+        setEntrySelectedIds((prev) => {
+          const kept = prev.filter((id) => assets.some((a) => a.id === id));
+          if (kept.length) return kept;
+          return defaultPostGallerySelection(assets);
+        });
+      }
     } catch {
       setGalleryAlbums([{ id: recentsAlbumId(), title: "Recents", assetCount: 0 }]);
       setRecentGridAssets([]);
@@ -789,8 +808,12 @@ export function CreateModal({
 
   React.useEffect(() => {
     if (entryType === "live") return;
-    if (entryType === "post") setCaptureEntryView("gallery");
-    else setCaptureEntryView("camera");
+    if (entryType === "post") {
+      setCaptureEntryView("gallery");
+      setEntrySelectedIds([]);
+    } else {
+      setCaptureEntryView("camera");
+    }
   }, [entryType]);
 
   React.useEffect(() => {
@@ -1075,14 +1098,19 @@ export function CreateModal({
           return;
         }
       }
-      setPickedPostAssets(assets);
       const gridIds = assets
         .map((a) => recentGridAssets.find((g) => g.uri === a.uri)?.id)
         .filter((id): id is string => !!id);
-      if (gridIds.length === assets.length) setEntrySelectedIds(gridIds);
-      else setEntrySelectedIds([]);
-      setCreateType("post");
-      setCreateStep("compose");
+      if (gridIds.length === assets.length) {
+        setEntrySelectedIds(gridIds);
+        setPickedPostAssets([]);
+      } else {
+        setPickedPostAssets(assets);
+        setEntrySelectedIds([]);
+      }
+      setCaptureEntryView("gallery");
+      setCreateType(null);
+      setCreateStep("preview");
       return;
     }
   };
@@ -1500,9 +1528,16 @@ export function CreateModal({
   const launchWebOrNativeImageLibrary = async () => {
     const allowMulti = entryType === "post";
     if (Platform.OS !== "web") {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        setErrorText(t("createErrMediaPerm"));
+      const access = await ensureMediaLibraryAccess();
+      if (!access.granted) {
+        if (!access.canAskAgain) {
+          Alert.alert(t("permissionNeeded"), t("createErrMediaPerm"), [
+            { text: "Cancel", style: "cancel" },
+            { text: "Settings", onPress: () => void Linking.openSettings() }
+          ]);
+        } else {
+          setErrorText(t("createErrMediaPerm"));
+        }
         return;
       }
     }
@@ -1530,9 +1565,35 @@ export function CreateModal({
       return;
     }
     if (entryType === "story" || entryType === "reel") {
-      const perm = await MediaLibrary.requestPermissionsAsync();
-      if (!perm.granted) {
-        setErrorText(t("createErrMediaPerm"));
+      const access = await ensureMediaLibraryAccess();
+      if (!access.granted) {
+        if (!access.canAskAgain) {
+          Alert.alert(t("permissionNeeded"), t("createErrMediaPerm"), [
+            { text: "Cancel", style: "cancel" },
+            { text: "Settings", onPress: () => void Linking.openSettings() }
+          ]);
+        }
+        await launchWebOrNativeImageLibrary();
+        return;
+      }
+      setCaptureEntryView("gallery");
+      void refreshGallery();
+      return;
+    }
+    if (entryType === "post") {
+      if (Platform.OS === "web") {
+        await launchWebOrNativeImageLibrary();
+        return;
+      }
+      const access = await ensureMediaLibraryAccess();
+      if (!access.granted) {
+        if (!access.canAskAgain) {
+          Alert.alert(t("permissionNeeded"), t("createErrMediaPerm"), [
+            { text: "Cancel", style: "cancel" },
+            { text: "Settings", onPress: () => void Linking.openSettings() }
+          ]);
+        }
+        await launchWebOrNativeImageLibrary();
         return;
       }
       setCaptureEntryView("gallery");
@@ -1680,7 +1741,7 @@ export function CreateModal({
           }
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           const reelAudio =
-            createType === "reel" && selectedAudioTrack
+            createType === "reel" && selectedAudioTrackId && selectedAudioTrack
               ? {
                   musicLabel: `${selectedAudioTrack.title} · ${selectedAudioTrack.artist}`.slice(0, 240),
                   musicAudioUrl: selectedAudioTrack.previewUrl
@@ -1760,6 +1821,7 @@ export function CreateModal({
   const previewWidth = Dimensions.get("window").width - 32;
   const selectedEntryAsset =
     recentGridAssets.find((a) => a.id === entrySelectedIds[0]) ??
+    recentGridAssets.find((a) => a.mediaType === "image") ??
     (pickedPostAssets[0]?.uri
       ? {
           id: "picked-preview",
@@ -1958,24 +2020,17 @@ export function CreateModal({
             </View>
 
             <View style={styles.igPostEntryPreview}>
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={() => void openEntryGallery()}
-                accessibilityRole="button"
-                accessibilityLabel="Open photo gallery"
-              >
-                {selectedEntryAsset ? (
-                  <Image
-                    source={{ uri: selectedEntryAsset.uri }}
-                    style={styles.igPostEntryPreviewImage}
-                    resizeMode={postPreviewResizeMode}
-                  />
-                ) : (
-                  <View style={styles.igPostEntryPreviewFallback}>
-                    <Ionicons name="images-outline" size={34} color="#fff" />
-                  </View>
-                )}
-              </Pressable>
+              {selectedEntryAsset ? (
+                <Image
+                  source={{ uri: selectedEntryAsset.uri }}
+                  style={styles.igPostEntryPreviewImage}
+                  resizeMode={postPreviewResizeMode}
+                />
+              ) : (
+                <View style={styles.igPostEntryPreviewFallback}>
+                  <Ionicons name="images-outline" size={34} color="#fff" />
+                </View>
+              )}
               <View style={styles.igPostGridOverlay} pointerEvents="none">
                 <View style={styles.igPostGridLineH} />
                 <View style={[styles.igPostGridLineH, { top: "66.666%" }]} />
