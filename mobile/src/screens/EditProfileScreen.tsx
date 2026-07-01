@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useState } from "react";
+import { ensureMediaLibraryAccess } from "../utils/mediaLibraryPermission";
 import * as ImagePicker from "expo-image-picker";
 import type { ImagePickerAsset } from "expo-image-picker";
 import {
@@ -234,8 +235,8 @@ export function EditProfileScreen() {
   };
 
   const pickProfilePhoto = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
+    const access = await ensureMediaLibraryAccess();
+    if (!access.granted) {
       Alert.alert(t("permissionNeeded"), t("photoLibraryPermission"));
       return;
     }

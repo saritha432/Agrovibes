@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
+import { fetchMyAccount } from "../services/api";
 import { clearReelPreviewCache } from "../utils/reelPreviewThumb";
 import { upsertSavedLogin } from "../utils/savedLogins";
 
@@ -26,6 +27,7 @@ interface AuthState {
   loading: boolean;
   signIn: (payload: { token: string; user: AuthUser }) => Promise<void>;
   refreshToken: (token: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (patch: Partial<AuthUser>) => Promise<void>;
 }
@@ -108,7 +110,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const value: AuthState = { token, user, loading, signIn, refreshToken, signOut, updateUser };
+  const refreshUser = React.useCallback(async () => {
+    const t = tokenRef.current;
+    if (!t) return;
+    const data = await fetchMyAccount(t);
+    if (!data?.user) return;
+    await updateUser({
+      id: data.user.id,
+      email: data.user.email,
+      fullName: data.user.fullName,
+      role: data.user.role,
+      phone: data.user.phone,
+      username: data.user.username,
+      avatarUrl: data.user.avatarUrl,
+      bio: data.user.bio,
+      website: data.user.website,
+      locationLabel: data.user.locationLabel
+    });
+  }, [updateUser]);
+
+  const value: AuthState = { token, user, loading, signIn, refreshToken, refreshUser, signOut, updateUser };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

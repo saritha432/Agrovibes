@@ -140,6 +140,8 @@ function LiveGridCard({ post, width, variant, language, t, onPress }: LiveGridCa
 
 type LiveHomeSectionProps = {
   posts: HomePost[];
+  viewerUserId?: number;
+  followingUserIds?: ReadonlySet<number>;
   joinPostId?: number | null;
   onJoinConsumed?: () => void;
   onOpenCreate?: () => void;
@@ -153,6 +155,8 @@ type LiveHomeSectionProps = {
 
 export function LiveHomeSection({
   posts,
+  viewerUserId,
+  followingUserIds,
   joinPostId,
   onJoinConsumed,
   onOpenCreate,
@@ -172,7 +176,10 @@ export function LiveHomeSection({
   const watching = watchingPostProp !== undefined ? watchingPostProp : watchingLocal;
   const setWatching = onWatchingChange ?? setWatchingLocal;
 
-  const activeLivePosts = React.useMemo(() => buildLiveFeed(posts), [posts]);
+  const activeLivePosts = React.useMemo(
+    () => buildLiveFeed(posts, viewerUserId, followingUserIds),
+    [posts, viewerUserId, followingUserIds]
+  );
   const completedLivePosts = React.useMemo(() => buildCompletedLiveFeed(posts), [posts]);
   const allLivePosts = React.useMemo(
     () => [...activeLivePosts, ...completedLivePosts],

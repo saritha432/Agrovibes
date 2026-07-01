@@ -5065,7 +5065,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
       FROM home_post_comments c
       JOIN learn_users u ON u.id = c.user_id
       WHERE c.post_id = $1
-      ORDER BY c.created_at ASC
+      ORDER BY c.created_at DESC
       `,
       [postId]
     );
