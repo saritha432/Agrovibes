@@ -204,6 +204,10 @@ function directMessagePushPayload(body) {
     return { excerpt: "Reel", imageUrl: null };
   }
 
+  if (text.startsWith("[Cropvibe Post]")) {
+    return { excerpt: "Post", imageUrl: null };
+  }
+
   if (text.startsWith("[Cropvibe Profile]")) {
     return { excerpt: "Profile", imageUrl: null };
   }
@@ -263,13 +267,15 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
   const image = String(imageUrl || "").trim();
   const hasImage = /^https?:\/\//i.test(image);
 
-  // Chat reply actions require a data-only FCM payload on Android so Expo can attach
-  // the registered DIRECT_MESSAGE category (Reply + inline text input).
-  if (categoryId === "DIRECT_MESSAGE") {
+  // Chat reply + incoming call actions require a data-only FCM payload on Android so Expo
+  // can attach the registered notification categories (Reply / Decline / Accept).
+  const isIncomingCallCategory =
+    categoryId === "INCOMING_VOICE_CALL" || categoryId === "INCOMING_VIDEO_CALL";
+  if (categoryId === "DIRECT_MESSAGE" || isIncomingCallCategory) {
     payloadData.title = pushTitle;
     payloadData.message = pushBody;
     payloadData.categoryId = String(categoryId);
-    payloadData.channelId = "direct_messages";
+    payloadData.channelId = isIncomingCallCategory ? "incoming_calls" : "direct_messages";
     payloadData.priority = "high";
     if (hasImage) payloadData.image = image;
 
@@ -281,7 +287,8 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
       },
       apns: {
         headers: {
-          "apns-priority": "10"
+          "apns-priority": "10",
+          ...(isIncomingCallCategory ? { "apns-push-type": "alert" } : {})
         },
         payload: {
           aps: {
@@ -291,6 +298,7 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
             },
             sound: "default",
             category: String(categoryId),
+            ...(isIncomingCallCategory ? { "interruption-level": "time-sensitive" } : {}),
             ...(hasImage ? { "mutable-content": 1 } : {})
           }
         },
@@ -390,16 +398,23 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
   });
 }
 
-async function sendIncomingCallPush({ userId, callerName, mode, roomName, callerId }) {
-  const label = mode === "video" ? "Incoming video call" : "Incoming voice call";
+async function sendIncomingCallPush({ userId, callerName, mode, roomName, callerId, callerAvatarUrl }) {
+  const isVideo = mode === "video";
+  const label = isVideo ? "Incoming video call" : "Incoming voice call";
+  const categoryId = isVideo ? "INCOMING_VIDEO_CALL" : "INCOMING_VOICE_CALL";
+  const avatar = String(callerAvatarUrl || "").trim();
+  const imageUrl = /^https?:\/\//i.test(avatar) ? avatar : null;
   return sendPushToUser(userId, {
     title: String(callerName || "Someone").trim() || "Someone",
     body: label,
+    categoryId,
+    imageUrl,
     data: {
       type: "incoming_call",
-      mode: mode === "video" ? "video" : "voice",
+      mode: isVideo ? "video" : "voice",
       roomName: String(roomName || ""),
-      callerId: callerId != null ? String(callerId) : ""
+      callerId: callerId != null ? String(callerId) : "",
+      callerAvatarUrl: avatar
     }
   });
 }

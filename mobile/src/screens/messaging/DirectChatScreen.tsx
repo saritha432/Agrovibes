@@ -42,6 +42,7 @@ import {
   isSocketChatConnected
 } from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
+import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
 import {
   hydrateLiveShareFromFeed,
   isJoinableLiveShare,
@@ -233,7 +234,7 @@ function dmReplyQuoteThumbUri(body: string, hydratedPost?: HomePost | null): str
 }
 
 function parseSharedCropvibeContent(body: string): HomePost | null {
-  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]"];
+  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]", "[Cropvibe Post]"];
   let jsonText = "";
   let matched = false;
   for (const p of prefixes) {
@@ -299,8 +300,8 @@ function parseSharedCropvibeContent(body: string): HomePost | null {
       // fall through
     }
   }
-  const link = lines.find((line) => line.includes("/reel/")) || "";
-  const idMatch = link.match(/\/reel\/(\d+)/i);
+  const link = lines.find((line) => /\/(reel|watch)\//i.test(line)) || "";
+  const idMatch = link.match(/\/(?:reel|watch)\/(\d+)/i);
   const legacyId = idMatch ? Number(idMatch[1]) : NaN;
   if (!Number.isFinite(legacyId) || legacyId <= 0) return null;
   return {
@@ -411,7 +412,7 @@ async function hydrateSharedPostsById(postIds: number[], token: string): Promise
 
 export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
   const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall } = route.params;
@@ -857,15 +858,16 @@ export function DirectChatScreen() {
 
   useEffect(() => {
     if (!incomingCall?.roomName) return;
-    callHistorySentRef.current = false;
-    setCallSession({
+    presentIncomingCallFromPush({
+      callerId: incomingCall.callerId,
+      callerName: peerName,
+      callerAvatarUrl: peerAvatar,
       roomName: incomingCall.roomName,
       mode: incomingCall.mode,
-      connectEnabled: false,
-      direction: "incoming",
-      statusLabel: incomingCall.mode === "video" ? "Incoming video call" : "Incoming voice call"
+      autoAccept: incomingCall.autoAccept
     });
-  }, [incomingCall?.mode, incomingCall?.roomName]);
+    navigation.setParams({ incomingCall: undefined });
+  }, [incomingCall, navigation, peerAvatar, peerName]);
 
   const startCall = async (mode: DirectCallMode) => {
     if (!token || Platform.OS === "web") {
@@ -1425,10 +1427,14 @@ export function DirectChatScreen() {
         visible={chatMediaViewer != null}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setChatMediaViewer(null)}
       >
         <View style={styles.chatMediaViewerBackdrop}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setChatMediaViewer(null)} />
+          <Pressable
+            style={[StyleSheet.absoluteFillObject, styles.chatMediaViewerDismiss]}
+            onPress={() => setChatMediaViewer(null)}
+          />
           <Pressable
             style={[styles.chatMediaViewerClose, { top: insets.top + 8 }]}
             onPress={() => setChatMediaViewer(null)}
@@ -1436,55 +1442,60 @@ export function DirectChatScreen() {
           >
             <Ionicons name="close" size={28} color="#fff" />
           </Pressable>
-          {chatMediaViewer && chatMediaViewer.items.length > 1 ? (
-            <FlatList
-              data={chatMediaViewer.items}
-              horizontal
-              pagingEnabled
-              initialScrollIndex={chatMediaViewer.index}
-              getItemLayout={(_data, index) => ({
-                length: windowWidth,
-                offset: windowWidth * index,
-                index
-              })}
-              keyExtractor={(item, index) => `${item.url}-${index}`}
-              showsHorizontalScrollIndicator={false}
-              renderItem={({ item }) =>
-                item.kind === "image" ? (
-                  <Image
-                    source={{ uri: item.url }}
-                    style={[styles.chatMediaViewerMedia, { width: windowWidth }]}
-                    resizeMode="contain"
-                  />
-                ) : (
-                  <Video
-                    source={{ uri: videoPlaybackUrl(item.url) }}
-                    style={[styles.chatMediaViewerMedia, { width: windowWidth }]}
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay
-                    useNativeControls
-                  />
-                )
-              }
-              onScrollToIndexFailed={() => {
-                // no-op
-              }}
-            />
-          ) : chatMediaViewer?.items[0]?.kind === "image" ? (
-            <Image
-              source={{ uri: chatMediaViewer.items[0].url }}
-              style={styles.chatMediaViewerMedia}
-              resizeMode="contain"
-            />
-          ) : chatMediaViewer?.items[0]?.kind === "video" ? (
-            <Video
-              source={{ uri: videoPlaybackUrl(chatMediaViewer.items[0].url) }}
-              style={styles.chatMediaViewerMedia}
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-              useNativeControls
-            />
-          ) : null}
+          <View style={styles.chatMediaViewerStage} pointerEvents="box-none">
+            {chatMediaViewer && chatMediaViewer.items.length > 1 ? (
+              <FlatList
+                style={styles.chatMediaViewerList}
+                data={chatMediaViewer.items}
+                horizontal
+                pagingEnabled
+                initialScrollIndex={chatMediaViewer.index}
+                getItemLayout={(_data, index) => ({
+                  length: windowWidth,
+                  offset: windowWidth * index,
+                  index
+                })}
+                keyExtractor={(item, index) => `${item.url}-${index}`}
+                showsHorizontalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <View style={[styles.chatMediaViewerPage, { width: windowWidth, height: windowHeight }]}>
+                    {item.kind === "image" ? (
+                      <Image
+                        source={{ uri: item.url }}
+                        style={styles.chatMediaViewerMedia}
+                        resizeMode="contain"
+                      />
+                    ) : (
+                      <Video
+                        source={{ uri: videoPlaybackUrl(item.url) }}
+                        style={styles.chatMediaViewerMedia}
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay
+                        useNativeControls
+                      />
+                    )}
+                  </View>
+                )}
+                onScrollToIndexFailed={() => {
+                  // no-op
+                }}
+              />
+            ) : chatMediaViewer?.items[0]?.kind === "image" ? (
+              <Image
+                source={{ uri: chatMediaViewer.items[0].url }}
+                style={[styles.chatMediaViewerMedia, { width: windowWidth, height: windowHeight }]}
+                resizeMode="contain"
+              />
+            ) : chatMediaViewer?.items[0]?.kind === "video" ? (
+              <Video
+                source={{ uri: videoPlaybackUrl(chatMediaViewer.items[0].url) }}
+                style={[styles.chatMediaViewerMedia, { width: windowWidth, height: windowHeight }]}
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay
+                useNativeControls
+              />
+            ) : null}
+          </View>
         </View>
       </Modal>
     </KeyboardAvoidingView>
@@ -1664,7 +1675,22 @@ const styles = StyleSheet.create({
   replyQuoteText: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18, fontWeight: "600" },
   chatMediaViewerBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.94)",
+    backgroundColor: "rgba(0,0,0,0.94)"
+  },
+  chatMediaViewerDismiss: {
+    zIndex: 0
+  },
+  chatMediaViewerStage: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  chatMediaViewerList: {
+    flex: 1,
+    width: "100%"
+  },
+  chatMediaViewerPage: {
     alignItems: "center",
     justifyContent: "center"
   },
@@ -1678,8 +1704,8 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   chatMediaViewerMedia: {
-    height: "82%",
-    maxWidth: 720
+    width: "100%",
+    height: "100%"
   },
   reactionRow: {
     flexDirection: "row",

@@ -3429,13 +3429,26 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
     const low = Math.min(me, peerUserId);
     const high = Math.max(me, peerUserId);
     const roomName = `dmcall-${low}-${high}-${Date.now()}`;
-    const callerName = await actorDisplayName(me);
+    const callerRes = await query(
+      `
+      SELECT
+        COALESCE(NULLIF(TRIM(full_name), ''), 'Someone') AS full_name,
+        NULLIF(TRIM(avatar_url), '') AS avatar_url
+      FROM learn_users
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [me]
+    );
+    const callerName = String(callerRes.rows[0]?.full_name || "Someone").trim() || "Someone";
+    const callerAvatarUrl = String(callerRes.rows[0]?.avatar_url || "").trim() || "";
     void sendIncomingCallPush({
       userId: peerUserId,
       callerName,
       mode,
       roomName,
-      callerId: me
+      callerId: me,
+      callerAvatarUrl
     }).catch((error) => {
       console.warn("[push] incoming call:", error?.message || error);
     });
@@ -5841,13 +5854,13 @@ router.post("/v1/payments/razorpay/verify", (req, res) => {
   res.json({ ok: true, mock: false });
 });
 
-router.get("/share/reel/:postId", async (req, res) => {
+async function handleSharePostPage(req, res, sharePath = "reel") {
   try {
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
     const postId = Number(req.params.postId);
     if (!Number.isFinite(postId) || postId <= 0) {
-      res.status(400).send("Invalid reel link");
+      res.status(400).send("Invalid link");
       return;
     }
     const result = await query(
@@ -5868,7 +5881,7 @@ router.get("/share/reel/:postId", async (req, res) => {
       [postId]
     );
     if (!result.rows[0]) {
-      res.status(404).send("Reel not found");
+      res.status(404).send("Post not found");
       return;
     }
     const post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
@@ -5877,12 +5890,16 @@ router.get("/share/reel/:postId", async (req, res) => {
     res.send(
       buildShareReelHtml(post, {
         postId,
-        userAgent: req.headers["user-agent"] || ""
+        userAgent: req.headers["user-agent"] || "",
+        sharePath
       })
     );
   } catch (error) {
-    res.status(500).send("Failed to load reel");
+    res.status(500).send("Failed to load post");
   }
-});
+}
+
+router.get("/share/reel/:postId", (req, res) => void handleSharePostPage(req, res, "reel"));
+router.get("/share/watch/:postId", (req, res) => void handleSharePostPage(req, res, "watch"));
 
 module.exports = router;

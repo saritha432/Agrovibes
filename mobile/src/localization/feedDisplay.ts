@@ -131,6 +131,9 @@ export function sharedReelCardCaption(caption?: string | null): string {
     return raw.split("\n")[0].trim();
   }
   const stripped = stripInternalCaptionPrefix(raw);
-  if (stripped) return `[REEL] ${stripped}`;
-  return "[REEL]";
+  if (stripped) {
+    const kind = /^\[POST\]/i.test(raw) ? "POST" : "REEL";
+    return `[${kind}] ${stripped}`;
+  }
+  return /^\[POST\]/i.test(raw) ? "[POST]" : "[REEL]";
 }

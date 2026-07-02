@@ -598,37 +598,46 @@ export function DirectCallView({
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => void finishWithoutRoom("cancelled")}>
       {!connectEnabled ? (
-        <View style={[styles.incomingScreen, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 24) }]}>
+        <View style={[styles.incomingScreen, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 28) }]}>
+          <View style={styles.incomingTopMeta}>
+            <Text style={styles.incomingName}>{peerName}</Text>
+            <Text style={styles.incomingStatus}>{mode === "video" ? "Incoming video call" : "Incoming voice call"}</Text>
+          </View>
           <UserAvatar
             uri={peerAvatarUrl}
             name={peerName}
-            size={118}
-            borderRadius={59}
+            size={148}
+            borderRadius={74}
             fallbackBackgroundColor={APP_LIME}
             initialsColor="#111"
+            style={styles.incomingAvatar}
           />
-          <Text style={styles.incomingName}>{peerName}</Text>
-          <Text style={styles.incomingStatus}>{mode === "video" ? "Incoming video call" : "Incoming voice call"}</Text>
           <View style={styles.incomingActions}>
-            <Pressable
-              style={[styles.incomingBtn, styles.declineBtn]}
-              onPress={() => {
-                silenceRingtone();
-                onDecline?.();
-                void finishWithoutRoom("declined");
-              }}
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </Pressable>
-            <Pressable
-              style={[styles.incomingBtn, styles.acceptBtn]}
-              onPress={() => {
-                silenceRingtone();
-                onAccept?.();
-              }}
-            >
-              <Ionicons name={mode === "video" ? "videocam" : "call"} size={26} color="#fff" />
-            </Pressable>
+            <View style={styles.incomingActionCol}>
+              <Pressable
+                style={[styles.incomingBtn, styles.declineBtn]}
+                onPress={() => {
+                  silenceRingtone();
+                  onDecline?.();
+                  void finishWithoutRoom("declined");
+                }}
+              >
+                <Ionicons name="close" size={30} color="#fff" />
+              </Pressable>
+              <Text style={styles.incomingActionLabel}>Decline</Text>
+            </View>
+            <View style={styles.incomingActionCol}>
+              <Pressable
+                style={[styles.incomingBtn, styles.acceptBtn]}
+                onPress={() => {
+                  silenceRingtone();
+                  onAccept?.();
+                }}
+              >
+                <Ionicons name={mode === "video" ? "videocam" : "call"} size={28} color="#fff" />
+              </Pressable>
+              <Text style={styles.incomingActionLabel}>{mode === "video" ? "Video" : "Accept"}</Text>
+            </View>
           </View>
         </View>
       ) : errorText && !connection ? (
@@ -697,17 +706,19 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 72,
     right: 16,
-    width: 108,
-    height: 152,
-    borderRadius: 14,
+    width: 102,
+    height: 144,
+    borderRadius: 18,
     overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.35)",
     zIndex: 3,
     elevation: 6,
-    backgroundColor: "#000"
+    backgroundColor: "#000",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 7
   },
-  localPipVideo: { width: "100%", height: "100%" },
+  localPipVideo: { ...StyleSheet.absoluteFillObject, borderRadius: 18 },
   videoPreview: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -770,18 +781,35 @@ const styles = StyleSheet.create({
   retryText: { color: "#111", fontWeight: "800" },
   incomingScreen: {
     flex: 1,
-    backgroundColor: "#121212",
+    backgroundColor: "#0b141a",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 12
+    justifyContent: "space-between"
   },
-  incomingName: { color: "#fff", fontSize: 26, fontWeight: "800", marginTop: 18 },
-  incomingStatus: { color: "rgba(255,255,255,0.72)", fontSize: 16, fontWeight: "600" },
-  incomingActions: { flexDirection: "row", gap: 42, marginTop: 36 },
+  incomingTopMeta: {
+    alignItems: "center",
+    paddingHorizontal: 24,
+    marginTop: 12
+  },
+  incomingAvatar: {
+    marginTop: 8,
+    marginBottom: 12
+  },
+  incomingName: { color: "#fff", fontSize: 28, fontWeight: "800", textAlign: "center" },
+  incomingStatus: { marginTop: 8, color: "rgba(255,255,255,0.68)", fontSize: 16, fontWeight: "600", textAlign: "center" },
+  incomingActions: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    gap: 56,
+    width: "100%",
+    paddingHorizontal: 24
+  },
+  incomingActionCol: { alignItems: "center", gap: 10 },
+  incomingActionLabel: { color: "rgba(255,255,255,0.82)", fontSize: 13, fontWeight: "700" },
   incomingBtn: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: "center",
     justifyContent: "center"
   },

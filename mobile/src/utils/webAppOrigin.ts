@@ -1,5 +1,5 @@
 /** Canonical public web origin for share / universal links (no trailing slash). */
-export const DEFAULT_WEB_APP_ORIGIN = "https://www.cropvibe.com";
+export const DEFAULT_WEB_APP_ORIGIN = "https://cropvibe.com";
 
 export function resolveWebAppOrigin(): string {
   const raw = (process.env as Record<string, string | undefined>).EXPO_PUBLIC_WEB_BASE_URL;

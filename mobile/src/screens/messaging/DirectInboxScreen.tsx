@@ -24,6 +24,7 @@ import {
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatDmInboxPreview } from "./dmMessageFormats";
+import { NewMessageComposerModal } from "./NewMessageComposerModal";
 
 const BG = "#121212";
 const TEXT = "#ffffff";
@@ -58,6 +59,7 @@ export function DirectInboxScreen() {
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
+  const [composerOpen, setComposerOpen] = useState(false);
 
   const displayName = user?.username || user?.fullName || "You";
 
@@ -155,7 +157,7 @@ export function DirectInboxScreen() {
         <Text style={styles.usernameTitle} numberOfLines={1}>
           {displayName}
         </Text>
-        <Pressable hitSlop={8} accessibilityLabel="New message">
+        <Pressable hitSlop={8} accessibilityLabel="New message" onPress={() => setComposerOpen(true)}>
           <Ionicons name="create-outline" size={28} color={TEXT} />
         </Pressable>
       </View>
@@ -222,6 +224,7 @@ export function DirectInboxScreen() {
           }}
         />
       )}
+      <NewMessageComposerModal visible={composerOpen} recentThreads={threads} onClose={() => setComposerOpen(false)} />
     </SafeAreaView>
   );
 }

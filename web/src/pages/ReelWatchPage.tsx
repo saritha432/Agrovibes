@@ -4,7 +4,7 @@ import { fetchHomePost } from "../api/home";
 import type { HomePost } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { getWebAppOrigin } from "../api/client";
-import { buildReelDeepLinkUrls, openReelInApp, pickReelAppOpenUrl } from "../utils/appDeepLink";
+import { buildReelDeepLinkUrls, openReelInApp, pickReelAppOpenUrl, pickStoreUrl } from "../utils/appDeepLink";
 import { resolveWebVideoUrl } from "../utils/videoUrl";
 import "./ReelWatchPage.css";
 
@@ -80,15 +80,25 @@ export function ReelWatchPage() {
       ? buildReelDeepLinkUrls(numericPostId, webOrigin).httpsWatchUrl
       : "";
 
+  const handleInstallApp = (event: React.MouseEvent) => {
+    event.preventDefault();
+    window.location.href = pickStoreUrl();
+  };
+
   return (
     <div className="reel-watch">
       <header className="reel-watch__header">
         <span className="reel-watch__brand">Cropvibe</span>
-        {appLink ? (
-          <a className="reel-watch__open-app" href={appLink} onClick={handleOpenApp}>
-            Open in app
+        <div className="reel-watch__header-actions">
+          <a className="reel-watch__install-app" href={pickStoreUrl()} onClick={handleInstallApp}>
+            Install app
           </a>
-        ) : null}
+          {appLink ? (
+            <a className="reel-watch__open-app" href={appLink} onClick={handleOpenApp}>
+              Open in app
+            </a>
+          ) : null}
+        </div>
       </header>
 
       {loading ? <p className="reel-watch__status">Loading reel…</p> : null}
