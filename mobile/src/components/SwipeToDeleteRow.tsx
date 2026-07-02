@@ -14,6 +14,11 @@ type SwipeToDeleteRowProps = {
 export function SwipeToDeleteRow({ children, onDelete, deleteLabel = "Delete", style }: SwipeToDeleteRowProps) {
   const translateX = useRef(new Animated.Value(0)).current;
   const openRef = useRef(false);
+  const deleteOpacity = translateX.interpolate({
+    inputRange: [-DELETE_WIDTH, -10, 0],
+    outputRange: [1, 0, 0],
+    extrapolate: "clamp"
+  });
 
   const snapOpen = () => {
     openRef.current = true;
@@ -70,14 +75,16 @@ export function SwipeToDeleteRow({ children, onDelete, deleteLabel = "Delete", s
   return (
     <View style={[styles.shell, style]}>
       <View style={styles.deleteSlot}>
-        <Pressable
-          style={styles.deleteBtn}
-          onPress={handleDelete}
-          accessibilityRole="button"
-          accessibilityLabel={deleteLabel}
-        >
-          <Text style={styles.deleteText}>{deleteLabel}</Text>
-        </Pressable>
+        <Animated.View style={{ opacity: deleteOpacity }}>
+          <Pressable
+            style={styles.deleteBtn}
+            onPress={handleDelete}
+            accessibilityRole="button"
+            accessibilityLabel={deleteLabel}
+          >
+            <Text style={styles.deleteText}>{deleteLabel}</Text>
+          </Pressable>
+        </Animated.View>
       </View>
       <Animated.View style={[styles.content, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
         {children}
@@ -110,6 +117,7 @@ const styles = StyleSheet.create({
     fontSize: 12
   },
   content: {
+    width: "100%",
     backgroundColor: "transparent"
   }
 });
