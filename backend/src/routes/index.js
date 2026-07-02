@@ -3428,13 +3428,26 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
     const low = Math.min(me, peerUserId);
     const high = Math.max(me, peerUserId);
     const roomName = `dmcall-${low}-${high}-${Date.now()}`;
-    const callerName = await actorDisplayName(me);
+    const callerRes = await query(
+      `
+      SELECT
+        COALESCE(NULLIF(TRIM(full_name), ''), 'Someone') AS full_name,
+        NULLIF(TRIM(avatar_url), '') AS avatar_url
+      FROM learn_users
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [me]
+    );
+    const callerName = String(callerRes.rows[0]?.full_name || "Someone").trim() || "Someone";
+    const callerAvatarUrl = String(callerRes.rows[0]?.avatar_url || "").trim() || "";
     void sendIncomingCallPush({
       userId: peerUserId,
       callerName,
       mode,
       roomName,
-      callerId: me
+      callerId: me,
+      callerAvatarUrl
     }).catch((error) => {
       console.warn("[push] incoming call:", error?.message || error);
     });

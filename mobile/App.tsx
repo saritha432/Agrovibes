@@ -2,9 +2,10 @@ import "fast-text-encoding";
 import "./src/push/registerNotificationHandlers";
 import React from "react";
 import { ActivityIndicator, View } from "react-native";
-import { setupDirectMessageNotificationCategory } from "./src/push/pushNotifications";
+import { setupDirectMessageNotificationCategory, setupIncomingCallNotificationCategories } from "./src/push/pushNotifications";
 
 void setupDirectMessageNotificationCategory();
+void setupIncomingCallNotificationCategories();
 import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
@@ -17,6 +18,7 @@ import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK, APP_LIME } from "./src/theme/appColors";
 import { PushNotificationBootstrap } from "./src/push/PushNotificationBootstrap";
+import { GlobalIncomingCallHost } from "./src/push/GlobalIncomingCallHost";
 import { SocketChatBootstrap } from "./src/messaging/SocketChatBootstrap";
 import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
 import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
@@ -40,6 +42,7 @@ export default function App() {
         <AuthProvider>
           <LanguageSync />
           <PushNotificationBootstrap />
+          <GlobalIncomingCallHost />
           <SocketChatBootstrap />
           <FirebaseBootstrap />
           <ReelDeepLinkBootstrap />
