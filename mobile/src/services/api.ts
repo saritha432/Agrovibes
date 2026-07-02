@@ -1432,6 +1432,12 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
   })) as { message: DirectMessageItem };
 }
 
+export async function deleteDirectMessage(token: string, messageId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/${encodeURIComponent(String(messageId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean; messageId: number };
+}
+
 function mimeFromUri(uri: string, fallback: string) {
   const clean = uri.split("?")[0].toLowerCase();
   if (clean.endsWith(".mp4")) return "video/mp4";

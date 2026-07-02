@@ -21,10 +21,16 @@ export type DmReadSocketPayload = {
   peerUserId: number;
 };
 
+export type DmDeletedSocketPayload = {
+  messageId: number;
+  peerUserId: number;
+};
+
 type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
 type DmTypingHandler = (payload: { peerUserId: number; isTyping: boolean }) => void;
 type DmReadHandler = (payload: DmReadSocketPayload) => void;
+type DmDeletedHandler = (payload: DmDeletedSocketPayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
@@ -34,6 +40,7 @@ const messageHandlers = new Set<DmMessageHandler>();
 const threadHandlers = new Set<DmThreadHandler>();
 const typingHandlers = new Set<DmTypingHandler>();
 const readHandlers = new Set<DmReadHandler>();
+const deletedHandlers = new Set<DmDeletedHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
 export function resolveSocketBaseUrl() {
@@ -72,6 +79,9 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("dm:read", (payload: DmReadSocketPayload) => {
     readHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("dm:deleted", (payload: DmDeletedSocketPayload) => {
+    deletedHandlers.forEach((handler) => handler(payload));
   });
 }
 
@@ -131,26 +141,43 @@ export function emitDirectTyping(peerUserId: number, isTyping = true) {
 
 export function onDirectMessage(handler: DmMessageHandler) {
   messageHandlers.add(handler);
-  return () => messageHandlers.delete(handler);
+  return () => {
+    messageHandlers.delete(handler);
+  };
 }
 
 export function onDirectThreadUpdate(handler: DmThreadHandler) {
   threadHandlers.add(handler);
-  return () => threadHandlers.delete(handler);
+  return () => {
+    threadHandlers.delete(handler);
+  };
 }
 
 export function onDirectTyping(handler: DmTypingHandler) {
   typingHandlers.add(handler);
-  return () => typingHandlers.delete(handler);
+  return () => {
+    typingHandlers.delete(handler);
+  };
 }
 
 export function onDirectRead(handler: DmReadHandler) {
   readHandlers.add(handler);
-  return () => readHandlers.delete(handler);
+  return () => {
+    readHandlers.delete(handler);
+  };
+}
+
+export function onDirectMessageDeleted(handler: DmDeletedHandler) {
+  deletedHandlers.add(handler);
+  return () => {
+    deletedHandlers.delete(handler);
+  };
 }
 
 export function onSocketConnectionChange(handler: ConnectionHandler) {
   connectionHandlers.add(handler);
   handler(isSocketChatConnected());
-  return () => connectionHandlers.delete(handler);
+  return () => {
+    connectionHandlers.delete(handler);
+  };
 }

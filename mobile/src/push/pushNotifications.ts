@@ -4,17 +4,34 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { registerPushToken, unregisterPushToken } from "../services/api";
 
+let incomingCallCategoriesReady: Promise<void> | null = null;
+
+export function ensureIncomingCallCategoriesReady() {
+  if (!incomingCallCategoriesReady) {
+    incomingCallCategoriesReady = setupIncomingCallNotificationCategories().catch(() => {
+      incomingCallCategoriesReady = null;
+    });
+  }
+  return incomingCallCategoriesReady;
+}
+
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = (notification.request.content.data || {}) as Record<string, unknown>;
     const isIncomingCall = String(data.type || "") === "incoming_call";
+    if (isIncomingCall) {
+      return {
+        shouldShowAlert: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+        priority: Notifications.AndroidNotificationPriority.MAX
+      };
+    }
     return {
       shouldShowAlert: true,
       shouldPlaySound: true,
-      shouldSetBadge: !isIncomingCall,
-      priority: isIncomingCall
-        ? Notifications.AndroidNotificationPriority.MAX
-        : Notifications.AndroidNotificationPriority.HIGH
+      shouldSetBadge: true,
+      priority: Notifications.AndroidNotificationPriority.HIGH
     };
   }
 });

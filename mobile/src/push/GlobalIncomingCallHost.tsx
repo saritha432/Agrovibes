@@ -5,6 +5,7 @@ import { DirectCallView, type CallEndResult } from "../screens/messaging/DirectC
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { sendDirectMessage } from "../services/api";
 import { navigateToDirectChat } from "../navigation/navigationRef";
+import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
 
 export function GlobalIncomingCallHost() {
@@ -24,6 +25,7 @@ export function GlobalIncomingCallHost() {
   const finishCall = React.useCallback(
     async (result: CallEndResult) => {
       const active = call;
+      hideIncomingCallAndroidNotification();
       clearIncomingCall();
       setCall(null);
       setConnectEnabled(false);
