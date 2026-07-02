@@ -71,7 +71,13 @@ export function ChatMediaAlbumBubble({ items, onPress, onLongPress }: ChatMediaA
             contentContainerStyle={{ width: CARD_W * items.length }}
           >
             {items.map((item, index) => (
-              <Pressable key={`${item.url}-${index}`} onPress={() => onPress?.(index)} style={styles.slide}>
+              <Pressable
+                key={`${item.url}-${index}`}
+                onPress={() => onPress?.(index)}
+                onLongPress={onLongPress}
+                delayLongPress={280}
+                style={styles.slide}
+              >
                 <Image source={{ uri: item.url }} style={styles.slideImage} resizeMode="cover" />
               </Pressable>
             ))}

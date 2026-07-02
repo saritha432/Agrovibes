@@ -102,6 +102,42 @@ async function listTokensForUser(userId) {
   return result.rows.map((row) => String(row.token || "").trim()).filter(Boolean);
 }
 
+async function listTokenEntriesForUser(userId) {
+  await ensurePushDeviceTokensTable();
+  const result = await query(`SELECT token, platform FROM push_device_tokens WHERE user_id = $1`, [userId]);
+  return result.rows
+    .map((row) => ({
+      token: String(row.token || "").trim(),
+      platform: String(row.platform || "android").trim().toLowerCase() || "android"
+    }))
+    .filter((row) => row.token);
+}
+
+async function sendMulticastAndCleanup(tokens, message) {
+  if (!tokens.length) return { sent: 0, failed: 0 };
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens,
+    ...message
+  });
+
+  const invalidTokens = [];
+  response.responses.forEach((item, index) => {
+    if (item.success) return;
+    const code = item.error?.code || "";
+    if (
+      code === "messaging/registration-token-not-registered" ||
+      code === "messaging/invalid-registration-token"
+    ) {
+      invalidTokens.push(tokens[index]);
+    }
+  });
+  if (invalidTokens.length) {
+    await removeInvalidTokens(invalidTokens);
+  }
+
+  return { sent: response.successCount, failed: response.failureCount };
+}
+
 async function removeInvalidTokens(tokens) {
   if (!tokens?.length) return;
   await ensurePushDeviceTokensTable();
@@ -276,7 +312,11 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
     payloadData.message = pushBody;
     payloadData.categoryId = String(categoryId);
     payloadData.channelId = isIncomingCallCategory ? "incoming_calls" : "direct_messages";
-    payloadData.priority = "high";
+    payloadData.priority = isIncomingCallCategory ? "max" : "high";
+    if (isIncomingCallCategory) {
+      payloadData.sticky = "true";
+      payloadData.vibrate = JSON.stringify([0, 800, 400, 800, 400, 800]);
+    }
     if (hasImage) payloadData.image = image;
 
     const response = await admin.messaging().sendEachForMulticast({
@@ -399,24 +439,86 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
 }
 
 async function sendIncomingCallPush({ userId, callerName, mode, roomName, callerId, callerAvatarUrl }) {
+  if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
+
+  const entries = await listTokenEntriesForUser(userId);
+  if (!entries.length) return { sent: 0, skipped: "no_tokens" };
+
   const isVideo = mode === "video";
   const label = isVideo ? "Incoming video call" : "Incoming voice call";
   const categoryId = isVideo ? "INCOMING_VIDEO_CALL" : "INCOMING_VOICE_CALL";
+  const name = String(callerName || "Someone").trim() || "Someone";
   const avatar = String(callerAvatarUrl || "").trim();
   const imageUrl = /^https?:\/\//i.test(avatar) ? avatar : null;
-  return sendPushToUser(userId, {
-    title: String(callerName || "Someone").trim() || "Someone",
-    body: label,
-    categoryId,
-    imageUrl,
-    data: {
+
+  const androidTokens = entries.filter((entry) => entry.platform === "android").map((entry) => entry.token);
+  const iosTokens = entries.filter((entry) => entry.platform !== "android").map((entry) => entry.token);
+
+  let sent = 0;
+  let failed = 0;
+
+  if (androidTokens.length) {
+    const androidResult = await sendMulticastAndCleanup(androidTokens, {
+      data: {
+        type: "incoming_call",
+        mode: isVideo ? "video" : "voice",
+        roomName: String(roomName || ""),
+        callerId: callerId != null ? String(callerId) : "",
+        callerName: name,
+        callerAvatarUrl: avatar
+      },
+      android: {
+        priority: "high"
+      }
+    });
+    sent += androidResult.sent;
+    failed += androidResult.failed;
+  }
+
+  if (iosTokens.length) {
+    const payloadData = {
       type: "incoming_call",
       mode: isVideo ? "video" : "voice",
       roomName: String(roomName || ""),
       callerId: callerId != null ? String(callerId) : "",
-      callerAvatarUrl: avatar
-    }
-  });
+      callerAvatarUrl: avatar,
+      title: name,
+      message: label,
+      categoryId,
+      channelId: "incoming_calls",
+      priority: "max",
+      sticky: "true",
+      vibrate: JSON.stringify([0, 800, 400, 800, 400, 800])
+    };
+    if (imageUrl) payloadData.image = imageUrl;
+
+    const iosResult = await sendMulticastAndCleanup(iosTokens, {
+      data: payloadData,
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: name,
+              body: label
+            },
+            sound: "default",
+            category: categoryId,
+            "interruption-level": "time-sensitive",
+            ...(imageUrl ? { "mutable-content": 1 } : {})
+          }
+        },
+        ...(imageUrl ? { fcm_options: { image: imageUrl } } : {})
+      }
+    });
+    sent += iosResult.sent;
+    failed += iosResult.failed;
+  }
+
+  return { sent, failed };
 }
 
 async function sendSocialPushToFollowers({ hostUserId, type, postId, commentExcerpt }) {

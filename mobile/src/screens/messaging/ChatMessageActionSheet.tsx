@@ -9,20 +9,24 @@ const QUICK_EMOJIS = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const
 type Props = {
   visible: boolean;
   timestampLabel?: string;
+  showDelete?: boolean;
   onClose: () => void;
   onReply: () => void;
   onCopy: () => void;
   onForward: () => void;
+  onDelete?: () => void;
   onReact: (emoji: string) => void;
 };
 
 export function ChatMessageActionSheet({
   visible,
   timestampLabel,
+  showDelete = false,
   onClose,
   onReply,
   onCopy,
   onForward,
+  onDelete,
   onReact
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -60,6 +64,13 @@ export function ChatMessageActionSheet({
             <Ionicons name="paper-plane-outline" size={22} color="#fff" />
             <Text style={styles.menuLabel}>Forward</Text>
           </Pressable>
+
+          {showDelete && onDelete ? (
+            <Pressable style={styles.menuRow} onPress={() => run(onDelete)}>
+              <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
+              <Text style={[styles.menuLabel, styles.menuLabelDanger]}>Delete</Text>
+            </Pressable>
+          ) : null}
         </Pressable>
       </Pressable>
     </Modal>
@@ -114,5 +125,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(255,255,255,0.08)"
   },
-  menuLabel: { color: "#fff", fontSize: 16, fontWeight: "600" }
+  menuLabel: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  menuLabelDanger: { color: "#ff6b6b" }
 });

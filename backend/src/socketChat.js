@@ -116,9 +116,17 @@ function emitMessagesRead({ readerId, peerUserId }) {
   });
 }
 
+function emitDirectMessageDeleted({ messageId, senderId, receiverId }) {
+  if (!io || !messageId) return;
+  const payload = { messageId: Number(messageId) };
+  io.to(userRoom(senderId)).emit("dm:deleted", { ...payload, peerUserId: receiverId });
+  io.to(userRoom(receiverId)).emit("dm:deleted", { ...payload, peerUserId: senderId });
+}
+
 module.exports = {
   initSocketChat,
   getSocketIo,
   emitDirectMessage,
-  emitMessagesRead
+  emitMessagesRead,
+  emitDirectMessageDeleted
 };

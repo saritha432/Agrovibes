@@ -236,6 +236,13 @@ export function parseDmCallMessage(body: string): DmCallPayload | null {
   }
 }
 
+/** Callee-side call log entry meaning the outgoing ring was not answered. */
+export function isPeerCallEndSignal(body: string): boolean {
+  const call = parseDmCallMessage(body);
+  if (!call || call.direction !== "incoming") return false;
+  return call.status === "declined" || call.status === "cancelled" || call.status === "missed";
+}
+
 export function formatDmCallLabel(call: DmCallPayload, t: (key: string) => string) {
   const kind = call.mode === "video" ? t("videoCall") : t("audioCall");
   if (call.status === "completed") {
