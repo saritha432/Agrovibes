@@ -19,7 +19,7 @@
     "androidStatusBar": {
       "backgroundColor": "#262626",
       "barStyle": "light-content",
-      "translucent": false
+      "translucent": true
     },
     "assetBundlePatterns": [],
     "android": {
@@ -87,6 +87,10 @@
     },
     "ios": {
       "bundleIdentifier": "com.cropvibe.app",
+      "associatedDomains": [
+        "applinks:www.cropvibe.com",
+        "applinks:cropvibe.com"
+      ],
       "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": true,
       "infoPlist": {

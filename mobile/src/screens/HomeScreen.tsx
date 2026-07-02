@@ -24,6 +24,7 @@ import {
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
@@ -36,11 +37,12 @@ import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBr
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
-import { AppTopBar } from "../components/AppTopBar";
+import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
 import { UserAvatar } from "../components/UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { ReelSeekBar } from "../components/ReelSeekBar";
+import { ReelSuggestionsPage } from "../components/ReelSuggestionsPage";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
@@ -104,6 +106,11 @@ import {
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postHasAttachedMusic, postShowsVolumeControl } from "../utils/reelGrid";
+import {
+  buildReelViewerFeed,
+  mapPostIndexToFeedIndex,
+  type ReelViewerFeedItem
+} from "../utils/reelViewerFeed";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 
 export type OpenCreateOptions = {
@@ -1136,20 +1143,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const appIsActive = useAppIsActive();
   const [feedPlaybackSuspended, setFeedPlaybackSuspended] = useState(false);
   const canPlayMedia = appIsActive && isFocused && !feedPlaybackSuspended;
-  /** Home feed header: Android window already clears the status bar (translucent: false). */
-  const homeTopInset = useMemo(() => {
-    if (Platform.OS === "android") return 0;
-    return Math.max(insets.top, 12) + 6;
-  }, [insets.top]);
 
-  /** Story / fullscreen reel chrome over translucent status bar — use full safe area, no cap. */
-  const modalTopInset = useMemo(() => {
-    if (Platform.OS === "android") {
-      const sbh = StatusBar.currentHeight ?? 0;
-      return Math.max(insets.top, sbh) + 8;
-    }
-    return Math.max(insets.top, 12) + 10;
-  }, [insets.top]);
+  const modalTopInset = useModalTopChromeInset();
+
+  /** Keep reel actions above Android gesture / 3-button navigation bar. */
+  const modalBottomInset = useMemo(() => {
+    if (Platform.OS === "android") return Math.max(insets.bottom, 24);
+    return Math.max(insets.bottom, 16);
+  }, [insets.bottom]);
 
   const homeTabLabel = React.useCallback(
     (tab: HomeTopTab) => {
@@ -1236,7 +1237,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [user?.fullName, user?.id]
   );
 
-  const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
+  const reelViewerListRef = useRef<FlatList<ReelViewerFeedItem> | null>(null);
   const reelBackgroundMusicRef = useRef<{ postId: number; sound: Audio.Sound } | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
   const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
@@ -1583,6 +1584,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   /** Dark, full-screen vertical reel surface for Feed, Friends, and Live tabs. */
   const isReelSurfaceTab = activeHomeTab === "Feed" || activeHomeTab === "Friends";
   const isLiveTab = activeHomeTab === "live";
+
+  const feedKeepsScreenOn =
+    canPlayMedia &&
+    playingPostId != null &&
+    (isReelSurfaceTab || !!reelViewerOpen || isStoryOpen || isLiveTab);
+
+  useEffect(() => {
+    if (!feedKeepsScreenOn) {
+      deactivateKeepAwake("feed-reels");
+      return;
+    }
+    void activateKeepAwakeAsync("feed-reels");
+    return () => {
+      deactivateKeepAwake("feed-reels");
+    };
+  }, [feedKeepsScreenOn]);
 
   const openPostFromFeed = useCallback((post: HomePost, opts?: { isolated?: boolean }) => {
     if (!postHasViewableMedia(post)) return;
@@ -2209,7 +2226,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         });
         if (!mounted) return;
         setSuggestedMutualByUserId(connections);
-        setSuggestedUsers(sorted.slice(0, 15));
+        setSuggestedUsers(sorted.slice(0, 20));
       } catch {
         if (mounted) {
           setSuggestedUsers([]);
@@ -2348,9 +2365,34 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, []);
 
   const visibleSuggestedUsers = useMemo(
-    () => suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 8),
+    () => suggestedUsers.filter((u) => !suggestedDismissed.has(u.id)).slice(0, 20),
     [suggestedUsers, suggestedDismissed]
   );
+
+  const hasFriendNetwork = useMemo(
+    () => followingUserIds.size + followerUserIds.size > 0,
+    [followerUserIds, followingUserIds]
+  );
+
+  const reelViewerFeed = useMemo(() => {
+    if (!reelViewerOpen?.posts.length) return [];
+    return buildReelViewerFeed(reelViewerOpen.posts, {
+      insertSuggestions: visibleSuggestedUsers.length >= 2
+    });
+  }, [reelViewerOpen?.posts, visibleSuggestedUsers.length]);
+
+  const reelViewerInitialFeedIndex = useMemo(() => {
+    if (!reelViewerOpen) return 0;
+    return mapPostIndexToFeedIndex(reelViewerFeed, reelViewerOpen.initialIndex);
+  }, [reelViewerFeed, reelViewerOpen]);
+
+  const openSuggestedProfile = useCallback((person: UserSearchRecord) => {
+    navigateToPublicProfile({
+      userId: person.id,
+      userName: person.fullName || person.username || "User",
+      avatarUrl: person.avatarUrl || undefined
+    });
+  }, []);
 
   useEffect(() => {
     setExpandedReplyThreads({});
@@ -2397,14 +2439,46 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const onReelViewerMomentumEnd = useCallback(
     (offsetY: number) => {
-      if (!reelViewerOpen || windowHeight <= 0) return;
-      const { posts: viewerPosts } = reelViewerOpen;
-      if (!viewerPosts.length) return;
-      const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / windowHeight)));
-      const post = viewerPosts[index];
-      setPlayingPostId(post?.id ?? null);
+      if (!reelViewerOpen || windowHeight <= 0 || !reelViewerFeed.length) return;
+      const index = Math.max(0, Math.min(reelViewerFeed.length - 1, Math.round(offsetY / windowHeight)));
+      const item = reelViewerFeed[index];
+      if (!item || item.type === "suggestions") {
+        setPlayingPostId(null);
+        return;
+      }
+      setPlayingPostId(item.post.id);
     },
-    [reelViewerOpen, windowHeight]
+    [reelViewerFeed, reelViewerOpen, windowHeight]
+  );
+
+  const onReelViewerViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const ordered = viewableItems
+        .filter((v) => v.isViewable && v.item != null)
+        .map((v) => ({ item: v.item as ReelViewerFeedItem, index: v.index ?? 0 }))
+        .sort((a, b) => a.index - b.index);
+      if (!ordered.length) {
+        setPlayingPostId(null);
+        return;
+      }
+      const primary = ordered[ordered.length - 1].item;
+      if (primary.type === "suggestions") {
+        setPlayingPostId(null);
+        return;
+      }
+      setPlayingPostId(primary.post.id);
+      prefetchPostMedia(primary.post);
+    },
+    []
+  );
+
+  const reelViewerViewabilityCallbackRef = useRef(onReelViewerViewableItemsChanged);
+  reelViewerViewabilityCallbackRef.current = onReelViewerViewableItemsChanged;
+
+  const onReelViewerViewableItemsChangedRef = useRef(
+    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      reelViewerViewabilityCallbackRef.current(info);
+    }
   );
 
   const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
@@ -3163,7 +3237,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const listHeader = useMemo(
     () => (
-      <View style={[styles.homeTopChrome, { paddingTop: homeTopInset }]}>
+      <View style={styles.homeTopChrome}>
         <AppTopBar />
 
         <ScrollView
@@ -3339,7 +3413,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       avatarLookup,
       displayPersonName,
       homeTabLabel,
-      homeTopInset,
       isReelSurfaceTab,
       isLiveTab,
       onOpenCreate,
@@ -3411,11 +3484,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const hasMusicTrack = postHasAttachedMusic(post);
       const showVolumeControl = postShowsVolumeControl(post);
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
+      const fullscreenSafeTop = reelViewerOpen ? modalTopInset : 0;
+      const fullscreenSafeBottom = reelViewerOpen ? modalBottomInset : 0;
+      const mediaContentH = pageH - fullscreenSafeTop - fullscreenSafeBottom;
+      const mediaFrameStyle = reelViewerOpen
+        ? { position: "absolute" as const, left: 0, right: 0, top: fullscreenSafeTop, bottom: fullscreenSafeBottom }
+        : StyleSheet.absoluteFillObject;
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
           {post.videoUrl && showActiveVideo ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
@@ -3424,7 +3503,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 posterUri={reelPoster || undefined}
                 shouldPlay={shouldPlayReel}
                 containerWidth={reelContentWidth}
-                containerHeight={pageH}
+                containerHeight={mediaContentH}
                 fit="auto"
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
@@ -3439,7 +3518,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               ) : null}
             </Pressable>
           ) : post.videoUrl ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {reelPoster ? (
                 <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
               ) : (
@@ -3457,7 +3536,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={{ width: reelContentWidth, height: pageH }}
+              style={[
+                { width: reelContentWidth, height: mediaContentH },
+                reelViewerOpen ? { position: "absolute", left: 0, right: 0, top: fullscreenSafeTop } : { height: pageH }
+              ]}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -3482,7 +3564,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   key={`reel-carousel-${post.id}-${i}-${uri.slice(-24)}`}
                   style={{
                     width: reelContentWidth,
-                    height: pageH,
+                    height: mediaContentH,
                     backgroundColor: "#000",
                     alignItems: "center",
                     justifyContent: "center"
@@ -3491,18 +3573,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <Image
                     source={{ uri }}
-                    style={{ width: reelContentWidth, height: pageH }}
+                    style={{ width: reelContentWidth, height: mediaContentH }}
                     resizeMode="contain"
                   />
                 </Pressable>
               ))}
             </ScrollView>
           ) : reelPoster ? (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "contain" : "contain"} />
             </Pressable>
           ) : (
-            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => onReelSurfaceTap(post)}>
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
@@ -3546,7 +3628,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             seenRef={reelLikeBurstSeenRef}
           />
           <View
-              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, insets.bottom + 14) }]}
+              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, (reelViewerOpen ? modalBottomInset : insets.bottom) + 14) }]}
               pointerEvents="box-none"
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
@@ -3671,7 +3753,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
             </View>
           {post.videoUrl ? (
-            <View style={styles.reelSeekWrap} pointerEvents="auto">
+            <View style={[styles.reelSeekWrap, reelViewerOpen ? { bottom: modalBottomInset } : null]} pointerEvents="auto">
               <ReelSeekBar
                 progressRatio={progressRatio}
                 onSeek={(ratio) => {
@@ -3696,6 +3778,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
+      modalBottomInset,
+      modalTopInset,
       isReelMuted,
       legacyFollowStateByName,
       legacyRelationshipByName,
@@ -3731,6 +3815,50 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       t,
       labelForFollowStatus,
       openPostAuthorProfile
+    ]
+  );
+
+  const renderReelViewerItem = useCallback(
+    ({ item }: { item: ReelViewerFeedItem }) => {
+      if (item.type === "suggestions") {
+        return (
+          <View style={{ height: windowHeight, width: windowWidth, backgroundColor: "#0f0f0f" }}>
+            <ReelSuggestionsPage
+              allUsers={visibleSuggestedUsers}
+              mutualByUserId={suggestedMutualByUserId}
+              hasFriendNetwork={hasFriendNetwork}
+              slideOffset={item.pageIndex}
+              followBusy={suggestedFollowBusy}
+              followDone={suggestedFollowDone}
+              topInset={modalTopInset}
+              bottomInset={modalBottomInset}
+              t={t}
+              onFollow={handleFollowSuggested}
+              onDismiss={handleDismissSuggested}
+              onOpenProfile={openSuggestedProfile}
+            />
+          </View>
+        );
+      }
+      const postIndex = reelViewerOpen?.posts.findIndex((p) => p.id === item.post.id) ?? 0;
+      return renderFullScreenReel({ item: item.post, index: Math.max(0, postIndex) });
+    },
+    [
+      handleDismissSuggested,
+      handleFollowSuggested,
+      hasFriendNetwork,
+      modalBottomInset,
+      modalTopInset,
+      openSuggestedProfile,
+      reelViewerOpen?.posts,
+      renderFullScreenReel,
+      suggestedFollowBusy,
+      suggestedFollowDone,
+      suggestedMutualByUserId,
+      t,
+      visibleSuggestedUsers,
+      windowHeight,
+      windowWidth
     ]
   );
 
@@ -4171,7 +4299,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 uri={activeStory.videoUrl}
                 shouldPlay={!storyHoldPaused}
                 containerWidth={storyViewport.width || windowWidth}
-                containerHeight={storyViewport.height || Math.max(1, windowHeight - 140)}
+                containerHeight={storyViewport.height || windowHeight}
                 fit="contain"
                 isLooping={false}
                 isMuted={false}
@@ -4285,14 +4413,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </View>
             </View>
           ) : null}
-          {reelViewerOpen && reelViewerOpen.posts.length > 0 ? (
+          {reelViewerOpen && reelViewerFeed.length > 0 ? (
             <FlatList
               ref={(r) => {
                 reelViewerListRef.current = r;
               }}
-              data={reelViewerOpen.posts}
-              keyExtractor={(item) => `reel-viewer-${item.id}`}
-              renderItem={renderFullScreenReel}
+              data={reelViewerFeed}
+              keyExtractor={(item) => item.key}
+              renderItem={renderReelViewerItem}
               pagingEnabled
               showsVerticalScrollIndicator={false}
               snapToInterval={windowHeight}
@@ -4300,8 +4428,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               decelerationRate="fast"
               disableIntervalMomentum
               initialScrollIndex={
-                reelViewerOpen.initialIndex > 0 && reelViewerOpen.initialIndex < reelViewerOpen.posts.length
-                  ? reelViewerOpen.initialIndex
+                reelViewerInitialFeedIndex > 0 && reelViewerInitialFeedIndex < reelViewerFeed.length
+                  ? reelViewerInitialFeedIndex
                   : undefined
               }
               getItemLayout={(_data, idx) => ({
@@ -4309,13 +4437,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 offset: windowHeight * idx,
                 index: idx
               })}
-              onViewableItemsChanged={onViewableItemsChangedRef.current}
+              onViewableItemsChanged={onReelViewerViewableItemsChangedRef.current}
               viewabilityConfig={reelViewabilityConfig}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
-              extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${reelViewerOpen.posts
+              onScrollToIndexFailed={(info) => {
+                reelViewerListRef.current?.scrollToOffset({
+                  offset: info.averageItemLength * info.index,
+                  animated: false
+                });
+              }}
+              extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${visibleSuggestedUsers.length}-${suggestedFollowDone.size}-${reelViewerFeed.length}-${reelViewerOpen.posts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
-              initialNumToRender={Math.min(3, reelViewerOpen.posts.length || 1)}
+              initialNumToRender={Math.min(3, reelViewerFeed.length || 1)}
               maxToRenderPerBatch={2}
               windowSize={3}
               removeClippedSubviews={false}
@@ -5249,6 +5383,10 @@ const styles = StyleSheet.create({
   reelCarouselDots: { bottom: 88 },
   storyViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
   storyViewerTopChrome: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
     zIndex: 4
   },
   storyProgressRow: { flexDirection: "row", gap: 6, paddingHorizontal: 10, paddingTop: 4 },
@@ -5261,7 +5399,6 @@ const styles = StyleSheet.create({
   storyViewerName: { color: "#fff", fontWeight: "800" },
   storyViewerBody: {
     flex: 1,
-    marginTop: 10,
     minHeight: 0,
     width: "100%",
     alignSelf: "stretch",

@@ -1,7 +1,20 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { APP_BLACK, APP_DARK_BG, APP_LIME } from "../theme/appColors";
+
+/** Trust safe-area insets only — avoid adding StatusBar height (causes double gap on many Android devices). */
+export function useAppTopBarInset() {
+  const insets = useSafeAreaInsets();
+  return useMemo(() => (Platform.OS === "web" ? 0 : insets.top), [insets.top]);
+}
+
+/** Story / fullscreen reel back button & progress — same safe area as home top bar + small gap below status icons. */
+export function useModalTopChromeInset() {
+  const topInset = useAppTopBarInset();
+  return useMemo(() => topInset + (Platform.OS === "web" ? 0 : 4), [topInset]);
+}
 
 function CountBadge({ count }: { count: number }) {
   const label = String(Math.min(99, count));
@@ -17,27 +30,32 @@ function CountBadge({ count }: { count: number }) {
 
 export function AppTopBar() {
   const { openNotificationSheet, notificationUnreadCount } = useNotificationPanel();
+  const topInset = useAppTopBarInset();
 
   return (
     <View style={styles.topBar}>
-      <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
-      <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
-        <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />
-        {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}
-      </Pressable>
+      <View style={[styles.topBarContent, { paddingTop: topInset }]}>
+        <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
+        <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
+          <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />
+          {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}
+        </Pressable>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   topBar: {
+    backgroundColor: APP_DARK_BG
+  },
+  topBarContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
-    backgroundColor: APP_DARK_BG,
+    minHeight: 44,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    paddingTop: 4
+    paddingBottom: 4
   },
   logoImage: { width: 132, height: 28, maxWidth: "46%" },
   iconBadge: {
@@ -49,7 +67,7 @@ const styles = StyleSheet.create({
   },
   notificationIcon: {
     width: 34,
-    height: 34,
+    height: 34
   },
   badge: {
     position: "absolute",

@@ -112,6 +112,7 @@ export const APP_STRINGS_EN = {
   noMessagesTitle: "No messages yet",
   noMessagesSub: "When someone reaches out, you will see it here.",
   sharedReel: "Shared a reel",
+  sharedPost: "Shared a post",
   sharedMedia: "Photo",
   sharedVideo: "Video",
   voiceMessage: "Voice message",
@@ -213,6 +214,8 @@ export const APP_STRINGS_EN = {
   farmerDefaultName: "Farmer",
   likesCountLabel: "{{count}} likes",
   shareReelMessage: "{{name}} shared a reel on Cropvibe",
+  sharePostMessage: "{{name}} shared a post on Cropvibe",
+  share: "Share",
   reportUserPrompt: "Why are you reporting {{name}}?"
 } as const;
 

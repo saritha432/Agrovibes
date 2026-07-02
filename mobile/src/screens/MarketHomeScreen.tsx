@@ -10,7 +10,6 @@ import {
   TextInput,
   View
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MarketAllTabContent } from "../components/market/all/MarketAllTabContent";
 import { MarketPlaceholderTab } from "../components/market/MarketPlaceholderTab";
 import { MarketSvgIcon, type SvgModule } from "../components/market/shared/marketAssetUtils";
@@ -43,7 +42,6 @@ const SEARCH_ICON = require("../../assets/bottom-icons/search.svg");
 const MIC_ICON = require("../../assets/market/mic-icon.svg");
 
 export function MarketHomeScreen() {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const [activeTab, setActiveTab] = useState<MarketTabId>("All");
   const [search, setSearch] = useState("");
@@ -52,7 +50,7 @@ export function MarketHomeScreen() {
   const openCategory = (categoryId: string) => navigation.navigate("MarketCategory", { categoryId });
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <View style={styles.screen}>
       <View style={styles.marketChrome}>
         <AppTopBar />
 

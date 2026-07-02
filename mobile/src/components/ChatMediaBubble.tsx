@@ -1,23 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import React from "react";
-import { Image, Linking, Pressable, StyleSheet, View } from "react-native";
-import type { DmMediaPayload } from "../screens/messaging/dmMessageFormats";
+import { Image, Pressable, StyleSheet, View } from "react-native";
+import type { DmMediaItem } from "../screens/messaging/dmMessageFormats";
 import { APP_LIME } from "../theme/appColors";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
 type ChatMediaBubbleProps = {
-  media: DmMediaPayload;
+  media: DmMediaItem;
   isSelf: boolean;
+  onPress?: () => void;
+  onLongPress?: () => void;
 };
 
-export function ChatMediaBubble({ media }: ChatMediaBubbleProps) {
+export function ChatMediaBubble({ media, onPress, onLongPress }: ChatMediaBubbleProps) {
   const openMedia = () => {
-    void Linking.openURL(media.url).catch(() => undefined);
+    onPress?.();
   };
 
   return (
-    <Pressable style={styles.card} onPress={openMedia}>
+    <Pressable style={styles.card} onPress={openMedia} onLongPress={onLongPress} delayLongPress={280}>
       {media.kind === "image" ? (
         <Image source={{ uri: media.url }} style={styles.media} resizeMode="cover" />
       ) : (

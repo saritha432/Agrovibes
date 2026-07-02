@@ -123,15 +123,16 @@ function PreConnectVideoPreview({
           <ActivityIndicator size="large" color={APP_LIME} />
         </View>
       )}
-      <View style={[styles.callTopBar, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.callTopSection, { paddingTop: Math.max(insets.top, 12) }]}>
         <Pressable style={styles.callTopIcon} onPress={onClose}>
           <Ionicons name="chevron-down" size={28} color="#fff" />
         </Pressable>
+        <View style={styles.callTopMeta}>
+          <Text style={styles.callName}>{peerName}</Text>
+          <Text style={styles.callStatus}>{statusLabel || "Calling..."}</Text>
+        </View>
       </View>
-      <View style={styles.callIdentity}>
-        <Text style={styles.callName}>{peerName}</Text>
-        <Text style={styles.callStatus}>{statusLabel || "Calling..."}</Text>
-      </View>
+      <View style={{ flex: 1 }} />
       <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
         <Pressable style={[styles.callControlBtn, styles.endCallBtn]} onPress={onClose}>
           <Ionicons name="call" size={25} color="#fff" />
@@ -369,6 +370,13 @@ function CallRoomContent({
     ? formatCallDuration(durationSec)
     : statusLabel?.trim() || status || (mode === "video" ? "Calling..." : "Ringing...");
   const speakerActive = audioRoute === "speaker";
+  const resolvedPeerName = React.useMemo(() => {
+    const fromRoute = String(peerName || "").trim();
+    const fromLiveKit = String(peer?.name || "").trim();
+    if (fromRoute && fromRoute.toLowerCase() !== "someone") return fromRoute;
+    if (fromLiveKit) return fromLiveKit;
+    return fromRoute || "Caller";
+  }, [peer?.name, peerName]);
 
   return (
     <View style={[styles.callScreen, mode === "video" ? styles.videoCallScreen : null]}>
@@ -411,17 +419,16 @@ function CallRoomContent({
         </View>
       ) : null}
 
-      <View style={[styles.callTopBar, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.callTopSection, { paddingTop: Math.max(insets.top, 12) }]}>
         <Pressable style={styles.callTopIcon} onPress={() => void endCall()}>
           <Ionicons name="chevron-down" size={28} color="#fff" />
         </Pressable>
-      </View>
-
-      <View style={styles.callIdentity}>
-        <Text style={styles.callName}>{peerName}</Text>
-        {!(mode === "video" && !tracksReady) ? (
-          <Text style={styles.callStatus}>{statusLine}</Text>
-        ) : null}
+        <View style={styles.callTopMeta}>
+          <Text style={styles.callName}>{resolvedPeerName}</Text>
+          {!(mode === "video" && !tracksReady) ? (
+            <Text style={styles.callStatus}>{statusLine}</Text>
+          ) : null}
+        </View>
       </View>
 
       <View style={[styles.callControls, { paddingBottom: Math.max(insets.bottom, 20) }]}>
@@ -682,8 +689,7 @@ export function DirectCallView({
 const styles = StyleSheet.create({
   callScreen: {
     flex: 1,
-    backgroundColor: "#121212",
-    justifyContent: "space-between"
+    backgroundColor: "#121212"
   },
   videoCallScreen: { backgroundColor: "#050505" },
   remoteVideo: { ...StyleSheet.absoluteFillObject },
@@ -714,7 +720,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600"
   },
-  callTopBar: { zIndex: 4, paddingHorizontal: 18 },
+  callTopSection: { zIndex: 4, paddingHorizontal: 18 },
   callTopIcon: {
     width: 42,
     height: 42,
@@ -723,11 +729,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.14)"
   },
-  callIdentity: { zIndex: 4, alignItems: "center", paddingHorizontal: 24 },
-  callName: { color: "#fff", fontSize: 24, fontWeight: "800" },
-  callStatus: { marginTop: 8, color: "rgba(255,255,255,0.72)", fontSize: 15, fontWeight: "600" },
+  callTopMeta: {
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 8
+  },
+  callName: { color: "#fff", fontSize: 24, fontWeight: "800", textAlign: "center" },
+  callStatus: { marginTop: 6, color: "rgba(255,255,255,0.72)", fontSize: 15, fontWeight: "700", textAlign: "center" },
   callControls: {
     zIndex: 4,
+    marginTop: "auto",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
