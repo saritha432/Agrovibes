@@ -23,7 +23,7 @@ function getWebAppOrigin() {
     .map((part) => part.trim())
     .find((part) => part.startsWith("http"));
   if (cors) return cors.replace(/\/$/, "");
-  return "https://www.cropvibe.com";
+  return "https://cropvibe.com";
 }
 
 function getApiOrigin() {
@@ -196,9 +196,6 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   <meta property="al:ios:app_name" content="Cropvibe" />
   <meta property="al:web:url" content="${escapeHtml(canonicalPath)}" />`;
   const logoUrl = `${webOrigin}/logo-wordmark.png`;
-  const previewThumb = image
-    ? `<img class="preview-thumb" src="${escapeHtml(image)}" alt="" />`
-    : `<div class="preview-thumb preview-thumb--placeholder">CV</div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -252,32 +249,16 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 12px 0 24px;
+      padding: 4px 0 12px;
     }
     .logo {
-      width: 88px;
-      height: 88px;
-      border-radius: 20px;
+      width: 94px;
+      height: 94px;
+      border-radius: 24px;
       object-fit: contain;
-      margin-bottom: 18px;
+      margin-bottom: 14px;
       background: #262626;
       padding: 10px;
-    }
-    .preview-thumb {
-      width: 120px;
-      height: 120px;
-      border-radius: 16px;
-      object-fit: cover;
-      margin-bottom: 16px;
-      border: 1px solid #e8e8e8;
-    }
-    .preview-thumb--placeholder {
-      display: grid;
-      place-items: center;
-      background: #c9ff35;
-      color: #111;
-      font-weight: 900;
-      font-size: 28px;
     }
     h1 {
       margin: 0 0 8px;
@@ -292,6 +273,12 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       line-height: 1.45;
       max-width: 320px;
     }
+    .estimated {
+      margin: 10px 0 0;
+      color: #a1a1a1;
+      font-size: 12px;
+      font-weight: 600;
+    }
     .author {
       margin: 14px 0 0;
       color: #888;
@@ -305,7 +292,7 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       max-width: 340px;
     }
     .meta {
-      margin-top: 10px;
+      margin-top: 12px;
       color: #999;
       font-size: 13px;
     }
@@ -316,7 +303,36 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
     }
     .actions {
       margin-top: auto;
-      padding-top: 20px;
+      padding-top: 26px;
+      width: 100%;
+    }
+    .mobile-note {
+      margin: 0 0 14px;
+      color: #4b4b4b;
+      font-size: 13px;
+      line-height: 1.35;
+      text-align: left;
+    }
+    .mobile-note .checkbox {
+      display: inline-block;
+      width: 13px;
+      height: 13px;
+      border: 1.6px solid #111;
+      border-radius: 2px;
+      margin-right: 8px;
+      vertical-align: -1px;
+      position: relative;
+    }
+    .mobile-note .checkbox:after {
+      content: "";
+      position: absolute;
+      left: 2px;
+      top: 0px;
+      width: 6px;
+      height: 10px;
+      border: solid #111;
+      border-width: 0 1.8px 1.8px 0;
+      transform: rotate(45deg);
     }
     .btn-install {
       display: block;
@@ -324,7 +340,7 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       padding: 14px 20px;
       border: none;
       border-radius: 999px;
-      background: #1877f2;
+      background: #3f5efb;
       color: #fff;
       font-size: 17px;
       font-weight: 700;
@@ -375,13 +391,14 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
     <div id="cv-loading" class="loading">Opening Cropvibe…</div>
     <div id="cv-install" class="hero" hidden>
       <img class="logo" src="${escapeHtml(logoUrl)}" alt="Cropvibe" onerror="this.style.display='none'" />
-      ${previewThumb}
       <h1>Install Cropvibe</h1>
       <p class="tagline">Bringing you closer to the people and things you love in farming.</p>
+      <p class="estimated">Estimated size: 12MB</p>
       <p class="author">${author}</p>
       <p class="caption">${caption}</p>
       <p class="meta"><a href="${escapeHtml(canonicalPath)}">View details</a></p>
       <div class="actions">
+        <p class="mobile-note"><span class="checkbox"></span>Use mobile data if Wi-Fi is not available. Data charges may apply.</p>
         <a id="cv-install-btn" class="btn-install" href="${escapeHtml(urls.playStoreUrl)}">Install</a>
         <a id="cv-watch-btn" class="btn-secondary" href="${escapeHtml(urls.httpsWatchUrl)}">Watch in browser</a>
       </div>

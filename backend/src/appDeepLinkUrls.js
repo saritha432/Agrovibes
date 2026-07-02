@@ -40,7 +40,7 @@ function getStoreUrls() {
 }
 
 function buildReelDeepLinkUrls(postId, webOrigin) {
-  const origin = String(webOrigin || "https://www.cropvibe.com").replace(/\/$/, "");
+  const origin = String(webOrigin || "https://cropvibe.com").replace(/\/$/, "");
   const { customSchemeUrl, httpsReelPath, httpsWatchPath } = buildReelPaths(postId);
   const httpsReelUrl = `${origin}${httpsReelPath}`;
   const httpsWatchUrl = `${origin}${httpsWatchPath}`;
