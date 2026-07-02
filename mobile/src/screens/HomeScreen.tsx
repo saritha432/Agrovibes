@@ -1144,18 +1144,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [feedPlaybackSuspended, setFeedPlaybackSuspended] = useState(false);
   const canPlayMedia = appIsActive && isFocused && !feedPlaybackSuspended;
 
-<<<<<<< HEAD
   const modalTopInset = useModalTopChromeInset();
-=======
-  /** Story / fullscreen reel chrome over translucent status bar — use full safe area, no cap. */
-  const modalTopInset = useMemo(() => {
-    if (Platform.OS === "android") {
-      const sbh = StatusBar.currentHeight ?? 0;
-      return Math.max(insets.top, sbh) + 12;
-    }
-    return Math.max(insets.top, 12) + 14;
-  }, [insets.top]);
->>>>>>> bfd9bc01053d7ff8959ee1b4cdb9c8a8d0b17f77
 
   /** Keep reel actions above Android gesture / 3-button navigation bar. */
   const modalBottomInset = useMemo(() => {

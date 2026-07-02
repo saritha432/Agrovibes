@@ -90,16 +90,66 @@ function buildOpenAppScript(urls) {
         var appUrl = ${JSON.stringify(urls.customSchemeUrl)};
         var androidIntent = ${JSON.stringify(urls.androidIntentUrl)};
         var androidCustom = ${JSON.stringify(urls.androidCustomIntentUrl)};
-        var webUrl = ${JSON.stringify(urls.httpsWatchUrl)};
+        var watchUrl = ${JSON.stringify(urls.httpsWatchUrl)};
+        var playStoreUrl = ${JSON.stringify(urls.playStoreUrl)};
+        var appStoreUrl = ${JSON.stringify(urls.appStoreUrl)};
         var ua = navigator.userAgent || "";
         var isAndroid = /android/i.test(ua);
+        var isIos = /iphone|ipad|ipod/i.test(ua);
+        var params = new URLSearchParams(window.location.search || "");
+        var forceInstall = params.get("install") === "1";
+        var forceWeb = params.get("web") === "1";
         var started = Date.now();
         var opened = false;
+
+        function showInstall() {
+          var loading = document.getElementById("cv-loading");
+          var install = document.getElementById("cv-install");
+          if (loading) loading.hidden = true;
+          if (install) install.hidden = false;
+        }
+
+        function storeUrl() {
+          if (isIos) return appStoreUrl;
+          if (isAndroid) return playStoreUrl;
+          return playStoreUrl;
+        }
 
         function tryOpen(url) {
           if (!url || opened) return;
           opened = true;
           try { window.location.href = url; } catch (e) {}
+        }
+
+        function wireInstall() {
+          var installBtn = document.getElementById("cv-install-btn");
+          var watchBtn = document.getElementById("cv-watch-btn");
+          if (installBtn) {
+            installBtn.href = storeUrl();
+            installBtn.addEventListener("click", function (e) {
+              e.preventDefault();
+              window.location.href = storeUrl();
+            });
+          }
+          if (watchBtn) {
+            watchBtn.href = watchUrl;
+            watchBtn.addEventListener("click", function (e) {
+              e.preventDefault();
+              window.location.href = watchUrl;
+            });
+          }
+        }
+
+        if (forceWeb) {
+          window.location.replace(watchUrl);
+          return;
+        }
+
+        wireInstall();
+
+        if (forceInstall) {
+          showInstall();
+          return;
         }
 
         if (isAndroid) {
@@ -113,7 +163,7 @@ function buildOpenAppScript(urls) {
         setTimeout(function () {
           if (document.hidden || document.visibilityState === "hidden") return;
           if (Date.now() - started < 2200) {
-            window.location.replace(webUrl);
+            showInstall();
           }
         }, 1800);
       })();
@@ -133,15 +183,22 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   const imageTags = image
     ? `<meta property="og:image" content="${escapeHtml(image)}" />
   <meta property="og:image:secure_url" content="${escapeHtml(image)}" />
+  <meta property="og:image:type" content="image/jpeg" />
   <meta name="twitter:image" content="${escapeHtml(image)}" />`
     : "";
   const previewBot = isLinkPreviewBot(userAgent);
-  const openAppHref = escapeHtml(urls.androidIntentUrl);
-  const openAppOnClick = previewBot
-    ? ""
-    : `onclick="event.preventDefault();var u=/android/i.test(navigator.userAgent)?${JSON.stringify(urls.androidIntentUrl)}:${JSON.stringify(urls.customSchemeUrl)};window.location.href=u;return false;"`;
-
   const redirectScript = previewBot ? "" : buildOpenAppScript(urls);
+  const appLinksTags = `
+  <meta property="al:android:url" content="${escapeHtml(urls.customSchemeUrl)}" />
+  <meta property="al:android:package" content="com.cropvibe.app" />
+  <meta property="al:android:app_name" content="Cropvibe" />
+  <meta property="al:ios:url" content="${escapeHtml(urls.customSchemeUrl)}" />
+  <meta property="al:ios:app_name" content="Cropvibe" />
+  <meta property="al:web:url" content="${escapeHtml(canonicalPath)}" />`;
+  const logoUrl = `${webOrigin}/logo-wordmark.png`;
+  const previewThumb = image
+    ? `<img class="preview-thumb" src="${escapeHtml(image)}" alt="" />`
+    : `<div class="preview-thumb preview-thumb--placeholder">CV</div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -156,33 +213,180 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   <meta property="og:description" content="${caption}" />
   <meta property="og:url" content="${escapeHtml(canonicalPath)}" />
   ${imageTags}
+  ${appLinksTags}
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${title}" />
   <meta name="twitter:description" content="${caption}" />
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #f5f5f5; }
-    .wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; text-align: center; }
-    .btn {
-      display: inline-block;
-      margin-top: 20px;
-      padding: 12px 22px;
-      border-radius: 999px;
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #fff;
+      color: #111;
+    }
+    .page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 20px 20px 28px;
+    }
+    .back {
+      width: 40px;
+      height: 40px;
+      border: none;
+      background: transparent;
+      font-size: 28px;
+      line-height: 1;
+      color: #111;
+      cursor: pointer;
+      padding: 0;
+      margin-left: -6px;
+    }
+    .hero {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 12px 0 24px;
+    }
+    .logo {
+      width: 88px;
+      height: 88px;
+      border-radius: 20px;
+      object-fit: contain;
+      margin-bottom: 18px;
+      background: #262626;
+      padding: 10px;
+    }
+    .preview-thumb {
+      width: 120px;
+      height: 120px;
+      border-radius: 16px;
+      object-fit: cover;
+      margin-bottom: 16px;
+      border: 1px solid #e8e8e8;
+    }
+    .preview-thumb--placeholder {
+      display: grid;
+      place-items: center;
       background: #c9ff35;
       color: #111;
-      font-weight: 800;
-      text-decoration: none;
+      font-weight: 900;
+      font-size: 28px;
     }
-    .sub { margin-top: 14px; color: #aaa; font-size: 14px; }
-    .sub a { color: #c9ff35; }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.15;
+      font-weight: 800;
+    }
+    .tagline {
+      margin: 0;
+      color: #666;
+      font-size: 15px;
+      line-height: 1.45;
+      max-width: 320px;
+    }
+    .author {
+      margin: 14px 0 0;
+      color: #888;
+      font-size: 14px;
+    }
+    .caption {
+      margin: 6px 0 0;
+      color: #444;
+      font-size: 14px;
+      line-height: 1.4;
+      max-width: 340px;
+    }
+    .meta {
+      margin-top: 10px;
+      color: #999;
+      font-size: 13px;
+    }
+    .meta a {
+      color: #1877f2;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .actions {
+      margin-top: auto;
+      padding-top: 20px;
+    }
+    .btn-install {
+      display: block;
+      width: 100%;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 999px;
+      background: #1877f2;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 700;
+      text-align: center;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      display: block;
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px 20px;
+      border-radius: 999px;
+      background: transparent;
+      color: #1877f2;
+      font-size: 16px;
+      font-weight: 700;
+      text-align: center;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .loading {
+      min-height: 60vh;
+      display: grid;
+      place-items: center;
+      color: #666;
+      font-size: 15px;
+    }
+    .preview-only {
+      padding: 24px;
+      text-align: center;
+      color: #444;
+      font-size: 14px;
+      line-height: 1.5;
+    }
   </style>
   ${redirectScript}
 </head>
 <body>
-  <div class="wrap">
-    <h1>${author}</h1>
-    <p>${caption}</p>
-    <a class="btn" href="${openAppHref}" ${openAppOnClick}>View on Cropvibe</a>
-    <p class="sub">No app? <a href="${escapeHtml(urls.httpsWatchUrl)}">Watch in browser</a></p>
+  <div class="page">
+    ${
+      previewBot
+        ? `<div class="preview-only">
+      <p><strong>${author}</strong></p>
+      <p>${caption}</p>
+    </div>`
+        : `<button class="back" type="button" onclick="history.length>1?history.back():window.location.href='${escapeHtml(webOrigin)}'">&#8592;</button>
+    <div id="cv-loading" class="loading">Opening Cropvibe…</div>
+    <div id="cv-install" class="hero" hidden>
+      <img class="logo" src="${escapeHtml(logoUrl)}" alt="Cropvibe" onerror="this.style.display='none'" />
+      ${previewThumb}
+      <h1>Install Cropvibe</h1>
+      <p class="tagline">Bringing you closer to the people and things you love in farming.</p>
+      <p class="author">${author}</p>
+      <p class="caption">${caption}</p>
+      <p class="meta"><a href="${escapeHtml(canonicalPath)}">View details</a></p>
+      <div class="actions">
+        <a id="cv-install-btn" class="btn-install" href="${escapeHtml(urls.playStoreUrl)}">Install</a>
+        <a id="cv-watch-btn" class="btn-secondary" href="${escapeHtml(urls.httpsWatchUrl)}">Watch in browser</a>
+      </div>
+    </div>`
+    }
   </div>
 </body>
 </html>`;

@@ -906,12 +906,7 @@ export function PostsReelViewerModal({
   }, [initialIndex, posts, visible]);
 
   const effectivePlayingId = playingPostId ?? intendedPlayingId;
-
-  const reelTopInset = useMemo(() => {
-    const sbh = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
-    const webPad = Platform.OS === "web" ? 12 : 0;
-    return Math.max(insets.top, sbh, webPad) + 12;
-  }, [insets.top]);
+  const modalTopInset = useModalTopChromeInset();
 
   const reelBottomInset = useMemo(() => {
     if (Platform.OS === "android") return Math.max(insets.bottom, 24);
@@ -945,12 +940,12 @@ export function PostsReelViewerModal({
       const showVolumeControl = postShowsVolumeControl(post);
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
-      const mediaContentH = pageH - reelTopInset - reelBottomInset;
+      const mediaContentH = pageH - modalTopInset - reelBottomInset;
       const mediaFrameStyle = {
         position: "absolute" as const,
         left: 0,
         right: 0,
-        top: reelTopInset,
+        top: modalTopInset,
         bottom: reelBottomInset
       };
 
@@ -989,7 +984,7 @@ export function PostsReelViewerModal({
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={{ width: reelContentWidth, height: mediaContentH, position: "absolute", left: 0, right: 0, top: reelTopInset }}
+              style={{ width: reelContentWidth, height: mediaContentH, position: "absolute", left: 0, right: 0, top: modalTopInset }}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -1146,7 +1141,7 @@ export function PostsReelViewerModal({
       user,
       viewerPosts,
       reelBottomInset,
-      reelTopInset,
+      modalTopInset,
       windowHeight,
       windowWidth
     ]
@@ -1154,10 +1149,7 @@ export function PostsReelViewerModal({
 
   const safeInitialIndex =
     visible && viewerPosts.length > 0 ? Math.max(0, Math.min(initialIndex, viewerPosts.length - 1)) : 0;
-<<<<<<< HEAD
-  const modalTopInset = useModalTopChromeInset();
-=======
->>>>>>> bfd9bc01053d7ff8959ee1b4cdb9c8a8d0b17f77
+  const activePlayingPost = viewerPosts.find((p) => p.id === effectivePlayingId);
 
   useEffect(() => {
     if (!visible || windowHeight <= 0 || safeInitialIndex <= 0) return;
@@ -1180,7 +1172,8 @@ export function PostsReelViewerModal({
           </View>
           {reelMuteFeedback &&
           !reelUserPaused &&
-          postShowsVolumeControl(viewerPosts.find((p) => p.id === effectivePlayingId) ?? {}) ? (
+          activePlayingPost &&
+          postShowsVolumeControl(activePlayingPost) ? (
             <View style={styles.reelMuteFeedbackLayer} pointerEvents="none">
               <View style={styles.reelMuteFeedbackBubble}>
                 <Ionicons name={reelMuteFeedback === "muted" ? "volume-mute" : "volume-high"} size={44} color="#fff" />
