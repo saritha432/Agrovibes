@@ -42,6 +42,7 @@ import {
   isSocketChatConnected
 } from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
+import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
 import {
   hydrateLiveShareFromFeed,
   isJoinableLiveShare,
@@ -857,15 +858,16 @@ export function DirectChatScreen() {
 
   useEffect(() => {
     if (!incomingCall?.roomName) return;
-    callHistorySentRef.current = false;
-    setCallSession({
+    presentIncomingCallFromPush({
+      callerId: incomingCall.callerId,
+      callerName: peerName,
+      callerAvatarUrl: peerAvatar,
       roomName: incomingCall.roomName,
       mode: incomingCall.mode,
-      connectEnabled: false,
-      direction: "incoming",
-      statusLabel: incomingCall.mode === "video" ? "Incoming video call" : "Incoming voice call"
+      autoAccept: incomingCall.autoAccept
     });
-  }, [incomingCall?.mode, incomingCall?.roomName]);
+    navigation.setParams({ incomingCall: undefined });
+  }, [incomingCall, navigation, peerAvatar, peerName]);
 
   const startCall = async (mode: DirectCallMode) => {
     if (!token || Platform.OS === "web") {

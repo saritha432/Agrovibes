@@ -5,11 +5,18 @@ import { Platform } from "react-native";
 import { registerPushToken, unregisterPushToken } from "../services/api";
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true
-  })
+  handleNotification: async (notification) => {
+    const data = (notification.request.content.data || {}) as Record<string, unknown>;
+    const isIncomingCall = String(data.type || "") === "incoming_call";
+    return {
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: !isIncomingCall,
+      priority: isIncomingCall
+        ? Notifications.AndroidNotificationPriority.MAX
+        : Notifications.AndroidNotificationPriority.HIGH
+    };
+  }
 });
 
 let cachedToken: string | null = null;
@@ -35,6 +42,17 @@ async function ensureAndroidChannel() {
     sound: "default",
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35"
+  });
+  await Notifications.setNotificationChannelAsync("incoming_calls", {
+    name: "Calls",
+    description: "Incoming voice and video calls",
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: true,
+    sound: "default",
+    vibrationPattern: [0, 800, 400, 800, 400, 800],
+    lightColor: "#C9FF35",
+    enableVibrate: true
   });
 }
 
@@ -127,6 +145,45 @@ export async function setupDirectMessageNotificationCategory() {
       },
       options: {
         opensAppToForeground: false
+      }
+    }
+  ]);
+}
+
+export async function setupIncomingCallNotificationCategories() {
+  if (Platform.OS === "web") return;
+  await ensureAndroidChannel();
+  await Notifications.setNotificationCategoryAsync("INCOMING_VOICE_CALL", [
+    {
+      identifier: "DECLINE",
+      buttonTitle: "Decline",
+      options: {
+        isDestructive: true,
+        opensAppToForeground: true
+      }
+    },
+    {
+      identifier: "ACCEPT",
+      buttonTitle: "Answer",
+      options: {
+        opensAppToForeground: true
+      }
+    }
+  ]);
+  await Notifications.setNotificationCategoryAsync("INCOMING_VIDEO_CALL", [
+    {
+      identifier: "DECLINE",
+      buttonTitle: "Decline",
+      options: {
+        isDestructive: true,
+        opensAppToForeground: true
+      }
+    },
+    {
+      identifier: "ACCEPT",
+      buttonTitle: "Video",
+      options: {
+        opensAppToForeground: true
       }
     }
   ]);

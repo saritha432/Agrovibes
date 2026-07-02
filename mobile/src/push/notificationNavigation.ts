@@ -4,6 +4,8 @@ import { sendDirectMessage, fetchHomePost } from "../services/api";
 import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
+import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
+import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
 
@@ -33,6 +35,14 @@ const replyInFlight = new Set<string>();
 
 function isReplyAction(actionId: string) {
   return actionId === "REPLY" || actionId.endsWith(":REPLY") || actionId.endsWith(".REPLY");
+}
+
+function isDeclineCallAction(actionId: string) {
+  return actionId === "DECLINE" || actionId.endsWith(":DECLINE") || actionId.endsWith(".DECLINE");
+}
+
+function isAcceptCallAction(actionId: string) {
+  return actionId === "ACCEPT" || actionId.endsWith(":ACCEPT") || actionId.endsWith(".ACCEPT");
 }
 
 function isAppReadyForNotificationNavigation() {
@@ -101,6 +111,52 @@ function scheduleOpenPost(postId: number, authToken?: string | null) {
   });
 }
 
+async function handleIncomingCallDecline(
+  data: Record<string, unknown>,
+  options?: { authToken?: string | null }
+) {
+  const callerId = peerIdFromData(data);
+  const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+  if (!callerId) return;
+  const authToken = await resolveAuthToken(options?.authToken);
+  if (!authToken) return;
+  try {
+    await sendDirectMessage(
+      authToken,
+      callerId,
+      buildDmCallMessage({
+        mode,
+        status: "declined",
+        durationSec: 0,
+        direction: "incoming"
+      })
+    );
+  } catch {
+    // no-op
+  }
+}
+
+function presentIncomingCallFromNotificationData(
+  data: Record<string, unknown>,
+  title: string,
+  autoAccept: boolean
+) {
+  const callerId = peerIdFromData(data);
+  const roomName = String(data.roomName || "").trim();
+  const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+  const callerAvatarUrl = String(data.callerAvatarUrl || "").trim() || null;
+  if (!callerId || !roomName) return false;
+  presentIncomingCallFromPush({
+    callerId,
+    callerName: title,
+    roomName,
+    mode,
+    callerAvatarUrl,
+    autoAccept
+  });
+  return true;
+}
+
 async function handleInlineReply(
   response: Notifications.NotificationResponse,
   options?: { authToken?: string | null }
@@ -146,6 +202,12 @@ export async function handleNotificationResponse(
     return;
   }
 
+  if (type === "incoming_call" && isDeclineCallAction(actionId)) {
+    await clearNotificationReplyUi(response);
+    await handleIncomingCallDecline(data, options);
+    return;
+  }
+
   let scheduled = false;
   const schedule = (action: () => void) => {
     scheduled = true;
@@ -153,17 +215,19 @@ export async function handleNotificationResponse(
   };
 
   if (type === "incoming_call") {
-    const callerId = peerIdFromData(data);
-    const roomName = String(data.roomName || "").trim();
-    const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
-    if (callerId && roomName) {
-      schedule(() => {
-        navigateToDirectChat({
-          peerUserId: callerId,
-          peerName: title,
-          incomingCall: { roomName, mode, callerId }
+    const autoAccept = isAcceptCallAction(actionId);
+    const presented = presentIncomingCallFromNotificationData(data, title, autoAccept);
+    if (presented) {
+      const callerId = peerIdFromData(data);
+      if (callerId) {
+        schedule(() => {
+          navigateToDirectChat({
+            peerUserId: callerId,
+            peerName: title,
+            peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined
+          });
         });
-      });
+      }
     }
   } else if (type === "live_share") {
     const postId = Number(data.postId);

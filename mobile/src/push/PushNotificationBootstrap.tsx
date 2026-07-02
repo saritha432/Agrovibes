@@ -3,15 +3,17 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "../auth/AuthContext";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
-import { navigateToDirectChat, navigateToJoinLive } from "../navigation/navigationRef";
+import { navigateToJoinLive } from "../navigation/navigationRef";
 import {
   addNotificationReceivedListener,
   registerPushNotifications,
   setupDirectMessageNotificationCategory,
+  setupIncomingCallNotificationCategories,
   unregisterPushNotifications
 } from "./pushNotifications";
 import { handleNotificationResponse } from "./notificationNavigation";
 import { registerNotificationResponseHandler } from "./registerNotificationHandlers";
+import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 
 export function PushNotificationBootstrap() {
   const { token, user } = useAuth();
@@ -38,6 +40,7 @@ export function PushNotificationBootstrap() {
     if (Platform.OS === "web") return;
 
     void setupDirectMessageNotificationCategory();
+    void setupIncomingCallNotificationCategories();
     registerNotificationResponseHandler();
 
     void Notifications.getLastNotificationResponseAsync().then((response) => {
@@ -60,11 +63,14 @@ export function PushNotificationBootstrap() {
       const roomName = String(data.roomName || "").trim();
       const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
       const callerName = String(event.request.content.title || "Someone").trim() || "Someone";
+      const callerAvatarUrl = String(data.callerAvatarUrl || "").trim() || null;
       if (Number.isFinite(callerId) && callerId > 0 && roomName) {
-        navigateToDirectChat({
-          peerUserId: callerId,
-          peerName: callerName,
-          incomingCall: { roomName, mode, callerId }
+        presentIncomingCallFromPush({
+          callerId,
+          callerName,
+          roomName,
+          mode,
+          callerAvatarUrl
         });
       }
     });
