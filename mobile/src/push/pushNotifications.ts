@@ -36,8 +36,6 @@ Notifications.setNotificationHandler({
   }
 });
 
-let cachedToken: string | null = null;
-
 export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync("default", {
@@ -73,6 +71,35 @@ export async function ensureAndroidChannels() {
   });
 }
 
+let cachedToken: string | null = null;
+
+async function getFirebaseMessagingToken(): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const messagingModule = require("@react-native-firebase/messaging").default as (() => {
+      registerDeviceForRemoteMessages: () => Promise<void>;
+      requestPermission: () => Promise<number>;
+      getToken: () => Promise<string>;
+    }) & { AuthorizationStatus: { AUTHORIZED: number; PROVISIONAL: number } };
+    if (typeof messagingModule !== "function") return null;
+
+    const messaging = messagingModule();
+    if (Platform.OS === "ios") {
+      await messaging.registerDeviceForRemoteMessages();
+      const authStatus = await messaging.requestPermission();
+      const enabled =
+        authStatus === messagingModule.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messagingModule.AuthorizationStatus.PROVISIONAL;
+      if (!enabled) return null;
+    }
+
+    const token = String((await messaging.getToken()) || "").trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getNativePushToken(): Promise<string | null> {
   if (Platform.OS === "web") return null;
   if (!Device.isDevice) return null;
@@ -86,6 +113,12 @@ export async function getNativePushToken(): Promise<string | null> {
   if (finalStatus !== "granted") return null;
 
   await ensureAndroidChannels();
+
+  const firebaseToken = await getFirebaseMessagingToken();
+  if (firebaseToken) {
+    cachedToken = firebaseToken;
+    return firebaseToken;
+  }
 
   const projectId =
     Constants.expoConfig?.extra?.eas?.projectId ||
@@ -101,6 +134,7 @@ export async function getNativePushToken(): Promise<string | null> {
       const expoToken = await Notifications.getExpoPushTokenAsync({ projectId });
       if (expoToken?.data) {
         cachedToken = expoToken.data;
+        return expoToken.data;
       }
     } catch {
       // Native FCM/APNs token is enough for firebase-admin.
@@ -109,6 +143,10 @@ export async function getNativePushToken(): Promise<string | null> {
 
   cachedToken = token;
   return token;
+}
+
+export function getCachedPushToken() {
+  return cachedToken;
 }
 
 export async function registerPushNotifications(authToken: string | null | undefined) {

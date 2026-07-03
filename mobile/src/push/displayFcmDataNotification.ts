@@ -4,9 +4,11 @@ import { ensureAndroidChannels } from "./pushNotifications";
 
 type FcmRemoteMessage = {
   data?: Record<string, unknown>;
+  notification?: { title?: string; body?: string };
 };
 
 export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage | null | undefined) {
+  if (remoteMessage?.notification) return;
   const data = remoteMessage?.data || {};
   const title = String(data.title || "").trim();
   const body = String(data.message || data.body || "").trim();

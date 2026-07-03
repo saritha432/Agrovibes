@@ -22,7 +22,7 @@
       "distribution": "internal",
       "channel": "preview",
       "cache": {
-        "key": "preview-no-dev-client-v4-push-fix"
+        "key": "preview-no-dev-client-v5-topbar-v1.0.7"
       },
       "env": {
         "NODE_ENV": "production",
@@ -44,7 +44,7 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-ios-xcode-26-v2"
+        "key": "production-android-v1.0.7-abi32"
       },
       "env": {
         "NODE_ENV": "production",
