@@ -1,13 +1,6 @@
 import "fast-text-encoding";
-import { registerIncomingCallMessagingBackground } from "./src/push/incomingCallMessagingBackground";
-import "./src/push/registerNotificationHandlers";
 import React from "react";
 import { ActivityIndicator, View } from "react-native";
-import { setupDirectMessageNotificationCategory, ensureIncomingCallCategoriesReady } from "./src/push/pushNotifications";
-
-void setupDirectMessageNotificationCategory();
-void ensureIncomingCallCategoriesReady();
-registerIncomingCallMessagingBackground();
 import { NavigationContainer } from "@react-navigation/native";
 import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
@@ -27,6 +20,10 @@ import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
 import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
+import { setupDirectMessageNotificationCategory, ensureIncomingCallCategoriesReady } from "./src/push/pushNotifications";
+
+void setupDirectMessageNotificationCategory();
+void ensureIncomingCallCategoriesReady();
 
 export default function App() {
   const { ready: fontsReady } = useAppFonts();

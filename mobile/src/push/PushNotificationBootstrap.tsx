@@ -38,6 +38,24 @@ export function PushNotificationBootstrap() {
   }, [token, user?.id]);
 
   React.useEffect(() => {
+    if (Platform.OS === "web" || !token) return;
+    try {
+      const messaging = require("@react-native-firebase/messaging").default as () => {
+        onTokenRefresh: (handler: (nextToken: string) => void) => () => void;
+      };
+      const unsubscribe = messaging().onTokenRefresh((nextToken) => {
+        const clean = String(nextToken || "").trim();
+        if (!clean) return;
+        registeredTokenRef.current = clean;
+        void registerPushNotifications(token);
+      });
+      return unsubscribe;
+    } catch {
+      return undefined;
+    }
+  }, [token]);
+
+  React.useEffect(() => {
     if (Platform.OS === "web") return;
 
     void setupDirectMessageNotificationCategory();

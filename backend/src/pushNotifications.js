@@ -303,8 +303,8 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
   const image = String(imageUrl || "").trim();
   const hasImage = /^https?:\/\//i.test(image);
 
-  // Chat reply + incoming call actions require a data-only FCM payload on Android so Expo
-  // can attach the registered notification categories (Reply / Decline / Accept).
+  // Chat reply actions use category payloads on iOS. On Android, also send a visible
+  // notification payload so FCM shows alerts when the app is backgrounded/killed.
   const isIncomingCallCategory =
     categoryId === "INCOMING_VOICE_CALL" || categoryId === "INCOMING_VIDEO_CALL";
   if (categoryId === "DIRECT_MESSAGE" || isIncomingCallCategory) {
@@ -318,6 +318,68 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
       payloadData.vibrate = JSON.stringify([0, 800, 400, 800, 400, 800]);
     }
     if (hasImage) payloadData.image = image;
+
+    if (categoryId === "DIRECT_MESSAGE") {
+      const entries = await listTokenEntriesForUser(userId);
+      if (!entries.length) return { sent: 0, skipped: "no_tokens" };
+
+      const androidTokens = entries.filter((entry) => entry.platform === "android").map((entry) => entry.token);
+      const iosTokens = entries.filter((entry) => entry.platform !== "android").map((entry) => entry.token);
+
+      let sent = 0;
+      let failed = 0;
+
+      if (androidTokens.length) {
+        const androidResult = await sendMulticastAndCleanup(androidTokens, {
+          notification: {
+            title: pushTitle,
+            body: pushBody,
+            ...(hasImage ? { imageUrl: image } : {})
+          },
+          data: payloadData,
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "direct_messages",
+              priority: "max",
+              visibility: "public",
+              defaultSound: true,
+              defaultVibrateTimings: true,
+              ...(hasImage ? { imageUrl: image } : {})
+            }
+          }
+        });
+        sent += androidResult.sent;
+        failed += androidResult.failed;
+      }
+
+      if (iosTokens.length) {
+        const iosResult = await sendMulticastAndCleanup(iosTokens, {
+          data: payloadData,
+          apns: {
+            headers: {
+              "apns-priority": "10"
+            },
+            payload: {
+              aps: {
+                alert: {
+                  title: pushTitle,
+                  body: pushBody
+                },
+                sound: "default",
+                category: String(categoryId),
+                ...(hasImage ? { "mutable-content": 1 } : {})
+              }
+            },
+            ...(hasImage ? { fcm_options: { image } } : {})
+          }
+        });
+        sent += iosResult.sent;
+        failed += iosResult.failed;
+      }
+
+      return { sent, failed };
+    }
 
     const response = await admin.messaging().sendEachForMulticast({
       tokens,
