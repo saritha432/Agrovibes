@@ -23,6 +23,7 @@ import {
 import React from "react";
 import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTopChromeInset } from "../../theme/topChromeInset";
 import { useAuth } from "../../auth/AuthContext";
 import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
 import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
@@ -108,6 +109,7 @@ function PreConnectVideoPreview({
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
   const [permission, requestPermission] = useCameraPermissions();
 
   React.useEffect(() => {
@@ -123,7 +125,7 @@ function PreConnectVideoPreview({
           <ActivityIndicator size="large" color={APP_LIME} />
         </View>
       )}
-      <View style={[styles.callTopSection, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.callTopSection, { paddingTop: topChromeInset }]}>
         <Pressable style={styles.callTopIcon} onPress={onClose}>
           <Ionicons name="chevron-down" size={28} color="#fff" />
         </Pressable>
@@ -164,6 +166,7 @@ function CallRoomContent({
   endedRef: React.MutableRefObject<boolean>;
 }) {
   const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
   const room = useRoomContext();
   const participants = useParticipants();
   const remoteCameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: true });
@@ -419,7 +422,7 @@ function CallRoomContent({
         </View>
       ) : null}
 
-      <View style={[styles.callTopSection, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.callTopSection, { paddingTop: topChromeInset }]}>
         <Pressable style={styles.callTopIcon} onPress={() => void endCall()}>
           <Ionicons name="chevron-down" size={28} color="#fff" />
         </Pressable>
@@ -488,6 +491,7 @@ export function DirectCallView({
 }: DirectCallViewProps) {
   const { token } = useAuth();
   const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [errorText, setErrorText] = React.useState("");
   const endedRef = React.useRef(false);
@@ -598,7 +602,7 @@ export function DirectCallView({
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => void finishWithoutRoom("cancelled")}>
       {!connectEnabled ? (
-        <View style={[styles.incomingScreen, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 28) }]}>
+        <View style={[styles.incomingScreen, { paddingTop: topChromeInset, paddingBottom: Math.max(insets.bottom, 28) }]}>
           <View style={styles.incomingTopMeta}>
             <Text style={styles.incomingName}>{peerName}</Text>
             <Text style={styles.incomingStatus}>{mode === "video" ? "Incoming video call" : "Incoming voice call"}</Text>

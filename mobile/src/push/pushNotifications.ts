@@ -38,7 +38,7 @@ Notifications.setNotificationHandler({
 
 let cachedToken: string | null = null;
 
-async function ensureAndroidChannel() {
+export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync("default", {
     name: "Default",
@@ -85,7 +85,7 @@ export async function getNativePushToken(): Promise<string | null> {
   }
   if (finalStatus !== "granted") return null;
 
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
 
   const projectId =
     Constants.expoConfig?.extra?.eas?.projectId ||
@@ -151,7 +151,7 @@ export function addNotificationReceivedListener(listener: (event: Notifications.
 
 export async function setupDirectMessageNotificationCategory() {
   if (Platform.OS === "web") return;
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
   await Notifications.setNotificationCategoryAsync("DIRECT_MESSAGE", [
     {
       identifier: "REPLY",
@@ -169,7 +169,7 @@ export async function setupDirectMessageNotificationCategory() {
 
 export async function setupIncomingCallNotificationCategories() {
   if (Platform.OS === "web") return;
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
   await Notifications.setNotificationCategoryAsync("INCOMING_VOICE_CALL", [
     {
       identifier: "DECLINE",

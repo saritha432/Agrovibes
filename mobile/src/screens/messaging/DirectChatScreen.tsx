@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFloatingTopChromeInset, useTopChromeInset } from "../../theme/topChromeInset";
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
@@ -414,6 +415,8 @@ async function hydrateSharedPostsById(postIds: number[], token: string): Promise
 
 export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
+  const floatingTopInset = useFloatingTopChromeInset();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
@@ -1082,7 +1085,7 @@ export function DirectChatScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.header, { paddingTop: topChromeInset }]}>
         <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={28} color={TEXT} />
         </Pressable>
@@ -1516,7 +1519,7 @@ export function DirectChatScreen() {
             onPress={() => setChatMediaViewer(null)}
           />
           <Pressable
-            style={[styles.chatMediaViewerClose, { top: insets.top + 8 }]}
+            style={[styles.chatMediaViewerClose, { top: floatingTopInset }]}
             onPress={() => setChatMediaViewer(null)}
             hitSlop={12}
           >
