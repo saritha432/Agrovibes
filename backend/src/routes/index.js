@@ -3113,6 +3113,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         n.post_id AS "postId",
         n.comment_excerpt AS "commentExcerpt",
         u.full_name AS "actorName",
+        NULLIF(TRIM(u.avatar_url), '') AS "actorAvatarUrl",
         COALESCE(f.status, 'pending') AS "followStatus",
         CASE
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true

@@ -28,11 +28,13 @@ import {
 import { APP_LIME } from "../theme/appColors";
 import { NotificationPostThumb } from "../components/NotificationPostThumb";
 import { SwipeToDeleteRow } from "../components/SwipeToDeleteRow";
+import { UserAvatar } from "../components/UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive } from "../navigation/navigationRef";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenLiveCreate } from "../navigation/liveCreateBridge";
+import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
 type NotificationPanelContextValue = {
   sheetOpen: boolean;
@@ -73,6 +75,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [lastSeenMs, setLastSeenMs] = useState(0);
   const [lastSeenReady, setLastSeenReady] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
+  const [followRequestsExpanded, setFollowRequestsExpanded] = useState(false);
 
   const viewerUserId = useMemo(() => {
     const parsed = Number(user?.id);
@@ -368,6 +371,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   }, [accepted, declined, lastSeenMs, lastSeenReady, liveStarts, sheetOpen, pending, postComments, postLikes]);
 
   const openNotificationSheet = useCallback(() => {
+    setFollowRequestsExpanded(false);
     setSheetOpen(true);
     void loadNotifications();
   }, [loadNotifications]);
@@ -375,6 +379,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const closeNotificationSheet = useCallback(() => {
     const now = Date.now();
     void persistLastSeenMs(now);
+    setFollowRequestsExpanded(false);
     setSheetOpen(false);
   }, [persistLastSeenMs]);
 
@@ -488,7 +493,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   };
 
   const dismissibleRow = (key: string, onDelete: () => void, row: React.ReactNode) => (
-    <SwipeToDeleteRow key={key} onDelete={onDelete} deleteLabel={t("deleteConfirm")}>
+    <SwipeToDeleteRow key={key} onDelete={onDelete} deleteLabel={t("deleteConfirm")} style={styles.swipeShell}>
       {row}
     </SwipeToDeleteRow>
   );
@@ -623,6 +628,88 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     return items;
   }, [accepted, declined, followBackQueue, liveStarts, pending, postComments, postLikes]);
 
+  const pendingRequestItems = useMemo(
+    () => notificationItems.filter((item) => item.kind === "pending"),
+    [notificationItems]
+  );
+
+  useEffect(() => {
+    if (pendingRequestItems.length === 0) {
+      setFollowRequestsExpanded(false);
+    }
+  }, [pendingRequestItems.length]);
+
+  const notificationSections = useMemo(() => {
+    const datedItems = notificationItems.filter((item) => item.kind !== "pending");
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfYesterday = startOfToday.getTime() - 24 * 60 * 60 * 1000;
+
+    const grouped = new Map<string, Array<{ kind: string; createdAt: string; entry: any; key: string }>>();
+    for (const item of datedItems) {
+      const createdMs = toMillis(item.createdAt);
+      const label =
+        createdMs >= startOfToday.getTime()
+          ? "Today"
+          : createdMs >= startOfYesterday
+            ? "Yesterday"
+            : "Earlier";
+      const list = grouped.get(label) || [];
+      list.push(item);
+      grouped.set(label, list);
+    }
+
+    const order = ["Today", "Yesterday", "Earlier"];
+    return order
+      .map((label) => ({ label, items: grouped.get(label) || [] }))
+      .filter((section) => section.items.length > 0);
+  }, [notificationItems]);
+
+  const relativeTimeLabel = useCallback((createdAt: string) => {
+    const createdMs = Date.parse(String(createdAt || ""));
+    if (!Number.isFinite(createdMs)) return "";
+    const diffMs = Math.max(0, Date.now() - createdMs);
+    const hours = Math.floor(diffMs / (60 * 60 * 1000));
+    if (hours < 1) {
+      const mins = Math.floor(diffMs / (60 * 1000));
+      return `${Math.max(1, mins)}m`;
+    }
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `${Math.max(1, days)}d`;
+  }, []);
+
+  const actorAvatarUri = useCallback((entry: any): string | undefined => {
+    const direct =
+      entry?.actorAvatarUrl ??
+      entry?.actor_avatar_url ??
+      entry?.avatarUrl ??
+      entry?.avatar_url ??
+      entry?.profilePhotoUrl ??
+      entry?.profile_photo_url ??
+      entry?.profileImage ??
+      entry?.actor?.avatarUrl ??
+      entry?.actor?.avatar_url ??
+      entry?.actor?.profileImageUrl ??
+      entry?.actor?.profile_image_url ??
+      entry?.actorProfileImageUrl ??
+      entry?.actor_profile_image_url ??
+      entry?.profileImageUrl;
+    if (typeof direct === "string" && direct.trim()) return stripLegacyCloudinaryUrl(direct.trim()) || direct.trim();
+    return undefined;
+  }, []);
+
+  const actorDisplayName = useCallback((entry: any) => String(entry?.actorName || "User"), []);
+
+  const notificationBadgeIcon = useCallback((kind: string): keyof typeof Ionicons.glyphMap => {
+    if (kind === "post_comment" || kind === "comment_reply") return "chatbubble";
+    if (kind === "follow_back" || kind === "pending") return "person-add";
+    if (kind === "accepted") return "checkmark";
+    if (kind === "declined") return "close";
+    if (kind.startsWith("live")) return "radio";
+    return "heart";
+  }, []);
+
   const value = useMemo<NotificationPanelContextValue>(
     () => ({
       sheetOpen,
@@ -637,182 +724,384 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   return (
     <NotificationPanelContext.Provider value={value}>
       {children}
-      <Modal visible={sheetOpen} transparent animationType="slide" onRequestClose={closeNotificationSheet}>
-        <Pressable style={styles.overlay} onPress={closeNotificationSheet}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation?.()}>
+      <Modal visible={sheetOpen} animationType="none" onRequestClose={closeNotificationSheet}>
+        <View style={styles.overlay}>
+          <View style={styles.sheet}>
             <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>{t("notifications")}</Text>
-              <Pressable onPress={closeNotificationSheet}>
-                <Ionicons name="close" size={20} color={APP_LIME} />
+              <Pressable
+                style={styles.headerBackBtn}
+                onPress={() => {
+                  if (followRequestsExpanded) {
+                    setFollowRequestsExpanded(false);
+                    return;
+                  }
+                  closeNotificationSheet();
+                }}
+              >
+                <Ionicons name="chevron-back" size={22} color={APP_LIME} />
               </Pressable>
+              <Text style={styles.sheetTitle}>{t("notifications")}</Text>
+              <View style={styles.headerBackBtn} />
             </View>
             <ScrollView contentContainerStyle={styles.sheetBody}>
               {notificationItems.length === 0 ? (
                 <Text style={styles.emptyText}>{t("noNotifications")}</Text>
               ) : null}
-              {notificationItems.map((item) => {
-                const n = item.entry;
-                if (item.kind === "pending") {
-                  return (
-                    <View key={item.key} style={styles.row}>
-                      <Text style={styles.rowText}>{t("notifFollowRequest", { name: String(n.actorName || "") })}</Text>
-                      <View style={styles.rowActions}>
-                        <Pressable style={styles.acceptBtn} onPress={() => handleAcceptFollowRequest(n)}>
-                          <Text style={styles.acceptText}>{t("accept")}</Text>
-                        </Pressable>
-                        <Pressable style={styles.declineBtn} onPress={() => onRespond(n, "decline")}>
-                          <Text style={styles.declineText}>{t("decline")}</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  );
-                }
-                if (item.kind === "follow_back") {
-                  const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-                  const status = followBackStatusByKey[key] || "none";
-                  const showPrompt = followBackPromptByKey[key] === true;
-                  return dismissibleRow(
-                    item.key,
-                    () => onDismissFollowBack(n),
-                    <View style={styles.row}>
-                      <Text style={styles.rowText}>{t("notifNowFollowing", { name: String(n.actorName || "") })}</Text>
-                      <View style={styles.rowActions}>
-                        {status === "accepted" ? (
-                          <View style={styles.followingPill}>
-                            <Text style={styles.followingText}>{t("following")}</Text>
-                          </View>
-                        ) : status === "pending" ? (
-                          <View style={styles.requestedPill}>
-                            <Text style={styles.requestedText}>{t("requested")}</Text>
-                          </View>
-                        ) : showPrompt ? (
-                          <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
-                            <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
-                          </Pressable>
-                        ) : (
-                          <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
-                            <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
-                          </Pressable>
-                        )}
-                      </View>
-                    </View>
-                  );
-                }
-                if (item.kind === "accepted") {
-                  return dismissibleRow(
-                    item.key,
-                    () => onDismissNotification(n),
-                    <View style={styles.acceptedRow}>
-                      <Ionicons name="checkmark-circle" size={16} color={APP_LIME} />
-                      <Text style={styles.rowText}>{t("notifAcceptedRequest", { name: String(n.actorName || "") })}</Text>
-                    </View>
-                  );
-                }
-                if (item.kind === "declined") {
-                  return dismissibleRow(
-                    item.key,
-                    () => onDismissNotification(n),
-                    <View style={styles.declinedRow}>
-                      <Ionicons name="close-circle" size={16} color="#ef4444" />
-                      <Text style={styles.rowText}>{t("notifDeclinedRequest", { name: String(n.actorName || "") })}</Text>
-                    </View>
-                  );
-                }
-                if (item.kind === "live_host_reminder") {
-                  return dismissibleRow(
-                    item.key,
-                    () => onDismissNotification(n),
-                    <View style={styles.liveStartRow}>
-                      <Pressable style={styles.liveStartMain} onPress={() => onStartScheduledLiveFromNotif(n)}>
-                        <Ionicons name="calendar" size={16} color={APP_LIME} />
-                        <Text style={styles.rowText}>{liveStartLabel(n)}</Text>
-                      </Pressable>
-                      <Pressable style={styles.joinLiveBtn} onPress={() => onStartScheduledLiveFromNotif(n)}>
-                        <Text style={styles.joinLiveText}>{t("goLive")}</Text>
-                      </Pressable>
-                    </View>
-                  );
-                }
-                if (
-                  item.kind === "live_start" ||
-                  item.kind === "live_scheduled" ||
-                  item.kind === "live_reminder"
-                ) {
-                  const postId = Number(n.postId);
-                  const liveEnded = item.kind === "live_start" && isLivePostEnded(n);
-                  const canJoin = item.kind === "live_start" && Number.isFinite(postId) && postId > 0 && !liveEnded;
-                  return dismissibleRow(
-                    item.key,
-                    () => onDismissNotification(n),
-                    <View style={styles.liveStartRow}>
-                      <Pressable
-                        style={styles.liveStartMain}
-                        onPress={() => (canJoin ? void onJoinLive(n) : undefined)}
-                      >
-                        <Ionicons
-                          name="radio"
-                          size={16}
-                          color={liveEnded ? "rgba(255,255,255,0.4)" : "#ef4444"}
-                        />
-                        <Text style={[styles.rowText, liveEnded ? styles.rowTextMuted : null]}>
-                          {liveStartLabel(n)}
-                        </Text>
-                      </Pressable>
-                      {canJoin ? (
-                        <Pressable style={styles.joinLiveBtn} onPress={() => void onJoinLive(n)}>
-                          <Text style={styles.joinLiveText}>Join live</Text>
-                        </Pressable>
-                      ) : liveEnded ? (
-                        <View style={styles.liveEndedBadge}>
-                          <Text style={styles.liveEndedBadgeText}>{t("liveEndedBadge")}</Text>
+              {pendingRequestItems.length > 0 && !followRequestsExpanded ? (
+                <Pressable style={styles.followRequestSummaryCard} onPress={() => setFollowRequestsExpanded(true)}>
+                  <View style={styles.followRequestSummaryIconWrap}>
+                    <Ionicons name="person-add" size={22} color={APP_LIME} />
+                  </View>
+                  <View style={styles.followRequestSummaryTextWrap}>
+                    <Text style={styles.followRequestSummaryTitle}>Follow Request</Text>
+                    <Text style={styles.followRequestSummarySubtitle}>Approve Or Decline Request</Text>
+                  </View>
+                </Pressable>
+              ) : null}
+              {pendingRequestItems.length > 0 && followRequestsExpanded ? (
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>Follow Request</Text>
+                  {pendingRequestItems.map((item, idx) => {
+                    const n = item.entry;
+                    const isLastRow = idx === pendingRequestItems.length - 1;
+                    return (
+                      <View key={item.key} style={[styles.figRow, !isLastRow ? styles.figRowDivider : null]}>
+                        <View style={styles.figAvatarWrap}>
+                          <UserAvatar
+                            uri={actorAvatarUri(n)}
+                            name={actorDisplayName(n)}
+                            size={42}
+                            borderRadius={21}
+                            fallbackBackgroundColor="#404040"
+                            initialsColor="#f2f5f7"
+                          />
                         </View>
-                      ) : null}
-                    </View>
-                  );
-                }
-                if (item.kind === "post_like") {
-                  return renderPostActivityNotification(item.key, n, "heart", APP_LIME);
-                }
-                if (item.kind === "post_comment" || item.kind === "comment_reply") {
-                  return renderPostActivityNotification(
-                    item.key,
-                    n,
-                    item.kind === "comment_reply" ? "chatbubble" : "chatbubble-ellipses",
-                    "#0ea5e9"
-                  );
-                }
-                return null;
-              })}
+                        <View style={[styles.figContentWrap, styles.figContentWrapExpanded]}>
+                          <Text style={styles.figMessageText}>
+                            <Text style={styles.figActorName}>{String(n.actorName || "User")}</Text>
+                            <Text style={styles.figActionText}> requested follow</Text>
+                          </Text>
+                        </View>
+                        <View style={styles.figRightWrap}>
+                          <View style={styles.rowActionsHorizontal}>
+                            <Pressable style={styles.declineBtnCompact} onPress={() => onRespond(n, "decline")}>
+                              <Text style={styles.declineTextLime}>{t("decline")}</Text>
+                            </Pressable>
+                            <Pressable style={styles.acceptBtnCompact} onPress={() => handleAcceptFollowRequest(n)}>
+                              <Text style={styles.acceptText}>Approve</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
+              {notificationSections.map((section) => (
+                <View key={section.label} style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>{section.label}</Text>
+                  {section.items.map((item, idx) => {
+                    const n = item.entry;
+                    const isLastRow = idx === section.items.length - 1;
+                    const hideRightPaneForType =
+                      item.kind === "accepted" || item.kind === "declined";
+
+                    const rowCore = (
+                      <View style={[styles.figRow, !isLastRow ? styles.figRowDivider : null]}>
+                        <View style={styles.figAvatarWrap}>
+                          <UserAvatar
+                            uri={actorAvatarUri(n)}
+                            name={actorDisplayName(n)}
+                            size={42}
+                            borderRadius={21}
+                            fallbackBackgroundColor="#404040"
+                            initialsColor="#f2f5f7"
+                          />
+                          <View style={styles.figBadge}>
+                            <Ionicons name={notificationBadgeIcon(item.kind)} size={9} color="#1f2328" />
+                          </View>
+                        </View>
+                        <View
+                          style={[
+                            styles.figContentWrap,
+                            hideRightPaneForType ? styles.figContentWrapExpanded : null
+                          ]}
+                        >
+                          {item.kind === "pending" ? (
+                            <Text style={styles.figMessageText}>
+                              {t("notifFollowRequest", { name: String(n.actorName || "") })}
+                            </Text>
+                          ) : item.kind === "follow_back" ? (
+                            <Text style={styles.figMessageText}>
+                              {t("notifNowFollowing", { name: String(n.actorName || "") })}
+                            </Text>
+                          ) : item.kind === "accepted" ? (
+                            <Text style={styles.figMessageText}>
+                              {t("notifAcceptedRequest", { name: String(n.actorName || "") })}
+                            </Text>
+                          ) : item.kind === "declined" ? (
+                            <Text style={styles.figMessageText}>
+                              {t("notifDeclinedRequest", { name: String(n.actorName || "") })}
+                            </Text>
+                          ) : item.kind === "post_like" || item.kind === "post_comment" || item.kind === "comment_reply" ? (
+                            <Text style={styles.figMessageText}>{postActivityLabel(n)}</Text>
+                          ) : (
+                            <Text style={styles.figMessageText}>{liveStartLabel(n)}</Text>
+                          )}
+                          <Text style={styles.figTimeText}>{relativeTimeLabel(item.createdAt)}</Text>
+                        </View>
+                        {!hideRightPaneForType ? (
+                          <View style={[styles.figRightWrap, styles.figRightWrapMedia]}>
+                            {item.kind === "pending" ? (
+                              <View style={styles.rowActions}>
+                                <Pressable style={styles.acceptBtn} onPress={() => handleAcceptFollowRequest(n)}>
+                                  <Text style={styles.acceptText}>{t("accept")}</Text>
+                                </Pressable>
+                                <Pressable style={styles.declineBtn} onPress={() => onRespond(n, "decline")}>
+                                  <Text style={styles.declineText}>{t("decline")}</Text>
+                                </Pressable>
+                              </View>
+                            ) : item.kind === "follow_back" ? (
+                              (() => {
+                                const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
+                                const status = followBackStatusByKey[key] || "none";
+                                if (status === "accepted") {
+                                  return (
+                                    <View style={styles.followingPill}>
+                                      <Text style={styles.followingText}>{t("following")}</Text>
+                                    </View>
+                                  );
+                                }
+                                if (status === "pending") {
+                                  return (
+                                    <View style={styles.requestedPill}>
+                                      <Text style={styles.requestedText}>{t("requested")}</Text>
+                                    </View>
+                                  );
+                                }
+                                return (
+                                  <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
+                                    <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
+                                  </Pressable>
+                                );
+                              })()
+                            ) : item.kind === "live_host_reminder" ? (
+                              <Pressable style={styles.joinLiveBtn} onPress={() => onStartScheduledLiveFromNotif(n)}>
+                                <Text style={styles.joinLiveText}>{t("goLive")}</Text>
+                              </Pressable>
+                            ) : item.kind === "live_start" ||
+                              item.kind === "live_scheduled" ||
+                              item.kind === "live_reminder" ? (
+                              (() => {
+                                const postId = Number(n.postId);
+                                const liveEnded = item.kind === "live_start" && isLivePostEnded(n);
+                                const canJoin =
+                                  item.kind === "live_start" && Number.isFinite(postId) && postId > 0 && !liveEnded;
+                                if (canJoin) {
+                                  return (
+                                    <Pressable style={styles.joinLiveBtn} onPress={() => void onJoinLive(n)}>
+                                      <Text style={styles.joinLiveText}>Join live</Text>
+                                    </Pressable>
+                                  );
+                                }
+                                if (liveEnded) {
+                                  return (
+                                    <View style={styles.liveEndedBadge}>
+                                      <Text style={styles.liveEndedBadgeText}>{t("liveEndedBadge")}</Text>
+                                    </View>
+                                  );
+                                }
+                                return <View style={styles.figPostPlaceholder} />;
+                              })()
+                            ) : item.kind === "post_like" || item.kind === "post_comment" || item.kind === "comment_reply" ? (
+                              <NotificationPostThumb
+                                postId={n.postId}
+                                postThumbnailUrl={n.postThumbnailUrl}
+                                postImageUrl={n.postImageUrl}
+                                postVideoUrl={n.postVideoUrl}
+                                postIsReel={n.postIsReel}
+                                token={token}
+                                onPress={() => onOpenPostFromNotification(n)}
+                              />
+                            ) : (
+                              <View style={styles.figPostPlaceholder} />
+                            )}
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+
+                    if (item.kind === "pending") {
+                      return <View key={item.key}>{rowCore}</View>;
+                    }
+                    if (item.kind === "follow_back") {
+                      return dismissibleRow(item.key, () => onDismissFollowBack(n), rowCore);
+                    }
+                    return dismissibleRow(item.key, () => onDismissNotification(n), rowCore);
+                  })}
+                </View>
+              ))}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </NotificationPanelContext.Provider>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  overlay: { flex: 1, backgroundColor: "#262626" },
   sheet: {
+    flex: 1,
     backgroundColor: "#262626",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    maxHeight: "70%",
-    padding: 12,
-    borderTopWidth: 1,
-    borderColor: "#3a424c"
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderTopWidth: 0
   },
-  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sheetTitle: { color: APP_LIME, fontWeight: "900", fontSize: 16 },
-  sheetBody: { paddingTop: 10, gap: 10 },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8
+  },
+  headerBackBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+  sheetTitle: { color: "#ffffff", fontWeight: "700", fontSize: 20, letterSpacing: 0.1, flex: 1, textAlign: "center" },
+  sheetBody: { paddingTop: 10, gap: 14, paddingBottom: 22 },
   emptyText: { color: "#9ca8b1", fontWeight: "700" },
+  followRequestSummaryCard: {
+    borderRadius: 14,
+    backgroundColor: "#303132",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  followRequestSummaryIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  followRequestSummaryTextWrap: { flex: 1, minWidth: 0 },
+  followRequestSummaryTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+    lineHeight: 20
+  },
+  followRequestSummarySubtitle: {
+    marginTop: 2,
+    color: "rgba(156,156,156,0.6)",
+    fontSize: 12,
+    lineHeight: 16
+  },
+  sectionCard: {
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: "#303132",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)"
+  },
+  sectionTitle: {
+    color: APP_LIME,
+    fontSize: 16,
+    fontWeight: "700",
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  figRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 102,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#303132"
+  },
+  figRowDivider: {
+    borderTopWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)"
+  },
+  figAvatarWrap: {
+    width: 46,
+    height: 46,
+    marginRight: 10,
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  figBadge: {
+    position: "absolute",
+    right: -1,
+    bottom: -1,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  figContentWrap: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 10
+  },
+  figContentWrapExpanded: {
+    paddingRight: 0
+  },
+  figMessageText: {
+    color: "#ffffff",
+    fontWeight: "600",
+    fontSize: 14,
+    lineHeight: 22
+  },
+  figActorName: {
+    color: "#ffffff",
+    fontWeight: "600",
+    fontSize: 12
+  },
+  figActionText: {
+    color: "#ffffff",
+    fontWeight: "400",
+    fontSize: 12
+  },
+  figTimeText: {
+    marginTop: 2,
+    color: "rgba(156,153,156,0.8)",
+    fontSize: 12,
+    lineHeight: 18
+  },
+  figRightWrap: {
+    minWidth: 160,
+    minHeight: 78,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    flexShrink: 0
+  },
+  figRightWrapMedia: {
+    minWidth: 72,
+    width: 72
+  },
+  figPostPlaceholder: {
+    width: 69,
+    height: 90,
+    borderRadius: 6,
+    backgroundColor: "#4d4d4d"
+  },
   row: { borderWidth: 1, borderColor: "#3a424c", borderRadius: 10, backgroundColor: "#252a30", padding: 10, gap: 8 },
   rowText: { color: "#eef4f8", fontWeight: "700", flex: 1 },
-  rowActions: { flexDirection: "row", gap: 8 },
+  rowActions: { flexDirection: "column", gap: 6 },
+  rowActionsHorizontal: { flexDirection: "row", gap: 8, alignItems: "center" },
   acceptBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  acceptBtnCompact: { backgroundColor: APP_LIME, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 7, minWidth: 78, alignItems: "center" },
   acceptText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
   declineBtn: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  declineBtnCompact: { backgroundColor: "#262626", borderRadius: 6, paddingHorizontal: 12, paddingVertical: 7, minWidth: 78, alignItems: "center" },
   declineText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
+  declineTextLime: { color: APP_LIME, fontWeight: "700", fontSize: 12, textTransform: "capitalize" },
   followBackBtn: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   followBackText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
@@ -878,4 +1167,8 @@ const styles = StyleSheet.create({
   },
   liveEndedBadgeText: { color: "rgba(255,255,255,0.5)", fontWeight: "800", fontSize: 12 },
   rowTextMuted: { color: "rgba(255,255,255,0.45)" }
+  ,
+  swipeShell: {
+    borderRadius: 0
+  }
 });

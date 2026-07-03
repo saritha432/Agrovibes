@@ -641,6 +641,7 @@ export interface SocialNotificationItem {
   followId: number;
   actorId: number;
   actorName: string;
+  actorAvatarUrl?: string | null;
   followStatus: FollowStatus;
 }
 
@@ -651,6 +652,7 @@ export interface SocialPostActivityNotification {
   createdAt: string;
   actorId: number;
   actorName: string;
+  actorAvatarUrl?: string | null;
   postId: number | null;
   postIsReel?: boolean;
   postThumbnailUrl?: string | null;
