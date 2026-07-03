@@ -1,28 +1,10 @@
-import React, { useMemo } from "react";
-import { Image, Platform, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React from "react";
+import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { APP_BLACK, APP_DARK_BG, APP_LIME } from "../theme/appColors";
+import { useTopChromeInset } from "../theme/topChromeInset";
 
-/** Trust safe-area insets only — avoid adding StatusBar height (causes double gap on many Android devices). */
-export function useAppTopBarInset() {
-  const insets = useSafeAreaInsets();
-  return useMemo(() => {
-    if (Platform.OS === "web") return 0;
-    if (Platform.OS === "android") {
-      // Production-safe: some Android builds report zero safe inset at startup.
-      // Keep a sane minimum so top chrome never hugs status icons.
-      return Math.max(insets.top, StatusBar.currentHeight ?? 0, 24);
-    }
-    return insets.top;
-  }, [insets.top]);
-}
-
-/** Story / fullscreen reel back button & progress — same safe area as home top bar + small gap below status icons. */
-export function useModalTopChromeInset() {
-  const topInset = useAppTopBarInset();
-  return useMemo(() => topInset + (Platform.OS === "web" ? 0 : 4), [topInset]);
-}
+export { useModalTopChromeInset, useTopChromeInset } from "../theme/topChromeInset";
 
 function CountBadge({ count }: { count: number }) {
   const label = String(Math.min(99, count));
@@ -38,11 +20,11 @@ function CountBadge({ count }: { count: number }) {
 
 export function AppTopBar() {
   const { openNotificationSheet, notificationUnreadCount } = useNotificationPanel();
-  const topInset = useAppTopBarInset();
+  const topInset = useTopChromeInset();
 
   return (
-    <View style={styles.topBar}>
-      <View style={[styles.topBarContent, { paddingTop: topInset }]}>
+    <View style={[styles.topBar, { paddingTop: topInset }]}>
+      <View style={styles.topBarContent}>
         <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
         <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
           <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />

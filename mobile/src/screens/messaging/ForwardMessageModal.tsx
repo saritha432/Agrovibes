@@ -10,7 +10,7 @@ import {
   TextInput,
   View
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTopChromeInset } from "../../theme/topChromeInset";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchSocialNetwork, sendDirectMessage } from "../../services/api";
@@ -31,7 +31,7 @@ type Props = {
 };
 
 export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClose, onSent }: Props) {
-  const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
   const { token, user } = useAuth();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -95,7 +95,7 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClo
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={[styles.root, { paddingTop: Math.max(insets.top, 12) }]}>
+      <View style={[styles.root, { paddingTop: topChromeInset }]}>
         <View style={styles.header}>
           <Text style={styles.title}>Forward</Text>
           <Pressable hitSlop={10} onPress={onClose}>

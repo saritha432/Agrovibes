@@ -5,6 +5,7 @@ import { sendDirectMessage } from "../services/api";
 import { navigateToDirectChat } from "../navigation/navigationRef";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
+import { displayFcmDataNotification } from "./displayFcmDataNotification";
 import {
   addIncomingCallAnswerListener,
   addIncomingCallEndListener,
@@ -78,8 +79,11 @@ export function IncomingCallNotificationBootstrap() {
   React.useEffect(() => {
     const showFromMessage = async (remoteMessage: Parameters<typeof parseIncomingCallRemoteMessage>[0]) => {
       const call = parseIncomingCallRemoteMessage(remoteMessage);
-      if (!call) return;
-      await displayIncomingCallAndroidNotification(call);
+      if (call) {
+        await displayIncomingCallAndroidNotification(call);
+        return;
+      }
+      await displayFcmDataNotification(remoteMessage);
     };
 
     let foregroundSub: (() => void) | null = null;

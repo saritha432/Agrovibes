@@ -72,7 +72,6 @@ module.exports = () => {
 
   if (shouldIncludeFirebasePlugins()) {
     plugins.unshift(...FIREBASE_PLUGINS);
-    plugins.push("./plugins/withFirebaseMessagingManifestMergeFix.js");
   }
 
   return {

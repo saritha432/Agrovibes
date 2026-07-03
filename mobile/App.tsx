@@ -9,7 +9,7 @@ void setupDirectMessageNotificationCategory();
 void ensureIncomingCallCategoriesReady();
 registerIncomingCallMessagingBackground();
 import { NavigationContainer } from "@react-navigation/native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { navigationRef } from "./src/navigation/navigationRef";
 import { AuthProvider } from "./src/auth/AuthContext";
@@ -40,7 +40,7 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <LanguageProvider>
         <AuthProvider>
           <LanguageSync />

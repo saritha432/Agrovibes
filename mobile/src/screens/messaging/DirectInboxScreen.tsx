@@ -9,7 +9,7 @@ import {
   View
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useTopChromeInset } from "../../theme/topChromeInset";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
@@ -55,6 +55,7 @@ function previewMessage(body: string, t: (key: string) => string) {
 
 export function DirectInboxScreen() {
   const { t } = useLanguage();
+  const topChromeInset = useTopChromeInset();
   const { user, token } = useAuth();
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
@@ -152,7 +153,7 @@ export function DirectInboxScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.root} edges={["top"]}>
+    <View style={[styles.root, { paddingTop: topChromeInset }]}>
       <View style={styles.topBar}>
         <Text style={styles.usernameTitle} numberOfLines={1}>
           {displayName}
@@ -225,7 +226,7 @@ export function DirectInboxScreen() {
         />
       )}
       <NewMessageComposerModal visible={composerOpen} recentThreads={threads} onClose={() => setComposerOpen(false)} />
-    </SafeAreaView>
+    </View>
   );
 }
 

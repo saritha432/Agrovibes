@@ -54,7 +54,7 @@ import {
   setLocalPostLikedByIdentity
 } from "../social/localEngagementStore";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
-import { useModalTopChromeInset } from "./AppTopBar";
+import { useModalTopChromeInset } from "../theme/topChromeInset";
 
 import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
 const REEL_LIKE_COLOR = "#ffffff";

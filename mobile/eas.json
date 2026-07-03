@@ -22,7 +22,7 @@
       "distribution": "internal",
       "channel": "preview",
       "cache": {
-        "key": "preview-no-dev-client-v2-manifest-merge"
+        "key": "preview-no-dev-client-v4-push-fix"
       },
       "env": {
         "NODE_ENV": "production",

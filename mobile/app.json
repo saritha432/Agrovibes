@@ -133,7 +133,7 @@
               "arm64-v8a"
             ],
             "useLegacyPackaging": false,
-            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*\n-keep class expo.modules.notifications.notifications.model.** { *; }\n-keepclassmembers class expo.modules.notifications.notifications.model.** { *; }\n-keepnames class expo.modules.notifications.notifications.model.** implements java.io.Serializable"
+            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*\n-keep class expo.modules.notifications.** { *; }\n-keep class expo.modules.notifications.notifications.model.** { *; }\n-keepclassmembers class expo.modules.notifications.notifications.model.** { *; }\n-keepnames class expo.modules.notifications.notifications.model.** implements java.io.Serializable\n-keep class io.invertase.firebase.** { *; }\n-dontwarn io.invertase.firebase.**\n-keep class com.google.firebase.messaging.** { *; }\n-dontwarn com.google.firebase.messaging.**\n-keep class com.reactnativefullscreennotificationincomingcall.** { *; }"
           },
           "ios": {
             "useFrameworks": "static"
@@ -180,7 +180,8 @@
       ],
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
-      "./scripts/withAndroidLargeHeap.js"
+      "./scripts/withAndroidLargeHeap.js",
+      "./plugins/withFcmManifestMergeFix.js"
     ],
     "extra": {
       "eas": {
