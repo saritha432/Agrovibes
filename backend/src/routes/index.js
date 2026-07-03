@@ -45,7 +45,7 @@ const {
   directMessagePushPayload
 } = require("../pushNotifications");
 const { buildShareReelHtml } = require("../shareReelPage");
-const { emitDirectMessage, emitMessagesRead, getSocketIo } = require("../socketChat");
+const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, getSocketIo } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
 
 const router = express.Router();
@@ -3504,15 +3504,18 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       }
     }
     const dmPush = directMessagePushPayload(body);
-    fireSocialPush({
-      userId: peerUserId,
-      type: isLiveShare ? "live_share" : "direct_message",
-      actorId: me,
-      actorName: await actorDisplayName(me),
-      postId: livePostId,
-      commentExcerpt: dmPush.excerpt,
-      imageUrl: dmPush.imageUrl
-    });
+    const isCallHistory = String(body).startsWith("[Cropvibe Call]");
+    if (!isCallHistory) {
+      fireSocialPush({
+        userId: peerUserId,
+        type: isLiveShare ? "live_share" : "direct_message",
+        actorId: me,
+        actorName: await actorDisplayName(me),
+        postId: livePostId,
+        commentExcerpt: dmPush.excerpt,
+        imageUrl: dmPush.imageUrl
+      });
+    }
     emitDirectMessage({
       senderId: me,
       receiverId: peerUserId,
@@ -3521,6 +3524,42 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
     res.status(201).json({ message: ins.rows[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to send message", error: error.message });
+  }
+});
+
+router.delete("/v1/messages/:messageId", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const messageId = Number(req.params.messageId);
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      res.status(400).json({ message: "Valid messageId is required" });
+      return;
+    }
+
+    const rowRes = await query(
+      `SELECT id, sender_id, receiver_id FROM direct_messages WHERE id = $1 LIMIT 1`,
+      [messageId]
+    );
+    const row = rowRes.rows[0];
+    if (!row) {
+      res.status(404).json({ message: "Message not found" });
+      return;
+    }
+    if (Number(row.sender_id) !== me) {
+      res.status(403).json({ message: "You can only delete your own messages" });
+      return;
+    }
+
+    await query(`DELETE FROM direct_messages WHERE id = $1`, [messageId]);
+    emitDirectMessageDeleted({
+      messageId,
+      senderId: me,
+      receiverId: Number(row.receiver_id)
+    });
+    res.json({ ok: true, messageId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete message", error: error.message });
   }
 });
 

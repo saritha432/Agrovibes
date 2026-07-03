@@ -5,6 +5,8 @@ import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJ
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
+import { dismissIncomingCallNotification } from "./incomingCallNotifications";
+import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
@@ -43,6 +45,11 @@ function isDeclineCallAction(actionId: string) {
 
 function isAcceptCallAction(actionId: string) {
   return actionId === "ACCEPT" || actionId.endsWith(":ACCEPT") || actionId.endsWith(".ACCEPT");
+}
+
+function dismissIncomingCallUi(roomName: string) {
+  void dismissIncomingCallNotification(roomName);
+  hideIncomingCallAndroidNotification();
 }
 
 function isAppReadyForNotificationNavigation() {
@@ -204,6 +211,7 @@ export async function handleNotificationResponse(
 
   if (type === "incoming_call" && isDeclineCallAction(actionId)) {
     await clearNotificationReplyUi(response);
+    await dismissIncomingCallUi(String(data.roomName || ""));
     await handleIncomingCallDecline(data, options);
     return;
   }
@@ -216,6 +224,7 @@ export async function handleNotificationResponse(
 
   if (type === "incoming_call") {
     const autoAccept = isAcceptCallAction(actionId);
+    await dismissIncomingCallUi(String(data.roomName || ""));
     const presented = presentIncomingCallFromNotificationData(data, title, autoAccept);
     if (presented) {
       const callerId = peerIdFromData(data);

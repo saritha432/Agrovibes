@@ -33,11 +33,12 @@ import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
 import {
   joinDirectThread,
   leaveDirectThread,
   onDirectMessage,
+  onDirectMessageDeleted,
   onSocketConnectionChange,
   isSocketChatConnected
 } from "../../services/socketChat";
@@ -75,6 +76,7 @@ import {
   parseDmReactMessage,
   parseDmReplyMessage,
   parseDmVoiceMessage,
+  isPeerCallEndSignal,
   type DmMediaItem
 } from "./dmMessageFormats";
 
@@ -439,8 +441,36 @@ export function DirectChatScreen() {
     connectEnabled: boolean;
     direction: CallDirection;
     statusLabel?: string;
+    startedAt: number;
   } | null>(null);
   const callHistorySentRef = useRef(false);
+  const callSessionRef = useRef(callSession);
+  callSessionRef.current = callSession;
+
+  const closeCall = useCallback(() => {
+    setCallSession(null);
+    navigation.setParams({ incomingCall: undefined });
+  }, [navigation]);
+
+  const endCallForPeerSignal = useCallback(() => {
+    if (!callSessionRef.current || callSessionRef.current.direction !== "outgoing") return;
+    callHistorySentRef.current = true;
+    closeCall();
+  }, [closeCall]);
+
+  const peerEndsOutgoingCall = useCallback(
+    (message: DirectMessageItem) => {
+      const session = callSessionRef.current;
+      if (!session || session.direction !== "outgoing") return false;
+      if (Number(message.senderId) !== peerUserId) return false;
+      if (!isPeerCallEndSignal(message.body)) return false;
+      const msgTime = new Date(message.createdAt).getTime();
+      if (Number.isFinite(msgTime) && msgTime < session.startedAt - 1000) return false;
+      return true;
+    },
+    [peerUserId]
+  );
+
   const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const [chatMediaViewer, setChatMediaViewer] = useState<{ items: DmMediaItem[]; index: number } | null>(null);
   const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
@@ -577,20 +607,41 @@ export function DirectChatScreen() {
   useEffect(() => {
     return onDirectMessage((payload) => {
       if (payload.peerUserId !== peerUserId) return;
+      if (peerEndsOutgoingCall(payload.message)) {
+        endCallForPeerSignal();
+      }
       setMessages((prev) => {
         if (prev.some((item) => item.id === payload.message.id)) return prev;
         return [...prev, payload.message];
       });
     });
+  }, [endCallForPeerSignal, peerEndsOutgoingCall, peerUserId]);
+
+  useEffect(() => {
+    if (!callSession || callSession.direction !== "outgoing") return;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (peerEndsOutgoingCall(messages[i])) {
+        endCallForPeerSignal();
+        break;
+      }
+    }
+  }, [callSession, endCallForPeerSignal, messages, peerEndsOutgoingCall]);
+
+  useEffect(() => {
+    return onDirectMessageDeleted((payload) => {
+      if (payload.peerUserId !== peerUserId) return;
+      setMessages((prev) => prev.filter((item) => item.id !== payload.messageId));
+    });
   }, [peerUserId]);
 
   useEffect(() => {
     if (socketConnected) return;
+    const pollMs = callSession?.direction === "outgoing" ? 2000 : 5000;
     const timer = setInterval(() => {
       void reload();
-    }, 5000);
+    }, pollMs);
     return () => clearInterval(timer);
-  }, [reload, socketConnected]);
+  }, [callSession?.direction, reload, socketConnected]);
 
   const appendSentMessage = useCallback((message: DirectMessageItem) => {
     setMessages((prev) => {
@@ -689,6 +740,33 @@ export function DirectChatScreen() {
       else await reload();
     },
     [appendSentMessage, peerUserId, reload, token]
+  );
+
+  const deleteMessage = useCallback(
+    (item: DirectMessageItem) => {
+      if (!token || Number(item.senderId) !== Number(user?.id)) return;
+      Alert.alert("Delete message?", "This removes the message for everyone in this chat.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              try {
+                await deleteDirectMessage(token, item.id);
+                setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
+              } catch (error) {
+                Alert.alert(
+                  "Delete failed",
+                  error instanceof Error ? error.message : "Could not delete this message."
+                );
+              }
+            })();
+          }
+        }
+      ]);
+    },
+    [token, user?.id]
   );
 
   const canInteractWithMessage = useCallback((body: string) => {
@@ -882,7 +960,8 @@ export function DirectChatScreen() {
         mode: result.mode,
         connectEnabled: true,
         direction: "outgoing",
-        statusLabel: mode === "video" ? "Calling..." : "Calling..."
+        statusLabel: mode === "video" ? "Calling..." : "Calling...",
+        startedAt: Date.now()
       });
     } catch (error) {
       Alert.alert("Call failed", error instanceof Error ? error.message : "Could not start call.");
@@ -918,11 +997,6 @@ export function DirectChatScreen() {
     void startCall("video");
   };
 
-  const closeCall = () => {
-    setCallSession(null);
-    navigation.setParams({ incomingCall: undefined });
-  };
-
   const handleCallEnded = useCallback(
     async (callResult: CallEndResult) => {
       if (callHistorySentRef.current) {
@@ -950,7 +1024,7 @@ export function DirectChatScreen() {
         // keep chat usable even if history message fails
       }
     },
-    [appendSentMessage, callSession, peerUserId, reload, socketConnected, token]
+    [appendSentMessage, callSession, closeCall, peerUserId, reload, socketConnected, token]
   );
 
   const openMoreAttachments = () => {
@@ -1367,6 +1441,9 @@ export function DirectChatScreen() {
         timestampLabel={
           actionMessage ? formatActionSheetTimestamp(new Date(actionMessage.createdAt).getTime()) : undefined
         }
+        showDelete={
+          actionMessage != null && Number(actionMessage.senderId) === Number(user?.id)
+        }
         onClose={() => setActionMessage(null)}
         onReply={() => {
           if (actionMessage) startReplyToMessage(actionMessage);
@@ -1376,6 +1453,9 @@ export function DirectChatScreen() {
         }}
         onForward={() => {
           if (actionMessage) setForwardBody(actionMessage.body);
+        }}
+        onDelete={() => {
+          if (actionMessage) deleteMessage(actionMessage);
         }}
         onReact={(emoji) => {
           if (actionMessage) void reactToMessage(actionMessage, emoji);

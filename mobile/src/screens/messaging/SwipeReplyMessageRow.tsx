@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useRef } from "react";
-import { Animated, PanResponder, Pressable, StyleSheet, View, type ViewStyle } from "react-native";
+import { Animated, PanResponder, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { APP_LIME } from "../../theme/appColors";
 
 const SWIPE_REPLY_THRESHOLD = 56;
@@ -8,8 +8,8 @@ const SWIPE_MAX = 72;
 
 type Props = {
   children: React.ReactNode;
-  rowStyle?: ViewStyle;
-  contentStyle?: ViewStyle;
+  rowStyle?: StyleProp<ViewStyle>;
+  contentStyle?: StyleProp<ViewStyle>;
   onReply: () => void;
   onLongPress: () => void;
   enabled?: boolean;

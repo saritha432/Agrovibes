@@ -13,7 +13,8 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     if (
       moduleName.startsWith("@react-native-firebase/") ||
       moduleName === "firebase/app" ||
-      moduleName.startsWith("firebase/")
+      moduleName.startsWith("firebase/") ||
+      moduleName === "react-native-full-screen-notification-incoming-call"
     ) {
       return { type: "sourceFile", filePath: firebaseWebStub };
     }

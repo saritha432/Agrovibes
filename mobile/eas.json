@@ -5,7 +5,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "cache": {
-        "key": "development-dev-client-v1"
+        "key": "development-dev-client-v2-call-notifications"
       },
       "ios": {
         "simulator": false
