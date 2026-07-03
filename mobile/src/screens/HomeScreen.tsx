@@ -4387,7 +4387,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       >
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset + 14 }]}
             pointerEvents="box-none"
           >
             <Pressable

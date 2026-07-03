@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -9,10 +9,12 @@ import {
   StyleSheet,
   Text,
   useWindowDimensions,
-  View
+  View,
+  type ViewToken
 } from "react-native";
 import type { MutualConnectionInfo, UserSearchRecord } from "../services/api";
 import { formatMutualConnectionLabel } from "../social/formatMutualConnection";
+import { APP_LIME, APP_LIME_MUTED, APP_TEXT_ON_LIME } from "../theme/appColors";
 import { buildSuggestionSlides } from "../utils/reelViewerFeed";
 import { UserAvatar } from "./UserAvatar";
 
@@ -110,7 +112,7 @@ function SuggestionUserCard({
         disabled={busy || followed}
       >
         {busy ? (
-          <ActivityIndicator size="small" color={followed ? "#fff" : "#111"} />
+          <ActivityIndicator size="small" color={followed ? "#fff" : APP_TEXT_ON_LIME} />
         ) : (
           <Text style={[styles.followBtnText, followed ? styles.followBtnTextDone : null]}>
             {followed ? (user.viewerStatus === "pending" ? "Requested" : "Following") : "Follow"}
@@ -139,6 +141,8 @@ export function ReelSuggestionsPage({
   const horizontalPad = 14;
   const gap = 10;
   const cardWidth = (width - horizontalPad * 2 - gap) / 2;
+  const cardRowHeight = 230;
+  const carouselHeight = cardRowHeight * 2;
   const [activeSlide, setActiveSlide] = useState(0);
   const listRef = useRef<FlatList<UserSearchRecord[]>>(null);
 
@@ -151,15 +155,45 @@ export function ReelSuggestionsPage({
     [allUsers, hasFriendNetwork, mutualByUserId, slideOffset]
   );
 
-  const onSlideEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const w = e.nativeEvent.layoutMeasurement.width || width;
-    if (w <= 0) return;
-    const next = Math.max(0, Math.min(slides.length - 1, Math.round(e.nativeEvent.contentOffset.x / w)));
-    setActiveSlide(next);
-  };
+  useEffect(() => {
+    setActiveSlide((prev) => Math.min(prev, Math.max(0, slides.length - 1)));
+  }, [slides.length]);
+
+  const updateActiveSlide = useCallback(
+    (offsetX: number, pageWidth: number) => {
+      if (pageWidth <= 0 || slides.length === 0) return;
+      const next = Math.max(0, Math.min(slides.length - 1, Math.round(offsetX / pageWidth)));
+      setActiveSlide((prev) => (prev === next ? prev : next));
+    },
+    [slides.length]
+  );
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      updateActiveSlide(e.nativeEvent.contentOffset.x, e.nativeEvent.layoutMeasurement.width || width);
+    },
+    [updateActiveSlide, width]
+  );
+
+  const onSlideEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      updateActiveSlide(e.nativeEvent.contentOffset.x, e.nativeEvent.layoutMeasurement.width || width);
+    },
+    [updateActiveSlide, width]
+  );
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 55 }).current;
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const focused = viewableItems.find((item) => item.isViewable);
+    const index = focused?.index;
+    if (index != null && index >= 0) {
+      setActiveSlide((prev) => (prev === index ? prev : index));
+    }
+  }).current;
 
   const renderSlide = ({ item: users }: { item: UserSearchRecord[] }) => (
-    <View style={[styles.slide, { width }]}>
+    <View style={[styles.slide, { width, height: carouselHeight }]}>
       <View style={[styles.grid, { paddingHorizontal: horizontalPad, gap }]}>
         {users.map((user) => {
           const mutual = mutualByUserId[user.id];
@@ -187,40 +221,49 @@ export function ReelSuggestionsPage({
   );
 
   return (
-    <View style={[styles.screen, { paddingTop: topInset + 18, paddingBottom: bottomInset + 16 }]}>
-      <FlatList
-        ref={listRef}
-        data={slides}
-        horizontal
-        pagingEnabled
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(_item, index) => `suggest-slide-${index}`}
-        renderItem={renderSlide}
-        onMomentumScrollEnd={onSlideEnd}
-        scrollEventThrottle={16}
-        style={styles.carousel}
-        getItemLayout={(_data, index) => ({ length: width, offset: width * index, index })}
-      />
+    <View style={[styles.screen, { paddingTop: topInset + 52, paddingBottom: bottomInset + 20 }]}>
+      <View style={styles.contentWrap}>
+        <FlatList
+          ref={listRef}
+          data={slides}
+          horizontal
+          pagingEnabled
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(_item, index) => `suggest-slide-${index}`}
+          renderItem={renderSlide}
+          onScroll={onScroll}
+          onMomentumScrollEnd={onSlideEnd}
+          onScrollEndDrag={onSlideEnd}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          scrollEventThrottle={16}
+          style={[styles.carousel, { height: carouselHeight }]}
+          snapToInterval={width}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          getItemLayout={(_data, index) => ({ length: width, offset: width * index, index })}
+        />
 
-      {slides.length > 1 ? (
-        <View style={styles.dotsRow}>
-          {slides.map((_, index) => (
-            <View key={`dot-${index}`} style={[styles.dot, activeSlide === index ? styles.dotActive : null]} />
-          ))}
-        </View>
-      ) : null}
+        {slides.length > 1 ? (
+          <View style={styles.dotsRow}>
+            {slides.map((_, index) => (
+              <View key={`dot-${index}`} style={[styles.dot, activeSlide === index ? styles.dotActive : null]} />
+            ))}
+          </View>
+        ) : null}
 
-      <View style={[styles.footer, { paddingHorizontal: horizontalPad }]}>
-        <View style={styles.footerTextWrap}>
-          <Text style={styles.footerTitle}>Suggested for you</Text>
-          <Text style={styles.footerSubtitle}>
-            {hasFriendNetwork && slides.length > 0
-              ? "People you may know from your friends"
-              : "Cropvibe is better with friends"}
-          </Text>
+        <View style={[styles.footer, { paddingHorizontal: horizontalPad }]}>
+          <View style={styles.footerTextWrap}>
+            <Text style={styles.footerTitle}>Suggested for you</Text>
+            <Text style={styles.footerSubtitle}>
+              {hasFriendNetwork && slides.length > 0
+                ? "People you may know from your friends"
+                : "Cropvibe is better with friends"}
+            </Text>
+          </View>
+          <Ionicons name="ellipsis-horizontal" size={22} color="rgba(255,255,255,0.55)" />
         </View>
-        <Ionicons name="ellipsis-horizontal" size={22} color="rgba(255,255,255,0.55)" />
       </View>
     </View>
   );
@@ -230,10 +273,18 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#0f0f0f",
-    justifyContent: "space-between"
+    justifyContent: "center"
   },
-  carousel: { flex: 1 },
-  slide: { flex: 1, justifyContent: "center" },
+  contentWrap: {
+    width: "100%"
+  },
+  carousel: {
+    width: "100%"
+  },
+  slide: {
+    overflow: "hidden",
+    justifyContent: "flex-start"
+  },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -297,7 +348,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     height: 34,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -305,7 +356,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.12)"
   },
   followBtnText: {
-    color: "#111",
+    color: APP_TEXT_ON_LIME,
     fontSize: 13,
     fontWeight: "800"
   },
@@ -317,25 +368,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 10
+    paddingTop: 12,
+    paddingBottom: 14
   },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.28)"
+    backgroundColor: APP_LIME_MUTED
   },
   dotActive: {
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: "#fff"
+    backgroundColor: APP_LIME
   },
   footer: {
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
-    paddingTop: 4
+    paddingTop: 0
   },
   footerTextWrap: { flex: 1, minWidth: 0, paddingRight: 12 },
   footerTitle: { color: "#fff", fontSize: 16, fontWeight: "800" },
