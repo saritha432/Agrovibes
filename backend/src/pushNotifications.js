@@ -530,7 +530,8 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
       data: androidData,
       android: {
         priority: "high",
-        ttl: 45 * 1000
+        ttl: 45 * 1000,
+        collapseKey: "incoming_call"
       }
     });
     sent += androidResult.sent;

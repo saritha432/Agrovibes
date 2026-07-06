@@ -13,7 +13,6 @@ import {
 } from "./pushNotifications";
 import { handleNotificationResponse } from "./notificationNavigation";
 import { registerNotificationResponseHandler } from "./registerNotificationHandlers";
-import { displayIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 
 export function PushNotificationBootstrap() {
@@ -95,23 +94,13 @@ export function PushNotificationBootstrap() {
       const callerName = String(event.request.content.title || "Someone").trim() || "Someone";
       const callerAvatarUrl = String(data.callerAvatarUrl || "").trim() || null;
       if (Number.isFinite(callerId) && callerId > 0 && roomName) {
-        if (Platform.OS === "android") {
-          displayIncomingCallAndroidNotification({
-            callerId,
-            callerName,
-            roomName,
-            mode,
-            callerAvatarUrl
-          });
-        } else {
-          presentIncomingCallFromPush({
-            callerId,
-            callerName,
-            roomName,
-            mode,
-            callerAvatarUrl
-          });
-        }
+        presentIncomingCallFromPush({
+          callerId,
+          callerName,
+          roomName,
+          mode,
+          callerAvatarUrl
+        });
       }
     });
     return () => {

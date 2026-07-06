@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from "react-native";
+import { AppState, NativeModules, Platform } from "react-native";
 import type { FirebaseMessagingTypes } from "@react-native-firebase/messaging";
 import { displayIncomingCallNotification } from "./incomingCallNotifications";
 import type { IncomingCallNotificationPayload } from "./incomingCallNotifications";
@@ -77,26 +77,34 @@ export function parseIncomingCallRemoteMessage(
 }
 
 export async function displayIncomingCallAndroidNotification(payload: ParsedIncomingCallPush) {
-  const module = getCallNotificationModule();
+  const isForeground = AppState.currentState === "active";
   const isVideo = payload.mode === "video";
   const avatar = String(payload.callerAvatarUrl || "").trim();
 
-  if (!module) {
-    await displayIncomingCallNotification(payload);
-    return;
-  }
+  // Foreground calls use the in-app overlay (presentIncomingCallFromPush).
+  if (isForeground) return;
 
-  module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, {
-    channelId: CALL_CHANNEL_ID,
-    channelName: "Calls",
-    notificationIcon: "ic_launcher",
-    notificationTitle: payload.callerName,
-    notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
-    answerText: isVideo ? "Video" : "Answer",
-    declineText: "Decline",
-    isVideo,
-    payload: callPayloadJson(payload)
-  });
+  // Expo notifications work reliably from FCM background/killed handlers.
+  await displayIncomingCallNotification(payload);
+
+  const module = getCallNotificationModule();
+  if (!module) return;
+
+  try {
+    module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, {
+      channelId: CALL_CHANNEL_ID,
+      channelName: "Calls",
+      notificationIcon: "ic_launcher",
+      notificationTitle: payload.callerName,
+      notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
+      answerText: isVideo ? "Video" : "Answer",
+      declineText: "Decline",
+      isVideo,
+      payload: callPayloadJson(payload)
+    });
+  } catch {
+    // Expo notification already shown above.
+  }
 }
 
 export function hideIncomingCallAndroidNotification() {
