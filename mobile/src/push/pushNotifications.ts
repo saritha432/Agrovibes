@@ -69,6 +69,16 @@ export async function ensureAndroidChannels() {
     lightColor: "#C9FF35",
     enableVibrate: true
   });
+  await Notifications.setNotificationChannelAsync("missed_calls", {
+    name: "Missed calls",
+    description: "Missed and declined call alerts",
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: false,
+    sound: "default",
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#C9FF35"
+  });
 }
 
 let cachedToken: string | null = null;
@@ -244,6 +254,27 @@ export async function setupIncomingCallNotificationCategories() {
     {
       identifier: "ACCEPT",
       buttonTitle: "Video",
+      options: {
+        opensAppToForeground: true
+      }
+    }
+  ]);
+}
+
+export async function setupMissedCallNotificationCategory() {
+  if (Platform.OS === "web") return;
+  await ensureAndroidChannels();
+  await Notifications.setNotificationCategoryAsync("MISSED_CALL", [
+    {
+      identifier: "CALL_BACK",
+      buttonTitle: "Call back",
+      options: {
+        opensAppToForeground: true
+      }
+    },
+    {
+      identifier: "MESSAGE",
+      buttonTitle: "Message",
       options: {
         opensAppToForeground: true
       }

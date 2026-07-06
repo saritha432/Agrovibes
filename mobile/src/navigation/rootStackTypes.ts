@@ -41,6 +41,7 @@ export type RootStackParamList = {
     peerKey?: string;
     peerUsername?: string;
     peerAvatarUrl?: string | null;
+    autoStartCall?: "voice" | "video";
     incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number; autoAccept?: boolean };
   };
   SettingsMenu: undefined;

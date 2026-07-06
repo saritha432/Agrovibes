@@ -420,7 +420,8 @@ export function DirectChatScreen() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall } = route.params;
+  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall, autoStartCall } =
+    route.params;
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
@@ -999,6 +1000,12 @@ export function DirectChatScreen() {
   const openVideoCall = () => {
     void startCall("video");
   };
+
+  useEffect(() => {
+    if (!autoStartCall || !token || Platform.OS === "web") return;
+    navigation.setParams({ autoStartCall: undefined });
+    void startCall(autoStartCall);
+  }, [autoStartCall, navigation, token]);
 
   const handleCallEnded = useCallback(
     async (callResult: CallEndResult) => {

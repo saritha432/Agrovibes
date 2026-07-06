@@ -81,30 +81,32 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
   const isVideo = payload.mode === "video";
   const avatar = String(payload.callerAvatarUrl || "").trim();
 
-  // Foreground calls use the in-app overlay (presentIncomingCallFromPush).
   if (isForeground) return;
 
-  // Expo notifications work reliably from FCM background/killed handlers.
-  await displayIncomingCallNotification(payload);
+  const nativeOptions = {
+    channelId: CALL_CHANNEL_ID,
+    channelName: "Calls",
+    notificationIcon: "ic_launcher",
+    notificationTitle: payload.callerName,
+    notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
+    answerText: "ANSWER",
+    declineText: "DECLINE",
+    notificationColor: "#25D366",
+    isVideo,
+    payload: callPayloadJson(payload)
+  };
 
   const module = getCallNotificationModule();
-  if (!module) return;
-
-  try {
-    module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, {
-      channelId: CALL_CHANNEL_ID,
-      channelName: "Calls",
-      notificationIcon: "ic_launcher",
-      notificationTitle: payload.callerName,
-      notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
-      answerText: isVideo ? "Video" : "Answer",
-      declineText: "Decline",
-      isVideo,
-      payload: callPayloadJson(payload)
-    });
-  } catch {
-    // Expo notification already shown above.
+  if (module) {
+    try {
+      module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, nativeOptions);
+      return;
+    } catch {
+      // Fall back to Expo notification below.
+    }
   }
+
+  await displayIncomingCallNotification(payload);
 }
 
 export function hideIncomingCallAndroidNotification() {
