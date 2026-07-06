@@ -1,8 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { sendDirectMessage } from "../services/api";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
-import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
-import { dismissIncomingCallNotification } from "./incomingCallNotifications";
+import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { displayMissedCallNotification } from "./missedCallNotifications";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
@@ -32,10 +31,7 @@ export async function completeIncomingCallDecline(input: {
   if (!Number.isFinite(callerId) || callerId <= 0) return;
 
   const roomName = String(input.roomName || "").trim();
-  if (roomName) {
-    await dismissIncomingCallNotification(roomName);
-  }
-  hideIncomingCallAndroidNotification();
+  await clearIncomingCallNotifications(roomName || undefined);
 
   const mode = input.mode === "video" ? "video" : "voice";
   const callerName = String(input.callerName || "Someone").trim() || "Someone";

@@ -39,6 +39,7 @@ import {
   type CallAudioRoute
 } from "./callAudioRoute";
 import { startIncomingRingtone, startOutgoingRingtone, stopCallSounds } from "./callSounds";
+import { clearIncomingCallNotifications } from "../../push/incomingCallNotifications";
 
 export type DirectCallMode = "voice" | "video";
 export type CallDirection = "outgoing" | "incoming";
@@ -502,6 +503,11 @@ export function DirectCallView({
     void stopCallSounds();
   }, []);
 
+  React.useEffect(() => {
+    if (!visible || !connectEnabled || direction !== "incoming" || !roomName) return;
+    void clearIncomingCallNotifications(roomName);
+  }, [visible, connectEnabled, direction, roomName]);
+
   const finishWithoutRoom = React.useCallback(
     async (status: DmCallStatus) => {
       if (endedRef.current) return;
@@ -638,7 +644,7 @@ export function DirectCallView({
                   onAccept?.();
                 }}
               >
-                <Ionicons name={mode === "video" ? "videocam" : "call"} size={28} color="#fff" />
+                <Ionicons name={mode === "video" ? "videocam" : "call"} size={28} color="#262626" />
               </Pressable>
               <Text style={styles.incomingActionLabel}>{mode === "video" ? "Video" : "Accept"}</Text>
             </View>
@@ -817,6 +823,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  declineBtn: { backgroundColor: "#e53935" },
-  acceptBtn: { backgroundColor: "#2e7d32" }
+  declineBtn: { backgroundColor: "#E53935" },
+  acceptBtn: { backgroundColor: APP_LIME }
 });

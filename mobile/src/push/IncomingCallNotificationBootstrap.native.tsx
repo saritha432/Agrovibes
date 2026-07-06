@@ -15,6 +15,7 @@ import {
   removeIncomingCallAnswerListener,
   removeIncomingCallEndListener
 } from "./incomingCallAndroidNotification";
+import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 
 function getFirebaseMessaging() {
   try {
@@ -78,8 +79,12 @@ export function IncomingCallNotificationBootstrap() {
     }
 
     const onAnswer = (data: { payload?: string }) => {
-      hideIncomingCallAndroidNotification();
       const parsed = parseIncomingCallActionPayload(data.payload);
+      if (parsed?.roomName) {
+        void clearIncomingCallNotifications(parsed.roomName);
+      } else {
+        hideIncomingCallAndroidNotification();
+      }
       if (!parsed?.callerId) {
         openIncomingCallApp();
         return;

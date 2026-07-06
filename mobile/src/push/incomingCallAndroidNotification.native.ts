@@ -89,9 +89,9 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
     notificationIcon: "ic_launcher",
     notificationTitle: payload.callerName,
     notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
-    answerText: "ANSWER",
-    declineText: "DECLINE",
-    notificationColor: "#25D366",
+    answerText: "Answer",
+    declineText: "Decline",
+    notificationColor: "#C9FF35",
     isVideo,
     payload: callPayloadJson(payload)
   };

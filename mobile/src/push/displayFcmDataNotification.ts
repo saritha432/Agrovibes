@@ -14,6 +14,7 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
 
   // System FCM notification payloads cannot show Expo action buttons (Reply / Answer).
   if (remoteMessage?.notification && !isDirectMessage) return;
+  if (type === "call_cancelled") return;
 
   const title = String(data.title || remoteMessage?.notification?.title || "").trim();
   const body = String(data.message || data.body || remoteMessage?.notification?.body || "").trim();

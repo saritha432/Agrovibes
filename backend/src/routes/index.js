@@ -40,6 +40,7 @@ const {
   registerPushDeviceToken,
   unregisterPushDeviceToken,
   sendIncomingCallPush,
+  sendCallCancelledPush,
   sendSocialPushToUser,
   sendSocialPushToFollowers,
   directMessagePushPayload
@@ -3456,6 +3457,38 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
     res.status(201).json({ roomName, mode, peerUserId, push: pushResult });
   } catch (error) {
     res.status(500).json({ message: "Failed to start call", error: error.message });
+  }
+});
+
+router.post("/v1/calls/cancel", authRequired, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.body?.peerUserId);
+    const roomName = String(req.body?.roomName || "").trim();
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    if (!roomName) {
+      res.status(400).json({ message: "roomName is required" });
+      return;
+    }
+    const peerRes = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+    const pushResult = await sendCallCancelledPush({
+      userId: peerUserId,
+      roomName,
+      callerId: me
+    }).catch((error) => {
+      console.warn("[push] call cancel:", error?.message || error);
+      return { sent: 0, failed: 0, skipped: "error" };
+    });
+    res.status(200).json({ ok: true, peerUserId, roomName, push: pushResult });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to cancel call", error: error.message });
   }
 });
 

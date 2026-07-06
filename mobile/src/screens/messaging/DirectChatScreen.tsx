@@ -34,7 +34,7 @@ import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
 import {
   joinDirectThread,
   leaveDirectThread,
@@ -45,6 +45,7 @@ import {
 } from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
+import { dismissIncomingCallRinging } from "../../push/incomingCallSignal";
 import {
   hydrateLiveShareFromFeed,
   isJoinableLiveShare,
@@ -78,6 +79,7 @@ import {
   parseDmReplyMessage,
   parseDmVoiceMessage,
   isPeerCallEndSignal,
+  isCalleeRingCancelledSignal,
   type DmMediaItem
 } from "./dmMessageFormats";
 
@@ -613,6 +615,10 @@ export function DirectChatScreen() {
       if (payload.peerUserId !== peerUserId) return;
       if (peerEndsOutgoingCall(payload.message)) {
         endCallForPeerSignal();
+      } else if (isCalleeRingCancelledSignal(payload.message.body)) {
+        void dismissIncomingCallRinging({
+          callerId: Number(payload.message.senderId)
+        });
       }
       setMessages((prev) => {
         if (prev.some((item) => item.id === payload.message.id)) return prev;
@@ -1017,6 +1023,19 @@ export function DirectChatScreen() {
       closeCall();
       if (!token || !session) return;
       callHistorySentRef.current = true;
+
+      if (session.direction === "outgoing" && callResult.status === "cancelled") {
+        try {
+          await cancelDirectCall(token, {
+            peerUserId,
+            roomName: session.roomName,
+            mode: session.mode
+          });
+        } catch {
+          // Still write chat history below.
+        }
+      }
+
       try {
         const sent = await sendDirectMessage(
           token,
