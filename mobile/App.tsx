@@ -14,6 +14,7 @@ import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK, APP_LIME } from "./src/theme/appColors";
 import { PushNotificationBootstrap } from "./src/push/PushNotificationBootstrap";
 import { IncomingCallNotificationBootstrap } from "./src/push/IncomingCallNotificationBootstrap";
+import { CallSignalBootstrap } from "./src/push/CallSignalBootstrap";
 import { GlobalIncomingCallHost } from "./src/push/GlobalIncomingCallHost";
 import { SocketChatBootstrap } from "./src/messaging/SocketChatBootstrap";
 import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
@@ -44,6 +45,7 @@ export default function App() {
           <LanguageSync />
           <PushNotificationBootstrap />
           <IncomingCallNotificationBootstrap />
+          <CallSignalBootstrap />
           <GlobalIncomingCallHost />
           <SocketChatBootstrap />
           <FirebaseBootstrap />

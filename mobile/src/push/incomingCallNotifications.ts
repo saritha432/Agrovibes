@@ -1,5 +1,6 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { setupIncomingCallNotificationCategories } from "./pushNotifications";
 
 export type IncomingCallNotificationPayload = {
@@ -70,4 +71,32 @@ export async function dismissIncomingCallNotification(roomName: string) {
   } catch {
     // no-op
   }
+}
+
+/** Remove incoming-call alerts from the shade after answer, decline, or connect. */
+export async function clearIncomingCallNotifications(roomName?: string | null) {
+  if (Platform.OS === "web") return;
+
+  const trimmedRoom = String(roomName || "").trim();
+  if (trimmedRoom) {
+    await dismissIncomingCallNotification(trimmedRoom);
+  }
+
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const item of presented) {
+      const data = (item.request.content.data || {}) as Record<string, unknown>;
+      if (String(data.type || "") !== "incoming_call") continue;
+      const itemRoom = String(data.roomName || "").trim();
+      if (trimmedRoom && itemRoom && itemRoom !== trimmedRoom) continue;
+      const identifier = String(item.request.identifier || "").trim();
+      if (identifier) {
+        await Notifications.dismissNotificationAsync(identifier);
+      }
+    }
+  } catch {
+    // no-op
+  }
+
+  hideIncomingCallAndroidNotification();
 }

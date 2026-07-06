@@ -7,6 +7,7 @@ import { sendDirectMessage } from "../services/api";
 import { navigateToDirectChat } from "../navigation/navigationRef";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
+import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { displayMissedCallNotification } from "./missedCallNotifications";
 
 export function GlobalIncomingCallHost() {
@@ -26,7 +27,11 @@ export function GlobalIncomingCallHost() {
   const finishCall = React.useCallback(
     async (result: CallEndResult) => {
       const active = call;
-      hideIncomingCallAndroidNotification();
+      if (active?.roomName) {
+        void clearIncomingCallNotifications(active.roomName);
+      } else {
+        hideIncomingCallAndroidNotification();
+      }
       clearIncomingCall();
       setCall(null);
       setConnectEnabled(false);
@@ -64,6 +69,7 @@ export function GlobalIncomingCallHost() {
       connectEnabled={connectEnabled}
       statusLabel={call.mode === "video" ? "Incoming video call" : "Incoming voice call"}
       onAccept={() => {
+        void clearIncomingCallNotifications(call.roomName);
         setConnectEnabled(true);
         navigateToDirectChat({
           peerUserId: call.callerId,
@@ -113,4 +119,7 @@ export function presentIncomingCallFromPush(input: {
     mode: input.mode,
     autoAccept: input.autoAccept
   });
+  if (input.autoAccept) {
+    void clearIncomingCallNotifications(input.roomName);
+  }
 }

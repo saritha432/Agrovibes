@@ -121,6 +121,7 @@
     "plugins": [
       "./plugins/withExpoModulesCoreApi35Fix.js",
       "./plugins/withRnScreensApi35Fix.js",
+      "./plugins/withIncomingCallBrandColors.js",
       [
         "expo-build-properties",
         {

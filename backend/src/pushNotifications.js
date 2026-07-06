@@ -584,6 +584,60 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
   return { sent, failed };
 }
 
+async function sendCallCancelledPush({ userId, roomName, callerId }) {
+  if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
+
+  const entries = await listTokenEntriesForUser(userId);
+  if (!entries.length) return { sent: 0, skipped: "no_tokens" };
+
+  const androidTokens = entries.filter((entry) => entry.platform === "android").map((entry) => entry.token);
+  const iosTokens = entries.filter((entry) => entry.platform !== "android").map((entry) => entry.token);
+
+  const payloadData = {
+    type: "call_cancelled",
+    roomName: String(roomName || ""),
+    callerId: callerId != null ? String(callerId) : "",
+    channelId: "incoming_calls"
+  };
+
+  let sent = 0;
+  let failed = 0;
+
+  if (androidTokens.length) {
+    const androidResult = await sendMulticastAndCleanup(androidTokens, {
+      data: payloadData,
+      android: {
+        priority: "high",
+        ttl: 30 * 1000,
+        collapseKey: "call_cancelled"
+      }
+    });
+    sent += androidResult.sent;
+    failed += androidResult.failed;
+  }
+
+  if (iosTokens.length) {
+    const iosResult = await sendMulticastAndCleanup(iosTokens, {
+      data: payloadData,
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "background"
+        },
+        payload: {
+          aps: {
+            "content-available": 1
+          }
+        }
+      }
+    });
+    sent += iosResult.sent;
+    failed += iosResult.failed;
+  }
+
+  return { sent, failed };
+}
+
 async function sendSocialPushToFollowers({ hostUserId, type, postId, commentExcerpt }) {
   const hostRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [hostUserId]);
   const actorName = String(hostRes.rows[0]?.full_name || "Someone").trim() || "Someone";
@@ -620,6 +674,7 @@ module.exports = {
   directMessagePushPayload,
   sendPushToUser,
   sendIncomingCallPush,
+  sendCallCancelledPush,
   sendSocialPushToUser,
   sendSocialPushToFollowers
 };

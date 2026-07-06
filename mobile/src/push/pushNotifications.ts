@@ -18,7 +18,16 @@ export function ensureIncomingCallCategoriesReady() {
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = (notification.request.content.data || {}) as Record<string, unknown>;
-    const isIncomingCall = String(data.type || "") === "incoming_call";
+    const type = String(data.type || "");
+    if (type === "call_cancelled") {
+      return {
+        shouldShowAlert: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+        priority: Notifications.AndroidNotificationPriority.MIN
+      };
+    }
+    const isIncomingCall = type === "incoming_call";
     if (isIncomingCall) {
       return {
         shouldShowAlert: true,

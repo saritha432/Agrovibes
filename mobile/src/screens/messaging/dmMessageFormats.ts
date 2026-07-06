@@ -243,6 +243,13 @@ export function isPeerCallEndSignal(body: string): boolean {
   return call.status === "declined" || call.status === "cancelled" || call.status === "missed";
 }
 
+/** Caller cancelled/missed before callee answered — message uses caller's outgoing direction. */
+export function isCalleeRingCancelledSignal(body: string): boolean {
+  const call = parseDmCallMessage(body);
+  if (!call || call.direction !== "outgoing") return false;
+  return call.status === "cancelled" || call.status === "missed";
+}
+
 export function formatDmCallLabel(call: DmCallPayload, t: (key: string) => string) {
   const kind = call.mode === "video" ? t("videoCall") : t("audioCall");
   if (call.status === "completed") {

@@ -5,8 +5,7 @@ import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJ
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
-import { dismissIncomingCallNotification } from "./incomingCallNotifications";
-import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
+import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
 import { dismissMissedCallNotification } from "./missedCallNotifications";
 
@@ -57,8 +56,7 @@ function isMessageAction(actionId: string) {
 }
 
 function dismissIncomingCallUi(roomName: string) {
-  void dismissIncomingCallNotification(roomName);
-  hideIncomingCallAndroidNotification();
+  void clearIncomingCallNotifications(roomName);
 }
 
 function isAppReadyForNotificationNavigation() {

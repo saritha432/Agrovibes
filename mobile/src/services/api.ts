@@ -1426,6 +1426,17 @@ export async function ringDirectCall(
   })) as { roomName: string; mode: "voice" | "video"; peerUserId: number };
 }
 
+export async function cancelDirectCall(
+  token: string,
+  payload: { peerUserId: number; roomName: string; mode?: "voice" | "video" }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/calls/cancel`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { ok: boolean; peerUserId: number; roomName: string };
+}
+
 export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
     method: "POST",
