@@ -509,34 +509,28 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
   let failed = 0;
 
   if (androidTokens.length) {
+    const androidData = {
+      type: "incoming_call",
+      mode: isVideo ? "video" : "voice",
+      roomName: String(roomName || ""),
+      callerId: callerId != null ? String(callerId) : "",
+      callerName: name,
+      callerAvatarUrl: avatar,
+      title: name,
+      message: label,
+      categoryId,
+      channelId: "incoming_calls",
+      priority: "max",
+      sticky: "true",
+      vibrate: JSON.stringify([0, 800, 400, 800, 400, 800])
+    };
+    if (imageUrl) androidData.image = imageUrl;
+
     const androidResult = await sendMulticastAndCleanup(androidTokens, {
-      notification: {
-        title: name,
-        body: label
-      },
-      data: {
-        type: "incoming_call",
-        mode: isVideo ? "video" : "voice",
-        roomName: String(roomName || ""),
-        callerId: callerId != null ? String(callerId) : "",
-        callerName: name,
-        callerAvatarUrl: avatar,
-        title: name,
-        message: label,
-        categoryId,
-        channelId: "incoming_calls",
-        priority: "max"
-      },
+      data: androidData,
       android: {
         priority: "high",
-        ttl: 45 * 1000,
-        notification: {
-          channelId: "incoming_calls",
-          priority: "max",
-          visibility: "public",
-          defaultSound: true,
-          defaultVibrateTimings: true
-        }
+        ttl: 45 * 1000
       }
     });
     sent += androidResult.sent;
