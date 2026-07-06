@@ -3442,7 +3442,7 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
     );
     const callerName = String(callerRes.rows[0]?.full_name || "Someone").trim() || "Someone";
     const callerAvatarUrl = String(callerRes.rows[0]?.avatar_url || "").trim() || "";
-    void sendIncomingCallPush({
+    const pushResult = await sendIncomingCallPush({
       userId: peerUserId,
       callerName,
       mode,
@@ -3451,8 +3451,9 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
       callerAvatarUrl
     }).catch((error) => {
       console.warn("[push] incoming call:", error?.message || error);
+      return { sent: 0, failed: 0, skipped: "error" };
     });
-    res.status(201).json({ roomName, mode, peerUserId });
+    res.status(201).json({ roomName, mode, peerUserId, push: pushResult });
   } catch (error) {
     res.status(500).json({ message: "Failed to start call", error: error.message });
   }

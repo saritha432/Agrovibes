@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "../auth/AuthContext";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
@@ -54,6 +54,17 @@ export function PushNotificationBootstrap() {
       return undefined;
     }
   }, [token]);
+
+  React.useEffect(() => {
+    if (Platform.OS === "web" || !token || !user) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      void registerPushNotifications(token).then((pushToken) => {
+        if (pushToken) registeredTokenRef.current = pushToken;
+      });
+    });
+    return () => sub.remove();
+  }, [token, user?.id]);
 
   React.useEffect(() => {
     if (Platform.OS === "web") return;
