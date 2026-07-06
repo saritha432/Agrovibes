@@ -9,6 +9,7 @@ import {
   ensureIncomingCallCategoriesReady,
   registerPushNotifications,
   setupDirectMessageNotificationCategory,
+  setupMissedCallNotificationCategory,
   unregisterPushNotifications
 } from "./pushNotifications";
 import { handleNotificationResponse } from "./notificationNavigation";
@@ -70,6 +71,7 @@ export function PushNotificationBootstrap() {
 
     void setupDirectMessageNotificationCategory();
     void ensureIncomingCallCategoriesReady();
+    void setupMissedCallNotificationCategory();
     registerNotificationResponseHandler();
 
     void Notifications.getLastNotificationResponseAsync().then((response) => {

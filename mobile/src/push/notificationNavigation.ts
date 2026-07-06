@@ -7,7 +7,8 @@ import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge"
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 import { dismissIncomingCallNotification } from "./incomingCallNotifications";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
-import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
+import { completeIncomingCallDecline } from "./incomingCallDecline";
+import { dismissMissedCallNotification } from "./missedCallNotifications";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
 
@@ -45,6 +46,14 @@ function isDeclineCallAction(actionId: string) {
 
 function isAcceptCallAction(actionId: string) {
   return actionId === "ACCEPT" || actionId.endsWith(":ACCEPT") || actionId.endsWith(".ACCEPT");
+}
+
+function isCallBackAction(actionId: string) {
+  return actionId === "CALL_BACK" || actionId.endsWith(":CALL_BACK") || actionId.endsWith(".CALL_BACK");
+}
+
+function isMessageAction(actionId: string) {
+  return actionId === "MESSAGE" || actionId.endsWith(":MESSAGE") || actionId.endsWith(".MESSAGE");
 }
 
 function dismissIncomingCallUi(roomName: string) {
@@ -120,27 +129,20 @@ function scheduleOpenPost(postId: number, authToken?: string | null) {
 
 async function handleIncomingCallDecline(
   data: Record<string, unknown>,
+  title: string,
   options?: { authToken?: string | null }
 ) {
   const callerId = peerIdFromData(data);
-  const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
   if (!callerId) return;
-  const authToken = await resolveAuthToken(options?.authToken);
-  if (!authToken) return;
-  try {
-    await sendDirectMessage(
-      authToken,
-      callerId,
-      buildDmCallMessage({
-        mode,
-        status: "declined",
-        durationSec: 0,
-        direction: "incoming"
-      })
-    );
-  } catch {
-    // no-op
-  }
+  const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+  await completeIncomingCallDecline({
+    callerId,
+    callerName: title,
+    mode,
+    roomName: String(data.roomName || ""),
+    callerAvatarUrl: String(data.callerAvatarUrl || "").trim() || null,
+    authToken: options?.authToken
+  });
 }
 
 function presentIncomingCallFromNotificationData(
@@ -211,8 +213,7 @@ export async function handleNotificationResponse(
 
   if (type === "incoming_call" && isDeclineCallAction(actionId)) {
     await clearNotificationReplyUi(response);
-    await dismissIncomingCallUi(String(data.roomName || ""));
-    await handleIncomingCallDecline(data, options);
+    await handleIncomingCallDecline(data, title, options);
     return;
   }
 
@@ -221,6 +222,44 @@ export async function handleNotificationResponse(
     scheduled = true;
     scheduleNotificationNavigation(action);
   };
+
+  if (type === "missed_call") {
+    const callerId = peerIdFromData(data);
+    const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+    if (callerId) {
+      await dismissMissedCallNotification(callerId);
+    }
+    if (isCallBackAction(actionId) && callerId) {
+      schedule(() => {
+        navigateToDirectChat({
+          peerUserId: callerId,
+          peerName: title,
+          peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined,
+          autoStartCall: mode
+        });
+      });
+    } else if (isMessageAction(actionId) && callerId) {
+      schedule(() => {
+        navigateToDirectChat({
+          peerUserId: callerId,
+          peerName: title,
+          peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined
+        });
+      });
+    } else if (callerId) {
+      schedule(() => {
+        navigateToDirectChat({
+          peerUserId: callerId,
+          peerName: title,
+          peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined
+        });
+      });
+    }
+    if (scheduled) {
+      runPendingNotificationNavigation();
+    }
+    return;
+  }
 
   if (type === "incoming_call") {
     const autoAccept = isAcceptCallAction(actionId);

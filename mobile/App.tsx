@@ -20,10 +20,11 @@ import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
 import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
-import { setupDirectMessageNotificationCategory, ensureIncomingCallCategoriesReady } from "./src/push/pushNotifications";
+import { setupDirectMessageNotificationCategory, ensureIncomingCallCategoriesReady, setupMissedCallNotificationCategory } from "./src/push/pushNotifications";
 
 void setupDirectMessageNotificationCategory();
 void ensureIncomingCallCategoriesReady();
+void setupMissedCallNotificationCategory();
 
 export default function App() {
   const { ready: fontsReady } = useAppFonts();

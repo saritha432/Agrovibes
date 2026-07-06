@@ -7,6 +7,7 @@ import { sendDirectMessage } from "../services/api";
 import { navigateToDirectChat } from "../navigation/navigationRef";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
+import { displayMissedCallNotification } from "./missedCallNotifications";
 
 export function GlobalIncomingCallHost() {
   const { token } = useAuth();
@@ -71,7 +72,16 @@ export function GlobalIncomingCallHost() {
         });
       }}
       onDecline={() => {
+        const active = call;
         void finishCall({ status: "declined", durationSec: 0 });
+        if (active) {
+          void displayMissedCallNotification({
+            callerId: active.callerId,
+            callerName: active.callerName,
+            mode: active.mode,
+            callerAvatarUrl: active.callerAvatarUrl
+          });
+        }
       }}
       onCallEnded={(result) => {
         void finishCall(result);
