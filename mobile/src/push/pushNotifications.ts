@@ -240,7 +240,7 @@ export async function setupIncomingCallNotificationCategories() {
       buttonTitle: "Decline",
       options: {
         isDestructive: true,
-        opensAppToForeground: true
+        opensAppToForeground: false
       }
     },
     {
@@ -257,7 +257,7 @@ export async function setupIncomingCallNotificationCategories() {
       buttonTitle: "Decline",
       options: {
         isDestructive: true,
-        opensAppToForeground: true
+        opensAppToForeground: false
       }
     },
     {
