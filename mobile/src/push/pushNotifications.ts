@@ -21,8 +21,8 @@ Notifications.setNotificationHandler({
     const isIncomingCall = String(data.type || "") === "incoming_call";
     if (isIncomingCall) {
       return {
-        shouldShowAlert: false,
-        shouldPlaySound: false,
+        shouldShowAlert: true,
+        shouldPlaySound: true,
         shouldSetBadge: false,
         priority: Notifications.AndroidNotificationPriority.MAX
       };
@@ -84,6 +84,13 @@ async function getFirebaseMessagingToken(): Promise<string | null> {
     if (typeof messagingModule !== "function") return null;
 
     const messaging = messagingModule();
+    if (Platform.OS === "android") {
+      try {
+        await messaging.requestPermission();
+      } catch {
+        // POST_NOTIFICATIONS may already be granted via expo-notifications.
+      }
+    }
     if (Platform.OS === "ios") {
       await messaging.registerDeviceForRemoteMessages();
       const authStatus = await messaging.requestPermission();

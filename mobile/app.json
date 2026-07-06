@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cropvibe",
     "slug": "agrovibes",
-    "version": "1.0.7",
+    "version": "1.0.10",
     "orientation": "portrait",
     "icon": "./assets/logo-adaptive-foreground.png",
     "platforms": [
@@ -24,7 +24,7 @@
     "assetBundlePatterns": [],
     "android": {
       "package": "com.cropvibe.app",
-      "versionCode": 11,
+      "versionCode": 14,
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"
@@ -109,7 +109,7 @@
         "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
       },
       "icon": "./assets/icon-ios.png",
-      "buildNumber": "11"
+      "buildNumber": "14"
     },
     "web": {
       "favicon": "./assets/logo.png"

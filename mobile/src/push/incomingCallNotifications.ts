@@ -45,21 +45,21 @@ export async function displayIncomingCallNotification(payload: IncomingCallNotif
       categoryIdentifier: categoryForMode(mode),
       sound: "default",
       sticky: true,
-      priority: Notifications.AndroidNotificationPriority.MAX,
       data: {
         type: "incoming_call",
         mode,
         roomName,
         callerId: String(callerId),
         callerAvatarUrl: String(payload.callerAvatarUrl || "").trim()
-      }
-    },
-    trigger:
-      Platform.OS === "android"
+      },
+      ...(Platform.OS === "android"
         ? {
-            channelId: "incoming_calls"
+            channelId: "incoming_calls",
+            priority: Notifications.AndroidNotificationPriority.MAX
           }
-        : null
+        : { priority: Notifications.AndroidNotificationPriority.MAX })
+    },
+    trigger: null
   });
 }
 

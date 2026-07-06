@@ -310,6 +310,7 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
   if (categoryId === "DIRECT_MESSAGE" || isIncomingCallCategory) {
     payloadData.title = pushTitle;
     payloadData.message = pushBody;
+    payloadData.type = String((data || {}).type || payloadData.type || "direct_message");
     payloadData.categoryId = String(categoryId);
     payloadData.channelId = isIncomingCallCategory ? "incoming_calls" : "direct_messages";
     payloadData.priority = isIncomingCallCategory ? "max" : "high";
@@ -331,22 +332,10 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
 
       if (androidTokens.length) {
         const androidResult = await sendMulticastAndCleanup(androidTokens, {
-          notification: {
-            title: pushTitle,
-            body: pushBody,
-            ...(hasImage ? { imageUrl: image } : {})
-          },
           data: payloadData,
           android: {
             priority: "high",
-            notification: {
-              channelId: "direct_messages",
-              priority: "max",
-              visibility: "public",
-              defaultSound: true,
-              defaultVibrateTimings: true,
-              ...(hasImage ? { imageUrl: image } : {})
-            }
+            ttl: 60 * 1000
           }
         });
         sent += androidResult.sent;
@@ -521,16 +510,33 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
 
   if (androidTokens.length) {
     const androidResult = await sendMulticastAndCleanup(androidTokens, {
+      notification: {
+        title: name,
+        body: label
+      },
       data: {
         type: "incoming_call",
         mode: isVideo ? "video" : "voice",
         roomName: String(roomName || ""),
         callerId: callerId != null ? String(callerId) : "",
         callerName: name,
-        callerAvatarUrl: avatar
+        callerAvatarUrl: avatar,
+        title: name,
+        message: label,
+        categoryId,
+        channelId: "incoming_calls",
+        priority: "max"
       },
       android: {
-        priority: "high"
+        priority: "high",
+        ttl: 45 * 1000,
+        notification: {
+          channelId: "incoming_calls",
+          priority: "max",
+          visibility: "public",
+          defaultSound: true,
+          defaultVibrateTimings: true
+        }
       }
     });
     sent += androidResult.sent;

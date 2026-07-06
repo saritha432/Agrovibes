@@ -8,10 +8,14 @@ type FcmRemoteMessage = {
 };
 
 export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage | null | undefined) {
-  if (remoteMessage?.notification) return;
   const data = remoteMessage?.data || {};
-  const title = String(data.title || "").trim();
-  const body = String(data.message || data.body || "").trim();
+  const type = String(data.type || "").trim();
+  // System FCM notification payloads cannot show Expo action buttons (Reply / Answer).
+  // For DMs, always re-post through Expo when we have category metadata.
+  if (remoteMessage?.notification && type !== "direct_message") return;
+
+  const title = String(data.title || remoteMessage?.notification?.title || "").trim();
+  const body = String(data.message || data.body || remoteMessage?.notification?.body || "").trim();
   if (!title && !body) return;
 
   await ensureAndroidChannels();
