@@ -1,6 +1,5 @@
 import React from "react";
 import { useAuth } from "../auth/AuthContext";
-import { navigateToDirectChat } from "../navigation/navigationRef";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 import { handleFcmRemoteMessage } from "./handleFcmRemoteMessage";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
@@ -99,11 +98,6 @@ export function IncomingCallNotificationBootstrap() {
         autoAccept: true
       });
       openIncomingCallApp();
-      navigateToDirectChat({
-        peerUserId: parsed.callerId,
-        peerName: parsed.callerName,
-        peerAvatarUrl: parsed.callerAvatarUrl || undefined
-      });
     };
 
     const onEndCall = (data: { endAction?: string; payload?: string }) => {

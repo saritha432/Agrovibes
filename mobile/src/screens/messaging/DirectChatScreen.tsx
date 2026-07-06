@@ -56,6 +56,7 @@ import { APP_LIME } from "../../theme/appColors";
 import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { useLanguage } from "../../localization/LanguageContext";
 import { DirectCallView, type CallDirection, type CallEndResult, type DirectCallMode } from "./DirectCallView";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ChatMessageActionSheet } from "./ChatMessageActionSheet";
 import { ForwardMessageModal } from "./ForwardMessageModal";
 import { SwipeReplyMessageRow } from "./SwipeReplyMessageRow";
@@ -484,6 +485,7 @@ export function DirectChatScreen() {
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
   const listRef = useRef<FlatList<ThreadListItem>>(null);
+  const composerInputRef = useRef<TextInput>(null);
   const threadItemCountRef = useRef(0);
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -496,6 +498,7 @@ export function DirectChatScreen() {
     replyLabel: string;
   } | null>(null);
   const [actionMessage, setActionMessage] = useState<DirectMessageItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DirectMessageItem | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
@@ -755,29 +758,27 @@ export function DirectChatScreen() {
   const deleteMessage = useCallback(
     (item: DirectMessageItem) => {
       if (!token || Number(item.senderId) !== Number(user?.id)) return;
-      Alert.alert("Delete message?", "This removes the message for everyone in this chat.", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                await deleteDirectMessage(token, item.id);
-                setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
-              } catch (error) {
-                Alert.alert(
-                  "Delete failed",
-                  error instanceof Error ? error.message : "Could not delete this message."
-                );
-              }
-            })();
-          }
-        }
-      ]);
+      setPendingDelete(item);
     },
     [token, user?.id]
   );
+
+  const confirmDeleteMessage = useCallback(() => {
+    const item = pendingDelete;
+    if (!item || !token) return;
+    setPendingDelete(null);
+    void (async () => {
+      try {
+        await deleteDirectMessage(token, item.id);
+        setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
+      } catch (error) {
+        Alert.alert(
+          "Delete failed",
+          error instanceof Error ? error.message : "Could not delete this message."
+        );
+      }
+    })();
+  }, [pendingDelete, token]);
 
   const canInteractWithMessage = useCallback((body: string) => {
     return !parseDmCallMessage(body) && !parseDmReactMessage(body);
@@ -1106,11 +1107,7 @@ export function DirectChatScreen() {
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-    >
+    <View style={styles.flex}>
       <View style={[styles.header, { paddingTop: topChromeInset }]}>
         <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={28} color={TEXT} />
@@ -1148,9 +1145,12 @@ export function DirectChatScreen() {
 
       <FlatList
         ref={listRef}
+        style={styles.flex}
         data={threadItems}
         keyExtractor={(item) => item.id}
         inverted
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         contentContainerStyle={styles.listContent}
         initialNumToRender={18}
         maxToRenderPerBatch={12}
@@ -1364,7 +1364,8 @@ export function DirectChatScreen() {
         }
       />
 
-      <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+      <KeyboardAvoidingView behavior="padding" enabled>
+        <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
             <View style={styles.replyComposerMeta}>
@@ -1404,12 +1405,17 @@ export function DirectChatScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={styles.inputArea}>
+            <Pressable
+              style={styles.inputArea}
+              onPress={() => composerInputRef.current?.focus()}
+            >
               <TextInput
+                ref={composerInputRef}
                 value={draft}
                 onChangeText={handleDraftChange}
                 placeholder="Message"
                 placeholderTextColor={MUTED}
+                showSoftInputOnFocus
                 style={[
                   styles.input,
                   {
@@ -1461,10 +1467,20 @@ export function DirectChatScreen() {
                   </Pressable>
                 </View>
               )}
-            </View>
+            </Pressable>
           )}
         </View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
+      <ConfirmDialog
+        visible={pendingDelete != null}
+        title="Delete message?"
+        message="This removes the message for everyone in this chat."
+        confirmLabel="DELETE"
+        confirmDanger
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDeleteMessage}
+      />
       <ChatMessageActionSheet
         visible={actionMessage != null}
         timestampLabel={
@@ -1607,7 +1623,7 @@ export function DirectChatScreen() {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

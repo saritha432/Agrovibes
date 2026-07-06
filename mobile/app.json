@@ -25,6 +25,7 @@
     "android": {
       "package": "com.cropvibe.app",
       "versionCode": 15,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"

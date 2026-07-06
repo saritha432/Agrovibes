@@ -261,20 +261,14 @@ export async function handleNotificationResponse(
 
   if (type === "incoming_call") {
     const autoAccept = isAcceptCallAction(actionId);
-    await dismissIncomingCallUi(String(data.roomName || ""));
-    const presented = presentIncomingCallFromNotificationData(data, title, autoAccept);
-    if (presented) {
-      const callerId = peerIdFromData(data);
-      if (callerId) {
-        schedule(() => {
-          navigateToDirectChat({
-            peerUserId: callerId,
-            peerName: title,
-            peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined
-          });
-        });
-      }
+    if (autoAccept) {
+      await dismissIncomingCallUi(String(data.roomName || ""));
+      presentIncomingCallFromNotificationData(data, title, true);
+    } else if (!isDeclineCallAction(actionId)) {
+      // Tap notification body: show incoming call UI without jumping into chat.
+      presentIncomingCallFromNotificationData(data, title, false);
     }
+    return;
   } else if (type === "live_share") {
     const postId = Number(data.postId);
     const senderId = peerIdFromData(data);

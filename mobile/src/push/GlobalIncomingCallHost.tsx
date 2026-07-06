@@ -4,7 +4,6 @@ import { useAuth } from "../auth/AuthContext";
 import { DirectCallView, type CallEndResult } from "../screens/messaging/DirectCallView";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { sendDirectMessage } from "../services/api";
-import { navigateToDirectChat } from "../navigation/navigationRef";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
@@ -71,11 +70,6 @@ export function GlobalIncomingCallHost() {
       onAccept={() => {
         void clearIncomingCallNotifications(call.roomName);
         setConnectEnabled(true);
-        navigateToDirectChat({
-          peerUserId: call.callerId,
-          peerName: call.callerName,
-          peerAvatarUrl: call.callerAvatarUrl || undefined
-        });
       }}
       onDecline={() => {
         const active = call;

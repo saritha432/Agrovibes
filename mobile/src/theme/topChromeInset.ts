@@ -10,15 +10,21 @@ export const FLOATING_TOP_CHROME_GAP = 8;
 
 /**
  * Instagram-style top inset: one status-bar offset for headers on every device/build.
- * Use safe-area when available; fall back to StatusBar height only when insets report 0 (dev client).
- * Never stack Math.max(insets, StatusBar) — that caused extra padding on preview/release APKs.
+ *
+ * Android (dev + preview + Play Store): always use StatusBar.currentHeight when available.
+ * Release APKs on some OEMs report inflated safe-area top (double status-bar padding);
+ * trusting insets.top caused extra gap above Cropvibe / notification icons.
+ *
+ * iOS: use safe-area (notch / Dynamic Island).
  */
 export function resolveTopChromeInset(insetsTop: number): number {
   if (Platform.OS === "web") return 0;
   if (Platform.OS === "ios") return insetsTop;
+
   const statusBar = StatusBar.currentHeight ?? 0;
-  if (insetsTop > 0) return insetsTop;
-  return statusBar > 0 ? statusBar : 24;
+  if (statusBar > 0) return statusBar;
+  if (insetsTop > 0) return Math.min(insetsTop, 36);
+  return 24;
 }
 
 export function useTopChromeInset(): number {
