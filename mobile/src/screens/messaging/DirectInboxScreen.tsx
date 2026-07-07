@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTopChromeInset } from "../../theme/topChromeInset";
-import { DeactivatedAccountGate } from "../../components/DeactivatedAccountGate";
+import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../../components/DeactivatedAccountGate";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
@@ -58,6 +58,7 @@ export function DirectInboxScreen() {
   const { t } = useLanguage();
   const topChromeInset = useTopChromeInset();
   const { user, token } = useAuth();
+  const isAccountDeactivated = useIsAccountDeactivated();
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
@@ -154,8 +155,8 @@ export function DirectInboxScreen() {
   );
 
   return (
-    <DeactivatedAccountGate featureLabel="Chat">
     <View style={[styles.root, { paddingTop: topChromeInset }]}>
+      <DeactivatedChromeWrap>
       <View style={styles.topBar}>
         <Text style={styles.usernameTitle} numberOfLines={1}>
           {displayName}
@@ -177,10 +178,14 @@ export function DirectInboxScreen() {
           style={styles.searchInput}
           autoCorrect={false}
           autoCapitalize="none"
+          editable={!isAccountDeactivated}
         />
       </View>
+      </DeactivatedChromeWrap>
 
-      {filtered.length === 0 ? (
+      {isAccountDeactivated ? (
+        <DeactivatedContentPlaceholder featureLabel="chat" />
+      ) : filtered.length === 0 ? (
         <View style={styles.emptyWrap}>
           {listHeader}
           <View style={styles.empty}>
@@ -227,9 +232,8 @@ export function DirectInboxScreen() {
           }}
         />
       )}
-      <NewMessageComposerModal visible={composerOpen} recentThreads={threads} onClose={() => setComposerOpen(false)} />
+      <NewMessageComposerModal visible={composerOpen && !isAccountDeactivated} recentThreads={threads} onClose={() => setComposerOpen(false)} />
     </View>
-    </DeactivatedAccountGate>
   );
 }
 

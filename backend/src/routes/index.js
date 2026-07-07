@@ -415,25 +415,21 @@ const authUserSelect = `
 `;
 
 const hideDeactivatedPostOwnersClause = `
+  AND COALESCE(owner.account_status, 'active') <> 'deactivated'
   AND NOT EXISTS (
     SELECT 1
     FROM learn_users post_owner
     WHERE COALESCE(post_owner.account_status, 'active') = 'deactivated'
       AND (
         post_owner.id = p.user_id
+        OR LOWER(TRIM(post_owner.full_name)) = LOWER(TRIM(p.user_name))
         OR (
-          p.user_id IS NULL
-          AND (
-            LOWER(TRIM(post_owner.full_name)) = LOWER(TRIM(p.user_name))
-            OR (
-              post_owner.username IS NOT NULL AND TRIM(post_owner.username) <> ''
-              AND LOWER(TRIM(post_owner.username)) = LOWER(TRIM(p.user_name))
-            )
-            OR (
-              post_owner.email IS NOT NULL AND TRIM(post_owner.email) <> ''
-              AND LOWER(TRIM(SPLIT_PART(post_owner.email, '@', 1))) = LOWER(TRIM(p.user_name))
-            )
-          )
+          post_owner.username IS NOT NULL AND TRIM(post_owner.username) <> ''
+          AND LOWER(TRIM(post_owner.username)) = LOWER(TRIM(p.user_name))
+        )
+        OR (
+          post_owner.email IS NOT NULL AND TRIM(post_owner.email) <> ''
+          AND LOWER(TRIM(SPLIT_PART(post_owner.email, '@', 1))) = LOWER(TRIM(p.user_name))
         )
       )
   )
@@ -5235,6 +5231,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         LIMIT 1
       ) u ON TRUE
       WHERE p.id = $2
+      ${hideDeactivatedPostOwnersClause}
       LIMIT 1
       `,
       [viewerId, postId]

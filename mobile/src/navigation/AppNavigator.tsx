@@ -25,7 +25,8 @@ import { useAuth } from "../auth/AuthContext";
 const Tab = createBottomTabNavigator();
 
 export function AppNavigator() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isAccountDeactivated = user?.accountStatus === "deactivated";
   const [isCreateOpen, setCreateOpen] = useState(false);
   const [homeRefreshToken, setHomeRefreshToken] = useState(0);
   const [createPresetType, setCreatePresetType] = useState<CreateType | null>(null);
@@ -40,6 +41,7 @@ export function AppNavigator() {
 
   React.useEffect(() => {
     return subscribeOpenLiveCreate((payload) => {
+      if (user?.accountStatus === "deactivated") return;
       setCreatePresetType("live");
       setCreateLiveOptions({
         liveTopic: payload.liveTopic,
@@ -48,7 +50,15 @@ export function AppNavigator() {
       });
       setCreateOpen(true);
     });
-  }, []);
+  }, [user?.accountStatus]);
+
+  useEffect(() => {
+    if (isAccountDeactivated && isCreateOpen) {
+      setCreatePresetType(null);
+      setCreateLiveOptions(null);
+      setCreateOpen(false);
+    }
+  }, [isAccountDeactivated, isCreateOpen]);
 
   useEffect(() => {
     setFeedPlaybackSuspended(isCreateOpen);
@@ -79,6 +89,7 @@ export function AppNavigator() {
             {...props}
             createFocused={isCreateOpen}
             onCreatePress={() => {
+              if (isAccountDeactivated) return;
               setCreatePresetType(null);
               setCreateOpen(true);
             }}
@@ -92,6 +103,7 @@ export function AppNavigator() {
               refreshToken={homeRefreshToken}
               takePendingFeedPost={takePendingFeedPost}
               onOpenCreate={(type, options) => {
+                if (isAccountDeactivated) return;
                 setCreatePresetType(type ?? null);
                 setCreateLiveOptions(options ?? null);
                 setCreateOpen(true);
