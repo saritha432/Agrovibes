@@ -24,6 +24,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFloatingTopChromeInset } from "../theme/topChromeInset";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { DeactivatedAccountGate } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
@@ -1248,6 +1249,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   }, [galleryLoading, isReelTab, t]);
 
   return (
+    <DeactivatedAccountGate featureLabel="Profile">
     <>
       <SafeAreaView style={styles.safeRoot} edges={["top"]}>
         {profileSubject ? (
@@ -1588,6 +1590,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       </Modal>
 
     </>
+    </DeactivatedAccountGate>
   );
 }
 

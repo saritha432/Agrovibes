@@ -414,6 +414,54 @@ const authUserSelect = `
   account_status AS "accountStatus"
 `;
 
+const hideDeactivatedPostOwnersClause = `
+  AND NOT EXISTS (
+    SELECT 1
+    FROM learn_users post_owner
+    WHERE COALESCE(post_owner.account_status, 'active') = 'deactivated'
+      AND (
+        post_owner.id = p.user_id
+        OR (
+          p.user_id IS NULL
+          AND (
+            LOWER(TRIM(post_owner.full_name)) = LOWER(TRIM(p.user_name))
+            OR (
+              post_owner.username IS NOT NULL AND TRIM(post_owner.username) <> ''
+              AND LOWER(TRIM(post_owner.username)) = LOWER(TRIM(p.user_name))
+            )
+            OR (
+              post_owner.email IS NOT NULL AND TRIM(post_owner.email) <> ''
+              AND LOWER(TRIM(SPLIT_PART(post_owner.email, '@', 1))) = LOWER(TRIM(p.user_name))
+            )
+          )
+        )
+      )
+  )
+`;
+
+async function verifyUserPassword(userId, password) {
+  const existing = await query(
+    `SELECT password_hash AS "passwordHash" FROM learn_users WHERE id = $1 LIMIT 1`,
+    [userId]
+  );
+  const row = existing.rows[0];
+  if (!row) return false;
+  const hash = String(row.passwordHash || "");
+  let ok = await bcrypt.compare(String(password || ""), hash);
+  if (!ok) {
+    ok = await bcrypt.compare(String(password || "").trim(), hash);
+  }
+  return ok;
+}
+
+async function isUserAccountDeactivated(userId) {
+  const result = await query(
+    `SELECT COALESCE(account_status, 'active') AS status FROM learn_users WHERE id = $1 LIMIT 1`,
+    [userId]
+  );
+  return String(result.rows[0]?.status || "active").toLowerCase() === "deactivated";
+}
+
 /**
  * Resolves which learn_users row should receive like/comment notifications for a home post.
  * Prefers real accounts over legacy backfill placeholders; updates home_posts.user_id when remapping.
@@ -1218,7 +1266,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       ORDER BY id ASC
       LIMIT 1
     ) u ON TRUE
-    WHERE 1=1 ${videoClause} ${cursorClause}
+    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${videoClause} ${cursorClause}
     ORDER BY p.id DESC
   `;
 }
@@ -2117,6 +2165,16 @@ router.get("/v1/auth/me", authRequired, async (req, res) => {
 router.post("/v1/auth/me/deactivate", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
+    const password = String(req.body?.password || "");
+    if (!password) {
+      res.status(400).json({ message: "Password is required to deactivate your account" });
+      return;
+    }
+    const ok = await verifyUserPassword(req.user.userId, password);
+    if (!ok) {
+      res.status(401).json({ message: "Password is incorrect" });
+      return;
+    }
     const result = await query(
       `
       UPDATE learn_users
@@ -2130,6 +2188,8 @@ router.post("/v1/auth/me/deactivate", authRequired, async (req, res) => {
       res.status(404).json({ message: "User not found" });
       return;
     }
+    await cacheIncr("home:posts:gen");
+    await cacheIncr("home:stories:gen");
     res.json({ success: true, user: authUserFromRow(result.rows[0]) });
   } catch (error) {
     res.status(500).json({ message: "Failed to deactivate account", error: error?.message || String(error) });
@@ -2161,7 +2221,19 @@ router.post("/v1/auth/me/activate", authRequired, async (req, res) => {
 router.delete("/v1/auth/me", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
+    const password = String(req.body?.password || "");
+    if (!password) {
+      res.status(400).json({ message: "Password is required to delete your account" });
+      return;
+    }
+    const ok = await verifyUserPassword(req.user.userId, password);
+    if (!ok) {
+      res.status(401).json({ message: "Password is incorrect" });
+      return;
+    }
     await query(`DELETE FROM learn_users WHERE id = $1`, [req.user.userId]);
+    await cacheIncr("home:posts:gen");
+    await cacheIncr("home:stories:gen");
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete account", error: error?.message || String(error) });
@@ -2450,6 +2522,7 @@ router.get("/v1/users", authRequired, async (req, res) => {
         OR LOWER(COALESCE(u.full_name, '')) LIKE $3
         OR LOWER(COALESCE(u.username, '')) LIKE $3
       )
+      AND (COALESCE(u.account_status, 'active') <> 'deactivated' OR u.id = $1)
       ORDER BY
         CASE WHEN u.id = $1 THEN 1 ELSE 0 END ASC,
         u.created_at DESC,
@@ -2625,6 +2698,7 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
         u.website,
         u.location_label AS "locationLabel",
         u.created_at AS "createdAt",
+        u.account_status AS "accountStatus",
         COALESCE(posts.posts_count, 0)::INT AS "postsCount",
         COALESCE(posts.reels_count, 0)::INT AS "reelsCount"
       FROM learn_users u
@@ -2652,6 +2726,12 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
     );
     if (!userRes.rows[0]) {
       res.status(404).json({ message: "User not found" });
+      return;
+    }
+    const viewerId = Number(req.user.userId);
+    const accountStatus = String(userRes.rows[0].accountStatus || "active").toLowerCase();
+    if (accountStatus === "deactivated" && viewerId !== targetUserId) {
+      res.status(404).json({ message: "This account is unavailable" });
       return;
     }
     const profile = userRes.rows[0];
@@ -3605,8 +3685,19 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       return;
     }
 
-    const peerRes = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [peerUserId]);
+    const peerRes = await query(
+      `SELECT id, COALESCE(account_status, 'active') AS status FROM learn_users WHERE id = $1 LIMIT 1`,
+      [peerUserId]
+    );
     if (!peerRes.rows[0]) {
+      res.status(404).json({ message: "Peer user not found" });
+      return;
+    }
+    if (await isUserAccountDeactivated(me)) {
+      res.status(403).json({ message: "Activate your account to send messages" });
+      return;
+    }
+    if (String(peerRes.rows[0].status || "active").toLowerCase() === "deactivated") {
       res.status(404).json({ message: "Peer user not found" });
       return;
     }
@@ -3830,6 +3921,7 @@ router.get("/v1/home/stories", authOptional, async (req, res) => {
       WHERE s.created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
         AND $1::integer IS NOT NULL
         AND COALESCE(s.user_id, lu.id) IS NOT NULL
+        AND COALESCE(lu.account_status, 'active') <> 'deactivated'
         AND (
           COALESCE(s.user_id, lu.id) = $1::integer
           OR EXISTS (
@@ -3874,6 +3966,10 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
     const avatarLabel = String(userName).trim().charAt(0).toUpperCase() || "U";
     const actorUserIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
     const actorUserId = Number.isFinite(actorUserIdRaw) && actorUserIdRaw > 0 ? actorUserIdRaw : null;
+    if (actorUserId && (await isUserAccountDeactivated(actorUserId))) {
+      res.status(403).json({ message: "Activate your account to create stories" });
+      return;
+    }
     const result = await query(
       `
       INSERT INTO home_stories (user_id, user_name, district, avatar_label, has_new, viewed, video_url, image_url)
@@ -4066,6 +4162,11 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
 
     const ownerIdRaw = req.user?.userId != null ? Number(req.user.userId) : Number(userId);
     const ownerId = Number.isFinite(ownerIdRaw) && ownerIdRaw > 0 ? ownerIdRaw : null;
+
+    if (ownerId && (await isUserAccountDeactivated(ownerId))) {
+      res.status(403).json({ message: "Activate your account to create posts" });
+      return;
+    }
 
     const cleanTagged = Array.isArray(taggedUserIds)
       ? [...new Set(taggedUserIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0))]
@@ -4986,8 +5087,18 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
     const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
     const viewerId = Number.isFinite(viewerIdRaw) ? viewerIdRaw : null;
 
-    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [targetUserId]);
+    const userRes = await query(
+      `SELECT full_name, username, email, COALESCE(account_status, 'active') AS status FROM learn_users WHERE id = $1 LIMIT 1`,
+      [targetUserId]
+    );
     if (!userRes.rows.length) {
+      res.json({ posts: [] });
+      return;
+    }
+    if (
+      String(userRes.rows[0]?.status || "active").toLowerCase() === "deactivated" &&
+      viewerId !== targetUserId
+    ) {
       res.json({ posts: [] });
       return;
     }

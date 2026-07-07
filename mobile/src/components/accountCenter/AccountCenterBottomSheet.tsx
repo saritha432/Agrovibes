@@ -22,6 +22,8 @@ import { SyncingProfilePicturesContent } from "./SyncingProfilePicturesContent";
 import { YourInformationPermissionsContent } from "./YourInformationPermissionsContent";
 import { DeactivateDeleteChoiceContent } from "./DeactivateDeleteChoiceContent";
 import { DeactivateDeleteContinueContent } from "./DeactivateDeleteContinueContent";
+import { DeactivateDeleteConfirmPasswordContent } from "./DeactivateDeleteConfirmPasswordContent";
+import { DeactivateDeleteSuccessContent } from "./DeactivateDeleteSuccessContent";
 import { resolveAccountCenterSheetRoute } from "./accountCenterSheetRoutes";
 import {
   SheetNavContext,
@@ -71,6 +73,10 @@ function SheetBody({ route }: { route: AccountCenterSheetRoute }) {
       return <DeactivateDeleteChoiceContent />;
     case "DeactivateDeleteContinue":
       return <DeactivateDeleteContinueContent />;
+    case "DeactivateDeleteConfirmPassword":
+      return <DeactivateDeleteConfirmPasswordContent />;
+    case "DeactivateDeleteSuccess":
+      return <DeactivateDeleteSuccessContent />;
     case "main":
     default:
       return <AccountCenterMain />;
