@@ -8,12 +8,13 @@ import {
   getPendingDeactivateAction
 } from "./accountCenterDeactivateFlow";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../theme/appColors";
+import { clearHomeFeedCache } from "../../social/homeFeedCache";
 import { useAuth } from "../../auth/AuthContext";
 import { deactivateMyAccount, deleteMyAccount } from "../../services/api";
 
 export function DeactivateDeleteConfirmPasswordContent() {
   const { push, pop, close, navigateStack } = useAccountCenterSheetNav();
-  const { token, updateUser, signOut } = useAuth();
+  const { token, updateUser, signOut, user } = useAuth();
   const [password, setPassword] = useState("");
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,6 +40,7 @@ export function DeactivateDeleteConfirmPasswordContent() {
       }
       const result = await deactivateMyAccount(token, password);
       await updateUser({ accountStatus: result.user.accountStatus || "deactivated" });
+      await clearHomeFeedCache(user?.id);
       push("DeactivateDeleteSuccess");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not update account status right now.";

@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
+import { DEACTIVATED_CHROME_OPACITY, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { useLanguage } from "../localization/LanguageContext";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
@@ -195,6 +196,8 @@ type TabSlotProps = {
   children: React.ReactNode;
   showBadge?: number;
   iconVariant?: "default" | "logo";
+  dimmed?: boolean;
+  disabled?: boolean;
 };
 
 function TabSlot({
@@ -204,14 +207,17 @@ function TabSlot({
   label,
   children,
   showBadge = 0,
-  iconVariant = "default"
+  iconVariant = "default",
+  dimmed = false,
+  disabled = false
 }: TabSlotProps) {
   return (
     <Pressable
-      onPress={onPress}
-      style={[styles.tabItem, focused ? styles.tabItemFocused : null]}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      style={[styles.tabItem, focused ? styles.tabItemFocused : null, dimmed ? styles.tabItemDimmed : null]}
       accessibilityRole="button"
-      accessibilityState={{ selected: focused }}
+      accessibilityState={{ selected: focused, disabled }}
       accessibilityLabel={accessibilityLabel}
     >
       <View style={styles.iconWrap}>
@@ -230,6 +236,7 @@ function TabSlot({
 export function MainTabBar({ state, navigation, onCreatePress, createFocused = false }: Props) {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
+  const isAccountDeactivated = useIsAccountDeactivated();
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
   const { messageUnreadCount } = useNotificationPanel();
 
@@ -261,6 +268,7 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           onPress={() => pressRoute("Home")}
           accessibilityLabel="Home"
           iconVariant="logo"
+          dimmed={isAccountDeactivated}
         >
           <Image
             source={require("../../assets/crop vibe.png")}
@@ -274,6 +282,7 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           onPress={() => pressRoute("Search")}
           accessibilityLabel="Discover"
           label="Discover"
+          dimmed={isAccountDeactivated}
         >
           <TabSvgIcon focused={searchFocused} icons={BOTTOM_TAB_ICONS.search} fallbackName="search-outline" />
         </TabSlot>
@@ -283,6 +292,8 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           onPress={onCreatePress}
           accessibilityLabel={t("tabCreate")}
           label={t("tabCreate")}
+          dimmed={isAccountDeactivated}
+          disabled={isAccountDeactivated}
         >
           <TabCreateIcon focused={createFocused} />
         </TabSlot>
@@ -293,12 +304,19 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
           accessibilityLabel="Chat"
           label="Chat"
           showBadge={messageUnreadCount}
+          dimmed={isAccountDeactivated}
         >
           <TabSvgIcon focused={messagesFocused} icons={BOTTOM_TAB_ICONS.messages} fallbackName="chatbubble-outline" />
         </TabSlot>
 
         {/* Was Learn */}
-        <TabSlot focused={profileFocused} onPress={() => pressRoute("Profile")} accessibilityLabel="Profile" label="Profile">
+        <TabSlot
+          focused={profileFocused}
+          onPress={() => pressRoute("Profile")}
+          accessibilityLabel="Profile"
+          label="Profile"
+          dimmed={isAccountDeactivated}
+        >
           <TabProfileIcon focused={profileFocused} />
         </TabSlot>
 
@@ -360,6 +378,9 @@ const styles = StyleSheet.create({
     borderTopColor: BRAND_ACCENT,
     marginTop: -2,
     paddingTop: 1
+  },
+  tabItemDimmed: {
+    opacity: DEACTIVATED_CHROME_OPACITY
   },
   iconWrap: {
     position: "relative",
