@@ -17,6 +17,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DeactivatedAccountGate } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
@@ -677,6 +678,7 @@ export function UserSearchScreen() {
   );
 
   return (
+    <DeactivatedAccountGate featureLabel="Search">
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.searchHeaderRow}>
         <View style={styles.searchWrap}>
@@ -767,6 +769,7 @@ export function UserSearchScreen() {
         }}
       />
     </SafeAreaView>
+    </DeactivatedAccountGate>
   );
 }
 

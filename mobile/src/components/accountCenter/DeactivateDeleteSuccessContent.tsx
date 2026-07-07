@@ -3,32 +3,38 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AccountCenterSubLayout } from "./AccountCenterSubLayout";
 import { useAccountCenterSheetNav } from "./accountCenterSheetNav";
+import { clearPendingDeactivateAction } from "./accountCenterDeactivateFlow";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../theme/appColors";
 
-export function DeactivateDeleteContinueContent() {
-  const { pop, push } = useAccountCenterSheetNav();
+export function DeactivateDeleteSuccessContent() {
+  const { close } = useAccountCenterSheetNav();
+
+  const handleDone = () => {
+    clearPendingDeactivateAction();
+    close();
+  };
 
   return (
     <AccountCenterSubLayout
       variant="sheet"
-      onBack={pop}
-      title="Before You Continue"
+      onBack={handleDone}
+      title="Account Deactivated"
       description={
         <Text style={styles.description}>
-          You may be asked to confirm your password and review what happens to your profile before final submission.
+          Your account has been deactivated. Your profile and content are hidden until you activate your account again.
         </Text>
       }
       contentStyle={styles.content}
     >
       <View style={styles.infoCard}>
-        <Ionicons name="information-circle-outline" size={24} color={APP_LIME} />
+        <Ionicons name="checkmark-circle-outline" size={28} color={APP_LIME} />
         <Text style={styles.infoText}>
-          We will guide you through final confirmation on the next secure step for your account.
+          You can reactivate anytime from Home, Search, Chat, or Profile by tapping Activate Account.
         </Text>
       </View>
 
-      <Pressable style={styles.doneBtn} onPress={() => push("DeactivateDeleteConfirmPassword")} accessibilityRole="button">
-        <Text style={styles.doneText}>Continue</Text>
+      <Pressable style={styles.doneBtn} onPress={handleDone} accessibilityRole="button">
+        <Text style={styles.doneText}>Done</Text>
       </Pressable>
     </AccountCenterSubLayout>
   );
@@ -75,4 +81,3 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   }
 });
-

@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTopChromeInset } from "../../theme/topChromeInset";
+import { DeactivatedAccountGate } from "../../components/DeactivatedAccountGate";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
@@ -153,6 +154,7 @@ export function DirectInboxScreen() {
   );
 
   return (
+    <DeactivatedAccountGate featureLabel="Chat">
     <View style={[styles.root, { paddingTop: topChromeInset }]}>
       <View style={styles.topBar}>
         <Text style={styles.usernameTitle} numberOfLines={1}>
@@ -227,6 +229,7 @@ export function DirectInboxScreen() {
       )}
       <NewMessageComposerModal visible={composerOpen} recentThreads={threads} onClose={() => setComposerOpen(false)} />
     </View>
+    </DeactivatedAccountGate>
   );
 }
 

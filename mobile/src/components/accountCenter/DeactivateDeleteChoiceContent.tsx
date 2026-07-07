@@ -1,40 +1,20 @@
 import React, { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AccountCenterCard, AccountCenterSubLayout } from "./AccountCenterSubLayout";
 import { useAccountCenterSheetNav } from "./accountCenterSheetNav";
+import { setPendingDeactivateAction } from "./accountCenterDeactivateFlow";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../theme/appColors";
-import { useAuth } from "../../auth/AuthContext";
-import { deactivateMyAccount, deleteMyAccount } from "../../services/api";
 
 type Option = "deactivate" | "delete";
 
 export function DeactivateDeleteChoiceContent() {
-  const { push, pop, close, navigateStack } = useAccountCenterSheetNav();
-  const { token, updateUser, signOut } = useAuth();
+  const { push, pop } = useAccountCenterSheetNav();
   const [selected, setSelected] = useState<Option>("deactivate");
-  const [busy, setBusy] = useState(false);
 
-  const handleContinue = async () => {
-    if (!token || busy) return;
-    setBusy(true);
-    try {
-      if (selected === "deactivate") {
-        const result = await deactivateMyAccount(token);
-        await updateUser({ accountStatus: result.user.accountStatus || "deactivated" });
-        push("DeactivateDeleteContinue");
-        return;
-      }
-      await deleteMyAccount(token);
-      await signOut();
-      close();
-      requestAnimationFrame(() => navigateStack("InitialSetup"));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not update account status right now.";
-      Alert.alert("Try again", message);
-    } finally {
-      setBusy(false);
-    }
+  const handleContinue = () => {
+    setPendingDeactivateAction(selected);
+    push("DeactivateDeleteContinue");
   };
 
   return (
@@ -65,8 +45,8 @@ export function DeactivateDeleteChoiceContent() {
         />
       </AccountCenterCard>
 
-      <Pressable style={[styles.continueBtn, busy && styles.continueBtnDisabled]} onPress={() => void handleContinue()} accessibilityRole="button" disabled={busy}>
-        <Text style={styles.continueText}>{busy ? "Please wait..." : "Continue"}</Text>
+      <Pressable style={styles.continueBtn} onPress={handleContinue} accessibilityRole="button">
+        <Text style={styles.continueText}>Continue</Text>
       </Pressable>
     </AccountCenterSubLayout>
   );
@@ -167,8 +147,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700"
   },
-  continueBtnDisabled: {
-    opacity: 0.7
-  }
 });
 

@@ -288,9 +288,11 @@ export async function fetchMyAccount(token: string) {
   };
 }
 
-export async function deactivateMyAccount(token: string) {
+export async function deactivateMyAccount(token: string, password: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/deactivate`, token, {
-    method: "POST"
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
   })) as { success: boolean; user: AuthResponse["user"] };
 }
 
@@ -300,9 +302,11 @@ export async function activateMyAccount(token: string) {
   })) as { success: boolean; user: AuthResponse["user"] };
 }
 
-export async function deleteMyAccount(token: string) {
+export async function deleteMyAccount(token: string, password: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token, {
-    method: "DELETE"
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
   })) as { success: boolean };
 }
 

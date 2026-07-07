@@ -19,7 +19,9 @@ export type AccountCenterSheetRoute =
   | "ManageAccounts"
   | "ManageAccountOptions"
   | "DeactivateDeleteChoice"
-  | "DeactivateDeleteContinue";
+  | "DeactivateDeleteContinue"
+  | "DeactivateDeleteConfirmPassword"
+  | "DeactivateDeleteSuccess";
 
 export type SheetNavContextValue = {
   push: (route: AccountCenterSheetRoute) => void;
