@@ -39,6 +39,8 @@ const {
   isPushConfigured,
   registerPushDeviceToken,
   unregisterPushDeviceToken,
+  getPushSettings,
+  setPushSettings,
   sendIncomingCallPush,
   sendSocialPushToUser,
   sendSocialPushToFollowers,
@@ -200,6 +202,7 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS website TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active'`);
   learnUsersTableReady = true;
 }
 
@@ -391,7 +394,8 @@ function authUserFromRow(row) {
     avatarUrl: stripLegacyCloudinaryUrl(row.avatarUrl) || undefined,
     bio: row.bio || undefined,
     website: row.website || undefined,
-    locationLabel: row.locationLabel || undefined
+    locationLabel: row.locationLabel || undefined,
+    accountStatus: row.accountStatus || "active"
   };
 }
 
@@ -405,7 +409,8 @@ const authUserSelect = `
   avatar_url AS "avatarUrl",
   bio,
   website,
-  location_label AS "locationLabel"
+  location_label AS "locationLabel",
+  account_status AS "accountStatus"
 `;
 
 /**
@@ -1657,6 +1662,10 @@ router.post("/v1/auth/login", async (req, res) => {
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
+    if (String(userRow.accountStatus || "active").toLowerCase() === "deleted") {
+      res.status(403).json({ message: "This account was deleted. Please create a new account." });
+      return;
+    }
 
     const user = authUserFromRow(userRow);
 
@@ -2101,6 +2110,60 @@ router.get("/v1/auth/me", authRequired, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile", error: error.message });
+  }
+});
+
+router.post("/v1/auth/me/deactivate", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    const result = await query(
+      `
+      UPDATE learn_users
+      SET account_status = 'deactivated'
+      WHERE id = $1
+      RETURNING ${authUserSelect}
+      `,
+      [req.user.userId]
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    res.json({ success: true, user: authUserFromRow(result.rows[0]) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to deactivate account", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/auth/me/activate", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    const result = await query(
+      `
+      UPDATE learn_users
+      SET account_status = 'active'
+      WHERE id = $1
+      RETURNING ${authUserSelect}
+      `,
+      [req.user.userId]
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    res.json({ success: true, user: authUserFromRow(result.rows[0]) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to activate account", error: error?.message || String(error) });
+  }
+});
+
+router.delete("/v1/auth/me", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    await query(`DELETE FROM learn_users WHERE id = $1`, [req.user.userId]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete account", error: error?.message || String(error) });
   }
 });
 
@@ -3181,6 +3244,41 @@ router.get("/v1/push/config", authRequired, async (_req, res) => {
     provider: "fcm",
     configured: isPushConfigured()
   });
+});
+
+router.get("/v1/push/settings", authRequired, async (req, res) => {
+  try {
+    const settings = await getPushSettings(Number(req.user.userId));
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load push settings", error: error.message });
+  }
+});
+
+router.put("/v1/push/settings", authRequired, async (req, res) => {
+  try {
+    const pushEnabled = req.body?.pushEnabled;
+    const messagesEnabled = req.body?.messagesEnabled;
+    const activityEnabled = req.body?.activityEnabled;
+    if (
+      typeof pushEnabled !== "boolean" ||
+      typeof messagesEnabled !== "boolean" ||
+      typeof activityEnabled !== "boolean"
+    ) {
+      res.status(400).json({
+        message: "pushEnabled, messagesEnabled and activityEnabled booleans are required"
+      });
+      return;
+    }
+    const settings = await setPushSettings(Number(req.user.userId), {
+      pushEnabled,
+      messagesEnabled,
+      activityEnabled
+    });
+    res.json(settings);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to save push settings", error: error.message });
+  }
 });
 
 router.post("/v1/push/register", authRequired, async (req, res) => {

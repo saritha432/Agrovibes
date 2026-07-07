@@ -62,6 +62,7 @@ import {
   fetchSocialNetwork,
   fetchUsers,
   fetchMutualConnections,
+  activateMyAccount,
   HomePost,
   HomeStory,
   type ScheduledLive,
@@ -1136,7 +1137,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     (caption: string | null | undefined) => formatReelCaption(caption, language, t),
     [language, t]
   );
-  const { token, user, refreshUser } = useAuth();
+  const { token, user, refreshUser, updateUser } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isFocused = useIsFocused();
@@ -4117,6 +4118,41 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     for (const post of tabPosts.slice(0, 4)) prefetchPostMedia(post);
   }, [tabPosts]);
 
+  const [activatingAccount, setActivatingAccount] = useState(false);
+
+  const onActivateAccount = useCallback(async () => {
+    if (!token || activatingAccount) return;
+    setActivatingAccount(true);
+    try {
+      const result = await activateMyAccount(token);
+      await updateUser({ accountStatus: result.user.accountStatus || "active" });
+      await refreshUser();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not activate account right now.";
+      Alert.alert("Try again", message);
+    } finally {
+      setActivatingAccount(false);
+    }
+  }, [activatingAccount, refreshUser, token, updateUser]);
+
+  if (user?.accountStatus === "deactivated") {
+    return (
+      <View style={[styles.screen, styles.deactivatedRoot]}>
+        <Text style={styles.deactivatedTitle}>Account is deactivated</Text>
+        <Text style={styles.deactivatedSubtitle}>
+          Activate your account to view Home content.
+        </Text>
+        <Pressable
+          style={[styles.deactivatedBtn, activatingAccount ? styles.deactivatedBtnDisabled : null]}
+          onPress={() => void onActivateAccount()}
+          disabled={activatingAccount}
+        >
+          <Text style={styles.deactivatedBtnText}>{activatingAccount ? "Activating..." : "Activate Account"}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.screen, (isReelSurfaceTab || isLiveTab) ? styles.screenDark : null]}>
       <Animated.View style={{ flex: 1, opacity: tabFadeAnim, transform: [{ translateY: tabSlideAnim }, { scale: tabScaleAnim }] }}>
@@ -4881,6 +4917,42 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f2f3f5" },
+  deactivatedRoot: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    backgroundColor: APP_DARK_BG
+  },
+  deactivatedTitle: {
+    color: APP_LIME,
+    fontSize: 22,
+    fontWeight: "800",
+    textAlign: "center"
+  },
+  deactivatedSubtitle: {
+    marginTop: 10,
+    color: "#c8ced6",
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center"
+  },
+  deactivatedBtn: {
+    marginTop: 18,
+    minHeight: 48,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  deactivatedBtnDisabled: {
+    opacity: 0.7
+  },
+  deactivatedBtnText: {
+    color: "#1f2937",
+    fontSize: 15,
+    fontWeight: "700"
+  },
   screenDark: { backgroundColor: APP_DARK_BG },
   reelsColumn: { flex: 1, minHeight: 0, flexDirection: "column" },
   homeTopChrome: { flexGrow: 0, flexShrink: 0 },
