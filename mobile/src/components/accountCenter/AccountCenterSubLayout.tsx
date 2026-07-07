@@ -3,24 +3,40 @@ import { Ionicons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../../theme/appColors";
+import { APP_BLACK, APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../theme/appColors";
+
+const CARD = "#303132";
+const DIVIDER = "rgba(255,255,255,0.1)";
+const SECTION_HEADING = "rgba(255, 255, 255, 0.55)";
 
 type AccountCenterSubLayoutProps = {
   title: string;
   description?: React.ReactNode;
   children: React.ReactNode;
   contentStyle?: ViewStyle;
+  variant?: "screen" | "sheet";
+  onBack?: () => void;
 };
 
-export function AccountCenterSubLayout({ title, description, children, contentStyle }: AccountCenterSubLayoutProps) {
+export function AccountCenterSubLayout({
+  title,
+  description,
+  children,
+  contentStyle,
+  variant = "screen",
+  onBack
+}: AccountCenterSubLayoutProps) {
   const navigation = useNavigation();
+  const handleBack = onBack ?? (() => navigation.goBack());
+  const Root = variant === "sheet" ? View : SafeAreaView;
+  const rootProps = variant === "sheet" ? {} : { edges: ["top", "bottom"] as const };
 
   return (
-    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
-      <View style={styles.grabber} />
+    <Root style={variant === "sheet" ? styles.sheetRoot : styles.screenRoot} {...rootProps}>
+      {variant === "sheet" ? null : <View style={styles.grabber} />}
       <Pressable
         style={styles.backBtn}
-        onPress={() => navigation.goBack()}
+        onPress={handleBack}
         accessibilityRole="button"
         accessibilityLabel="Back"
       >
@@ -28,14 +44,16 @@ export function AccountCenterSubLayout({ title, description, children, contentSt
       </Pressable>
 
       <ScrollView
+        style={styles.scroll}
         contentContainerStyle={[styles.content, contentStyle]}
         showsVerticalScrollIndicator={false}
+        bounces={false}
       >
         <Text style={styles.title}>{title}</Text>
         {description ? <View style={styles.descriptionWrap}>{description}</View> : null}
         {children}
       </ScrollView>
-    </SafeAreaView>
+    </Root>
   );
 }
 
@@ -84,8 +102,11 @@ export function AccountCenterChevronRow({
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  screenRoot: {
     flex: 1,
+    backgroundColor: APP_BLACK
+  },
+  sheetRoot: {
     backgroundColor: APP_BLACK
   },
   grabber: {
@@ -104,9 +125,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginLeft: 8
   },
+  scroll: {
+    flexGrow: 0
+  },
   content: {
     paddingHorizontal: 16,
-    paddingBottom: 32
+    paddingBottom: 24
   },
   title: {
     color: APP_TEXT,
@@ -117,48 +141,47 @@ const styles = StyleSheet.create({
   descriptionWrap: {
     marginBottom: 22
   },
-  description: {
-    color: APP_TEXT_MUTED,
-    fontSize: 14,
-    lineHeight: 21
-  },
   sectionTitle: {
-    color: APP_TEXT_MUTED,
-    fontSize: 13,
-    fontWeight: "600",
+    color: SECTION_HEADING,
+    fontSize: 16,
+    fontWeight: "500",
     marginBottom: 10,
-    marginTop: 6
+    marginTop: 6,
+    textTransform: "capitalize"
   },
   card: {
-    backgroundColor: APP_SURFACE,
+    backgroundColor: CARD,
     borderRadius: 14,
-    overflow: "hidden"
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: DIVIDER
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 54,
+    minHeight: 63,
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 12
   },
   rowBody: {
     flex: 1,
-    gap: 4
+    gap: 4,
+    minWidth: 0
   },
   rowTitle: {
     color: APP_TEXT,
-    fontSize: 15,
-    fontWeight: "600"
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 19
   },
   rowSubtitle: {
     color: APP_TEXT_MUTED,
-    fontSize: 13,
-    lineHeight: 18
+    fontSize: 12,
+    lineHeight: 17
   },
   rowDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#3a3a3a",
-    marginLeft: 14
+    height: 1,
+    backgroundColor: DIVIDER
   }
 });

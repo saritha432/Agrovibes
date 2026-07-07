@@ -24,6 +24,8 @@ import { EditProfileScreen } from "../screens/EditProfileScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
+import { SavedSettingsScreen } from "../screens/SavedSettingsScreen";
+import { NotificationsSettingsScreen } from "../screens/NotificationsSettingsScreen";
 import { AccountCenterScreen } from "../screens/AccountCenterScreen";
 import { ProfilesPersonalDetailsScreen } from "../screens/ProfilesPersonalDetailsScreen";
 import { PasswordSecurityScreen } from "../screens/PasswordSecurityScreen";
@@ -106,12 +108,31 @@ export function RootNavigator() {
       <Stack.Screen name="DirectChat" component={DirectChatScreen} options={{ headerShown: false }} />
       <Stack.Screen name="SettingsMenu" component={SettingsMenuScreen} options={{ headerShown: false, animation: "slide_from_right" }} />
       <Stack.Screen
+        name="SavedSettings"
+        component={SavedSettingsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="NotificationsSettings"
+        component={NotificationsSettingsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
         name="AccountCenter"
         component={AccountCenterScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -119,8 +140,9 @@ export function RootNavigator() {
         component={ProfilesPersonalDetailsScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -128,8 +150,9 @@ export function RootNavigator() {
         component={PasswordSecurityScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -137,8 +160,9 @@ export function RootNavigator() {
         component={ChangePasswordScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -218,8 +242,9 @@ export function RootNavigator() {
         component={ConnectedExperiencesScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -227,8 +252,9 @@ export function RootNavigator() {
         component={SharingAcrossProfilesScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -236,8 +262,9 @@ export function RootNavigator() {
         component={MemoriesFromInstagramScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -245,8 +272,9 @@ export function RootNavigator() {
         component={ShowingProfileLinksScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -254,8 +282,9 @@ export function RootNavigator() {
         component={SyncingProfilePicturesScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -272,8 +301,9 @@ export function RootNavigator() {
         component={YourInformationPermissionsScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -290,8 +320,9 @@ export function RootNavigator() {
         component={SearchHistoryScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -299,8 +330,9 @@ export function RootNavigator() {
         component={AutoClearSearchHistoryScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -308,8 +340,9 @@ export function RootNavigator() {
         component={HowAutoClearingWorksScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen
@@ -317,8 +350,9 @@ export function RootNavigator() {
         component={ActivityOffCropvibeScreen}
         options={{
           headerShown: false,
+          presentation: "transparentModal",
           animation: "slide_from_bottom",
-          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+          contentStyle: { backgroundColor: "transparent" }
         }}
       />
       <Stack.Screen

@@ -921,6 +921,7 @@ export function PostsReelViewerModal({
       const shouldPlayVideo = isActiveVideo && !reelUserPaused;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
+      const carouselPage = carouselPageByPostId[post.id] ?? 0;
       const thumbUri = reelGridStillUri(post);
       const reelPoster = reelGridStillUri(post);
       const reelProgress = reelProgressByPostId[post.id];
@@ -1013,6 +1014,16 @@ export function PostsReelViewerModal({
               <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
             </Pressable>
           )}
+          {isCarousel ? (
+            <View style={[styles.carouselDotsWrap, { bottom: Math.max(reelBottomInset + 92, 112) }]} pointerEvents="none">
+              {gallery.map((_, dotIndex) => (
+                <View
+                  key={`carousel-dot-${post.id}-${dotIndex}`}
+                  style={[styles.carouselDot, dotIndex === carouselPage ? styles.carouselDotActive : null]}
+                />
+              ))}
+            </View>
+          ) : null}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
           {reelOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">
@@ -1134,6 +1145,7 @@ export function PostsReelViewerModal({
       effectivePlayingId,
       reelLikeBurstByPostId,
       reelProgressByPostId,
+      carouselPageByPostId,
       setShareTargetPost,
       t,
       togglePostLike,
@@ -1384,6 +1396,28 @@ const styles = StyleSheet.create({
   reelSeekWrap: { position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 12 },
   reelSeekTrack: { width: "100%", height: 5, backgroundColor: "rgba(0,0,0,0.42)", overflow: "hidden" },
   reelSeekFill: { height: "100%", backgroundColor: "#C9FF35" },
+  carouselDotsWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    zIndex: 9,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6
+  },
+  carouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.5)"
+  },
+  carouselDotActive: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: APP_LIME
+  },
   commentsSheetRoot: { flex: 1, justifyContent: "flex-end" },
   commentsSheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)" },
   commentsSheetContainer: { justifyContent: "flex-end" },
