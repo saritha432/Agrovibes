@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "../auth/AuthContext";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
@@ -9,11 +9,11 @@ import {
   ensureIncomingCallCategoriesReady,
   registerPushNotifications,
   setupDirectMessageNotificationCategory,
+  setupMissedCallNotificationCategory,
   unregisterPushNotifications
 } from "./pushNotifications";
 import { handleNotificationResponse } from "./notificationNavigation";
 import { registerNotificationResponseHandler } from "./registerNotificationHandlers";
-import { displayIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 
 export function PushNotificationBootstrap() {
@@ -38,10 +38,40 @@ export function PushNotificationBootstrap() {
   }, [token, user?.id]);
 
   React.useEffect(() => {
+    if (Platform.OS === "web" || !token) return;
+    try {
+      const messaging = require("@react-native-firebase/messaging").default as () => {
+        onTokenRefresh: (handler: (nextToken: string) => void) => () => void;
+      };
+      const unsubscribe = messaging().onTokenRefresh((nextToken) => {
+        const clean = String(nextToken || "").trim();
+        if (!clean) return;
+        registeredTokenRef.current = clean;
+        void registerPushNotifications(token);
+      });
+      return unsubscribe;
+    } catch {
+      return undefined;
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    if (Platform.OS === "web" || !token || !user) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      void registerPushNotifications(token).then((pushToken) => {
+        if (pushToken) registeredTokenRef.current = pushToken;
+      });
+    });
+    return () => sub.remove();
+  }, [token, user?.id]);
+
+  React.useEffect(() => {
     if (Platform.OS === "web") return;
 
     void setupDirectMessageNotificationCategory();
     void ensureIncomingCallCategoriesReady();
+    void setupMissedCallNotificationCategory();
     registerNotificationResponseHandler();
 
     void Notifications.getLastNotificationResponseAsync().then((response) => {
@@ -66,23 +96,13 @@ export function PushNotificationBootstrap() {
       const callerName = String(event.request.content.title || "Someone").trim() || "Someone";
       const callerAvatarUrl = String(data.callerAvatarUrl || "").trim() || null;
       if (Number.isFinite(callerId) && callerId > 0 && roomName) {
-        if (Platform.OS === "android") {
-          displayIncomingCallAndroidNotification({
-            callerId,
-            callerName,
-            roomName,
-            mode,
-            callerAvatarUrl
-          });
-        } else {
-          presentIncomingCallFromPush({
-            callerId,
-            callerName,
-            roomName,
-            mode,
-            callerAvatarUrl
-          });
-        }
+        presentIncomingCallFromPush({
+          callerId,
+          callerName,
+          roomName,
+          mode,
+          callerAvatarUrl
+        });
       }
     });
     return () => {

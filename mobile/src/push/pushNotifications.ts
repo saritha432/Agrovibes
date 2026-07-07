@@ -18,11 +18,20 @@ export function ensureIncomingCallCategoriesReady() {
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = (notification.request.content.data || {}) as Record<string, unknown>;
-    const isIncomingCall = String(data.type || "") === "incoming_call";
-    if (isIncomingCall) {
+    const type = String(data.type || "");
+    if (type === "call_cancelled") {
       return {
         shouldShowAlert: false,
         shouldPlaySound: false,
+        shouldSetBadge: false,
+        priority: Notifications.AndroidNotificationPriority.MIN
+      };
+    }
+    const isIncomingCall = type === "incoming_call";
+    if (isIncomingCall) {
+      return {
+        shouldShowAlert: true,
+        shouldPlaySound: true,
         shouldSetBadge: false,
         priority: Notifications.AndroidNotificationPriority.MAX
       };
@@ -36,9 +45,7 @@ Notifications.setNotificationHandler({
   }
 });
 
-let cachedToken: string | null = null;
-
-async function ensureAndroidChannel() {
+export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
   await Notifications.setNotificationChannelAsync("default", {
     name: "Default",
@@ -71,6 +78,52 @@ async function ensureAndroidChannel() {
     lightColor: "#C9FF35",
     enableVibrate: true
   });
+  await Notifications.setNotificationChannelAsync("missed_calls", {
+    name: "Missed calls",
+    description: "Missed and declined call alerts",
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: false,
+    sound: "default",
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#C9FF35"
+  });
+}
+
+let cachedToken: string | null = null;
+
+async function getFirebaseMessagingToken(): Promise<string | null> {
+  if (Platform.OS === "web") return null;
+  try {
+    const messagingModule = require("@react-native-firebase/messaging").default as (() => {
+      registerDeviceForRemoteMessages: () => Promise<void>;
+      requestPermission: () => Promise<number>;
+      getToken: () => Promise<string>;
+    }) & { AuthorizationStatus: { AUTHORIZED: number; PROVISIONAL: number } };
+    if (typeof messagingModule !== "function") return null;
+
+    const messaging = messagingModule();
+    if (Platform.OS === "android") {
+      try {
+        await messaging.requestPermission();
+      } catch {
+        // POST_NOTIFICATIONS may already be granted via expo-notifications.
+      }
+    }
+    if (Platform.OS === "ios") {
+      await messaging.registerDeviceForRemoteMessages();
+      const authStatus = await messaging.requestPermission();
+      const enabled =
+        authStatus === messagingModule.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messagingModule.AuthorizationStatus.PROVISIONAL;
+      if (!enabled) return null;
+    }
+
+    const token = String((await messaging.getToken()) || "").trim();
+    return token || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getNativePushToken(): Promise<string | null> {
@@ -85,7 +138,13 @@ export async function getNativePushToken(): Promise<string | null> {
   }
   if (finalStatus !== "granted") return null;
 
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
+
+  const firebaseToken = await getFirebaseMessagingToken();
+  if (firebaseToken) {
+    cachedToken = firebaseToken;
+    return firebaseToken;
+  }
 
   const projectId =
     Constants.expoConfig?.extra?.eas?.projectId ||
@@ -101,6 +160,7 @@ export async function getNativePushToken(): Promise<string | null> {
       const expoToken = await Notifications.getExpoPushTokenAsync({ projectId });
       if (expoToken?.data) {
         cachedToken = expoToken.data;
+        return expoToken.data;
       }
     } catch {
       // Native FCM/APNs token is enough for firebase-admin.
@@ -109,6 +169,10 @@ export async function getNativePushToken(): Promise<string | null> {
 
   cachedToken = token;
   return token;
+}
+
+export function getCachedPushToken() {
+  return cachedToken;
 }
 
 export async function registerPushNotifications(authToken: string | null | undefined) {
@@ -151,7 +215,7 @@ export function addNotificationReceivedListener(listener: (event: Notifications.
 
 export async function setupDirectMessageNotificationCategory() {
   if (Platform.OS === "web") return;
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
   await Notifications.setNotificationCategoryAsync("DIRECT_MESSAGE", [
     {
       identifier: "REPLY",
@@ -169,14 +233,14 @@ export async function setupDirectMessageNotificationCategory() {
 
 export async function setupIncomingCallNotificationCategories() {
   if (Platform.OS === "web") return;
-  await ensureAndroidChannel();
+  await ensureAndroidChannels();
   await Notifications.setNotificationCategoryAsync("INCOMING_VOICE_CALL", [
     {
       identifier: "DECLINE",
       buttonTitle: "Decline",
       options: {
         isDestructive: true,
-        opensAppToForeground: true
+        opensAppToForeground: false
       }
     },
     {
@@ -193,12 +257,33 @@ export async function setupIncomingCallNotificationCategories() {
       buttonTitle: "Decline",
       options: {
         isDestructive: true,
-        opensAppToForeground: true
+        opensAppToForeground: false
       }
     },
     {
       identifier: "ACCEPT",
       buttonTitle: "Video",
+      options: {
+        opensAppToForeground: true
+      }
+    }
+  ]);
+}
+
+export async function setupMissedCallNotificationCategory() {
+  if (Platform.OS === "web") return;
+  await ensureAndroidChannels();
+  await Notifications.setNotificationCategoryAsync("MISSED_CALL", [
+    {
+      identifier: "CALL_BACK",
+      buttonTitle: "Call back",
+      options: {
+        opensAppToForeground: true
+      }
+    },
+    {
+      identifier: "MESSAGE",
+      buttonTitle: "Message",
       options: {
         opensAppToForeground: true
       }

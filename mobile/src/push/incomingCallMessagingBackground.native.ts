@@ -1,7 +1,4 @@
-import {
-  displayIncomingCallAndroidNotification,
-  parseIncomingCallRemoteMessage
-} from "./incomingCallAndroidNotification";
+import { handleFcmRemoteMessage } from "./handleFcmRemoteMessage";
 
 function hasFirebaseMessagingNativeModule() {
   try {
@@ -16,10 +13,8 @@ export function registerIncomingCallMessagingBackground() {
   if (!hasFirebaseMessagingNativeModule()) return;
   try {
     const messaging = require("@react-native-firebase/messaging").default;
-    messaging().setBackgroundMessageHandler(async (remoteMessage: Parameters<typeof parseIncomingCallRemoteMessage>[0]) => {
-      const call = parseIncomingCallRemoteMessage(remoteMessage);
-      if (!call) return;
-      await displayIncomingCallAndroidNotification(call);
+    messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+      await handleFcmRemoteMessage(remoteMessage);
     });
   } catch {
     // Native Firebase Messaging is unavailable until the dev client is rebuilt.

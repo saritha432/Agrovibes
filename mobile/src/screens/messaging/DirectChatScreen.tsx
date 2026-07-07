@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFloatingTopChromeInset, useTopChromeInset } from "../../theme/topChromeInset";
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
@@ -33,7 +34,7 @@ import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
 import {
   joinDirectThread,
   leaveDirectThread,
@@ -44,6 +45,7 @@ import {
 } from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
+import { dismissIncomingCallRinging } from "../../push/incomingCallSignal";
 import {
   hydrateLiveShareFromFeed,
   isJoinableLiveShare,
@@ -54,6 +56,7 @@ import { APP_LIME } from "../../theme/appColors";
 import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { useLanguage } from "../../localization/LanguageContext";
 import { DirectCallView, type CallDirection, type CallEndResult, type DirectCallMode } from "./DirectCallView";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ChatMessageActionSheet } from "./ChatMessageActionSheet";
 import { ForwardMessageModal } from "./ForwardMessageModal";
 import { SwipeReplyMessageRow } from "./SwipeReplyMessageRow";
@@ -77,6 +80,7 @@ import {
   parseDmReplyMessage,
   parseDmVoiceMessage,
   isPeerCallEndSignal,
+  isCalleeRingCancelledSignal,
   type DmMediaItem
 } from "./dmMessageFormats";
 
@@ -414,10 +418,13 @@ async function hydrateSharedPostsById(postIds: number[], token: string): Promise
 
 export function DirectChatScreen() {
   const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
+  const floatingTopInset = useFloatingTopChromeInset();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
-  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall } = route.params;
+  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall, autoStartCall } =
+    route.params;
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
@@ -478,6 +485,7 @@ export function DirectChatScreen() {
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
   const listRef = useRef<FlatList<ThreadListItem>>(null);
+  const composerInputRef = useRef<TextInput>(null);
   const threadItemCountRef = useRef(0);
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -490,6 +498,7 @@ export function DirectChatScreen() {
     replyLabel: string;
   } | null>(null);
   const [actionMessage, setActionMessage] = useState<DirectMessageItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DirectMessageItem | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
@@ -609,6 +618,10 @@ export function DirectChatScreen() {
       if (payload.peerUserId !== peerUserId) return;
       if (peerEndsOutgoingCall(payload.message)) {
         endCallForPeerSignal();
+      } else if (isCalleeRingCancelledSignal(payload.message.body)) {
+        void dismissIncomingCallRinging({
+          callerId: Number(payload.message.senderId)
+        });
       }
       setMessages((prev) => {
         if (prev.some((item) => item.id === payload.message.id)) return prev;
@@ -745,29 +758,27 @@ export function DirectChatScreen() {
   const deleteMessage = useCallback(
     (item: DirectMessageItem) => {
       if (!token || Number(item.senderId) !== Number(user?.id)) return;
-      Alert.alert("Delete message?", "This removes the message for everyone in this chat.", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                await deleteDirectMessage(token, item.id);
-                setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
-              } catch (error) {
-                Alert.alert(
-                  "Delete failed",
-                  error instanceof Error ? error.message : "Could not delete this message."
-                );
-              }
-            })();
-          }
-        }
-      ]);
+      setPendingDelete(item);
     },
     [token, user?.id]
   );
+
+  const confirmDeleteMessage = useCallback(() => {
+    const item = pendingDelete;
+    if (!item || !token) return;
+    setPendingDelete(null);
+    void (async () => {
+      try {
+        await deleteDirectMessage(token, item.id);
+        setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
+      } catch (error) {
+        Alert.alert(
+          "Delete failed",
+          error instanceof Error ? error.message : "Could not delete this message."
+        );
+      }
+    })();
+  }, [pendingDelete, token]);
 
   const canInteractWithMessage = useCallback((body: string) => {
     return !parseDmCallMessage(body) && !parseDmReactMessage(body);
@@ -997,6 +1008,12 @@ export function DirectChatScreen() {
     void startCall("video");
   };
 
+  useEffect(() => {
+    if (!autoStartCall || !token || Platform.OS === "web") return;
+    navigation.setParams({ autoStartCall: undefined });
+    void startCall(autoStartCall);
+  }, [autoStartCall, navigation, token]);
+
   const handleCallEnded = useCallback(
     async (callResult: CallEndResult) => {
       if (callHistorySentRef.current) {
@@ -1007,6 +1024,19 @@ export function DirectChatScreen() {
       closeCall();
       if (!token || !session) return;
       callHistorySentRef.current = true;
+
+      if (session.direction === "outgoing" && callResult.status === "cancelled") {
+        try {
+          await cancelDirectCall(token, {
+            peerUserId,
+            roomName: session.roomName,
+            mode: session.mode
+          });
+        } catch {
+          // Still write chat history below.
+        }
+      }
+
       try {
         const sent = await sendDirectMessage(
           token,
@@ -1077,12 +1107,8 @@ export function DirectChatScreen() {
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-    >
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
+    <View style={styles.flex}>
+      <View style={[styles.header, { paddingTop: topChromeInset }]}>
         <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={28} color={TEXT} />
         </Pressable>
@@ -1119,9 +1145,12 @@ export function DirectChatScreen() {
 
       <FlatList
         ref={listRef}
+        style={styles.flex}
         data={threadItems}
         keyExtractor={(item) => item.id}
         inverted
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         contentContainerStyle={styles.listContent}
         initialNumToRender={18}
         maxToRenderPerBatch={12}
@@ -1335,7 +1364,8 @@ export function DirectChatScreen() {
         }
       />
 
-      <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+      <KeyboardAvoidingView behavior="padding" enabled>
+        <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
             <View style={styles.replyComposerMeta}>
@@ -1375,12 +1405,17 @@ export function DirectChatScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={styles.inputArea}>
+            <Pressable
+              style={styles.inputArea}
+              onPress={() => composerInputRef.current?.focus()}
+            >
               <TextInput
+                ref={composerInputRef}
                 value={draft}
                 onChangeText={handleDraftChange}
                 placeholder="Message"
                 placeholderTextColor={MUTED}
+                showSoftInputOnFocus
                 style={[
                   styles.input,
                   {
@@ -1432,10 +1467,20 @@ export function DirectChatScreen() {
                   </Pressable>
                 </View>
               )}
-            </View>
+            </Pressable>
           )}
         </View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
+      <ConfirmDialog
+        visible={pendingDelete != null}
+        title="Delete message?"
+        message="This removes the message for everyone in this chat."
+        confirmLabel="DELETE"
+        confirmDanger
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDeleteMessage}
+      />
       <ChatMessageActionSheet
         visible={actionMessage != null}
         timestampLabel={
@@ -1516,7 +1561,7 @@ export function DirectChatScreen() {
             onPress={() => setChatMediaViewer(null)}
           />
           <Pressable
-            style={[styles.chatMediaViewerClose, { top: insets.top + 8 }]}
+            style={[styles.chatMediaViewerClose, { top: floatingTopInset }]}
             onPress={() => setChatMediaViewer(null)}
             hitSlop={12}
           >
@@ -1578,7 +1623,7 @@ export function DirectChatScreen() {
           </View>
         </View>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

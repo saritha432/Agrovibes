@@ -4,9 +4,10 @@ import { useAuth } from "../auth/AuthContext";
 import { DirectCallView, type CallEndResult } from "../screens/messaging/DirectCallView";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { sendDirectMessage } from "../services/api";
-import { navigateToDirectChat } from "../navigation/navigationRef";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
+import { clearIncomingCallNotifications } from "./incomingCallNotifications";
+import { displayMissedCallNotification } from "./missedCallNotifications";
 
 export function GlobalIncomingCallHost() {
   const { token } = useAuth();
@@ -25,7 +26,11 @@ export function GlobalIncomingCallHost() {
   const finishCall = React.useCallback(
     async (result: CallEndResult) => {
       const active = call;
-      hideIncomingCallAndroidNotification();
+      if (active?.roomName) {
+        void clearIncomingCallNotifications(active.roomName);
+      } else {
+        hideIncomingCallAndroidNotification();
+      }
       clearIncomingCall();
       setCall(null);
       setConnectEnabled(false);
@@ -63,15 +68,20 @@ export function GlobalIncomingCallHost() {
       connectEnabled={connectEnabled}
       statusLabel={call.mode === "video" ? "Incoming video call" : "Incoming voice call"}
       onAccept={() => {
+        void clearIncomingCallNotifications(call.roomName);
         setConnectEnabled(true);
-        navigateToDirectChat({
-          peerUserId: call.callerId,
-          peerName: call.callerName,
-          peerAvatarUrl: call.callerAvatarUrl || undefined
-        });
       }}
       onDecline={() => {
+        const active = call;
         void finishCall({ status: "declined", durationSec: 0 });
+        if (active) {
+          void displayMissedCallNotification({
+            callerId: active.callerId,
+            callerName: active.callerName,
+            mode: active.mode,
+            callerAvatarUrl: active.callerAvatarUrl
+          });
+        }
       }}
       onCallEnded={(result) => {
         void finishCall(result);
@@ -103,4 +113,7 @@ export function presentIncomingCallFromPush(input: {
     mode: input.mode,
     autoAccept: input.autoAccept
   });
+  if (input.autoAccept) {
+    void clearIncomingCallNotifications(input.roomName);
+  }
 }

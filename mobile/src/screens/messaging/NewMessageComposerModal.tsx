@@ -12,6 +12,7 @@ import {
   View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTopChromeInset } from "../../theme/topChromeInset";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { useLanguage } from "../../localization/LanguageContext";
@@ -44,6 +45,7 @@ function personKey(person: Person) {
 
 export function NewMessageComposerModal({ visible, recentThreads = [], onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
   const { t } = useLanguage();
   const { token, user } = useAuth();
   const [query, setQuery] = useState("");
@@ -266,7 +268,7 @@ export function NewMessageComposerModal({ visible, recentThreads = [], onClose }
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onBack}>
-      <View style={[styles.root, { paddingTop: Math.max(insets.top, 8), paddingBottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[styles.root, { paddingTop: topChromeInset, paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.header}>
           <Pressable hitSlop={10} onPress={onBack} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={TEXT} />

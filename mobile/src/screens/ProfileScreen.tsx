@@ -21,7 +21,8 @@ import {
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useFloatingTopChromeInset } from "../theme/topChromeInset";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
@@ -143,7 +144,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const publicUserKey = isPublicProfileView ? (route.params?.userKey as string | undefined) : undefined;
   const publicAvatarFromRoute = isPublicProfileView ? (route.params?.avatarUrl as string | null | undefined) : undefined;
   const { width, height: windowHeight } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const floatingTopInset = useFloatingTopChromeInset();
   const { user, token, signOut, refreshUser } = useAuth();
   const { t } = useLanguage();
   const [publicUsername, setPublicUsername] = useState<string | null>(null);
@@ -1577,7 +1578,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             </View>
             <Pressable
               onPress={() => setAvatarPreviewOpen(false)}
-              style={[styles.avatarPreviewClose, { top: insets.top + 8 }]}
+              style={[styles.avatarPreviewClose, { top: floatingTopInset }]}
               hitSlop={12}
             >
               <Ionicons name="close-circle" size={44} color="rgba(255,255,255,0.92)" />

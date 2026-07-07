@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cropvibe",
     "slug": "agrovibes",
-    "version": "1.0.6",
+    "version": "1.0.11",
     "orientation": "portrait",
     "icon": "./assets/logo-adaptive-foreground.png",
     "platforms": [
@@ -24,7 +24,8 @@
     "assetBundlePatterns": [],
     "android": {
       "package": "com.cropvibe.app",
-      "versionCode": 10,
+      "versionCode": 15,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"
@@ -109,7 +110,7 @@
         "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
       },
       "icon": "./assets/icon-ios.png",
-      "buildNumber": "10"
+      "buildNumber": "14"
     },
     "web": {
       "favicon": "./assets/logo.png"
@@ -121,6 +122,7 @@
     "plugins": [
       "./plugins/withExpoModulesCoreApi35Fix.js",
       "./plugins/withRnScreensApi35Fix.js",
+      "./plugins/withIncomingCallBrandColors.js",
       [
         "expo-build-properties",
         {
@@ -130,10 +132,11 @@
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
             "abiFilters": [
+              "armeabi-v7a",
               "arm64-v8a"
             ],
             "useLegacyPackaging": false,
-            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*\n-keep class expo.modules.notifications.notifications.model.** { *; }\n-keepclassmembers class expo.modules.notifications.notifications.model.** { *; }\n-keepnames class expo.modules.notifications.notifications.model.** implements java.io.Serializable"
+            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*\n-keep class expo.modules.notifications.** { *; }\n-keep class expo.modules.notifications.notifications.model.** { *; }\n-keepclassmembers class expo.modules.notifications.notifications.model.** { *; }\n-keepnames class expo.modules.notifications.notifications.model.** implements java.io.Serializable\n-keep class io.invertase.firebase.** { *; }\n-dontwarn io.invertase.firebase.**\n-keep class com.google.firebase.messaging.** { *; }\n-dontwarn com.google.firebase.messaging.**\n-keep class com.reactnativefullscreennotificationincomingcall.** { *; }"
           },
           "ios": {
             "useFrameworks": "static"
@@ -180,7 +183,8 @@
       ],
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
-      "./scripts/withAndroidLargeHeap.js"
+      "./scripts/withAndroidLargeHeap.js",
+      "./plugins/withFcmManifestMergeFix.js"
     ],
     "extra": {
       "eas": {

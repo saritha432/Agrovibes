@@ -1,14 +1,11 @@
 import React from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
-import { sendDirectMessage } from "../services/api";
-import { navigateToDirectChat } from "../navigation/navigationRef";
-import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
+import { handleFcmRemoteMessage } from "./handleFcmRemoteMessage";
+import { completeIncomingCallDecline } from "./incomingCallDecline";
 import {
   addIncomingCallAnswerListener,
   addIncomingCallEndListener,
-  displayIncomingCallAndroidNotification,
   hideIncomingCallAndroidNotification,
   isIncomingCallNotificationModuleReady,
   openIncomingCallApp,
@@ -17,8 +14,7 @@ import {
   removeIncomingCallAnswerListener,
   removeIncomingCallEndListener
 } from "./incomingCallAndroidNotification";
-
-const AUTH_STORAGE_KEY = "agrovibes.auth";
+import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 
 function getFirebaseMessaging() {
   try {
@@ -30,41 +26,24 @@ function getFirebaseMessaging() {
   }
 }
 
-async function resolveAuthToken(explicit?: string | null) {
-  const direct = String(explicit || "").trim();
-  if (direct) return direct;
-  try {
-    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { token?: string } | null;
-    return String(parsed?.token || "").trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 async function declineIncomingCall(
-  callerId: number,
-  mode: "voice" | "video",
+  parsed: {
+    callerId: number;
+    callerName: string;
+    mode: "voice" | "video";
+    roomName: string;
+    callerAvatarUrl?: string | null;
+  },
   authToken?: string | null
 ) {
-  if (!callerId) return;
-  const token = await resolveAuthToken(authToken);
-  if (!token) return;
-  try {
-    await sendDirectMessage(
-      token,
-      callerId,
-      buildDmCallMessage({
-        mode,
-        status: "declined",
-        durationSec: 0,
-        direction: "incoming"
-      })
-    );
-  } catch {
-    // no-op
-  }
+  await completeIncomingCallDecline({
+    callerId: parsed.callerId,
+    callerName: parsed.callerName,
+    mode: parsed.mode,
+    roomName: parsed.roomName,
+    callerAvatarUrl: parsed.callerAvatarUrl,
+    authToken
+  });
 }
 
 export function IncomingCallNotificationBootstrap() {
@@ -77,9 +56,7 @@ export function IncomingCallNotificationBootstrap() {
 
   React.useEffect(() => {
     const showFromMessage = async (remoteMessage: Parameters<typeof parseIncomingCallRemoteMessage>[0]) => {
-      const call = parseIncomingCallRemoteMessage(remoteMessage);
-      if (!call) return;
-      await displayIncomingCallAndroidNotification(call);
+      await handleFcmRemoteMessage(remoteMessage);
     };
 
     let foregroundSub: (() => void) | null = null;
@@ -101,8 +78,12 @@ export function IncomingCallNotificationBootstrap() {
     }
 
     const onAnswer = (data: { payload?: string }) => {
-      hideIncomingCallAndroidNotification();
       const parsed = parseIncomingCallActionPayload(data.payload);
+      if (parsed?.roomName) {
+        void clearIncomingCallNotifications(parsed.roomName);
+      } else {
+        hideIncomingCallAndroidNotification();
+      }
       if (!parsed?.callerId) {
         openIncomingCallApp();
         return;
@@ -117,11 +98,6 @@ export function IncomingCallNotificationBootstrap() {
         autoAccept: true
       });
       openIncomingCallApp();
-      navigateToDirectChat({
-        peerUserId: parsed.callerId,
-        peerName: parsed.callerName,
-        peerAvatarUrl: parsed.callerAvatarUrl || undefined
-      });
     };
 
     const onEndCall = (data: { endAction?: string; payload?: string }) => {
@@ -130,7 +106,7 @@ export function IncomingCallNotificationBootstrap() {
       if (!parsed?.callerId) return;
 
       if (data.endAction === "ACTION_REJECTED_CALL" || data.endAction === "ACTION_HIDE_CALL") {
-        void declineIncomingCall(parsed.callerId, parsed.mode, tokenRef.current);
+        void declineIncomingCall(parsed, tokenRef.current);
       }
     };
 

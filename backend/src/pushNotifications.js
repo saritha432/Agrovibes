@@ -375,13 +375,14 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
   const image = String(imageUrl || "").trim();
   const hasImage = /^https?:\/\//i.test(image);
 
-  // Chat reply + incoming call actions require a data-only FCM payload on Android so Expo
-  // can attach the registered notification categories (Reply / Decline / Accept).
+  // Chat reply actions use category payloads on iOS. On Android, also send a visible
+  // notification payload so FCM shows alerts when the app is backgrounded/killed.
   const isIncomingCallCategory =
     categoryId === "INCOMING_VOICE_CALL" || categoryId === "INCOMING_VIDEO_CALL";
   if (categoryId === "DIRECT_MESSAGE" || isIncomingCallCategory) {
     payloadData.title = pushTitle;
     payloadData.message = pushBody;
+    payloadData.type = String((data || {}).type || payloadData.type || "direct_message");
     payloadData.categoryId = String(categoryId);
     payloadData.channelId = isIncomingCallCategory ? "incoming_calls" : "direct_messages";
     payloadData.priority = isIncomingCallCategory ? "max" : "high";
@@ -390,6 +391,56 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
       payloadData.vibrate = JSON.stringify([0, 800, 400, 800, 400, 800]);
     }
     if (hasImage) payloadData.image = image;
+
+    if (categoryId === "DIRECT_MESSAGE") {
+      const entries = await listTokenEntriesForUser(userId);
+      if (!entries.length) return { sent: 0, skipped: "no_tokens" };
+
+      const androidTokens = entries.filter((entry) => entry.platform === "android").map((entry) => entry.token);
+      const iosTokens = entries.filter((entry) => entry.platform !== "android").map((entry) => entry.token);
+
+      let sent = 0;
+      let failed = 0;
+
+      if (androidTokens.length) {
+        const androidResult = await sendMulticastAndCleanup(androidTokens, {
+          data: payloadData,
+          android: {
+            priority: "high",
+            ttl: 60 * 1000
+          }
+        });
+        sent += androidResult.sent;
+        failed += androidResult.failed;
+      }
+
+      if (iosTokens.length) {
+        const iosResult = await sendMulticastAndCleanup(iosTokens, {
+          data: payloadData,
+          apns: {
+            headers: {
+              "apns-priority": "10"
+            },
+            payload: {
+              aps: {
+                alert: {
+                  title: pushTitle,
+                  body: pushBody
+                },
+                sound: "default",
+                category: String(categoryId),
+                ...(hasImage ? { "mutable-content": 1 } : {})
+              }
+            },
+            ...(hasImage ? { fcm_options: { image } } : {})
+          }
+        });
+        sent += iosResult.sent;
+        failed += iosResult.failed;
+      }
+
+      return { sent, failed };
+    }
 
     const response = await admin.messaging().sendEachForMulticast({
       tokens,
@@ -534,17 +585,29 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
   let failed = 0;
 
   if (androidTokens.length) {
+    const androidData = {
+      type: "incoming_call",
+      mode: isVideo ? "video" : "voice",
+      roomName: String(roomName || ""),
+      callerId: callerId != null ? String(callerId) : "",
+      callerName: name,
+      callerAvatarUrl: avatar,
+      title: name,
+      message: label,
+      categoryId,
+      channelId: "incoming_calls",
+      priority: "max",
+      sticky: "true",
+      vibrate: JSON.stringify([0, 800, 400, 800, 400, 800])
+    };
+    if (imageUrl) androidData.image = imageUrl;
+
     const androidResult = await sendMulticastAndCleanup(androidTokens, {
-      data: {
-        type: "incoming_call",
-        mode: isVideo ? "video" : "voice",
-        roomName: String(roomName || ""),
-        callerId: callerId != null ? String(callerId) : "",
-        callerName: name,
-        callerAvatarUrl: avatar
-      },
+      data: androidData,
       android: {
-        priority: "high"
+        priority: "high",
+        ttl: 45 * 1000,
+        collapseKey: "incoming_call"
       }
     });
     sent += androidResult.sent;
@@ -597,6 +660,60 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
   return { sent, failed };
 }
 
+async function sendCallCancelledPush({ userId, roomName, callerId }) {
+  if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
+
+  const entries = await listTokenEntriesForUser(userId);
+  if (!entries.length) return { sent: 0, skipped: "no_tokens" };
+
+  const androidTokens = entries.filter((entry) => entry.platform === "android").map((entry) => entry.token);
+  const iosTokens = entries.filter((entry) => entry.platform !== "android").map((entry) => entry.token);
+
+  const payloadData = {
+    type: "call_cancelled",
+    roomName: String(roomName || ""),
+    callerId: callerId != null ? String(callerId) : "",
+    channelId: "incoming_calls"
+  };
+
+  let sent = 0;
+  let failed = 0;
+
+  if (androidTokens.length) {
+    const androidResult = await sendMulticastAndCleanup(androidTokens, {
+      data: payloadData,
+      android: {
+        priority: "high",
+        ttl: 30 * 1000,
+        collapseKey: "call_cancelled"
+      }
+    });
+    sent += androidResult.sent;
+    failed += androidResult.failed;
+  }
+
+  if (iosTokens.length) {
+    const iosResult = await sendMulticastAndCleanup(iosTokens, {
+      data: payloadData,
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "background"
+        },
+        payload: {
+          aps: {
+            "content-available": 1
+          }
+        }
+      }
+    });
+    sent += iosResult.sent;
+    failed += iosResult.failed;
+  }
+
+  return { sent, failed };
+}
+
 async function sendSocialPushToFollowers({ hostUserId, type, postId, commentExcerpt }) {
   const hostRes = await query(`SELECT full_name FROM learn_users WHERE id = $1 LIMIT 1`, [hostUserId]);
   const actorName = String(hostRes.rows[0]?.full_name || "Someone").trim() || "Someone";
@@ -636,6 +753,7 @@ module.exports = {
   directMessagePushPayload,
   sendPushToUser,
   sendIncomingCallPush,
+  sendCallCancelledPush,
   sendSocialPushToUser,
   sendSocialPushToFollowers
 };

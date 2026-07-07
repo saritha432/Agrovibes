@@ -1,0 +1,45 @@
+import { useMemo } from "react";
+import { Platform, StatusBar } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+/** Small gap below status icons for fullscreen modal controls (stories, reels). */
+export const MODAL_TOP_CHROME_GAP = 4;
+
+/** Gap below status icons for floating close buttons on fullscreen media. */
+export const FLOATING_TOP_CHROME_GAP = 8;
+
+/**
+ * Instagram-style top inset: one status-bar offset for headers on every device/build.
+ *
+ * Android (dev + preview + Play Store): always use StatusBar.currentHeight when available.
+ * Release APKs on some OEMs report inflated safe-area top (double status-bar padding);
+ * trusting insets.top caused extra gap above Cropvibe / notification icons.
+ *
+ * iOS: use safe-area (notch / Dynamic Island).
+ */
+export function resolveTopChromeInset(insetsTop: number): number {
+  if (Platform.OS === "web") return 0;
+  if (Platform.OS === "ios") return insetsTop;
+
+  const statusBar = StatusBar.currentHeight ?? 0;
+  if (statusBar > 0) return statusBar;
+  if (insetsTop > 0) return Math.min(insetsTop, 36);
+  return 24;
+}
+
+export function useTopChromeInset(): number {
+  const insets = useSafeAreaInsets();
+  return useMemo(() => resolveTopChromeInset(insets.top), [insets.top]);
+}
+
+/** Story / reel / fullscreen viewer top chrome — same inset + small control gap. */
+export function useModalTopChromeInset(): number {
+  const top = useTopChromeInset();
+  return useMemo(() => top + (Platform.OS === "web" ? 0 : MODAL_TOP_CHROME_GAP), [top]);
+}
+
+/** Floating X / back on edge-to-edge fullscreen media viewers. */
+export function useFloatingTopChromeInset(gap = FLOATING_TOP_CHROME_GAP): number {
+  const top = useTopChromeInset();
+  return useMemo(() => top + (Platform.OS === "web" ? 0 : gap), [gap, top]);
+}
