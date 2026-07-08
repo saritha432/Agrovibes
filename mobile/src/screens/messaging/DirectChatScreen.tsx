@@ -9,6 +9,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -597,6 +598,10 @@ export function DirectChatScreen() {
       void reload();
       if (!token || !peerUserId) return;
       joinDirectThread(peerUserId);
+      return () => {
+        Keyboard.dismiss();
+        composerInputRef.current?.blur();
+      };
     }, [peerUserId, reload, token])
   );
 
@@ -755,12 +760,20 @@ export function DirectChatScreen() {
     [appendSentMessage, peerUserId, reload, token]
   );
 
+  const isOwnMessage = useCallback(
+    (item: DirectMessageItem | null | undefined) => {
+      if (!item || user?.id == null) return false;
+      return String(item.senderId) === String(user.id);
+    },
+    [user?.id]
+  );
+
   const deleteMessage = useCallback(
     (item: DirectMessageItem) => {
-      if (!token || Number(item.senderId) !== Number(user?.id)) return;
+      if (!token || !isOwnMessage(item)) return;
       setPendingDelete(item);
     },
-    [token, user?.id]
+    [isOwnMessage, token]
   );
 
   const confirmDeleteMessage = useCallback(() => {
@@ -789,17 +802,18 @@ export function DirectChatScreen() {
       if (!token || attachBusy || !assets.length) return;
       setAttachBusy(true);
       try {
-        const uploaded: DmMediaItem[] = [];
-        for (const asset of assets) {
-          const { url } = await uploadPickedMedia(asset.uri, asset);
-          const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
-          uploaded.push({
-            kind: isVideo ? "video" : "image",
-            url,
-            width: asset.width,
-            height: asset.height
-          });
-        }
+        const uploaded: DmMediaItem[] = await Promise.all(
+          assets.map(async (asset) => {
+            const { url } = await uploadPickedMedia(asset.uri, asset);
+            const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
+            return {
+              kind: isVideo ? "video" : "image",
+              url,
+              width: asset.width,
+              height: asset.height
+            };
+          })
+        );
         const body =
           uploaded.length > 1 ? buildDmMediaAlbumMessage(uploaded) : buildDmMediaMessage(uploaded[0]);
         const result = await sendDirectMessage(token, peerUserId, body);
@@ -1364,7 +1378,7 @@ export function DirectChatScreen() {
         }
       />
 
-      <KeyboardAvoidingView behavior="padding" enabled>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} enabled={Platform.OS === "ios"}>
         <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
@@ -1405,10 +1419,7 @@ export function DirectChatScreen() {
               </Pressable>
             </View>
           ) : (
-            <Pressable
-              style={styles.inputArea}
-              onPress={() => composerInputRef.current?.focus()}
-            >
+            <View style={styles.inputArea}>
               <TextInput
                 ref={composerInputRef}
                 value={draft}
@@ -1467,7 +1478,7 @@ export function DirectChatScreen() {
                   </Pressable>
                 </View>
               )}
-            </Pressable>
+            </View>
           )}
         </View>
         </View>
@@ -1486,9 +1497,7 @@ export function DirectChatScreen() {
         timestampLabel={
           actionMessage ? formatActionSheetTimestamp(new Date(actionMessage.createdAt).getTime()) : undefined
         }
-        showDelete={
-          actionMessage != null && Number(actionMessage.senderId) === Number(user?.id)
-        }
+        showDelete={isOwnMessage(actionMessage)}
         onClose={() => setActionMessage(null)}
         onReply={() => {
           if (actionMessage) startReplyToMessage(actionMessage);

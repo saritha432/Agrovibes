@@ -44,7 +44,7 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-android-v1.0.9-push-reply-call"
+        "key": "production-android-v1.0.12-call-expo-fallback"
       },
       "env": {
         "NODE_ENV": "production",

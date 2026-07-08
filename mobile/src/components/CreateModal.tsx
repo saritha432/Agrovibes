@@ -23,7 +23,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
-import { getNativeVideoThumbnail } from "../utils/safeVideoThumbnail";
+import { uploadVideoThumbnailFromUri } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
 import {
   createHomePost,
@@ -1128,20 +1128,7 @@ export function CreateModal({
     try {
       await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
-      for (const time of [400, 0, 1200]) {
-        try {
-          const thumb = await getNativeVideoThumbnail(asset.uri, { time, quality: 0.72 });
-          if (thumb?.uri) {
-            const { url } = await uploadImageFile(thumb.uri);
-            if (url) {
-              derivedThumb = url;
-              break;
-            }
-          }
-        } catch {
-          /* try next frame */
-        }
-      }
+      derivedThumb = await uploadVideoThumbnailFromUri(asset.uri, uploadImageFile);
       const { url: mediaUrl } = await uploadPickedMedia(asset.uri, asset);
       const liveCaption = caption.trim() || liveScheduleTopic.trim() || "Live stream";
       const { post: newPost } =
@@ -1716,30 +1703,11 @@ export function CreateModal({
         const taggedIds = taggedPeople.map((p) => p.id);
         if (videos.length === 1) {
           const v = videos[0];
-          await assertVideoUnderUploadLimit(v.uri);
+          const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           let derivedThumb: string | undefined = thumbnailUrl.trim() || undefined;
           if (!derivedThumb) {
-            for (const time of [400, 0, 1200]) {
-              try {
-                const thumb = await getNativeVideoThumbnail(v.uri, { time, quality: 0.72 });
-                if (thumb?.uri) {
-                  const { url } = await uploadImageFile(thumb.uri);
-                  if (url) {
-                    derivedThumb = url;
-                    break;
-                  }
-                }
-              } catch {
-                /* try next frame */
-              }
-            }
+            derivedThumb = await uploadVideoThumbnailFromUri(v.uri, uploadImageFile);
           }
-          if (createType === "reel" && !derivedThumb) {
-            setErrorText("Could not create reel preview. Try again.");
-            setSubmitting(false);
-            return;
-          }
-          const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           const reelAudio =
             createType === "reel" && selectedAudioTrackId && selectedAudioTrack
               ? {

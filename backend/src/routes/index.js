@@ -65,6 +65,7 @@ let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
 let homePostSavesTableReady = false;
+let homePostResharesTableReady = false;
 let postReportsTableReady = false;
 let directMessagesTableReady = false;
 let scheduledLivesTableReady = false;
@@ -378,6 +379,25 @@ async function ensureHomePostSavesTable() {
     `
   );
   homePostSavesTableReady = true;
+}
+
+async function ensureHomePostResharesTable() {
+  if (homePostResharesTableReady) return;
+  await ensureHomePostsTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_post_reshares (
+      post_id INT NOT NULL REFERENCES home_posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      quote_caption TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (post_id, user_id)
+    )
+    `
+  );
+  await query(`ALTER TABLE home_post_reshares ADD COLUMN IF NOT EXISTS quote_caption TEXT`);
+  homePostResharesTableReady = true;
 }
 
 async function ensureDirectMessagesTable() {
@@ -1302,6 +1322,22 @@ function normalizeHomePostRow(row) {
       base.liveStartedAt = base.liveStartedAt || base.createdAt;
     }
   }
+  const repostByUserId = Number(base.repostByUserId);
+  if (Number.isFinite(repostByUserId) && repostByUserId > 0) {
+    const quote = String(base.repostQuoteCaption || base.reshareQuoteCaption || "").trim();
+    base.repost = {
+      byUserId: repostByUserId,
+      byUserName: String(base.repostByUserName || "").trim() || "User",
+      byAvatarUrl: base.repostByAvatarUrl ?? null,
+      ...(quote ? { quoteCaption: quote } : {}),
+      repostedAt: base.repostedAt || base.resharedAt || base.createdAt
+    };
+    base.feedEntryKey = `repost:${repostByUserId}:${base.id}`;
+  }
+  delete base.repostByUserId;
+  delete base.repostByUserName;
+  delete base.repostByAvatarUrl;
+  delete base.repostQuoteCaption;
   return sanitizeHomePostRowMedia(base);
 }
 
@@ -1364,7 +1400,14 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
           SELECT 1 FROM home_post_saves hps
           WHERE hps.post_id = p.id AND hps.user_id = $1::integer
         )
-      END AS "viewerHasSaved"
+      END AS "viewerHasSaved",
+      CASE
+        WHEN $1::integer IS NULL THEN false
+        ELSE EXISTS (
+          SELECT 1 FROM home_post_reshares hpr
+          WHERE hpr.post_id = p.id AND hpr.user_id = $1::integer
+        )
+      END AS "viewerHasReshared"
     FROM home_posts p
     LEFT JOIN learn_users owner ON owner.id = p.user_id
     LEFT JOIN LATERAL (
@@ -1699,6 +1742,99 @@ router.get("/v1/bootstrap", (_req, res) => {
       crashTracking: "firebase-crashlytics"
     }
   });
+});
+
+async function sendSupportContactEmail({
+  firstName,
+  lastName,
+  email,
+  subject,
+  message
+}) {
+  const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+  if (!resendKey) {
+    throw new Error("Support email service is not configured");
+  }
+
+  const toEmail = String(process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
+  const fromEmail = String(process.env.SUPPORT_FROM_EMAIL || "Cropvibe Support <no-reply@cropvibe.com>").trim();
+  const replyTo = String(email || "").trim().toLowerCase();
+  const fullName = `${String(firstName || "").trim()} ${String(lastName || "").trim()}`.trim() || "Unknown";
+
+  const payload = {
+    from: fromEmail,
+    to: [toEmail],
+    subject: `[Web Support] ${String(subject || "").trim() || "Support request"}`,
+    reply_to: replyTo || undefined,
+    text: [
+      "New support request from Cropvibe web",
+      "",
+      `First Name: ${String(firstName || "").trim() || "-"}`,
+      `Last Name: ${String(lastName || "").trim() || "-"}`,
+      `Full Name: ${fullName}`,
+      `Email: ${replyTo || "-"}`,
+      `Subject: ${String(subject || "").trim() || "-"}`,
+      "",
+      "Message:",
+      String(message || "").trim() || "-"
+    ].join("\n")
+  };
+
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const reason = data?.message || data?.error || `Resend error (${resp.status})`;
+    throw new Error(String(reason));
+  }
+}
+
+router.post("/v1/support/contact", async (req, res) => {
+  try {
+    const {
+      firstName = "",
+      lastName = "",
+      email = "",
+      subject = "",
+      message = ""
+    } = req.body || {};
+
+    const cleanFirstName = String(firstName || "").trim().slice(0, 100);
+    const cleanLastName = String(lastName || "").trim().slice(0, 100);
+    const cleanEmail = String(email || "").trim().toLowerCase().slice(0, 320);
+    const cleanSubject = String(subject || "").trim().slice(0, 200);
+    const cleanMessage = String(message || "").trim().slice(0, 5000);
+
+    if (!cleanEmail || !cleanSubject || !cleanMessage) {
+      res.status(400).json({ message: "email, subject and message are required" });
+      return;
+    }
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
+    if (!emailOk) {
+      res.status(400).json({ message: "Please provide a valid email address" });
+      return;
+    }
+
+    await sendSupportContactEmail({
+      firstName: cleanFirstName,
+      lastName: cleanLastName,
+      email: cleanEmail,
+      subject: cleanSubject,
+      message: cleanMessage
+    });
+    res.status(201).json({ success: true });
+  } catch (error) {
+    res.status(503).json({
+      message: error instanceof Error ? error.message : "Failed to send support request"
+    });
+  }
 });
 
 async function issueAuthToken(user, req, deviceInfo) {
@@ -4350,6 +4486,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    await ensureHomePostResharesTable();
     const params = [viewerId];
     if (cursor != null) params.push(cursor);
     params.push(limit + 1);
@@ -4403,6 +4540,7 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
     await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    await ensureHomePostResharesTable();
     const params = [viewerId];
     if (cursor != null) params.push(cursor);
     params.push(limit + 1);
@@ -5321,6 +5459,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    await ensureHomePostResharesTable();
     const viewerId = Number(req.user.userId);
     const cacheKey = `v1:home:posts:mine:${viewerId}`;
     const cached = await cacheGetJson(cacheKey);
@@ -5366,7 +5505,11 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         EXISTS (
           SELECT 1 FROM home_post_saves hps
           WHERE hps.post_id = p.id AND hps.user_id = $1
-        ) AS "viewerHasSaved"
+        ) AS "viewerHasSaved",
+        EXISTS (
+          SELECT 1 FROM home_post_reshares hpr
+          WHERE hpr.post_id = p.id AND hpr.user_id = $1
+        ) AS "viewerHasReshared"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
@@ -5404,6 +5547,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    await ensureHomePostResharesTable();
     const viewerId = Number(req.user.userId);
     const result = await query(
       `
@@ -5433,7 +5577,11 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         EXISTS (
           SELECT 1 FROM home_post_saves hps
           WHERE hps.post_id = p.id AND hps.user_id = $1
-        ) AS "viewerHasSaved"
+        ) AS "viewerHasSaved",
+        EXISTS (
+          SELECT 1 FROM home_post_reshares hpr
+          WHERE hpr.post_id = p.id AND hpr.user_id = $1
+        ) AS "viewerHasReshared"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
@@ -5613,6 +5761,191 @@ router.post("/v1/home/posts/:postId/unsave", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostResharesTable();
+    const viewerId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved",
+        true AS "viewerHasReshared",
+        hpr.quote_caption AS "reshareQuoteCaption",
+        hpr.created_at AS "resharedAt"
+      FROM home_post_reshares hpr
+      JOIN home_posts p ON p.id = hpr.post_id
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE hpr.user_id = $1
+      ORDER BY hpr.created_at DESC
+      LIMIT 100
+      `,
+      [viewerId]
+    );
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load reshared posts", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/reshare", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostResharesTable();
+    const postId = Number(req.params.postId);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const post = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    if (!post.rows[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const quoteRaw = req.body && typeof req.body.quoteCaption === "string" ? req.body.quoteCaption.trim() : "";
+    const quoteCaption = quoteRaw ? quoteRaw.slice(0, 2200) : null;
+    await query(
+      `
+      INSERT INTO home_post_reshares (post_id, user_id, quote_caption)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (post_id, user_id) DO UPDATE SET
+        quote_caption = EXCLUDED.quote_caption,
+        created_at = NOW()
+      `,
+      [postId, userId, quoteCaption]
+    );
+    await cacheIncr("home:posts:gen");
+    res.json({ reshared: true, quoteCaption });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to reshare post", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/unreshare", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostResharesTable();
+    const postId = Number(req.params.postId);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    await query(`DELETE FROM home_post_reshares WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
+    await cacheIncr("home:posts:gen");
+    res.json({ reshared: false });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unreshare post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostResharesTable();
+    await ensureSocialFollowsTable();
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    const viewerId = Number(req.user.userId);
+    const limitRaw = Number(req.query.limit);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 24, 1), 48);
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved",
+        EXISTS (
+          SELECT 1 FROM home_post_reshares hpr_self
+          WHERE hpr_self.post_id = p.id AND hpr_self.user_id = $1
+        ) AS "viewerHasReshared",
+        hpr.created_at AS "repostedAt",
+        hpr.quote_caption AS "repostQuoteCaption",
+        hpr.user_id AS "repostByUserId",
+        COALESCE(NULLIF(TRIM(reposter.full_name), ''), 'User') AS "repostByUserName",
+        reposter.avatar_url AS "repostByAvatarUrl"
+      FROM home_post_reshares hpr
+      JOIN home_posts p ON p.id = hpr.post_id
+      JOIN learn_users reposter ON reposter.id = hpr.user_id
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE EXISTS (
+        SELECT 1 FROM social_follows sf
+        WHERE sf.follower_id = $1
+          AND sf.following_id = hpr.user_id
+          AND sf.status = 'accepted'
+      )
+      ORDER BY hpr.created_at DESC
+      LIMIT $2
+      `,
+      [viewerId, limit]
+    );
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load repost feed", error: error.message });
+  }
+});
+
 router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
   try {
     await backfillHomePostUserIds();
@@ -5622,6 +5955,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
     await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    await ensureHomePostResharesTable();
 
     const targetUserId = Number(req.params.userId);
     if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
@@ -5733,7 +6067,14 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
             SELECT 1 FROM home_post_saves hps
             WHERE hps.post_id = p.id AND hps.user_id = $1::integer
           )
-        END AS "viewerHasSaved"
+        END AS "viewerHasSaved",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_reshares hpr
+            WHERE hpr.post_id = p.id AND hpr.user_id = $1::integer
+          )
+        END AS "viewerHasReshared"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
@@ -5774,6 +6115,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
     await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
+    await ensureHomePostResharesTable();
     const postId = Number(req.params.postId);
     if (!Number.isFinite(postId) || postId <= 0) {
       res.status(400).json({ message: "Valid postId is required" });
@@ -5816,7 +6158,14 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
             SELECT 1 FROM home_post_saves hps
             WHERE hps.post_id = p.id AND hps.user_id = $1::integer
           )
-        END AS "viewerHasSaved"
+        END AS "viewerHasSaved",
+        CASE
+          WHEN $1::integer IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM home_post_reshares hpr
+            WHERE hpr.post_id = p.id AND hpr.user_id = $1::integer
+          )
+        END AS "viewerHasReshared"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (

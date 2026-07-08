@@ -32,6 +32,7 @@ import { useLanguage } from "../localization/LanguageContext";
 import { resolvePersonDisplayName, looksLikePhoneNumber } from "../localization/feedDisplay";
 import {
   fetchHomePosts,
+  fetchResharedHomePosts,
   fetchSavedHomePosts,
   fetchMyHomePosts,
   fetchUserHomePosts,
@@ -87,11 +88,12 @@ const PROFILE_TAB_ICONS: Record<
 > = {
   Posts: { active: "grid", inactive: "grid-outline" },
   Reels: { active: "film", inactive: "film-outline" },
-  Saved: { active: "repeat", inactive: "repeat-outline" },
-  Tagged: { active: "person-circle", inactive: "person-circle-outline" }
+  Reshared: { active: "repeat", inactive: "repeat-outline" },
+  Tagged: { active: "person-circle", inactive: "person-circle-outline" },
+  Bookmarks: { active: "bookmark", inactive: "bookmark-outline" }
 };
 
-type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
+type GalleryTab = "Posts" | "Reels" | "Reshared" | "Tagged" | "Bookmarks";
 
 function profileTileBackground(index: number) {
   return reelGridTileBackground(index, 3);
@@ -159,12 +161,15 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [publicBio, setPublicBio] = useState("");
   const [followPublicBusy, setFollowPublicBusy] = useState(false);
   const [userPosts, setUserPosts] = useState<HomePost[]>([]);
+  const [resharedPosts, setResharedPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [previewUriByPostId, setPreviewUriByPostId] = useState<Record<number, string>>({});
+  const [resharedLoading, setResharedLoading] = useState(false);
   const [savedLoading, setSavedLoading] = useState(false);
   const [taggedLoading, setTaggedLoading] = useState(false);
+  const resharedLoadedRef = useRef(false);
   const savedLoadedRef = useRef(false);
   const taggedLoadedRef = useRef(false);
   const [followersCount, setFollowersCount] = useState(0);
@@ -181,7 +186,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [removeFollowerBusy, setRemoveFollowerBusy] = useState(false);
   const [activeGalleryTab, setActiveGalleryTab] = useState<GalleryTab>(() => {
     const tab = route?.params?.initialTab;
-    if (tab === "Saved" || tab === "Tagged" || tab === "Reels" || tab === "Posts") return tab;
+    if (tab === "Bookmarks" || tab === "Reshared" || tab === "Tagged" || tab === "Reels" || tab === "Posts") return tab;
     return "Posts";
   });
   const [publicListLoading, setPublicListLoading] = useState(false);
@@ -204,7 +209,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const gridTileSize = (width - gridGap * 2) / 3;
   const reelTileHeight = Math.round(gridTileSize * (16 / 9));
   const isReelTab =
-    activeGalleryTab === "Reels" || activeGalleryTab === "Saved" || activeGalleryTab === "Tagged";
+    activeGalleryTab === "Reels" ||
+    activeGalleryTab === "Reshared" ||
+    activeGalleryTab === "Tagged" ||
+    activeGalleryTab === "Bookmarks";
 
   const normalizeName = (v: string) =>
     String(v || "")
@@ -291,6 +299,29 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     }
   }, [isPublicProfileView, publicUserId, publicUserName, publicUsername, token, user]);
 
+  const loadResharedPosts = useCallback(async () => {
+    if (!token || !user?.id) {
+      setResharedPosts([]);
+      resharedLoadedRef.current = false;
+      return;
+    }
+    setResharedLoading(true);
+    try {
+      const data = await fetchResharedHomePosts(token);
+      if (!isMountedRef.current) return;
+      const posts = data.posts || [];
+      setResharedPosts(posts);
+      resharedLoadedRef.current = true;
+      writeProfilePostsCache({ userId: Number(user.id), resharedPosts: posts, resharedLoaded: true, fetchedAt: Date.now() });
+    } catch {
+      if (!isMountedRef.current) return;
+      setResharedPosts([]);
+      resharedLoadedRef.current = false;
+    } finally {
+      if (isMountedRef.current) setResharedLoading(false);
+    }
+  }, [token, user?.id]);
+
   const loadSavedPosts = useCallback(async () => {
     if (!token || !user?.id) {
       setSavedPosts([]);
@@ -342,6 +373,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     const cached = readProfilePostsCache(Number(user.id));
     if (!cached) return false;
     setUserPosts(cached.userPosts);
+    if (cached.resharedLoaded) {
+      setResharedPosts(cached.resharedPosts);
+      resharedLoadedRef.current = true;
+    }
     if (cached.savedLoaded) {
       setSavedPosts(cached.savedPosts);
       savedLoadedRef.current = true;
@@ -361,7 +396,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         return;
       }
       const tab = route?.params?.initialTab;
-      if (tab === "Saved" || tab === "Tagged" || tab === "Reels" || tab === "Posts") {
+      if (tab === "Bookmarks" || tab === "Reshared" || tab === "Tagged" || tab === "Reels" || tab === "Posts") {
         profileInitialTabRef.current = tab;
         setActiveGalleryTab(tab);
       } else {
@@ -381,23 +416,35 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       void refreshUser().catch(() => {});
       const hadCache = hydrateProfilePostsFromCache();
       void loadUserPosts();
+      if (resharedLoadedRef.current) void loadResharedPosts();
       if (savedLoadedRef.current) void loadSavedPosts();
       if (taggedLoadedRef.current) void loadTaggedPosts();
-      if (!hadCache && !savedLoadedRef.current && !taggedLoadedRef.current) {
-        // Preload saved in background — common profile tab after reels.
-        void loadSavedPosts();
+      if (!hadCache && !resharedLoadedRef.current && !savedLoadedRef.current && !taggedLoadedRef.current) {
+        void loadResharedPosts();
       }
-    }, [hydrateProfilePostsFromCache, isPublicProfileView, loadSavedPosts, loadTaggedPosts, loadUserPosts, refreshUser, user?.id])
+    }, [
+      hydrateProfilePostsFromCache,
+      isPublicProfileView,
+      loadResharedPosts,
+      loadSavedPosts,
+      loadTaggedPosts,
+      loadUserPosts,
+      refreshUser,
+      user?.id
+    ])
   );
 
   useEffect(() => {
-    if (activeGalleryTab === "Saved" && token && !savedLoadedRef.current) {
+    if (activeGalleryTab === "Reshared" && token && !resharedLoadedRef.current) {
+      void loadResharedPosts();
+    }
+    if (activeGalleryTab === "Bookmarks" && token && !savedLoadedRef.current) {
       void loadSavedPosts();
     }
     if (activeGalleryTab === "Tagged" && token && !taggedLoadedRef.current) {
       void loadTaggedPosts();
     }
-  }, [activeGalleryTab, loadSavedPosts, loadTaggedPosts, token]);
+  }, [activeGalleryTab, loadResharedPosts, loadSavedPosts, loadTaggedPosts, token]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -407,6 +454,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   }, []);
 
   useEffect(() => {
+    resharedLoadedRef.current = false;
     savedLoadedRef.current = false;
     taggedLoadedRef.current = false;
     clearProfilePostsCache();
@@ -551,10 +599,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const visiblePosts = useMemo(() => {
     if (activeGalleryTab === "Posts") return userPosts;
     if (activeGalleryTab === "Reels") return userPosts.filter((p) => isReelPost(p));
-    if (activeGalleryTab === "Saved") return savedPosts.filter((p) => isReelPost(p));
+    if (activeGalleryTab === "Reshared") return resharedPosts.filter((p) => isReelPost(p));
+    if (activeGalleryTab === "Bookmarks") return savedPosts.filter((p) => isReelPost(p));
     if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => isReelPost(p));
     return userPosts;
-  }, [activeGalleryTab, savedPosts, taggedPosts, userPosts]);
+  }, [activeGalleryTab, resharedPosts, savedPosts, taggedPosts, userPosts]);
 
   const { playingPostId: profilePlayingPostId, markVideoFailed: markProfileVideoFailed } = useReelGridAutoplay(
     visiblePosts,
@@ -568,7 +617,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         void loadUserPosts();
         return;
       }
-      if (tabKey === "Saved") {
+      if (tabKey === "Reshared") {
+        void loadResharedPosts();
+        return;
+      }
+      if (tabKey === "Bookmarks") {
         void loadSavedPosts();
         return;
       }
@@ -576,14 +629,25 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         void loadTaggedPosts();
       }
     },
-    [loadSavedPosts, loadTaggedPosts, loadUserPosts]
+    [loadResharedPosts, loadSavedPosts, loadTaggedPosts, loadUserPosts]
   );
 
   const galleryLoading = useMemo(() => {
-    if (activeGalleryTab === "Saved") return savedLoading && savedPosts.length === 0;
+    if (activeGalleryTab === "Reshared") return resharedLoading && resharedPosts.length === 0;
+    if (activeGalleryTab === "Bookmarks") return savedLoading && savedPosts.length === 0;
     if (activeGalleryTab === "Tagged") return taggedLoading && taggedPosts.length === 0;
     return postsLoading && userPosts.length === 0;
-  }, [activeGalleryTab, postsLoading, savedLoading, savedPosts.length, taggedLoading, taggedPosts.length, userPosts.length]);
+  }, [
+    activeGalleryTab,
+    postsLoading,
+    resharedLoading,
+    resharedPosts.length,
+    savedLoading,
+    savedPosts.length,
+    taggedLoading,
+    taggedPosts.length,
+    userPosts.length
+  ]);
 
   const previewHydrationKey = useMemo(
     () =>
@@ -617,7 +681,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     !isPublicProfileView && (activeGalleryTab === "Posts" || activeGalleryTab === "Reels");
 
   const galleryTabs = useMemo(
-    (): GalleryTab[] => (isPublicProfileView ? ["Posts", "Reels"] : ["Posts", "Reels", "Saved", "Tagged"]),
+    (): GalleryTab[] => (isPublicProfileView ? ["Posts", "Reels"] : ["Posts", "Reels", "Reshared", "Tagged"]),
     [isPublicProfileView]
   );
 
@@ -639,7 +703,9 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     (nextPosts: HomePost[]) => {
       if (activeGalleryTab === "Posts" || activeGalleryTab === "Reels") {
         setUserPosts(nextPosts);
-      } else if (activeGalleryTab === "Saved") {
+      } else if (activeGalleryTab === "Reshared") {
+        setResharedPosts(nextPosts);
+      } else if (activeGalleryTab === "Bookmarks") {
         setSavedPosts(nextPosts);
       } else if (activeGalleryTab === "Tagged") {
         setTaggedPosts(nextPosts);
@@ -1257,13 +1323,22 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         </View>
       );
     }
+    let title = isReelTab ? t("emptyReelsTitle") : t("emptyNothingTitle");
+    let sub = isReelTab ? t("emptyReelsSub") : t("emptyDefaultSub");
+    if (activeGalleryTab === "Reshared") {
+      sub = t("resharedReelsEmpty");
+    } else if (activeGalleryTab === "Tagged") {
+      sub = t("taggedReelsEmpty");
+    } else if (activeGalleryTab === "Bookmarks") {
+      sub = t("savedReelsEmpty");
+    }
     return (
       <View style={styles.galleryEmptyWrap}>
-        <Text style={styles.galleryEmptyTitle}>{isReelTab ? t("emptyReelsTitle") : t("emptyNothingTitle")}</Text>
-        <Text style={styles.galleryEmptySub}>{isReelTab ? t("emptyReelsSub") : t("emptyDefaultSub")}</Text>
+        <Text style={styles.galleryEmptyTitle}>{title}</Text>
+        <Text style={styles.galleryEmptySub}>{sub}</Text>
       </View>
     );
-  }, [galleryLoading, isReelTab, showDeactivatedGallery, t]);
+  }, [activeGalleryTab, galleryLoading, isReelTab, t]);
 
   return (
     <>

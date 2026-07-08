@@ -91,22 +91,25 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
     notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
     answerText: "Answer",
     declineText: "Decline",
-    notificationColor: "#C9FF35",
+    // Native module expects an Android color resource name, not a hex literal.
+    // Passing hex can fail notification rendering and force Expo fallback actions.
+    notificationColor: "cropvibe_call_accent",
     isVideo,
     payload: callPayloadJson(payload)
   };
 
-  const module = getCallNotificationModule();
-  if (module) {
-    try {
-      module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, nativeOptions);
-      return;
-    } catch {
-      // Fall back to Expo notification below.
-    }
-  }
-
+  // Same Expo path as direct messages — reliable on closed-test / Play builds.
+  // Native full-screen call UI is best-effort only; many OEMs block it without throwing.
   await displayIncomingCallNotification(payload);
+
+  const module = getCallNotificationModule();
+  if (!module) return;
+
+  try {
+    module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, nativeOptions);
+  } catch {
+    // Expo notification already shown above.
+  }
 }
 
 export function hideIncomingCallAndroidNotification() {

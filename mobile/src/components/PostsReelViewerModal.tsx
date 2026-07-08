@@ -31,6 +31,7 @@ import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/
 import { UserAvatar } from "./UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet, type SharePeer } from "./PostShareSheet";
+import { PostRepostSheet } from "./PostRepostSheet";
 import { ReelSeekBar } from "./ReelSeekBar";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -539,6 +540,7 @@ export function PostsReelViewerModal({
   const commentSubmittingRef = useRef(false);
   const [optionsPost, setOptionsPost] = useState<HomePost | null>(null);
   const [shareTargetPost, setShareTargetPost] = useState<HomePost | null>(null);
+  const [repostTargetPost, setRepostTargetPost] = useState<HomePost | null>(null);
 
   const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
@@ -714,6 +716,23 @@ export function PostsReelViewerModal({
       }
     },
     [applyPosts, readPostEngagement, token, user?.email, user?.fullName, user?.id, user?.username]
+  );
+
+  const applyRepostState = useCallback(
+    (postId: number, reshared: boolean, quoteCaption?: string) => {
+      applyPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                viewerHasReshared: reshared,
+                ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
+              }
+            : p
+        )
+      );
+    },
+    [applyPosts]
   );
 
   const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
@@ -1065,6 +1084,11 @@ export function PostsReelViewerModal({
           <ReelLikeBurst postId={post.id} trigger={reelLikeBurstByPostId[post.id] || 0} seenRef={reelLikeBurstSeenRef} />
           <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, reelBottomInset + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
+              {post.repost ? (
+                <Text style={styles.reelRepostMeta} numberOfLines={1}>
+                  {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
+                </Text>
+              ) : null}
               <View style={styles.reelUserFollowRow}>
                 <Pressable
                   style={styles.reelAuthorTap}
@@ -1123,6 +1147,18 @@ export function PostsReelViewerModal({
               <Pressable style={styles.reelActionItem} onPress={() => setShareTargetPost(post)}>
                 <Ionicons name="paper-plane-outline" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
+              <Pressable
+                style={styles.reelActionItem}
+                onPress={() => setRepostTargetPost(post)}
+                accessibilityRole="button"
+                accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
+              >
+                <Ionicons
+                  name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
+                  size={REEL_ACTION_ICON}
+                  color={post.viewerHasReshared ? APP_LIME : "#fff"}
+                />
+              </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
@@ -1174,6 +1210,7 @@ export function PostsReelViewerModal({
       effectivePlayingId,
       reelLikeBurstByPostId,
       reelProgressByPostId,
+      setRepostTargetPost,
       carouselPageByPostId,
       setShareTargetPost,
       t,
@@ -1372,6 +1409,13 @@ export function PostsReelViewerModal({
         followingPeers={followingPeers}
         onAddToStory={onAddToStory}
       />
+
+      <PostRepostSheet
+        visible={!!repostTargetPost}
+        post={repostTargetPost}
+        onClose={() => setRepostTargetPost(null)}
+        onRepostChange={applyRepostState}
+      />
     </>
   );
 }
@@ -1440,6 +1484,7 @@ const styles = StyleSheet.create({
     paddingTop: 28
   },
   reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
+  reelRepostMeta: { color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", marginBottom: 8 },
   reelUserFollowRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "nowrap", minWidth: 0 },
   reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
   reelAvatarSq: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },

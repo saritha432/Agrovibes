@@ -17,7 +17,13 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
   if (type === "call_cancelled") return;
 
   const title = String(data.title || remoteMessage?.notification?.title || "").trim();
-  const body = String(data.message || data.body || remoteMessage?.notification?.body || "").trim();
+  const rawBody = String(data.message || data.body || remoteMessage?.notification?.body || "").trim();
+  const actorName = String(data.actorName || data.senderName || data.peerName || title || "").trim();
+  const body = isDirectMessage
+    ? actorName && rawBody && !rawBody.toLowerCase().startsWith(`${actorName.toLowerCase()}:`)
+      ? `${actorName}: ${rawBody}`
+      : rawBody
+    : rawBody;
   if (!title && !body) return;
 
   await ensureAndroidChannels();

@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { buildLocalLoginSessionsFallback, isLocalLoginSessionId, LOGIN_ACTIVITY_DEPLOY_HINT } from "../utils/loginActivityFallback";
 import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
+import { ensureLocalFileUri } from "../utils/mediaLocalUri";
 import { prepareImageForUpload, prepareProfileImageForUpload } from "../utils/mediaUpload";
 import { resolveWebAppOrigin } from "../utils/webAppOrigin";
 
@@ -621,6 +622,21 @@ export interface HomePost {
   /** Present when posts are loaded with an auth token (server-tracked save). */
   viewerHasSaved?: boolean;
   savedAt?: string;
+  /** Present when posts are loaded with an auth token (server-tracked reshare). */
+  viewerHasReshared?: boolean;
+  resharedAt?: string;
+  /** Viewer's quote when this post appears in their reshared tab. */
+  reshareQuoteCaption?: string;
+  /** When this feed row is a repost from someone you follow (Instagram-style). */
+  repost?: {
+    byUserId: number;
+    byUserName: string;
+    byAvatarUrl?: string | null;
+    quoteCaption?: string;
+    repostedAt: string;
+  };
+  /** Stable list key when the same post appears as original and as a repost row. */
+  feedEntryKey?: string;
   /** Author profile image when joined from learn_users */
   authorAvatarUrl?: string | null;
   /** Users who liked this post (from feed API — used for likes list without a separate request). */
@@ -968,6 +984,44 @@ export async function unsaveHomePost(token: string, postId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unsave`, token, {
     method: "POST"
   })) as { saved: boolean };
+}
+
+export async function fetchResharedHomePosts(token: string) {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/reshared`, { headers });
+  if (response.status === 404) {
+    return { posts: [] as HomePost[] };
+  }
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
+export async function fetchRepostFeed(token: string, limit = 24) {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/repost-feed?limit=${limit}`, { headers });
+  if (response.status === 404) {
+    return { posts: [] as HomePost[] };
+  }
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
+export async function reshareHomePost(token: string, postId: number, quoteCaption?: string) {
+  const body: { quoteCaption?: string } = {};
+  if (quoteCaption != null && String(quoteCaption).trim()) {
+    body.quoteCaption = String(quoteCaption).trim();
+  }
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/reshare`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })) as { reshared: boolean; quoteCaption?: string | null };
+}
+
+export async function unreshareHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unreshare`, token, {
+    method: "POST"
+  })) as { reshared: boolean };
 }
 
 export async function deleteHomePost(token: string, postId: number) {
@@ -1712,13 +1766,14 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
 }
 
 export async function uploadVideoFile(fileUri: string, asset?: PickerAssetMeta | null) {
-  await assertVideoUnderUploadLimit(fileUri);
-  assertVideoResolutionWithinLimit(asset?.width ?? undefined, asset?.height ?? undefined);
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
+  const localUri = await ensureLocalFileUri(fileUri, ext);
+  await assertVideoUnderUploadLimit(localUri);
+  assertVideoResolutionWithinLimit(asset?.width ?? undefined, asset?.height ?? undefined);
   const mime =
     ext === ".webm" ? "video/webm" : ext === ".mov" ? "video/quicktime" : ext === ".m4v" ? "video/x-m4v" : "video/mp4";
-  return uploadToSupabaseServer(fileUri, `video-${Date.now()}${ext}`, mime);
+  return uploadToSupabaseServer(localUri, `video-${Date.now()}${ext}`, mime);
 }
 
 export async function uploadImageFile(fileUri: string, options?: { profile?: boolean }) {

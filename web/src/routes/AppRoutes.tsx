@@ -18,6 +18,7 @@ import { SearchPage } from "../pages/SearchPage";
 import { PrivacyPolicy } from "../pages/PrivacyPolicy";
 import { DeleteAccount } from "../pages/DeleteAccount";
 import { ChildSafety } from "../pages/ChildSafety";
+import { ContactSupportPage } from "../pages/ContactSupportPage";
 
 function ProtectedLayout() {
   const { token, loading } = useAuth();
@@ -40,6 +41,7 @@ export function AppRoutes() {
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/delete-account" element={<DeleteAccount />} />
       <Route path="/child-safety" element={<ChildSafety />} />
+      <Route path="/contact-support" element={<ContactSupportPage />} />
       <Route path="/watch/:postId" element={<ReelWatchPage />} />
       <Route path="/profile/:userIdOrHandle" element={<PublicProfilePage />} />
       <Route element={<ProtectedLayout />}>

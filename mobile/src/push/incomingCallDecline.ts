@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { sendDirectMessage } from "../services/api";
+import { cancelDirectCall, sendDirectMessage } from "../services/api";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { displayMissedCallNotification } from "./missedCallNotifications";
@@ -38,6 +38,18 @@ export async function completeIncomingCallDecline(input: {
   const authToken = await resolveAuthToken(input.authToken);
 
   if (authToken) {
+    if (roomName) {
+      try {
+        // Ensure caller-side ringing push is cancelled immediately.
+        await cancelDirectCall(authToken, {
+          peerUserId: callerId,
+          roomName,
+          mode
+        });
+      } catch {
+        // Continue and still send call-state message below.
+      }
+    }
     try {
       await sendDirectMessage(
         authToken,
