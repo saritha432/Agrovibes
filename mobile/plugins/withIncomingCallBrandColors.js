@@ -1,4 +1,4 @@
-const { withAndroidColors, withDangerousMod } = require("@expo/config-plugins");
+const { withAndroidColors, withDangerousMod, AndroidConfig } = require("@expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
@@ -77,9 +77,16 @@ function applyCallBrandPatch(projectRoot) {
 }
 
 module.exports = function withIncomingCallBrandColors(config) {
-  config = withAndroidColors(config, {
-    cropvibe_call_accent: "#C9FF35",
-    cropvibe_call_decline: "#E53935"
+  config = withAndroidColors(config, (modConfig) => {
+    AndroidConfig.Colors.assignColorValue(modConfig.modResults, {
+      name: "cropvibe_call_accent",
+      value: "#C9FF35"
+    });
+    AndroidConfig.Colors.assignColorValue(modConfig.modResults, {
+      name: "cropvibe_call_decline",
+      value: "#E53935"
+    });
+    return modConfig;
   });
 
   return withDangerousMod(config, [

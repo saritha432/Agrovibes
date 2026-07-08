@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useRef } from "react";
-import { Animated, PanResponder, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, PanResponder, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { APP_LIME } from "../../theme/appColors";
 
 const SWIPE_REPLY_THRESHOLD = 56;
 const SWIPE_MAX = 72;
+const LONG_PRESS_MS = 320;
 
 type Props = {
   children: React.ReactNode;
@@ -24,21 +25,46 @@ export function SwipeReplyMessageRow({
   enabled = true
 }: Props) {
   const translateX = useRef(new Animated.Value(0)).current;
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
 
   const panResponder = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponder: () => enabled,
       onMoveShouldSetPanResponder: (_evt, gesture) =>
-        enabled && gesture.dx > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
+        enabled && gesture.dx > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35,
+      onPanResponderGrant: () => {
+        if (!enabled) return;
+        longPressFiredRef.current = false;
+        clearLongPressTimer();
+        longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null;
+          longPressFiredRef.current = true;
+          onLongPress();
+        }, LONG_PRESS_MS);
+      },
       onPanResponderMove: (_evt, gesture) => {
         if (!enabled) return;
+        if (Math.abs(gesture.dx) > 8 || Math.abs(gesture.dy) > 8) {
+          clearLongPressTimer();
+        }
         translateX.setValue(Math.max(0, Math.min(gesture.dx, SWIPE_MAX)));
       },
       onPanResponderRelease: (_evt, gesture) => {
+        clearLongPressTimer();
         if (!enabled) return;
-        if (gesture.dx >= SWIPE_REPLY_THRESHOLD) onReply();
+        if (!longPressFiredRef.current && gesture.dx >= SWIPE_REPLY_THRESHOLD) onReply();
         Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 20 }).start();
       },
       onPanResponderTerminate: () => {
+        clearLongPressTimer();
         Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 0 }).start();
       }
     })
@@ -56,15 +82,7 @@ export function SwipeReplyMessageRow({
         <Ionicons name="arrow-undo" size={18} color={APP_LIME} />
       </Animated.View>
       <Animated.View style={styles.slideArea} {...panResponder.panHandlers}>
-        <Animated.View style={{ transform: [{ translateX }] }}>
-          <Pressable
-            style={contentStyle}
-            onLongPress={enabled ? onLongPress : undefined}
-            delayLongPress={280}
-          >
-            {children}
-          </Pressable>
-        </Animated.View>
+        <Animated.View style={[contentStyle, { transform: [{ translateX }] }]}>{children}</Animated.View>
       </Animated.View>
     </View>
   );

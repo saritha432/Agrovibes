@@ -39,6 +39,7 @@ import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
+import { PostRepostSheet } from "../components/PostRepostSheet";
 import { UserAvatar } from "../components/UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { ReelSeekBar } from "../components/ReelSeekBar";
@@ -54,6 +55,7 @@ import {
   fetchHomePostLikes,
   fetchHomePosts,
   fetchHomePostsPage,
+  fetchRepostFeed,
   HOME_FEED_PAGE_SIZE,
   fetchSocialNotifications,
   type HomePostLiker,
@@ -91,7 +93,7 @@ import {
   removeLocalFollowByIdentity,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
-import { mergeHomeFeedPosts, readHomeFeedCache, writeHomeFeedCache } from "../social/homeFeedCache";
+import { mergeHomeFeedPosts, mergeRepostFeedItems, readHomeFeedCache, writeHomeFeedCache } from "../social/homeFeedCache";
 import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
@@ -1240,6 +1242,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const reelViewerListRef = useRef<FlatList<ReelViewerFeedItem> | null>(null);
   const reelBackgroundMusicRef = useRef<{ postId: number; sound: Audio.Sound } | null>(null);
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
+  const [repostPost, setRepostPost] = useState<HomePost | null>(null);
+  const [repostFeedItems, setRepostFeedItems] = useState<HomePost[]>([]);
   const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
@@ -1417,7 +1421,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
     if (activeHomeTab === "Feed") {
       return orderPostsForFeed(
-        strip(posts).filter((p) => !isLivePost(p)),
+        mergeRepostFeedItems(
+          strip(posts).filter((p) => !isLivePost(p)),
+          repostFeedItems
+        ),
         feedShuffleSeed,
         nowMs
       );
@@ -1441,7 +1448,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs, viewerUserId);
     }
     return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
-  }, [activeHomeTab, posts, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
+  }, [activeHomeTab, posts, repostFeedItems, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
 
   tabPostsRef.current = tabPosts;
 
@@ -2070,6 +2077,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setFeedShuffleSeed(Date.now());
         setPosts(nextPosts);
         void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
+        if (token) {
+          void fetchRepostFeed(token)
+            .then((repostData) => {
+              if (mounted) setRepostFeedItems(repostData.posts || []);
+            })
+            .catch(() => {
+              if (mounted) setRepostFeedItems([]);
+            });
+        } else if (mounted) {
+          setRepostFeedItems([]);
+        }
       } catch {
         if (!mounted) return;
         if (!postsRef.current.length) setPosts([]);
@@ -2889,6 +2907,32 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         Alert.alert(t("saveFailed"), t("savePostFailed"));
       } finally {
         setSaveBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
+      }
+    },
+    [token]
+  );
+
+  const applyRepostState = useCallback(
+    (postId: number, reshared: boolean, quoteCaption?: string) => {
+      const patch = (p: HomePost): HomePost =>
+        p.id === postId
+          ? {
+              ...p,
+              viewerHasReshared: reshared,
+              ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
+            }
+          : p;
+      setPosts((prev) => prev.map(patch));
+      setRepostPost((cur) => (cur?.id === postId ? patch(cur) : cur));
+      setActiveReelOptionsPost((cur) => (cur?.id === postId ? patch(cur) : cur));
+      setReelViewerOpen((current) => {
+        if (!current) return current;
+        return { ...current, posts: current.posts.map(patch) };
+      });
+      if (token) {
+        void fetchRepostFeed(token)
+          .then((data) => setRepostFeedItems(data.posts || []))
+          .catch(() => {});
       }
     },
     [token]
@@ -3728,6 +3772,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Pressable style={styles.reelActionItem} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
+              <Pressable
+                style={styles.reelActionItem}
+                onPress={() => setRepostPost(post)}
+                accessibilityRole="button"
+                accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
+              >
+                <Ionicons
+                  name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
+                  size={REEL_ACTION_ICON}
+                  color={post.viewerHasReshared ? APP_LIME : "#fff"}
+                />
+              </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
@@ -3801,6 +3857,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       triggerReelLikeBurst,
       onReelStatusUpdate,
       togglePostSave,
+      setRepostPost,
       user?.fullName,
       user?.id,
       user?.avatarUrl,
@@ -3894,6 +3951,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       return (
         <>
         <View style={styles.postCard}>
+          {post.repost ? (
+            <View style={styles.repostHeader}>
+              <Ionicons name="repeat" size={14} color="#7a8680" />
+              <Text style={styles.repostHeaderText}>
+                {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
+              </Text>
+            </View>
+          ) : null}
+          {post.repost?.quoteCaption ? (
+            <Text style={styles.repostQuote}>{displayFeedCopy(post.repost.quoteCaption)}</Text>
+          ) : null}
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
               <UserAvatar
@@ -4039,9 +4107,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Pressable style={styles.postActionIconBtn} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={22} color="#111" />
               </Pressable>
+              <Pressable
+                style={styles.postActionIconBtn}
+                onPress={() => setRepostPost(post)}
+                accessibilityRole="button"
+                accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
+              >
+                <Ionicons
+                  name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
+                  size={22}
+                  color={post.viewerHasReshared ? likeActiveColor : "#111"}
+                />
+              </Pressable>
             </View>
-            <Pressable style={styles.postActionIconBtn}>
-              <Ionicons name="bookmark-outline" size={22} color="#111" />
+            <Pressable style={styles.postActionIconBtn} onPress={() => void togglePostSave(post)}>
+              <Ionicons
+                name={post.viewerHasSaved ? "bookmark" : "bookmark-outline"}
+                size={22}
+                color={post.viewerHasSaved ? likeActiveColor : "#111"}
+              />
             </Pressable>
           </View>
 
@@ -4077,6 +4161,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       relationships,
       toggleFollow,
       togglePostLike,
+      togglePostSave,
+      setSharePost,
+      setRepostPost,
+      displayFeedCopy,
       displayPersonName,
       displayPostCaption,
       t,
@@ -4163,7 +4251,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <FlatList
                   style={styles.reelFrameList}
                   data={tabPosts}
-                  keyExtractor={(item) => String(item.id)}
+                  keyExtractor={(item) => item.feedEntryKey || String(item.id)}
                   renderItem={renderFullScreenReel}
                   removeClippedSubviews
                   initialNumToRender={1}
@@ -4205,7 +4293,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : (
       <FlatList
         data={tabPosts}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item) => item.feedEntryKey || String(item.id)}
         renderItem={renderPost}
         removeClippedSubviews
         nestedScrollEnabled
@@ -4859,6 +4947,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         followingPeers={followingSharePeers}
       />
 
+      <PostRepostSheet
+        visible={!!repostPost}
+        post={repostPost}
+        onClose={() => setRepostPost(null)}
+        onRepostChange={applyRepostState}
+      />
+
       <LiveStreamViewerModal
         post={watchingLivePost}
         onClose={() => setWatchingLivePost(null)}
@@ -5291,6 +5386,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     marginTop: 10,
     paddingBottom: 10
+  },
+  repostHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 10
+  },
+  repostHeaderText: {
+    color: "#7a8680",
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  repostQuote: {
+    color: "#111",
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 2,
+    fontWeight: "600"
   },
   postTop: {
     flexDirection: "row",

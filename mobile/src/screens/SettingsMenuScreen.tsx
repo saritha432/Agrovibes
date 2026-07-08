@@ -112,7 +112,7 @@ export function SettingsMenuScreen() {
   const openSaved = () => {
     navigation.goBack();
     setTimeout(
-      () => navigation.navigate("Main", { screen: "Profile", params: { initialTab: "Saved" } } as any),
+      () => navigation.navigate("Main", { screen: "Profile", params: { initialTab: "Bookmarks" } } as any),
       120
     );
   };

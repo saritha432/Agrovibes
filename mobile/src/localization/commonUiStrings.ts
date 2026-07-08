@@ -3,6 +3,7 @@ export const COMMON_UI_EN = {
   loginRequired: "Login required",
   loginRequiredChat: "Please log in to send reels in chat.",
   loginRequiredSave: "Please log in to save reels.",
+  loginRequiredReshare: "Please log in to reshare posts.",
   loginRequiredReport: "Please log in to report posts.",
   loginRequiredDelete: "Please log in to delete posts.",
   chatUnavailableSend: "This user cannot receive messages yet.",
