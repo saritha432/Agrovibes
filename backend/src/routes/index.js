@@ -1632,6 +1632,99 @@ router.get("/v1/bootstrap", (_req, res) => {
   });
 });
 
+async function sendSupportContactEmail({
+  firstName,
+  lastName,
+  email,
+  subject,
+  message
+}) {
+  const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+  if (!resendKey) {
+    throw new Error("Support email service is not configured");
+  }
+
+  const toEmail = String(process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
+  const fromEmail = String(process.env.SUPPORT_FROM_EMAIL || "Cropvibe Support <no-reply@cropvibe.com>").trim();
+  const replyTo = String(email || "").trim().toLowerCase();
+  const fullName = `${String(firstName || "").trim()} ${String(lastName || "").trim()}`.trim() || "Unknown";
+
+  const payload = {
+    from: fromEmail,
+    to: [toEmail],
+    subject: `[Web Support] ${String(subject || "").trim() || "Support request"}`,
+    reply_to: replyTo || undefined,
+    text: [
+      "New support request from Cropvibe web",
+      "",
+      `First Name: ${String(firstName || "").trim() || "-"}`,
+      `Last Name: ${String(lastName || "").trim() || "-"}`,
+      `Full Name: ${fullName}`,
+      `Email: ${replyTo || "-"}`,
+      `Subject: ${String(subject || "").trim() || "-"}`,
+      "",
+      "Message:",
+      String(message || "").trim() || "-"
+    ].join("\n")
+  };
+
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const reason = data?.message || data?.error || `Resend error (${resp.status})`;
+    throw new Error(String(reason));
+  }
+}
+
+router.post("/v1/support/contact", async (req, res) => {
+  try {
+    const {
+      firstName = "",
+      lastName = "",
+      email = "",
+      subject = "",
+      message = ""
+    } = req.body || {};
+
+    const cleanFirstName = String(firstName || "").trim().slice(0, 100);
+    const cleanLastName = String(lastName || "").trim().slice(0, 100);
+    const cleanEmail = String(email || "").trim().toLowerCase().slice(0, 320);
+    const cleanSubject = String(subject || "").trim().slice(0, 200);
+    const cleanMessage = String(message || "").trim().slice(0, 5000);
+
+    if (!cleanEmail || !cleanSubject || !cleanMessage) {
+      res.status(400).json({ message: "email, subject and message are required" });
+      return;
+    }
+
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
+    if (!emailOk) {
+      res.status(400).json({ message: "Please provide a valid email address" });
+      return;
+    }
+
+    await sendSupportContactEmail({
+      firstName: cleanFirstName,
+      lastName: cleanLastName,
+      email: cleanEmail,
+      subject: cleanSubject,
+      message: cleanMessage
+    });
+    res.status(201).json({ success: true });
+  } catch (error) {
+    res.status(503).json({
+      message: error instanceof Error ? error.message : "Failed to send support request"
+    });
+  }
+});
+
 async function issueAuthToken(user, req, deviceInfo) {
   const { sessionId } = await createAuthSession({
     userId: user.id,

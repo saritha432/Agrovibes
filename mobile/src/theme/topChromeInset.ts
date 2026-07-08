@@ -21,9 +21,11 @@ export function resolveTopChromeInset(insetsTop: number): number {
   if (Platform.OS === "web") return 0;
   if (Platform.OS === "ios") return insetsTop;
 
-  const statusBar = StatusBar.currentHeight ?? 0;
-  if (statusBar > 0) return statusBar;
-  if (insetsTop > 0) return Math.min(insetsTop, 36);
+  // Some Android OEMs report inflated status-bar heights in release APKs.
+  // Keep header top spacing within a realistic range.
+  const statusBar = Number(StatusBar.currentHeight ?? 0);
+  if (statusBar > 0) return Math.min(Math.max(statusBar, 24), 34);
+  if (insetsTop > 0) return Math.min(Math.max(insetsTop, 24), 34);
   return 24;
 }
 
