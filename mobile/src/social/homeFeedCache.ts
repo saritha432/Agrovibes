@@ -71,13 +71,22 @@ function feedSortTime(post: HomePost): number {
 /** Blend repost rows from followed users into the home feed (Instagram-style). */
 export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePost[]): HomePost[] {
   if (!repostItems.length) return basePosts;
-  const seen = new Set<string>();
-  const out: HomePost[] = [];
-  for (const post of [...repostItems, ...basePosts]) {
-    const key = post.feedEntryKey || `post:${post.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(post);
+  const repostByPostId = new Map<number, HomePost>();
+  for (const repostPost of repostItems) {
+    const existing = repostByPostId.get(repostPost.id);
+    if (!existing || feedSortTime(repostPost) > feedSortTime(existing)) {
+      repostByPostId.set(repostPost.id, repostPost);
+    }
+  }
+
+  const out: HomePost[] = basePosts.map((post) => {
+    const repostMeta = repostByPostId.get(post.id)?.repost;
+    return repostMeta ? { ...post, repost: repostMeta } : post;
+  });
+
+  const presentIds = new Set(out.map((post) => post.id));
+  for (const repostPost of repostItems) {
+    if (!presentIds.has(repostPost.id)) out.push(repostPost);
   }
   return out.sort((a, b) => feedSortTime(b) - feedSortTime(a) || b.id - a.id);
 }

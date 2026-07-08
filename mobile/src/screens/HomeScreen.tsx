@@ -216,7 +216,7 @@ function localLikeViewerIdentity(user: {
 }
 
 function postCreatedMs(post: HomePost): number {
-  const raw = post.createdAt as string | number | Date | undefined;
+  const raw = (post.repost?.repostedAt || post.createdAt) as string | number | Date | undefined;
   if (raw == null) return 0;
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
   const t = Date.parse(String(raw));
@@ -3690,6 +3690,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               pointerEvents="box-none"
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
+              {post.repost ? (
+                <Text style={styles.reelRepostMeta} numberOfLines={1}>
+                  {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
+                </Text>
+              ) : null}
               <View style={styles.reelUserFollowRow}>
                 <Pressable
                   style={styles.reelAuthorTap}
@@ -3794,7 +3799,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               >
                 <Ionicons
                   name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
-                  size={REEL_ACTION_ICON}
+                  size={REEL_ACTION_ICON + 3}
                   color={post.viewerHasReshared ? APP_LIME : "#fff"}
                 />
               </Pressable>
@@ -4129,7 +4134,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               >
                 <Ionicons
                   name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
-                  size={22}
+                  size={25}
                   color={post.viewerHasReshared ? likeActiveColor : "#111"}
                 />
               </Pressable>
@@ -5143,6 +5148,12 @@ const styles = StyleSheet.create({
     paddingTop: 28
   },
   reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
+  reelRepostMeta: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 8
+  },
   reelUserFollowRow: {
     flexDirection: "row",
     alignItems: "center",

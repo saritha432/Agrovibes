@@ -91,7 +91,9 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
     notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
     answerText: "Answer",
     declineText: "Decline",
-    notificationColor: "#C9FF35",
+    // Native module expects an Android color resource name, not a hex literal.
+    // Passing hex can fail notification rendering and force Expo fallback actions.
+    notificationColor: "cropvibe_call_accent",
     isVideo,
     payload: callPayloadJson(payload)
   };

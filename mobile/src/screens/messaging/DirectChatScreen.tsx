@@ -802,17 +802,18 @@ export function DirectChatScreen() {
       if (!token || attachBusy || !assets.length) return;
       setAttachBusy(true);
       try {
-        const uploaded: DmMediaItem[] = [];
-        for (const asset of assets) {
-          const { url } = await uploadPickedMedia(asset.uri, asset);
-          const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
-          uploaded.push({
-            kind: isVideo ? "video" : "image",
-            url,
-            width: asset.width,
-            height: asset.height
-          });
-        }
+        const uploaded: DmMediaItem[] = await Promise.all(
+          assets.map(async (asset) => {
+            const { url } = await uploadPickedMedia(asset.uri, asset);
+            const isVideo = asset.type === "video" || /\.(mp4|mov|webm|m4v)$/i.test(asset.uri.split("?")[0]);
+            return {
+              kind: isVideo ? "video" : "image",
+              url,
+              width: asset.width,
+              height: asset.height
+            };
+          })
+        );
         const body =
           uploaded.length > 1 ? buildDmMediaAlbumMessage(uploaded) : buildDmMediaMessage(uploaded[0]);
         const result = await sendDirectMessage(token, peerUserId, body);

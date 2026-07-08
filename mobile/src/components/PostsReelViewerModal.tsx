@@ -1055,6 +1055,11 @@ export function PostsReelViewerModal({
           <ReelLikeBurst postId={post.id} trigger={reelLikeBurstByPostId[post.id] || 0} seenRef={reelLikeBurstSeenRef} />
           <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, reelBottomInset + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
+              {post.repost ? (
+                <Text style={styles.reelRepostMeta} numberOfLines={1}>
+                  {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
+                </Text>
+              ) : null}
               <View style={styles.reelUserFollowRow}>
                 <Pressable
                   style={styles.reelAuthorTap}
@@ -1419,6 +1424,7 @@ const styles = StyleSheet.create({
     paddingTop: 28
   },
   reelLeftMeta: { flex: 1, marginRight: 6, maxWidth: "74%", paddingBottom: 2 },
+  reelRepostMeta: { color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", marginBottom: 8 },
   reelUserFollowRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "nowrap", minWidth: 0 },
   reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
   reelAvatarSq: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },

@@ -1,102 +1,223 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import type { ReactNode } from "react";
 import type { FormEvent } from "react";
+import { sendSupportContact } from "../api/support";
 import "./ContactSupportPage.css";
 
-const FAQ_ITEMS = [
-  "Account & payments",
-  "Privacy policy",
-  "Cancellation policy",
-  "How to reset my password?",
-  "Do you offer refunds?",
-  "Terms and conditions"
-] as const;
+type FaqItem = {
+  title: string;
+  answer: ReactNode;
+};
+
+const FAQ_ITEMS: FaqItem[] = [
+  {
+    title: "How do I reset my password?",
+    answer: (
+      <ol>
+        <li>Open the Cropvibe app.</li>
+        <li>Tap Forgot Password on the login screen.</li>
+        <li>Enter your registered email address.</li>
+        <li>Follow the instructions sent to your email to create a new password.</li>
+      </ol>
+    )
+  },
+  {
+    title: "How do I delete my Cropvibe account?",
+    answer: (
+      <>
+        <ol>
+          <li>Open the Cropvibe app.</li>
+          <li>Go to Profile → Settings → Account Center → Manage account → Delete Account.</li>
+          <li>Confirm your decision.</li>
+        </ol>
+        <p>Your account and associated personal data will be deleted according to our Privacy Policy.</p>
+      </>
+    )
+  },
+  {
+    title: "What is Cropvibe?",
+    answer: (
+      <>
+        <p>Cropvibe is a farming community platform where users can:</p>
+        <ul>
+          <li>Share farming videos and posts.</li>
+          <li>Connect with other farmers.</li>
+          <li>Discover agricultural knowledge.</li>
+        </ul>
+      </>
+    )
+  },
+  {
+    title: "How do I report a problem?",
+    answer: (
+      <p>
+        If you encounter an issue while using Cropvibe, use the contact form on this page or email info@cropvibe.com.
+        Please include screenshots and your registered email address so we can assist you more quickly.
+      </p>
+    )
+  },
+  {
+    title: "Privacy Policy",
+    answer: (
+      <p>
+        Your privacy is important to us. Please review our Privacy Policy to understand how we collect, use, and
+        protect your information.{" "}
+        <a href="https://cropvibe.com/privacy-policy" target="_blank" rel="noreferrer">
+          https://cropvibe.com/privacy-policy
+        </a>
+      </p>
+    )
+  },
+  {
+    title: "Terms & Conditions",
+    answer: (
+      <p>
+        Please review our Terms &amp; Conditions for platform usage rules, account responsibilities, and policies.{" "}
+        <a href="https://cropvibe.com/terms" target="_blank" rel="noreferrer">
+          https://cropvibe.com/terms
+        </a>
+      </p>
+    )
+  }
+];
 
 export function ContactSupportPage() {
-  const [query, setQuery] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [company, setCompany] = useState("");
+  const [email, setEmail] = useState("");
+  const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const filteredFaq = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [...FAQ_ITEMS];
-    return FAQ_ITEMS.filter((item) => item.toLowerCase().includes(q));
-  }, [query]);
-
-  const onSubmit = (event: FormEvent) => {
+  const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    const subject = encodeURIComponent("Support request from Cropvibe web");
-    const body = encodeURIComponent(
-      [
-        `First Name: ${firstName || "-"}`,
-        `Last Name: ${lastName || "-"}`,
-        `Company: ${company || "-"}`,
-        "",
-        message || "-"
-      ].join("\n")
-    );
-    window.location.href = `mailto:info@cropvibe.com?subject=${subject}&body=${body}`;
+    if (submitting) return;
+    setSubmitted(false);
+    setSubmitError("");
+    setSubmitting(true);
+    try {
+      await sendSupportContact({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        subject: subject.trim(),
+        message: message.trim()
+      });
+      setSubmitted(true);
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      setSubject("");
+      setMessage("");
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : "Could not send your support request.";
+      if (messageText.includes("(404)")) {
+        const encodedSubject = encodeURIComponent(subject.trim() || "Cropvibe Support");
+        const body = encodeURIComponent(
+          [
+            `First Name: ${firstName.trim() || "-"}`,
+            `Last Name: ${lastName.trim() || "-"}`,
+            `Email Address: ${email.trim() || "-"}`,
+            "",
+            "Message:",
+            message.trim() || "-"
+          ].join("\n")
+        );
+        window.location.href = `mailto:info@cropvibe.com?subject=${encodedSubject}&body=${body}`;
+        setSubmitted(true);
+      } else {
+        setSubmitError(messageText);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const filteredFaq = FAQ_ITEMS;
 
   return (
     <div className="contact-support">
-      <section className="contact-support__faq">
-        <h1>How we can help you</h1>
-        <input
+      <section className="contact-support__header">
+        <h1>How we can help you?</h1>
+        <p>Cropvibe Support Center</p>
+        {/* <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search for queries"
+          placeholder="Search..."
           aria-label="Search support topics"
-        />
+        /> */}
+      </section>
+
+      <section className="contact-support__block">
+        <h2>FAQ</h2>
         <div className="contact-support__faq-grid">
           {filteredFaq.map((item) => (
-            <article className="contact-support__faq-card" key={item}>
-              <span className="contact-support__faq-icon">i</span>
-              <h2>{item}</h2>
-              <p>
-                Find quick answers from Cropvibe support. If you need additional help, send us a message below.
-              </p>
+            <article className="contact-support__faq-card" key={item.title}>
+              <h3>{item.title}</h3>
+              <div className="contact-support__faq-content">{item.answer}</div>
             </article>
           ))}
         </div>
       </section>
 
+      <section className="contact-support__block contact-support__assist">
+        <h3>Need immediate assistance?</h3>
+        <p>📧 info@cropvibe.com</p>
+        <p>🕒 Monday – Saturday</p>
+        <p>9:00 AM – 6:00 PM IST</p>
+        <p className="contact-support__muted">We typically respond within 24 hours.</p>
+      </section>
+
       <section className="contact-support__reach">
-        <div className="contact-support__photo" />
-        <form className="contact-support__form" onSubmit={onSubmit}>
-          <h2>We&apos;d love to hear from you</h2>
-          <p>Contact us regarding any concerns or inquiries.</p>
-          <div className="contact-support__row">
+        <div className="contact-support__photo" aria-hidden />
+        <div className="contact-support__formWrap">
+          <h2>Contact Support</h2>
+          <form className="contact-support__form" onSubmit={onSubmit}>
+            <div className="contact-support__row">
+              <label>
+                First Name
+                <input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+              </label>
+              <label>
+                Last Name
+                <input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              </label>
+            </div>
             <label>
-              First Name
-              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="e.g. June" />
+              Email Address *
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="example@email.com"
+              />
             </label>
             <label>
-              Last Name
-              <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="e.g. Doe" />
+              Subject *
+              <input value={subject} onChange={(e) => setSubject(e.target.value)} required />
             </label>
-          </div>
-          <label>
-            Company
-            <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="e.g. Company XYZ" />
-          </label>
-          <label>
-            Additional Message
-            <textarea
-              rows={5}
-              maxLength={420}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Type a message here..."
-            />
-          </label>
-          <div className="contact-support__actions">
-            <button type="submit">Primary Action</button>
-            <span>{message.length}/420</span>
-          </div>
-        </form>
+            <label>
+              Message *
+              <textarea rows={5} value={message} onChange={(e) => setMessage(e.target.value)} required />
+            </label>
+            <button type="submit" disabled={submitting}>
+              {submitting ? "Sending..." : "Send Message"}
+            </button>
+          </form>
+          {submitted ? (
+            <p className="contact-support__success">
+              ✅ Thank you for contacting Cropvibe Support!
+              <br />
+              We have received your request and will respond within 24 hours.
+            </p>
+          ) : null}
+          {submitError ? <p className="contact-support__error">⚠️ {submitError}</p> : null}
+        </div>
       </section>
     </div>
   );
