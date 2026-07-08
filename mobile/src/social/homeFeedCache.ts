@@ -63,3 +63,21 @@ export function mergeHomeFeedPosts(fresh: HomePost[], existing: HomePost[]): Hom
     return bTime - aTime || b.id - a.id;
   });
 }
+
+function feedSortTime(post: HomePost): number {
+  return Date.parse(String(post.repost?.repostedAt || post.createdAt || "")) || 0;
+}
+
+/** Blend repost rows from followed users into the home feed (Instagram-style). */
+export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePost[]): HomePost[] {
+  if (!repostItems.length) return basePosts;
+  const seen = new Set<string>();
+  const out: HomePost[] = [];
+  for (const post of [...repostItems, ...basePosts]) {
+    const key = post.feedEntryKey || `post:${post.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(post);
+  }
+  return out.sort((a, b) => feedSortTime(b) - feedSortTime(a) || b.id - a.id);
+}

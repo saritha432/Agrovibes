@@ -3,8 +3,10 @@ import type { HomePost } from "../services/api";
 type ProfilePostsCache = {
   userId: number;
   userPosts: HomePost[];
+  resharedPosts: HomePost[];
   savedPosts: HomePost[];
   taggedPosts: HomePost[];
+  resharedLoaded: boolean;
   savedLoaded: boolean;
   taggedLoaded: boolean;
   fetchedAt: number;
@@ -25,8 +27,10 @@ export function writeProfilePostsCache(partial: Partial<ProfilePostsCache> & { u
   cache = {
     userId: partial.userId,
     userPosts: partial.userPosts ?? prev?.userPosts ?? [],
+    resharedPosts: partial.resharedPosts ?? prev?.resharedPosts ?? [],
     savedPosts: partial.savedPosts ?? prev?.savedPosts ?? [],
     taggedPosts: partial.taggedPosts ?? prev?.taggedPosts ?? [],
+    resharedLoaded: partial.resharedLoaded ?? prev?.resharedLoaded ?? false,
     savedLoaded: partial.savedLoaded ?? prev?.savedLoaded ?? false,
     taggedLoaded: partial.taggedLoaded ?? prev?.taggedLoaded ?? false,
     fetchedAt: partial.fetchedAt ?? Date.now()
