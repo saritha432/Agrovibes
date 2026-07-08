@@ -60,6 +60,7 @@ let learnEnrollmentsReady = false;
 let learnProgressReady = false;
 let phoneOtpTableReady = false;
 let socialFollowsTableReady = false;
+let socialBlocksTableReady = false;
 let socialNotificationsTableReady = false;
 let homePostLikesTableReady = false;
 let homePostCommentsTableReady = false;
@@ -205,6 +206,7 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMPTZ`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active'`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false`);
   learnUsersTableReady = true;
 }
 
@@ -253,6 +255,25 @@ async function ensureSocialFollowsTable() {
   await query(`ALTER TABLE social_follows ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ`);
   await query(`ALTER TABLE social_follows ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
   socialFollowsTableReady = true;
+}
+
+async function ensureSocialBlocksTable() {
+  if (socialBlocksTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS social_blocks (
+      id SERIAL PRIMARY KEY,
+      blocker_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      blocked_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (blocker_id, blocked_id)
+    )
+    `
+  );
+  await query(`CREATE INDEX IF NOT EXISTS idx_social_blocks_blocker ON social_blocks(blocker_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_social_blocks_blocked ON social_blocks(blocked_id)`);
+  socialBlocksTableReady = true;
 }
 
 async function ensureSocialNotificationsTable() {
@@ -416,7 +437,8 @@ function authUserFromRow(row) {
     bio: row.bio || undefined,
     website: row.website || undefined,
     locationLabel: row.locationLabel || undefined,
-    accountStatus: row.accountStatus || "active"
+    accountStatus: row.accountStatus || "active",
+    isPrivate: Boolean(row.isPrivate)
   };
 }
 
@@ -431,7 +453,85 @@ const authUserSelect = `
   bio,
   website,
   location_label AS "locationLabel",
-  account_status AS "accountStatus"
+  account_status AS "accountStatus",
+  COALESCE(is_private, false) AS "isPrivate"
+`;
+
+/** Hide posts from users the viewer blocked or who blocked the viewer. $1 = viewerId */
+const hideBlockedUsersPostsClause = `
+  AND (
+    $1::integer IS NULL
+    OR NOT EXISTS (
+      SELECT 1
+      FROM social_blocks sb
+      JOIN learn_users blocked_u ON (
+        blocked_u.id = p.user_id
+        OR LOWER(TRIM(blocked_u.full_name)) = LOWER(TRIM(p.user_name))
+        OR (
+          blocked_u.username IS NOT NULL AND TRIM(blocked_u.username) <> ''
+          AND LOWER(TRIM(blocked_u.username)) = LOWER(TRIM(p.user_name))
+        )
+      )
+      WHERE (sb.blocker_id = $1::integer AND sb.blocked_id = blocked_u.id)
+         OR (sb.blocked_id = $1::integer AND sb.blocker_id = blocked_u.id)
+    )
+  )
+`;
+
+/** Hide private-account posts unless viewer is the owner or an accepted follower. $1 = viewerId */
+const hidePrivateAccountPostsClause = `
+  AND (
+    (
+      $1::integer IS NOT NULL
+      AND (
+        p.user_id = $1::integer
+        OR EXISTS (
+          SELECT 1
+          FROM learn_users self_u
+          WHERE self_u.id = $1::integer
+            AND (
+              LOWER(TRIM(self_u.full_name)) = LOWER(TRIM(p.user_name))
+              OR (
+                self_u.username IS NOT NULL AND TRIM(self_u.username) <> ''
+                AND LOWER(TRIM(self_u.username)) = LOWER(TRIM(p.user_name))
+              )
+            )
+        )
+      )
+    )
+    OR NOT EXISTS (
+      SELECT 1
+      FROM learn_users priv_owner
+      WHERE COALESCE(priv_owner.is_private, false) = true
+        AND (
+          priv_owner.id = p.user_id
+          OR LOWER(TRIM(priv_owner.full_name)) = LOWER(TRIM(p.user_name))
+          OR (
+            priv_owner.username IS NOT NULL AND TRIM(priv_owner.username) <> ''
+            AND LOWER(TRIM(priv_owner.username)) = LOWER(TRIM(p.user_name))
+          )
+        )
+    )
+    OR (
+      $1::integer IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM social_follows sf
+        JOIN learn_users priv_owner ON priv_owner.id = sf.following_id
+        WHERE sf.follower_id = $1::integer
+          AND sf.status = 'accepted'
+          AND COALESCE(priv_owner.is_private, false) = true
+          AND (
+            priv_owner.id = p.user_id
+            OR LOWER(TRIM(priv_owner.full_name)) = LOWER(TRIM(p.user_name))
+            OR (
+              priv_owner.username IS NOT NULL AND TRIM(priv_owner.username) <> ''
+              AND LOWER(TRIM(priv_owner.username)) = LOWER(TRIM(p.user_name))
+            )
+          )
+      )
+    )
+  )
 `;
 
 const hideDeactivatedPostOwnersClause = `
@@ -454,6 +554,16 @@ const hideDeactivatedPostOwnersClause = `
       )
   )
 `;
+const hideSoftDeletedPostsClause = `AND p.deleted_at IS NULL`;
+
+async function purgeExpiredDeletedHomePosts() {
+  await ensureHomePostsTable();
+  await query(`
+    DELETE FROM home_posts
+    WHERE deleted_at IS NOT NULL
+      AND deleted_at <= (NOW() - INTERVAL '30 days')
+  `);
+}
 
 async function verifyUserPassword(userId, password) {
   const existing = await query(
@@ -1070,8 +1180,10 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS creative_meta JSONB NOT NULL DEFAULT '{}'::jsonb`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_status TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_ended_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
   homePostsTableReady = true;
 }
 
@@ -1305,7 +1417,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       ORDER BY id ASC
       LIMIT 1
     ) u ON TRUE
-    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${videoClause} ${cursorClause}
+    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${hideSoftDeletedPostsClause} ${hidePrivateAccountPostsClause} ${hideBlockedUsersPostsClause} ${videoClause} ${cursorClause}
     ORDER BY p.id DESC
   `;
 }
@@ -2287,7 +2399,8 @@ router.get("/v1/auth/me", authRequired, async (req, res) => {
     const row = result.rows[0];
     res.json({
       user,
-      passwordUpdatedAt: row.passwordUpdatedAt || row.createdAt || null
+      passwordUpdatedAt: row.passwordUpdatedAt || row.createdAt || null,
+      createdAt: row.createdAt || null
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile", error: error.message });
@@ -2809,6 +2922,35 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
   }
 });
 
+router.put("/v1/auth/me/privacy", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    if (typeof req.body?.isPrivate !== "boolean") {
+      res.status(400).json({ message: "isPrivate boolean is required" });
+      return;
+    }
+    const isPrivate = Boolean(req.body.isPrivate);
+    const result = await query(
+      `
+      UPDATE learn_users
+      SET is_private = $1
+      WHERE id = $2
+      RETURNING ${authUserSelect}
+      `,
+      [isPrivate, req.user.userId]
+    );
+    const user = authUserFromRow(result.rows[0]);
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    await cacheIncr("home:posts:gen");
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update privacy settings", error: error.message });
+  }
+});
+
 router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) => {
   try {
     await ensureSocialNotificationsTable();
@@ -2819,6 +2961,7 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
       res.status(400).json({ message: "Valid userId is required" });
       return;
     }
+    const viewerId = Number(req.user.userId);
     const userRes = await query(
       `
       SELECT
@@ -2831,8 +2974,31 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
         u.location_label AS "locationLabel",
         u.created_at AS "createdAt",
         u.account_status AS "accountStatus",
-        COALESCE(posts.posts_count, 0)::INT AS "postsCount",
-        COALESCE(posts.reels_count, 0)::INT AS "reelsCount"
+        COALESCE(u.is_private, false) AS "isPrivate",
+        CASE
+          WHEN COALESCE(u.is_private, false) = false
+            OR u.id = $2::integer
+            OR EXISTS (
+              SELECT 1 FROM social_follows sf
+              WHERE sf.follower_id = $2::integer
+                AND sf.following_id = u.id
+                AND sf.status = 'accepted'
+            )
+          THEN COALESCE(posts.posts_count, 0)::INT
+          ELSE 0
+        END AS "postsCount",
+        CASE
+          WHEN COALESCE(u.is_private, false) = false
+            OR u.id = $2::integer
+            OR EXISTS (
+              SELECT 1 FROM social_follows sf
+              WHERE sf.follower_id = $2::integer
+                AND sf.following_id = u.id
+                AND sf.status = 'accepted'
+            )
+          THEN COALESCE(posts.reels_count, 0)::INT
+          ELSE 0
+        END AS "reelsCount"
       FROM learn_users u
       LEFT JOIN LATERAL (
         SELECT
@@ -2840,27 +3006,29 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
           COUNT(*) FILTER (WHERE video_url IS NOT NULL AND TRIM(video_url) <> '')::INT AS reels_count
         FROM home_posts p
         WHERE
-          p.user_id = u.id
-          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.full_name))
-          OR (
-            u.username IS NOT NULL AND TRIM(u.username) <> ''
-            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.username))
-          )
-          OR (
-            u.email IS NOT NULL AND TRIM(u.email) <> ''
-            AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(SPLIT_PART(u.email, '@', 1)))
+          p.deleted_at IS NULL
+          AND (
+            p.user_id = u.id
+            OR LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.full_name))
+            OR (
+              u.username IS NOT NULL AND TRIM(u.username) <> ''
+              AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.username))
+            )
+            OR (
+              u.email IS NOT NULL AND TRIM(u.email) <> ''
+              AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(SPLIT_PART(u.email, '@', 1)))
+            )
           )
       ) posts ON TRUE
       WHERE u.id = $1
       LIMIT 1
       `,
-      [targetUserId]
+      [targetUserId, viewerId]
     );
     if (!userRes.rows[0]) {
       res.status(404).json({ message: "User not found" });
       return;
     }
-    const viewerId = Number(req.user.userId);
     const accountStatus = String(userRes.rows[0].accountStatus || "active").toLowerCase();
     if (accountStatus === "deactivated" && viewerId !== targetUserId) {
       res.status(404).json({ message: "This account is unavailable" });
@@ -3093,6 +3261,7 @@ router.post("/v1/social/mutual-connections", authRequired, async (req, res) => {
 router.post("/v1/social/follow/request", authRequired, async (req, res) => {
   try {
     await ensureSocialNotificationsTable();
+    await ensureSocialBlocksTable();
     const actorUserId = Number(req.user.userId);
     const targetUserId = Number(req.body?.targetUserId);
     if (!Number.isFinite(targetUserId)) {
@@ -3104,11 +3273,31 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
       return;
     }
 
-    const userExists = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [targetUserId]);
+    const blockCheck = await query(
+      `
+      SELECT 1
+      FROM social_blocks
+      WHERE (blocker_id = $1 AND blocked_id = $2)
+         OR (blocker_id = $2 AND blocked_id = $1)
+      LIMIT 1
+      `,
+      [actorUserId, targetUserId]
+    );
+    if (blockCheck.rows[0]) {
+      res.status(403).json({ message: "Cannot follow this user" });
+      return;
+    }
+
+    const userExists = await query(
+      `SELECT id, COALESCE(is_private, false) AS "isPrivate" FROM learn_users WHERE id = $1 LIMIT 1`,
+      [targetUserId]
+    );
     if (!userExists.rows[0]) {
       res.status(404).json({ message: "Target user not found" });
       return;
     }
+    const targetIsPrivate = Boolean(userExists.rows[0].isPrivate);
+    const initialStatus = targetIsPrivate ? "pending" : "accepted";
 
     const existing = await query(
       `SELECT id, status FROM social_follows WHERE follower_id = $1 AND following_id = $2 LIMIT 1`,
@@ -3120,25 +3309,36 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
       const inserted = await query(
         `
         INSERT INTO social_follows (follower_id, following_id, status, updated_at, responded_at)
-        VALUES ($1, $2, 'pending', NOW(), NULL)
+        VALUES ($1, $2, $3, NOW(), CASE WHEN $3 = 'accepted' THEN NOW() ELSE NULL END)
         RETURNING id, status
         `,
-        [actorUserId, targetUserId]
+        [actorUserId, targetUserId, initialStatus]
       );
       followRow = inserted.rows[0];
     } else if (existing.rows[0].status === "accepted") {
       followRow = existing.rows[0];
-    } else if (existing.rows[0].status === "pending") {
+    } else if (existing.rows[0].status === "pending" && targetIsPrivate) {
       followRow = existing.rows[0];
-    } else {
+    } else if (existing.rows[0].status === "pending" && !targetIsPrivate) {
       const updated = await query(
         `
         UPDATE social_follows
-        SET status = 'pending', updated_at = NOW(), responded_at = NULL
+        SET status = 'accepted', updated_at = NOW(), responded_at = NOW()
         WHERE id = $1
         RETURNING id, status
         `,
         [existing.rows[0].id]
+      );
+      followRow = updated.rows[0];
+    } else {
+      const updated = await query(
+        `
+        UPDATE social_follows
+        SET status = $2, updated_at = NOW(), responded_at = CASE WHEN $2 = 'accepted' THEN NOW() ELSE NULL END
+        WHERE id = $1
+        RETURNING id, status
+        `,
+        [existing.rows[0].id, initialStatus]
       );
       followRow = updated.rows[0];
     }
@@ -3167,6 +3367,101 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to request follow", error: error.message });
+  }
+});
+
+router.get("/v1/social/blocks", authRequired, async (req, res) => {
+  try {
+    await ensureSocialBlocksTable();
+    const blockerId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT
+        u.id AS "userId",
+        u.full_name AS "fullName",
+        u.username,
+        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
+        sb.created_at AS "blockedAt"
+      FROM social_blocks sb
+      JOIN learn_users u ON u.id = sb.blocked_id
+      WHERE sb.blocker_id = $1
+      ORDER BY sb.created_at DESC, u.full_name ASC
+      `,
+      [blockerId]
+    );
+    const users = result.rows.map((row) => ({
+      ...row,
+      fullName: sanitizePersonDisplayName(row.fullName, row.username)
+    }));
+    res.json({ users });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load blocked users", error: error.message });
+  }
+});
+
+router.post("/v1/social/block", authRequired, async (req, res) => {
+  try {
+    await ensureSocialBlocksTable();
+    await ensureSocialFollowsTable();
+    const blockerId = Number(req.user.userId);
+    const targetUserId = Number(req.body?.targetUserId);
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ message: "targetUserId is required" });
+      return;
+    }
+    if (targetUserId === blockerId) {
+      res.status(400).json({ message: "You cannot block yourself" });
+      return;
+    }
+    const userExists = await query(`SELECT id FROM learn_users WHERE id = $1 LIMIT 1`, [targetUserId]);
+    if (!userExists.rows[0]) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    await query(
+      `
+      INSERT INTO social_blocks (blocker_id, blocked_id)
+      VALUES ($1, $2)
+      ON CONFLICT (blocker_id, blocked_id) DO NOTHING
+      `,
+      [blockerId, targetUserId]
+    );
+
+    // Remove follow relationships both ways
+    await query(
+      `
+      DELETE FROM social_follows
+      WHERE (follower_id = $1 AND following_id = $2)
+         OR (follower_id = $2 AND following_id = $1)
+      `,
+      [blockerId, targetUserId]
+    );
+
+    await cacheIncr("home:posts:gen");
+    res.json({ ok: true, blocked: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to block user", error: error.message });
+  }
+});
+
+router.delete("/v1/social/block/:userId", authRequired, async (req, res) => {
+  try {
+    await ensureSocialBlocksTable();
+    const blockerId = Number(req.user.userId);
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+    const result = await query(
+      `DELETE FROM social_blocks WHERE blocker_id = $1 AND blocked_id = $2`,
+      [blockerId, targetUserId]
+    );
+    await cacheIncr("home:posts:gen");
+    res.json({ ok: true, unblocked: true, removed: result.rowCount || 0 });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unblock user", error: error.message });
   }
 });
 
@@ -3483,10 +3778,24 @@ router.put("/v1/push/settings", authRequired, async (req, res) => {
       });
       return;
     }
+    const current = await getPushSettings(Number(req.user.userId));
+    const sleepMode =
+      typeof req.body?.sleepMode === "boolean" ? req.body.sleepMode : Boolean(current.sleepMode);
+    const pauseAii = typeof req.body?.pauseAii === "boolean" ? req.body.pauseAii : Boolean(current.pauseAii);
+    const followingAndFollowers =
+      typeof req.body?.followingAndFollowers === "boolean"
+        ? req.body.followingAndFollowers
+        : Boolean(current.followingAndFollowers);
+    const liveAndDrops =
+      typeof req.body?.liveAndDrops === "boolean" ? req.body.liveAndDrops : Boolean(current.liveAndDrops);
     const settings = await setPushSettings(Number(req.user.userId), {
       pushEnabled,
       messagesEnabled,
-      activityEnabled
+      activityEnabled,
+      sleepMode,
+      pauseAii,
+      followingAndFollowers,
+      liveAndDrops
     });
     res.json(settings);
   } catch (error) {
@@ -4171,7 +4480,10 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
 
     await backfillHomePostUserIds();
     await ensureHomePostsTable();
+    await purgeExpiredDeletedHomePosts();
     await ensureLearnUsersTable();
+    await ensureSocialFollowsTable();
+    await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
     await ensureHomePostResharesTable();
@@ -4222,7 +4534,10 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
     }
 
     await ensureHomePostsTable();
+    await purgeExpiredDeletedHomePosts();
     await ensureLearnUsersTable();
+    await ensureSocialFollowsTable();
+    await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
     await ensureHomePostResharesTable();
@@ -4873,6 +5188,7 @@ router.post("/v1/live/token", authRequired, async (req, res) => {
 router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
   try {
     await ensureHomePostsTable();
+    await purgeExpiredDeletedHomePosts();
     const postId = Number(req.params.postId);
     if (!Number.isFinite(postId) || postId <= 0) {
       res.status(400).json({ message: "Valid postId is required" });
@@ -4926,12 +5242,180 @@ router.delete("/v1/home/posts/:postId", authRequired, async (req, res) => {
       return;
     }
 
-    await query(`DELETE FROM home_posts WHERE id = $1`, [postId]);
+    await query(`UPDATE home_posts SET deleted_at = NOW() WHERE id = $1`, [postId]);
     await cacheIncr("home:posts:gen");
     await invalidateProfilePostsCache(me);
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete post", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    await ensureHomePostLikesTable();
+    await ensureHomePostSavesTable();
+    await purgeExpiredDeletedHomePosts();
+    const viewerId = Number(req.user.userId);
+    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [viewerId]);
+    const fullName = String(userRes.rows[0]?.full_name || "").trim();
+    const username = String(userRes.rows[0]?.username || "").trim();
+    const emailLocal = String(userRes.rows[0]?.email || "")
+      .split("@")[0]
+      .trim();
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        p.deleted_at AS "deletedAt",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        EXISTS (
+          SELECT 1 FROM home_post_likes hpl
+          WHERE hpl.post_id = p.id AND hpl.user_id = $1
+        ) AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved"
+      FROM home_posts p
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE p.deleted_at IS NOT NULL
+        AND p.deleted_at > (NOW() - INTERVAL '30 days')
+        AND (
+          p.user_id = $1
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($2))
+          OR ($3::text IS NOT NULL AND $3 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($3)))
+          OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+        )
+      ORDER BY p.deleted_at DESC
+      LIMIT 200
+      `,
+      [viewerId, fullName, username || null, emailLocal || null]
+    );
+    const posts = result.rows.map((row) => {
+      const p = normalizeHomePostRow(row);
+      const deletedAtMs = Date.parse(String(row.deletedAt || ""));
+      return {
+        ...p,
+        deletedAt: row.deletedAt || null,
+        expiresAt: Number.isFinite(deletedAtMs) ? new Date(deletedAtMs + 30 * 24 * 60 * 60 * 1000).toISOString() : null
+      };
+    });
+    res.json({ posts });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load recently deleted posts", error: error.message });
+  }
+});
+
+router.post("/v1/home/posts/:postId/restore", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    await purgeExpiredDeletedHomePosts();
+    const postId = Number(req.params.postId);
+    const me = Number(req.user.userId);
+    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [me]);
+    const fullName = String(userRes.rows[0]?.full_name || "").trim();
+    const username = String(userRes.rows[0]?.username || "").trim();
+    const emailLocal = String(userRes.rows[0]?.email || "")
+      .split("@")[0]
+      .trim();
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const result = await query(
+      `
+      UPDATE home_posts p
+      SET deleted_at = NULL
+      WHERE p.id = $1
+        AND p.deleted_at IS NOT NULL
+        AND p.deleted_at > (NOW() - INTERVAL '30 days')
+        AND (
+          p.user_id = $2
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($3))
+          OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+          OR ($5::text IS NOT NULL AND $5 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($5)))
+        )
+      RETURNING p.*
+      `,
+      [postId, me, fullName, username || null, emailLocal || null]
+    );
+    if (!result.rows.length) {
+      res.status(404).json({ message: "Deleted post not found or expired" });
+      return;
+    }
+    await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
+    res.json({ ok: true, post: normalizeHomePostRow(result.rows[0]) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to restore post", error: error.message });
+  }
+});
+
+router.delete("/v1/home/posts/:postId/permanent", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostsTable();
+    const postId = Number(req.params.postId);
+    const me = Number(req.user.userId);
+    const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [me]);
+    const fullName = String(userRes.rows[0]?.full_name || "").trim();
+    const username = String(userRes.rows[0]?.username || "").trim();
+    const emailLocal = String(userRes.rows[0]?.email || "")
+      .split("@")[0]
+      .trim();
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const deleted = await query(
+      `
+      DELETE FROM home_posts p
+      WHERE p.id = $1
+        AND p.deleted_at IS NOT NULL
+        AND (
+          p.user_id = $2
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($3))
+          OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+          OR ($5::text IS NOT NULL AND $5 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($5)))
+        )
+      RETURNING p.id
+      `,
+      [postId, me, fullName, username || null, emailLocal || null]
+    );
+    if (!deleted.rows.length) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    await cacheIncr("home:posts:gen");
+    await invalidateProfilePostsCache(me);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to permanently delete post", error: error.message });
   }
 });
 
@@ -4950,7 +5434,7 @@ router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const existsRes = await query(`SELECT 1 FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    const existsRes = await query(`SELECT 1 FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [postId]);
     if (!existsRes.rows.length) {
       res.status(404).json({ message: "Post not found" });
       return;
@@ -4971,6 +5455,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
   try {
     await backfillHomePostUserIds();
     await ensureHomePostsTable();
+    await purgeExpiredDeletedHomePosts();
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
@@ -5035,10 +5520,13 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         LIMIT 1
       ) nm ON TRUE
       WHERE
+        p.deleted_at IS NULL
+        AND (
         p.user_id = $1
         OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($2))
         OR ($3::text IS NOT NULL AND $3 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($3)))
         OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+        )
       ORDER BY p.created_at DESC
       LIMIT 100
       `,
@@ -5103,7 +5591,8 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         ORDER BY id ASC
         LIMIT 1
       ) nm ON TRUE
-      WHERE p.tagged_user_ids @> to_jsonb($1::integer)
+      WHERE p.deleted_at IS NULL
+        AND p.tagged_user_ids @> to_jsonb($1::integer)
       ORDER BY p.created_at DESC
       LIMIT 100
       `,
@@ -5157,6 +5646,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         LIMIT 1
       ) nm ON TRUE
       WHERE hps.user_id = $1
+        AND p.deleted_at IS NULL
       ORDER BY hps.created_at DESC
       LIMIT 100
       `,
@@ -5165,6 +5655,63 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
     res.json({ posts: result.rows.map(normalizeHomePostRow) });
   } catch (error) {
     res.status(500).json({ message: "Failed to load saved posts", error: error.message });
+  }
+});
+
+router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
+  try {
+    await ensureHomePostLikesTable();
+    await ensureHomePostsTable();
+    await ensureLearnUsersTable();
+    const viewerId = Number(req.user.userId);
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
+        COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
+        owner.username AS "username",
+        p.location,
+        p.caption,
+        p.likes_count AS "likesCount",
+        p.comments_count AS "commentsCount",
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.image_urls AS "image_urls",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.created_at AS "createdAt",
+        p.tagged_user_ids AS "tagged_user_ids",
+        p.music_label AS "musicLabel",
+        p.music_audio_url AS "musicAudioUrl",
+        p.creative_meta AS "creativeMeta",
+        COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(nm.avatar_url), '')) AS "authorAvatarUrl",
+        true AS "viewerHasLiked",
+        EXISTS (
+          SELECT 1 FROM home_post_saves hps
+          WHERE hps.post_id = p.id AND hps.user_id = $1
+        ) AS "viewerHasSaved",
+        hpl.created_at AS "likedAt"
+      FROM home_post_likes hpl
+      JOIN home_posts p ON p.id = hpl.post_id
+      LEFT JOIN learn_users owner ON owner.id = p.user_id
+      LEFT JOIN LATERAL (
+        SELECT avatar_url
+        FROM learn_users
+        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        ORDER BY id ASC
+        LIMIT 1
+      ) nm ON TRUE
+      WHERE hpl.user_id = $1
+      AND p.deleted_at IS NULL
+      ${hideDeactivatedPostOwnersClause}
+      ORDER BY hpl.created_at DESC
+      LIMIT 200
+      `,
+      [viewerId]
+    );
+    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load liked posts", error: error.message });
   }
 });
 
@@ -5177,7 +5724,7 @@ router.post("/v1/home/posts/:postId/save", authRequired, async (req, res) => {
       res.status(400).json({ message: "Valid postId is required" });
       return;
     }
-    const post = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    const post = await query(`SELECT id FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [postId]);
     if (!post.rows[0]) {
       res.status(404).json({ message: "Post not found" });
       return;
@@ -5404,6 +5951,8 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
     await backfillHomePostUserIds();
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
+    await ensureSocialFollowsTable();
+    await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
     await ensureHomePostResharesTable();
@@ -5431,6 +5980,48 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
     ) {
       res.json({ posts: [] });
       return;
+    }
+
+    if (viewerId != null && viewerId !== targetUserId) {
+      const blockRes = await query(
+        `
+        SELECT 1
+        FROM social_blocks
+        WHERE (blocker_id = $1 AND blocked_id = $2)
+           OR (blocker_id = $2 AND blocked_id = $1)
+        LIMIT 1
+        `,
+        [viewerId, targetUserId]
+      );
+      if (blockRes.rows[0]) {
+        res.json({ posts: [], restricted: true });
+        return;
+      }
+    }
+
+    const privacyRes = await query(
+      `SELECT COALESCE(is_private, false) AS "isPrivate" FROM learn_users WHERE id = $1 LIMIT 1`,
+      [targetUserId]
+    );
+    const targetIsPrivate = Boolean(privacyRes.rows[0]?.isPrivate);
+    if (targetIsPrivate && viewerId !== targetUserId) {
+      if (viewerId == null) {
+        res.json({ posts: [], restricted: true });
+        return;
+      }
+      const followRes = await query(
+        `
+        SELECT 1
+        FROM social_follows
+        WHERE follower_id = $1 AND following_id = $2 AND status = 'accepted'
+        LIMIT 1
+        `,
+        [viewerId, targetUserId]
+      );
+      if (!followRes.rows[0]) {
+        res.json({ posts: [], restricted: true });
+        return;
+      }
     }
 
     const fullName = String(userRes.rows[0]?.full_name || "").trim();
@@ -5494,12 +6085,15 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         LIMIT 1
       ) nm ON TRUE
       WHERE
-        p.user_id = $2
-        OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($3))
-        OR LOWER(TRIM(SPLIT_PART(p.user_name, ' ', 1))) = LOWER(TRIM(SPLIT_PART($3, ' ', 1)))
-        OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
-        OR ($5::text IS NOT NULL AND $5 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($5)))
-        OR ($6::text IS NOT NULL AND $6 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($6)))
+        p.deleted_at IS NULL
+        AND (
+          p.user_id = $2
+          OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($3))
+          OR LOWER(TRIM(SPLIT_PART(p.user_name, ' ', 1))) = LOWER(TRIM(SPLIT_PART($3, ' ', 1)))
+          OR ($4::text IS NOT NULL AND $4 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+          OR ($5::text IS NOT NULL AND $5 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($5)))
+          OR ($6::text IS NOT NULL AND $6 <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($6)))
+        )
       ORDER BY p.created_at DESC
       LIMIT 100
       `,
@@ -5517,6 +6111,8 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
   try {
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
+    await ensureSocialFollowsTable();
+    await ensureSocialBlocksTable();
     await ensureHomePostLikesTable();
     await ensureHomePostSavesTable();
     await ensureHomePostResharesTable();
@@ -5580,7 +6176,10 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         LIMIT 1
       ) u ON TRUE
       WHERE p.id = $2
+      AND p.deleted_at IS NULL
       ${hideDeactivatedPostOwnersClause}
+      ${hidePrivateAccountPostsClause}
+      ${hideBlockedUsersPostsClause}
       LIMIT 1
       `,
       [viewerId, postId]
@@ -5637,7 +6236,7 @@ router.post("/v1/home/posts/:postId/like", authRequired, async (req, res) => {
     }
     const actorUserId = Number(req.user.userId);
     const postRes = await query(
-      `SELECT id, user_id, user_name, likes_count, video_url FROM home_posts WHERE id = $1 LIMIT 1`,
+      `SELECT id, user_id, user_name, likes_count, video_url FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
       [postId]
     );
     if (!postRes.rows[0]) {
@@ -5650,7 +6249,7 @@ router.post("/v1/home/posts/:postId/like", authRequired, async (req, res) => {
       [postId, actorUserId]
     );
     if (!insertLike.rows[0]) {
-      const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1`, [postId]);
+      const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1 AND deleted_at IS NULL`, [postId]);
       const liked = await query(`SELECT 1 FROM home_post_likes WHERE post_id = $1 AND user_id = $2`, [postId, actorUserId]);
       res.json({
         liked: !!liked.rows[0],
@@ -5699,7 +6298,7 @@ router.post("/v1/home/posts/:postId/unlike", authRequired, async (req, res) => {
     if (del.rows[0]) {
       await query(`UPDATE home_posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = $1`, [postId]);
     }
-    const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1`, [postId]);
+    const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1 AND deleted_at IS NULL`, [postId]);
     await cacheIncr("home:posts:gen");
     res.json({ liked: false, likesCount: Number(cur.rows[0]?.likesCount || 0) });
   } catch (error) {
@@ -5715,7 +6314,7 @@ router.get("/v1/home/posts/:postId/comments", async (req, res) => {
       res.status(400).json({ message: "Valid postId is required" });
       return;
     }
-    const postCheck = await query(`SELECT id FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    const postCheck = await query(`SELECT id FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [postId]);
     if (!postCheck.rows[0]) {
       res.status(404).json({ message: "Post not found" });
       return;
@@ -5771,7 +6370,7 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
         ? Number(parentRaw)
         : null;
 
-    const postRes = await query(`SELECT id, user_id, user_name FROM home_posts WHERE id = $1 LIMIT 1`, [postId]);
+    const postRes = await query(`SELECT id, user_id, user_name FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [postId]);
     if (!postRes.rows[0]) {
       res.status(404).json({ message: "Post not found" });
       return;
@@ -5846,7 +6445,7 @@ router.post("/v1/home/posts/:postId/comments", authRequired, async (req, res) =>
       [actorUserId]
     );
     const row = ins.rows[0];
-    const cc = await query(`SELECT comments_count AS "commentsCount" FROM home_posts WHERE id = $1`, [postId]);
+    const cc = await query(`SELECT comments_count AS "commentsCount" FROM home_posts WHERE id = $1 AND deleted_at IS NULL`, [postId]);
     res.status(201).json({
       comment: {
         id: String(row.id),

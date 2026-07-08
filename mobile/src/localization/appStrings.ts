@@ -102,6 +102,7 @@ export const APP_STRINGS_EN = {
   genderFemale: "Female",
   genderOther: "Other",
   genderPreferNotToSay: "Prefer not to say",
+  selectGender: "Select gender",
   saveProfile: "Save",
   additionalInfo: "Additional Info",
   profileNavTitle: "Profile",

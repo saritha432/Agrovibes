@@ -31,6 +31,7 @@ type Props = {
   avatarName?: string;
   submitting?: boolean;
   maxLength?: number;
+  showQuickEmojis?: boolean;
 };
 
 export function CommentComposerBar({
@@ -41,20 +42,23 @@ export function CommentComposerBar({
   avatarUri,
   avatarName = "You",
   submitting = false,
-  maxLength = 2000
+  maxLength = 2000,
+  showQuickEmojis = true
 }: Props) {
   const hasText = value.trim().length > 0;
   const isMultiline = value.includes("\n") || value.length > 48;
 
   return (
     <View style={styles.root}>
-      <View style={styles.emojiRow}>
-        {COMMENT_QUICK_EMOJIS.map((emoji) => (
-          <Pressable key={emoji} hitSlop={6} onPress={() => onChangeText(`${value}${emoji}`)}>
-            <Text style={styles.emojiText}>{emoji}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {showQuickEmojis ? (
+        <View style={styles.emojiRow}>
+          {COMMENT_QUICK_EMOJIS.map((emoji) => (
+            <Pressable key={emoji} hitSlop={6} onPress={() => onChangeText(`${value}${emoji}`)}>
+              <Text style={styles.emojiText}>{emoji}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.inputRow}>
         <UserAvatar

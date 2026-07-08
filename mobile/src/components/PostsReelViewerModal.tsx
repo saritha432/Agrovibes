@@ -76,6 +76,7 @@ export type PostsReelViewerModalProps = {
   visible: boolean;
   posts: HomePost[];
   initialIndex: number;
+  initialCommentsPostId?: number | null;
   onClose: () => void;
   onPostsChange: (posts: HomePost[]) => void;
   /** When true, viewer can delete posts owned by the signed-in user (profile Posts/Reels tabs). */
@@ -485,10 +486,28 @@ function mergeRemoteAndLocalComments(remote: HomeCommentRow[], local: HomeCommen
   });
 }
 
+function commentAgeLabel(createdAt?: string): string {
+  const ms = Date.parse(String(createdAt || ""));
+  if (!Number.isFinite(ms)) return "";
+  const diffMs = Date.now() - ms;
+  const mins = Math.max(1, Math.floor(diffMs / 60000));
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+
 export function PostsReelViewerModal({
   visible,
   posts,
   initialIndex,
+  initialCommentsPostId = null,
   onClose,
   onPostsChange,
   canDeleteOwnPosts = false,
@@ -782,6 +801,16 @@ export function PostsReelViewerModal({
     },
     [token]
   );
+
+  useEffect(() => {
+    if (!visible || !initialCommentsPostId || !viewerPosts.length) return;
+    const targetPost = viewerPosts.find((p) => p.id === initialCommentsPostId);
+    if (!targetPost) return;
+    const timer = setTimeout(() => {
+      openCommentsForPost(targetPost);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [initialCommentsPostId, openCommentsForPost, viewerPosts, visible]);
 
   const submitComment = useCallback(async () => {
     const text = commentDraft.trim();
@@ -1292,11 +1321,42 @@ export function PostsReelViewerModal({
                     <Text style={styles.noCommentsText}>{t("noCommentsYet")}</Text>
                   ) : (
                     (activeCommentsPost ? commentsByPost[activeCommentsPost.id] ?? [] : []).map((c) => (
-                      <View key={c.id} style={styles.commentRow}>
+                      <View key={c.id} style={styles.commentRowInsta}>
                         <UserAvatar uri={c.avatarUrl} name={c.user} size={32} borderRadius={16} fallbackBackgroundColor="#3f3f46" initialsColor="#fafafa" />
-                        <View style={styles.commentBody}>
-                          <Text style={styles.commentUser}>{displayPersonName(c.user)}</Text>
-                          <Text style={styles.commentText}>{c.text}</Text>
+                        <View style={styles.commentBodyInsta}>
+                          <View style={styles.commentTopLine}>
+                            <Text style={styles.commentUserName} numberOfLines={1}>
+                              {displayPersonName(c.user)}
+                            </Text>
+                            {commentAgeLabel(c.createdAt) ? <Text style={styles.commentTimeText}>{commentAgeLabel(c.createdAt)}</Text> : null}
+                          </View>
+                          <Text style={styles.commentTextInsta}>{c.text}</Text>
+                          <View style={styles.commentReplyRow}>
+                            <Pressable
+                              hitSlop={6}
+                              onPress={() => {
+                                const handle = String(c.user || "").replace(/^@/, "");
+                                setCommentDraft((prev) => (prev.trim() ? prev : `@${handle} `));
+                              }}
+                              style={styles.commentReplyBtn}
+                            >
+                              <Text style={styles.commentReplyText}>Reply</Text>
+                            </Pressable>
+                            {String(c.user || "").trim().toLowerCase() === String(user?.fullName || user?.username || "").trim().toLowerCase() ? (
+                              <Pressable hitSlop={6} style={styles.commentReplyBtn}>
+                                <Text style={styles.commentDeleteText}>Delete</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        </View>
+                        <View style={styles.commentRightActions}>
+                          <Pressable hitSlop={6} style={styles.commentActionPill}>
+                            <Ionicons name="heart-outline" size={18} color="#9ca3af" />
+                            <Text style={styles.commentActionCount}>{c.likes ?? 0}</Text>
+                          </Pressable>
+                          <Pressable hitSlop={6} style={styles.commentActionPill}>
+                            <Ionicons name="chatbubble-ellipses-outline" size={17} color="#9ca3af" />
+                          </Pressable>
                         </View>
                       </View>
                     ))
@@ -1472,10 +1532,19 @@ const styles = StyleSheet.create({
   commentsTitle: { color: "#fff", fontWeight: "800", fontSize: 16 },
   commentsListScroll: { flex: 1, paddingHorizontal: 16 },
   noCommentsText: { color: "#9ca3af", textAlign: "center", marginTop: 24 },
-  commentRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
-  commentBody: { flex: 1 },
-  commentUser: { color: "#C9FF35", fontWeight: "800", fontSize: 13 },
-  commentText: { color: "#e5e7eb", marginTop: 2, lineHeight: 18 },
+  commentRowInsta: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 },
+  commentBodyInsta: { flex: 1 },
+  commentTopLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  commentUserName: { color: "#fafafa", fontSize: 13, fontWeight: "800", maxWidth: "70%" },
+  commentTimeText: { color: "#a1a1aa", fontSize: 12, fontWeight: "600" },
+  commentTextInsta: { color: "#e5e7eb", marginTop: 2, lineHeight: 18 },
+  commentReplyRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 4 },
+  commentReplyBtn: { alignSelf: "flex-start", marginTop: 2 },
+  commentReplyText: { color: "#a1a1aa", fontSize: 12, fontWeight: "700" },
+  commentDeleteText: { color: "#f87171", fontSize: 12, fontWeight: "700" },
+  commentRightActions: { alignItems: "flex-end", gap: 8, paddingTop: 2 },
+  commentActionPill: { flexDirection: "row", alignItems: "center", gap: 4 },
+  commentActionCount: { color: "#9ca3af", fontSize: 12, fontWeight: "700" },
   commentComposerWrap: { paddingHorizontal: 16 },
   reelOptionsModalRoot: { flex: 1, justifyContent: "flex-end" },
   reelOptionsDimTap: { backgroundColor: "rgba(0,0,0,0.45)" },

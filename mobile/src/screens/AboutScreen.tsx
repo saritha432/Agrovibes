@@ -1,5 +1,6 @@
 import React from "react";
-import { Image, Linking, Platform, Pressable, StatusBar, StyleSheet, Text, View, ScrollView } from "react-native";
+import { Image, Linking, Pressable, StyleSheet, Text, View, ScrollView } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -18,10 +19,9 @@ const APP_VERSION = Constants.expoConfig?.version ?? "1.0.1";
 export function AboutScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { t } = useLanguage();
-  const topPadding = Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 40;
 
   return (
-    <View style={[styles.screen, { paddingTop: topPadding }]}>
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
       <View style={styles.topBar}>
         <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={TEXT} />
@@ -73,7 +73,7 @@ export function AboutScreen() {
 
         <Text style={styles.footer}>Made with love for Indian farmers</Text>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

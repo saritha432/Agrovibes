@@ -129,7 +129,7 @@ export function EditProfileScreen() {
   const [bio, setBio] = useState(user?.bio || "");
   const [website, setWebsite] = useState(user?.website || "");
   const [location, setLocation] = useState(user?.locationLabel || "");
-  const [gender, setGender] = useState<GenderOption>("Male");
+  const [gender, setGender] = useState<GenderOption | null>(null);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [pendingAvatarUri, setPendingAvatarUri] = useState<string | null>(null);
   const [removeAvatarPending, setRemoveAvatarPending] = useState(false);
@@ -224,7 +224,11 @@ export function EditProfileScreen() {
       } else {
         await updateUser(payload);
       }
-      await AsyncStorage.setItem(genderStorageKey(user?.id), gender);
+      if (gender) {
+        await AsyncStorage.setItem(genderStorageKey(user?.id), gender);
+      } else {
+        await AsyncStorage.removeItem(genderStorageKey(user?.id));
+      }
       Alert.alert(t("profileSaved"), t("profileUpdated"));
       navigation.goBack();
     } catch (error: any) {
@@ -369,7 +373,9 @@ export function EditProfileScreen() {
                   onPress={() => setGenderPickerOpen(true)}
                   accessibilityRole="button"
                 >
-                  <Text style={styles.fieldValue}>{genderLabel(gender, t)}</Text>
+                  <Text style={[styles.fieldValue, !gender ? styles.fieldValuePlaceholder : null]}>
+                    {gender ? genderLabel(gender, t) : t("selectGender")}
+                  </Text>
                   <Ionicons name="chevron-down" size={18} color={LABEL} />
                 </Pressable>
               </FieldRow>
@@ -667,6 +673,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: TEXT
+  },
+  fieldValuePlaceholder: {
+    color: LABEL,
+    fontWeight: "500"
   },
   bioInput: {
     minHeight: 96,

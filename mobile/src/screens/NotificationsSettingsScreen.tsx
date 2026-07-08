@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/rootStackTypes";
@@ -14,15 +15,30 @@ import { APP_BLACK, APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColor
 
 const CARD = "#303132";
 const DIVIDER = "rgba(255,255,255,0.1)";
+const DEFAULT_SETTINGS: PushNotificationSettings = {
+  pushEnabled: true,
+  messagesEnabled: true,
+  activityEnabled: true,
+  sleepMode: false,
+  pauseAii: false,
+  followingAndFollowers: true,
+  liveAndDrops: true
+};
+
+function normalizeSettings(
+  incoming: Partial<PushNotificationSettings> | null | undefined,
+  base?: PushNotificationSettings
+): PushNotificationSettings {
+  return {
+    ...(base ?? DEFAULT_SETTINGS),
+    ...(incoming ?? {})
+  };
+}
 
 export function NotificationsSettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { token } = useAuth();
-  const [settings, setSettings] = useState<PushNotificationSettings>({
-    pushEnabled: true,
-    messagesEnabled: true,
-    activityEnabled: true
-  });
+  const [settings, setSettings] = useState<PushNotificationSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -35,7 +51,7 @@ export function NotificationsSettingsScreen() {
         try {
           const next = await fetchPushSettings(token);
           if (!mounted) return;
-          setSettings(next);
+          setSettings((prev) => normalizeSettings(next, prev));
         } finally {
           if (mounted) setLoading(false);
         }
@@ -54,7 +70,7 @@ export function NotificationsSettingsScreen() {
       setSaving(true);
       try {
         const saved = await updatePushSettings(token, next);
-        setSettings(saved);
+        setSettings((prev) => normalizeSettings(saved, prev));
       } finally {
         setSaving(false);
       }
@@ -63,7 +79,7 @@ export function NotificationsSettingsScreen() {
   );
 
   return (
-    <View style={styles.screen}>
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
       <View style={styles.topBar}>
         <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} accessibilityRole="button">
           <Ionicons name="chevron-back" size={24} color={APP_LIME} />
@@ -73,50 +89,74 @@ export function NotificationsSettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.description}>Control which notifications cropvibe sends to your device.</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardHeading}>Push Notifications</Text>
+          <SettingsToggleRow
+            title="Pause All"
+            subtitle="Temporarily Pause Notifications"
+            value={!settings.pushEnabled}
+            onValueChange={(pauseAll) =>
+              void persist({
+                ...settings,
+                pushEnabled: !pauseAll
+              })
+            }
+            disabled={loading || saving}
+          />
+          <View style={styles.divider} />
+          <SettingsToggleRow
+            title="Sleep Mode"
+            subtitle="Automatically mute notifications at night or whenever you need to focus."
+            value={settings.sleepMode}
+            onValueChange={(sleepMode) => void persist({ ...settings, sleepMode })}
+            disabled={loading || saving}
+          />
+          <View style={styles.divider} />
+          <SettingsToggleRow
+            title="Pause AII"
+            subtitle="Only receive notifications about new messages and other message notifications, such as requests and reminders."
+            value={settings.pauseAii}
+            onValueChange={(pauseAii) => void persist({ ...settings, pauseAii })}
+            disabled={loading || saving}
+          />
+        </View>
 
         <View style={styles.card}>
+          <Text style={styles.cardHeading}>Notification Categories</Text>
           <SettingsToggleRow
-            title="Push Notifications"
-            subtitle="Allow cropvibe to send alerts to this phone."
-            value={settings.pushEnabled}
-            onValueChange={(pushEnabled) =>
-              void persist({
-                ...settings,
-                pushEnabled
-              })
-            }
-            disabled={loading || saving}
-          />
-          <View style={styles.divider} />
-          <SettingsToggleRow
-            title="Messages"
-            subtitle="DMs, story replies, and mentions."
-            value={settings.messagesEnabled}
-            onValueChange={(messagesEnabled) =>
-              void persist({
-                ...settings,
-                messagesEnabled
-              })
-            }
-            disabled={loading || saving}
-          />
-          <View style={styles.divider} />
-          <SettingsToggleRow
-            title="Activity"
-            subtitle="Likes, comments, follows, and post updates."
+            title="Posts, Stories And Comments"
+            subtitle=""
             value={settings.activityEnabled}
-            onValueChange={(activityEnabled) =>
-              void persist({
-                ...settings,
-                activityEnabled
-              })
-            }
+            onValueChange={(activityEnabled) => void persist({ ...settings, activityEnabled })}
+            disabled={loading || saving}
+          />
+          <View style={styles.divider} />
+          <SettingsToggleRow
+            title="Following And Followers"
+            subtitle=""
+            value={settings.followingAndFollowers}
+            onValueChange={(followingAndFollowers) => void persist({ ...settings, followingAndFollowers })}
+            disabled={loading || saving}
+          />
+          <View style={styles.divider} />
+          <SettingsToggleRow
+            title="Messages & Calls"
+            subtitle=""
+            value={settings.messagesEnabled}
+            onValueChange={(messagesEnabled) => void persist({ ...settings, messagesEnabled })}
+            disabled={loading || saving}
+          />
+          <View style={styles.divider} />
+          <SettingsToggleRow
+            title="Live And Drops"
+            subtitle=""
+            value={settings.liveAndDrops}
+            onValueChange={(liveAndDrops) => void persist({ ...settings, liveAndDrops })}
             disabled={loading || saving}
           />
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -137,7 +177,7 @@ function SettingsToggleRow({
     <View style={styles.row}>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle}>{title}</Text>
-        <Text style={styles.rowSubtitle}>{subtitle}</Text>
+        {subtitle ? <Text style={styles.rowSubtitle}>{subtitle}</Text> : null}
       </View>
       <Switch
         value={value}
@@ -183,11 +223,6 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     gap: 12
   },
-  description: {
-    color: "#97a0a8",
-    fontSize: 14,
-    lineHeight: 21
-  },
   card: {
     borderRadius: 14,
     backgroundColor: CARD,
@@ -217,6 +252,14 @@ const styles = StyleSheet.create({
     color: APP_TEXT_MUTED,
     fontSize: 12,
     lineHeight: 17
+  },
+  cardHeading: {
+    color: APP_TEXT_MUTED,
+    fontSize: 12,
+    fontWeight: "700",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 2
   },
   divider: {
     height: 1,
