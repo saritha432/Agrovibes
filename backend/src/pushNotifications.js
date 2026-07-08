@@ -3,6 +3,7 @@ const fs = require("fs");
 const { query } = require("./db");
 
 let pushDeviceTokensTableReady = false;
+let pushUserSettingsTableReady = false;
 let firebaseReady = false;
 
 function stripEnv(value) {
@@ -67,6 +68,77 @@ async function ensurePushDeviceTokensTable() {
   );
   await query(`CREATE INDEX IF NOT EXISTS idx_push_device_tokens_user_id ON push_device_tokens(user_id)`);
   pushDeviceTokensTableReady = true;
+}
+
+async function ensurePushUserSettingsTable() {
+  if (pushUserSettingsTableReady) return;
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS push_user_settings (
+      user_id INT PRIMARY KEY REFERENCES learn_users(id) ON DELETE CASCADE,
+      push_enabled BOOLEAN NOT NULL DEFAULT true,
+      messages_enabled BOOLEAN NOT NULL DEFAULT true,
+      activity_enabled BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  pushUserSettingsTableReady = true;
+}
+
+async function getPushSettings(userId) {
+  await ensurePushUserSettingsTable();
+  const result = await query(
+    `
+    SELECT push_enabled, messages_enabled, activity_enabled
+    FROM push_user_settings
+    WHERE user_id = $1
+    LIMIT 1
+    `,
+    [userId]
+  );
+  if (!result.rows[0]) {
+    return { pushEnabled: true, messagesEnabled: true, activityEnabled: true };
+  }
+  const row = result.rows[0];
+  return {
+    pushEnabled: Boolean(row.push_enabled),
+    messagesEnabled: Boolean(row.messages_enabled),
+    activityEnabled: Boolean(row.activity_enabled)
+  };
+}
+
+async function setPushSettings(userId, settings) {
+  await ensurePushUserSettingsTable();
+  const pushEnabled = Boolean(settings?.pushEnabled);
+  const messagesEnabled = Boolean(settings?.messagesEnabled);
+  const activityEnabled = Boolean(settings?.activityEnabled);
+  const result = await query(
+    `
+    INSERT INTO push_user_settings (user_id, push_enabled, messages_enabled, activity_enabled, updated_at)
+    VALUES ($1, $2, $3, $4, NOW())
+    ON CONFLICT (user_id) DO UPDATE
+      SET push_enabled = EXCLUDED.push_enabled,
+          messages_enabled = EXCLUDED.messages_enabled,
+          activity_enabled = EXCLUDED.activity_enabled,
+          updated_at = NOW()
+    RETURNING push_enabled, messages_enabled, activity_enabled
+    `,
+    [userId, pushEnabled, messagesEnabled, activityEnabled]
+  );
+  const row = result.rows[0];
+  return {
+    pushEnabled: Boolean(row.push_enabled),
+    messagesEnabled: Boolean(row.messages_enabled),
+    activityEnabled: Boolean(row.activity_enabled)
+  };
+}
+
+function shouldSendPushForType(settings, type) {
+  if (!settings.pushEnabled) return false;
+  if (type === "direct_message" || type === "live_share") return settings.messagesEnabled;
+  return settings.activityEnabled;
 }
 
 async function registerPushDeviceToken({ userId, token, platform }) {
@@ -474,6 +546,10 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
 }
 
 async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, commentExcerpt, followId, imageUrl }) {
+  const settings = await getPushSettings(Number(userId));
+  if (!shouldSendPushForType(settings, String(type || ""))) {
+    return { sent: 0, skipped: "user_settings" };
+  }
   const copy = socialPushCopy({ type, actorName, commentExcerpt });
   return sendPushToUser(userId, {
     title: copy.title,
@@ -667,9 +743,12 @@ async function sendSocialPushToFollowers({ hostUserId, type, postId, commentExce
 
 module.exports = {
   ensurePushDeviceTokensTable,
+  ensurePushUserSettingsTable,
   isPushConfigured,
   registerPushDeviceToken,
   unregisterPushDeviceToken,
+  getPushSettings,
+  setPushSettings,
   formatDirectMessagePushExcerpt,
   directMessagePushPayload,
   sendPushToUser,

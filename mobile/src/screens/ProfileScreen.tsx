@@ -24,6 +24,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFloatingTopChromeInset } from "../theme/topChromeInset";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
@@ -148,6 +149,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const { width, height: windowHeight } = useWindowDimensions();
   const floatingTopInset = useFloatingTopChromeInset();
   const { user, token, signOut, refreshUser } = useAuth();
+  const isAccountDeactivated = useIsAccountDeactivated();
   const { t } = useLanguage();
   const [publicUsername, setPublicUsername] = useState<string | null>(null);
   const [publicFullName, setPublicFullName] = useState<string | null>(null);
@@ -1162,8 +1164,18 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     });
   };
 
+  const showDeactivatedGallery = isAccountDeactivated && !isPublicProfileView;
+
+  useEffect(() => {
+    if (!showDeactivatedGallery) return;
+    setShareProfileOpen(false);
+    setAvatarPreviewOpen(false);
+    setProfileReelViewer(null);
+  }, [showDeactivatedGallery]);
+
   const profileListHeader = useMemo(
     () => (
+      <DeactivatedChromeWrap active={showDeactivatedGallery}>
       <>
         <View style={styles.profileCard}>
           <View style={styles.headerMidRow}>
@@ -1272,6 +1284,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           </View>
         </View>
       </>
+      </DeactivatedChromeWrap>
     ),
     [
       activeGalleryTab,
@@ -1293,11 +1306,15 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       profileSubject?.username,
       publicFollowLabel,
       publicFollowDisabled,
+      showDeactivatedGallery,
       t
     ]
   );
 
   const profileListEmpty = useMemo(() => {
+    if (showDeactivatedGallery) {
+      return <DeactivatedContentPlaceholder featureLabel="posts and reels" />;
+    }
     if (galleryLoading) {
       return (
         <View style={styles.galleryLoadingWrap}>
@@ -1337,11 +1354,13 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                 <Ionicons name="chevron-back" size={26} color={TEXT} />
               </Pressable>
             ) : null}
-            <View style={[styles.topBarUsernameWrap, isPublicProfileView ? styles.topBarUsernameWrapPublic : null]}>
-              <Text style={styles.topBarUsername} numberOfLines={1}>
-                {profileHeaderName}
-              </Text>
-            </View>
+            <DeactivatedChromeWrap active={showDeactivatedGallery} style={styles.topBarUsernameChrome}>
+              <View style={[styles.topBarUsernameWrap, isPublicProfileView ? styles.topBarUsernameWrapPublic : null]}>
+                <Text style={styles.topBarUsername} numberOfLines={1}>
+                  {profileHeaderName}
+                </Text>
+              </View>
+            </DeactivatedChromeWrap>
             {isPublicProfileView ? (
               <View style={styles.topBarBackBtn} />
             ) : (
@@ -1373,7 +1392,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             key={activeGalleryTab}
             style={styles.screen}
             contentContainerStyle={styles.scrollBottom}
-            data={galleryLoading ? [] : visiblePosts}
+            data={showDeactivatedGallery || galleryLoading ? [] : visiblePosts}
             keyExtractor={(item) => String(item.id)}
             numColumns={3}
             renderItem={renderProfileGridItem}
@@ -1686,6 +1705,10 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
     justifyContent: "center"
+  },
+  topBarUsernameChrome: {
+    flex: 1,
+    minWidth: 0
   },
   topBarUsername: {
     fontSize: 16,

@@ -44,6 +44,7 @@ import { UserAvatar } from "../components/UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { ReelSeekBar } from "../components/ReelSeekBar";
 import { ReelSuggestionsPage } from "../components/ReelSuggestionsPage";
+import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
@@ -93,7 +94,13 @@ import {
   removeLocalFollowByIdentity,
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
-import { mergeHomeFeedPosts, mergeRepostFeedItems, readHomeFeedCache, writeHomeFeedCache } from "../social/homeFeedCache";
+import {
+  clearHomeFeedCache,
+  mergeHomeFeedPosts,
+  mergeRepostFeedItems,
+  readHomeFeedCache,
+  writeHomeFeedCache
+} from "../social/homeFeedCache";
 import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
@@ -1680,7 +1687,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useFocusEffect(
     useCallback(() => {
-      if (!token || !appIsActive) return;
+      if (!token || !appIsActive || user?.accountStatus === "deactivated") return;
       const mediaBusy = !!(reelViewerOpen || watchingLivePost || playingPostId != null);
       const pollMs = mediaBusy ? 30000 : 20000;
       const poll = () => {
@@ -1699,7 +1706,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       poll();
       const timer = setInterval(poll, pollMs);
       return () => clearInterval(timer);
-    }, [appIsActive, applyLocalLikesToPosts, playingPostId, reelViewerOpen, token, watchingLivePost])
+    }, [appIsActive, applyLocalLikesToPosts, playingPostId, reelViewerOpen, token, user?.accountStatus, watchingLivePost])
   );
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
@@ -2053,6 +2060,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [activeStory?.id, isStoryOpen]);
 
   useEffect(() => {
+    if (user?.accountStatus === "deactivated") {
+      setPosts([]);
+      void clearHomeFeedCache(user?.id);
+      return;
+    }
     let mounted = true;
     const finishPullRefreshTask = () => {
       if (refreshPendingRef.current <= 0) return;
@@ -2098,7 +2110,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return () => {
       mounted = false;
     };
-  }, [applyLocalLikesToPosts, manualRefreshToken, refreshToken, token, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
+  }, [applyLocalLikesToPosts, manualRefreshToken, refreshToken, token, user?.accountStatus, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
 
   const relationshipAuthorKey = useMemo(() => {
     if (!user?.id) return "";
@@ -3281,6 +3293,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const listHeader = useMemo(
     () => (
+      <DeactivatedChromeWrap>
       <View style={styles.homeTopChrome}>
         <AppTopBar />
 
@@ -3450,6 +3463,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           <View style={styles.homeTopTabsSeparator} />
         </View>
       </View>
+      </DeactivatedChromeWrap>
     ),
     [
       activeHomeTab,
@@ -4205,12 +4219,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     for (const post of tabPosts.slice(0, 4)) prefetchPostMedia(post);
   }, [tabPosts]);
 
+  const isAccountDeactivated = useIsAccountDeactivated();
+
+  useEffect(() => {
+    if (!isAccountDeactivated) return;
+    setStoryOpen(false);
+    setReelViewerOpen(null);
+    setWatchingLivePost(null);
+    setSharePost(null);
+  }, [isAccountDeactivated]);
+
   return (
     <View style={[styles.screen, (isReelSurfaceTab || isLiveTab) ? styles.screenDark : null]}>
       <Animated.View style={{ flex: 1, opacity: tabFadeAnim, transform: [{ translateY: tabSlideAnim }, { scale: tabScaleAnim }] }}>
       {isLiveTab ? (
         <View style={styles.reelsColumn}>
           {listHeader}
+          {isAccountDeactivated ? (
+            <DeactivatedContentPlaceholder featureLabel="live and posts" />
+          ) : (
           <LiveHomeSection
             posts={posts}
             viewerUserId={viewerUserId}
@@ -4231,11 +4258,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             watchingPost={watchingLivePost}
             onWatchingChange={setWatchingLivePost}
           />
+          )}
         </View>
       ) : useFullScreenReelLayout ? (
         <View style={styles.reelsColumn}>
           {listHeader}
           <View style={styles.reelSlot}>
+            {isAccountDeactivated ? (
+              <DeactivatedContentPlaceholder featureLabel="reels and posts" />
+            ) : (
             <View
               style={styles.reelFrame}
               onLayout={(e) => {
@@ -4288,7 +4319,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               )
             ) : null}
             </View>
+            )}
           </View>
+        </View>
+      ) : (
+      isAccountDeactivated ? (
+        <View style={{ flex: 1 }}>
+          {listHeader}
+          <DeactivatedContentPlaceholder featureLabel="reels and posts" />
         </View>
       ) : (
       <FlatList
@@ -4316,7 +4354,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         onViewableItemsChanged={onViewableItemsChangedRef.current}
         viewabilityConfig={viewabilityConfig}
       />
-      )}
+      )
+      )
+      }
       </Animated.View>
 
       <Modal
@@ -4475,7 +4515,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       >
         <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
           <View
-            style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset }]}
+            style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset + 14 }]}
             pointerEvents="box-none"
           >
             <Pressable

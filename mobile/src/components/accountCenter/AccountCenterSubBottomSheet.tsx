@@ -3,43 +3,41 @@ import { Modal, Pressable, StyleSheet, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ChangePasswordContent } from "../components/accountCenter/ChangePasswordContent";
-import { SheetNavContext } from "../components/accountCenter/accountCenterSheetNav";
-import type { RootStackParamList } from "../navigation/rootStackTypes";
-import { APP_BLACK } from "../theme/appColors";
+import type { RootStackParamList } from "../../navigation/rootStackTypes";
+import { APP_BLACK } from "../../theme/appColors";
+import { SheetNavContext, type AccountCenterSheetRoute } from "./accountCenterSheetNav";
 
-export function ChangePasswordScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+type Props = {
+  visible: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+};
+
+export function AccountCenterSubBottomSheet({ visible, onClose, children }: Props) {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const navValue = useMemo(
     () => ({
-      push: () => {},
-      pop: () => navigation.goBack(),
-      close: () => navigation.goBack(),
+      push: (_route: AccountCenterSheetRoute) => {},
+      pop: onClose,
+      close: onClose,
       navigateStack: (screen: keyof RootStackParamList) => {
-        navigation.goBack();
+        onClose();
         requestAnimationFrame(() => navigation.navigate(screen as any));
       }
     }),
-    [navigation]
+    [navigation, onClose]
   );
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={() => navigation.goBack()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.root}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        />
+        <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 12), maxHeight: "92%" }]}>
           <View style={styles.handle} />
           <View style={styles.sheetBody}>
-            <SheetNavContext.Provider value={navValue}>
-              <ChangePasswordContent />
-            </SheetNavContext.Provider>
+            <SheetNavContext.Provider value={navValue}>{children}</SheetNavContext.Provider>
           </View>
         </View>
       </View>

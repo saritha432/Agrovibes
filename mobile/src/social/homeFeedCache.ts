@@ -28,6 +28,14 @@ export async function readHomeFeedCache(viewerKey?: string | number | null): Pro
   }
 }
 
+export async function clearHomeFeedCache(viewerKey?: string | number | null): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(cacheKeyForViewer(viewerKey));
+  } catch {
+    // ignore disk errors
+  }
+}
+
 export async function writeHomeFeedCache(posts: HomePost[], viewerKey?: string | number | null): Promise<void> {
   if (!posts.length) return;
   try {

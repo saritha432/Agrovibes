@@ -45,6 +45,8 @@ export type RootStackParamList = {
     incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number; autoAccept?: boolean };
   };
   SettingsMenu: undefined;
+  SavedSettings: undefined;
+  NotificationsSettings: undefined;
   AccountCenter: undefined;
   ProfilesPersonalDetails: undefined;
   PasswordSecurity: undefined;
@@ -69,6 +71,10 @@ export type RootStackParamList = {
   AutoClearSearchHistory: undefined;
   HowAutoClearingWorks: undefined;
   ActivityOffCropvibe: undefined;
+  ManageAccounts: undefined;
+  ManageAccountOptions: undefined;
+  DeactivateDeleteChoice: undefined;
+  DeactivateDeleteContinue: undefined;
   ActivityAcrossPartners: undefined;
   ConfirmItsYou: {
     title?: string;

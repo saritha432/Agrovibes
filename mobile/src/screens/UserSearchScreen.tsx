@@ -17,6 +17,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
@@ -207,6 +208,7 @@ function HighlightedQueryText({
 export function UserSearchScreen() {
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
+  const isAccountDeactivated = useIsAccountDeactivated();
   const { width } = useWindowDimensions();
   const searchInputRef = useRef<TextInput>(null);
 
@@ -678,6 +680,7 @@ export function UserSearchScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
+      <DeactivatedChromeWrap>
       <View style={styles.searchHeaderRow}>
         <View style={styles.searchWrap}>
           <Ionicons name="search" size={18} color={SEARCH_ICON} />
@@ -695,6 +698,7 @@ export function UserSearchScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
+            editable={!isAccountDeactivated}
             onSubmitEditing={() => {
               if (trimmedQuery) addRecentSearch(trimmedQuery);
             }}
@@ -713,9 +717,12 @@ export function UserSearchScreen() {
           ) : null}
         </View>
       </View>
+      </DeactivatedChromeWrap>
 
       <View style={styles.body}>
-        {loadingExplore && !showTypeahead ? (
+        {isAccountDeactivated ? (
+          <DeactivatedContentPlaceholder featureLabel="search" />
+        ) : loadingExplore && !showTypeahead ? (
           <View style={styles.centered}>
             <ActivityIndicator color={APP_LIME} />
           </View>
@@ -746,7 +753,7 @@ export function UserSearchScreen() {
           />
         )}
 
-        {showTypeahead ? <View style={styles.typeaheadOverlay}>{renderTypeaheadPanel()}</View> : null}
+        {showTypeahead && !isAccountDeactivated ? <View style={styles.typeaheadOverlay}>{renderTypeaheadPanel()}</View> : null}
       </View>
 
       <PostsReelViewerModal

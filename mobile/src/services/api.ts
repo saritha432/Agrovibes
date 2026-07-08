@@ -102,6 +102,7 @@ export interface AuthResponse {
     bio?: string;
     website?: string;
     locationLabel?: string;
+    accountStatus?: "active" | "deactivated";
   };
   isNewUser?: boolean;
 }
@@ -286,6 +287,28 @@ export async function fetchMyAccount(token: string) {
     user: AuthResponse["user"];
     passwordUpdatedAt?: string | null;
   };
+}
+
+export async function deactivateMyAccount(token: string, password: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/deactivate`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  })) as { success: boolean; user: AuthResponse["user"] };
+}
+
+export async function activateMyAccount(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/activate`, token, {
+    method: "POST"
+  })) as { success: boolean; user: AuthResponse["user"] };
+}
+
+export async function deleteMyAccount(token: string, password: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  })) as { success: boolean };
 }
 
 export async function changeMyPassword(
@@ -1418,6 +1441,24 @@ export async function registerPushToken(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   })) as { ok: boolean };
+}
+
+export type PushNotificationSettings = {
+  pushEnabled: boolean;
+  messagesEnabled: boolean;
+  activityEnabled: boolean;
+};
+
+export async function fetchPushSettings(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/push/settings`, token)) as PushNotificationSettings;
+}
+
+export async function updatePushSettings(token: string, settings: PushNotificationSettings) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/push/settings`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings)
+  })) as PushNotificationSettings;
 }
 
 export async function unregisterPushToken(authToken: string, deviceToken: string) {
