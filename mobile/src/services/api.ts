@@ -102,6 +102,7 @@ export interface AuthResponse {
     website?: string;
     locationLabel?: string;
     accountStatus?: "active" | "deactivated";
+    isPrivate?: boolean;
   };
   isNewUser?: boolean;
 }
@@ -285,6 +286,7 @@ export async function fetchMyAccount(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token)) as {
     user: AuthResponse["user"];
     passwordUpdatedAt?: string | null;
+    createdAt?: string | null;
   };
 }
 
@@ -491,6 +493,14 @@ export async function updateMyProfile(
   })) as AuthResponse;
 }
 
+export async function updateMyPrivacySettings(token: string, payload: { isPrivate: boolean }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/privacy`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { user: AuthResponse["user"] };
+}
+
 export async function fetchAuthMe(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token)) as { user: AuthResponse["user"] };
 }
@@ -625,6 +635,10 @@ export interface HomePost {
   liveEndedAt?: string;
   /** LiveKit room name for active live sessions. */
   liveRoomName?: string;
+  /** When set, post is in recently deleted bucket. */
+  deletedAt?: string | null;
+  /** Auto-permanent-delete time for recently deleted posts. */
+  expiresAt?: string | null;
 }
 
 export type FollowStatus = "none" | "pending" | "accepted" | "declined" | "self";
@@ -925,6 +939,11 @@ export async function fetchSavedHomePosts(token: string) {
   return { posts: data.posts.map(sanitizeHomePost) };
 }
 
+export async function fetchLikedHomePosts(token: string) {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/liked`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
 /**
  * Posts where the current user appears in `taggedUserIds`.
  * Returns an empty list when the server does not expose this route yet (e.g. 404 before redeploy).
@@ -953,6 +972,23 @@ export async function unsaveHomePost(token: string, postId: number) {
 
 export async function deleteHomePost(token: string, postId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean };
+}
+
+export async function fetchRecentlyDeletedHomePosts(token: string) {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/recently-deleted`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
+export async function restoreHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/restore`, token, {
+    method: "POST"
+  })) as { ok: boolean; post?: HomePost };
+}
+
+export async function permanentlyDeleteHomePost(token: string, postId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/permanent`, token, {
     method: "DELETE"
   })) as { ok: boolean };
 }
@@ -1255,6 +1291,32 @@ export async function unfollowUser(token: string, targetUserId: number) {
   };
 }
 
+export type BlockedUser = {
+  userId: number;
+  fullName: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  blockedAt?: string;
+};
+
+export async function fetchBlockedUsers(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/blocks`, token)) as { users: BlockedUser[] };
+}
+
+export async function blockUser(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/block`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetUserId })
+  })) as { ok: boolean; blocked: boolean };
+}
+
+export async function unblockUser(token: string, targetUserId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/block/${encodeURIComponent(String(targetUserId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean; unblocked: boolean; removed?: number };
+}
+
 export async function removeFollower(token: string, targetUserId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/remove-follower`, token, {
     method: "POST",
@@ -1393,6 +1455,10 @@ export type PushNotificationSettings = {
   pushEnabled: boolean;
   messagesEnabled: boolean;
   activityEnabled: boolean;
+  sleepMode: boolean;
+  pauseAii: boolean;
+  followingAndFollowers: boolean;
+  liveAndDrops: boolean;
 };
 
 export async function fetchPushSettings(token: string) {

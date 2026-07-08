@@ -67,9 +67,9 @@ export function ReelGridTile({
           source={{ uri: videoUri }}
           style={styles.media}
           resizeMode={ResizeMode.COVER}
-          shouldPlay={false}
+          shouldPlay
           isMuted
-          isLooping={false}
+          isLooping
           useNativeControls={false}
         />
       ) : (

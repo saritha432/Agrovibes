@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, ActivityIndicator } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/rootStackTypes";
@@ -14,12 +15,12 @@ const CARD = "#303132";
 const CARD_ALT = "#383b3f";
 const DIVIDER = "rgba(255,255,255,0.08)";
 
-type SavedTab = "All" | "Collection" | "Drops" | "Post";
+type SavedTab = "All" | "Drops" | "Post";
 
 const TABS: Array<{ key: SavedTab; icon: keyof typeof Ionicons.glyphMap; label: string }> = [
   { key: "All", icon: "layers-outline", label: "All" },
-  { key: "Collection", icon: "file-tray-stacked-outline", label: "Collection" },
-  { key: "Drops", icon: "play-box-outline", label: "Drops" },
+  // { key: "Collection", icon: "file-tray-stacked-outline", label: "Collection" },
+  { key: "Drops", icon: "play-circle-outline", label: "Drops" },
   { key: "Post", icon: "images-outline", label: "Post" }
 ];
 
@@ -64,12 +65,12 @@ export function SavedSettingsScreen() {
   const filteredSaved = useMemo(() => {
     if (activeTab === "Drops") return savedPosts.filter((post) => !!post.videoUrl);
     if (activeTab === "Post") return savedPosts.filter((post) => !post.videoUrl);
-    if (activeTab === "Collection") return savedPosts.filter((post) => !!post.imageUrl || (post.imageUrls?.length ?? 0) > 0);
+    // if (activeTab === "Collection") return savedPosts.filter((post) => !!post.imageUrl || (post.imageUrls?.length ?? 0) > 0);
     return savedPosts;
   }, [activeTab, savedPosts]);
 
   return (
-    <View style={styles.screen}>
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
       <View style={styles.topBar}>
         <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} accessibilityRole="button">
           <Ionicons name="arrow-back" size={22} color={APP_LIME} />
@@ -131,7 +132,7 @@ export function SavedSettingsScreen() {
           })
         }
       />
-    </View>
+    </SafeAreaView>
   );
 }
 

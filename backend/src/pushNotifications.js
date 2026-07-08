@@ -79,11 +79,19 @@ async function ensurePushUserSettingsTable() {
       push_enabled BOOLEAN NOT NULL DEFAULT true,
       messages_enabled BOOLEAN NOT NULL DEFAULT true,
       activity_enabled BOOLEAN NOT NULL DEFAULT true,
+      sleep_mode BOOLEAN NOT NULL DEFAULT false,
+      pause_aii BOOLEAN NOT NULL DEFAULT false,
+      following_and_followers_enabled BOOLEAN NOT NULL DEFAULT true,
+      live_and_drops_enabled BOOLEAN NOT NULL DEFAULT true,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     `
   );
+  await query(`ALTER TABLE push_user_settings ADD COLUMN IF NOT EXISTS sleep_mode BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE push_user_settings ADD COLUMN IF NOT EXISTS pause_aii BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE push_user_settings ADD COLUMN IF NOT EXISTS following_and_followers_enabled BOOLEAN NOT NULL DEFAULT true`);
+  await query(`ALTER TABLE push_user_settings ADD COLUMN IF NOT EXISTS live_and_drops_enabled BOOLEAN NOT NULL DEFAULT true`);
   pushUserSettingsTableReady = true;
 }
 
@@ -91,7 +99,14 @@ async function getPushSettings(userId) {
   await ensurePushUserSettingsTable();
   const result = await query(
     `
-    SELECT push_enabled, messages_enabled, activity_enabled
+    SELECT
+      push_enabled,
+      messages_enabled,
+      activity_enabled,
+      sleep_mode,
+      pause_aii,
+      following_and_followers_enabled,
+      live_and_drops_enabled
     FROM push_user_settings
     WHERE user_id = $1
     LIMIT 1
@@ -99,13 +114,25 @@ async function getPushSettings(userId) {
     [userId]
   );
   if (!result.rows[0]) {
-    return { pushEnabled: true, messagesEnabled: true, activityEnabled: true };
+    return {
+      pushEnabled: true,
+      messagesEnabled: true,
+      activityEnabled: true,
+      sleepMode: false,
+      pauseAii: false,
+      followingAndFollowers: true,
+      liveAndDrops: true
+    };
   }
   const row = result.rows[0];
   return {
     pushEnabled: Boolean(row.push_enabled),
     messagesEnabled: Boolean(row.messages_enabled),
-    activityEnabled: Boolean(row.activity_enabled)
+    activityEnabled: Boolean(row.activity_enabled),
+    sleepMode: Boolean(row.sleep_mode),
+    pauseAii: Boolean(row.pause_aii),
+    followingAndFollowers: Boolean(row.following_and_followers_enabled),
+    liveAndDrops: Boolean(row.live_and_drops_enabled)
   };
 }
 
@@ -114,30 +141,71 @@ async function setPushSettings(userId, settings) {
   const pushEnabled = Boolean(settings?.pushEnabled);
   const messagesEnabled = Boolean(settings?.messagesEnabled);
   const activityEnabled = Boolean(settings?.activityEnabled);
+  const sleepMode = Boolean(settings?.sleepMode);
+  const pauseAii = Boolean(settings?.pauseAii);
+  const followingAndFollowers = Boolean(settings?.followingAndFollowers);
+  const liveAndDrops = Boolean(settings?.liveAndDrops);
   const result = await query(
     `
-    INSERT INTO push_user_settings (user_id, push_enabled, messages_enabled, activity_enabled, updated_at)
-    VALUES ($1, $2, $3, $4, NOW())
+    INSERT INTO push_user_settings (
+      user_id,
+      push_enabled,
+      messages_enabled,
+      activity_enabled,
+      sleep_mode,
+      pause_aii,
+      following_and_followers_enabled,
+      live_and_drops_enabled,
+      updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
     ON CONFLICT (user_id) DO UPDATE
       SET push_enabled = EXCLUDED.push_enabled,
           messages_enabled = EXCLUDED.messages_enabled,
           activity_enabled = EXCLUDED.activity_enabled,
+          sleep_mode = EXCLUDED.sleep_mode,
+          pause_aii = EXCLUDED.pause_aii,
+          following_and_followers_enabled = EXCLUDED.following_and_followers_enabled,
+          live_and_drops_enabled = EXCLUDED.live_and_drops_enabled,
           updated_at = NOW()
-    RETURNING push_enabled, messages_enabled, activity_enabled
+    RETURNING
+      push_enabled,
+      messages_enabled,
+      activity_enabled,
+      sleep_mode,
+      pause_aii,
+      following_and_followers_enabled,
+      live_and_drops_enabled
     `,
-    [userId, pushEnabled, messagesEnabled, activityEnabled]
+    [userId, pushEnabled, messagesEnabled, activityEnabled, sleepMode, pauseAii, followingAndFollowers, liveAndDrops]
   );
   const row = result.rows[0];
   return {
     pushEnabled: Boolean(row.push_enabled),
     messagesEnabled: Boolean(row.messages_enabled),
-    activityEnabled: Boolean(row.activity_enabled)
+    activityEnabled: Boolean(row.activity_enabled),
+    sleepMode: Boolean(row.sleep_mode),
+    pauseAii: Boolean(row.pause_aii),
+    followingAndFollowers: Boolean(row.following_and_followers_enabled),
+    liveAndDrops: Boolean(row.live_and_drops_enabled)
   };
 }
 
 function shouldSendPushForType(settings, type) {
   if (!settings.pushEnabled) return false;
-  if (type === "direct_message" || type === "live_share") return settings.messagesEnabled;
+  if (settings.sleepMode) return false;
+  const normalizedType = String(type || "").trim();
+  const isMessageType = normalizedType === "direct_message" || normalizedType === "live_share";
+  const isFollowType = normalizedType === "follow_request" || normalizedType === "follow_accept";
+  const isLiveType =
+    normalizedType === "live_start" ||
+    normalizedType === "live_scheduled" ||
+    normalizedType === "live_reminder" ||
+    normalizedType === "live_host_reminder";
+  if (settings.pauseAii) return isMessageType && settings.messagesEnabled;
+  if (isMessageType) return settings.messagesEnabled;
+  if (isFollowType) return settings.followingAndFollowers;
+  if (isLiveType) return settings.liveAndDrops;
   return settings.activityEnabled;
 }
 
@@ -566,6 +634,10 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
 }
 
 async function sendIncomingCallPush({ userId, callerName, mode, roomName, callerId, callerAvatarUrl }) {
+  const settings = await getPushSettings(Number(userId));
+  if (!settings.pushEnabled || settings.sleepMode || !settings.messagesEnabled) {
+    return { sent: 0, skipped: "user_settings" };
+  }
   if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
 
   const entries = await listTokenEntriesForUser(userId);
@@ -661,6 +733,10 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
 }
 
 async function sendCallCancelledPush({ userId, roomName, callerId }) {
+  const settings = await getPushSettings(Number(userId));
+  if (!settings.pushEnabled || settings.sleepMode || !settings.messagesEnabled) {
+    return { sent: 0, skipped: "user_settings" };
+  }
   if (!initFirebaseAdmin()) return { sent: 0, skipped: "not_configured" };
 
   const entries = await listTokenEntriesForUser(userId);
