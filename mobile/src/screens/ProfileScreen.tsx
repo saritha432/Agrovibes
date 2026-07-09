@@ -60,6 +60,8 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
+import { clearHomeFeedCache } from "../social/homeFeedCache";
+import { rememberBlockedUser } from "../social/blockedUsers";
 import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
@@ -1382,6 +1384,16 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                         void (async () => {
                           try {
                             await blockUser(token, publicUserId);
+                            await rememberBlockedUser(
+                              {
+                                userId: publicUserId,
+                                fullName: name,
+                                username: profileSubject?.username ?? null,
+                                avatarUrl: profileSubject?.avatarUrl ?? null
+                              },
+                              user?.id
+                            );
+                            void clearHomeFeedCache(user?.id);
                             Alert.alert("Blocked", `${name} has been blocked.`);
                             navigation.goBack();
                           } catch {

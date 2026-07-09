@@ -102,6 +102,13 @@ import {
   readHomeFeedCache,
   writeHomeFeedCache
 } from "../social/homeFeedCache";
+import {
+  filterPostsByBlockedUsers,
+  loadBlockedUsers,
+  rememberBlockedUser,
+  subscribeBlockedUsersChanged
+} from "../social/blockedUsers";
+import type { BlockedUser } from "../services/api";
 import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
@@ -1252,6 +1259,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [sharePost, setSharePost] = useState<HomePost | null>(null);
   const [repostPost, setRepostPost] = useState<HomePost | null>(null);
   const [repostFeedItems, setRepostFeedItems] = useState<HomePost[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
@@ -1423,6 +1431,39 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const viewerUserId = Number(user?.id) || undefined;
 
+  const reloadBlockedUsers = useCallback(async () => {
+    if (!token) {
+      setBlockedUsers([]);
+      return;
+    }
+    const users = await loadBlockedUsers(token, user?.id);
+    setBlockedUsers(users);
+    if (users.length) {
+      setPosts((prev) => filterPostsByBlockedUsers(prev, users));
+      setRepostFeedItems((prev) => filterPostsByBlockedUsers(prev, users));
+    }
+  }, [token, user?.id]);
+
+  useEffect(() => {
+    void reloadBlockedUsers();
+  }, [reloadBlockedUsers]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeBlockedUsersChanged(() => {
+      void reloadBlockedUsers();
+    });
+    return unsubscribe;
+  }, [reloadBlockedUsers]);
+
+  const visiblePosts = useMemo(
+    () => filterPostsByBlockedUsers(posts, blockedUsers),
+    [posts, blockedUsers]
+  );
+  const visibleRepostFeedItems = useMemo(
+    () => filterPostsByBlockedUsers(repostFeedItems, blockedUsers),
+    [repostFeedItems, blockedUsers]
+  );
+
   const tabPosts = useMemo(() => {
     const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
@@ -1430,8 +1471,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     if (activeHomeTab === "Feed") {
       return orderPostsForFeed(
         mergeRepostFeedItems(
-          strip(posts).filter((p) => !isLivePost(p)),
-          repostFeedItems
+          strip(visiblePosts).filter((p) => !isLivePost(p)),
+          visibleRepostFeedItems
         ),
         feedShuffleSeed,
         nowMs
@@ -1440,7 +1481,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     if (activeHomeTab === "Friends") {
       return orderPostsForFeed(
         strip(
-          posts.filter((p) => {
+          visiblePosts.filter((p) => {
             if (!p.videoUrl) return false;
             if (isLivePost(p)) return false;
             const uid = Number(p.userId);
@@ -1453,10 +1494,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       );
     }
     if (activeHomeTab === "live") {
-      return orderPostsForFeed(strip(posts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs, viewerUserId);
+      return orderPostsForFeed(strip(visiblePosts.filter((p) => !!p.videoUrl)), feedShuffleSeed, nowMs, viewerUserId);
     }
-    return orderPostsForFeed(strip(posts), feedShuffleSeed, nowMs, viewerUserId);
-  }, [activeHomeTab, posts, repostFeedItems, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
+    return orderPostsForFeed(strip(visiblePosts), feedShuffleSeed, nowMs, viewerUserId);
+  }, [activeHomeTab, visiblePosts, visibleRepostFeedItems, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
 
   tabPostsRef.current = tabPosts;
 
@@ -1674,8 +1715,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, []);
 
   const activeLivePosts = useMemo(
-    () => buildLiveFeed(posts, viewerUserId, followingUserIds),
-    [posts, viewerUserId, followingUserIds]
+    () => buildLiveFeed(visiblePosts, viewerUserId, followingUserIds),
+    [visiblePosts, viewerUserId, followingUserIds]
   );
   const feedPollInFlightRef = useRef(false);
 
@@ -3026,8 +3067,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             void (async () => {
               try {
                 await blockUser(token, targetUserId);
+                await rememberBlockedUser(
+                  { userId: targetUserId, fullName: name, username: null, avatarUrl: post.authorAvatarUrl ?? null },
+                  user?.id
+                );
+                void clearHomeFeedCache(user?.id);
                 setPosts((prev) =>
-                  prev.filter((p) => Number(p.userId) !== targetUserId && String(p.userName || "") !== String(post.userName || ""))
+                  filterPostsByBlockedUsers(prev, [{ userId: targetUserId, fullName: name, username: null }])
+                );
+                setRepostFeedItems((prev) =>
+                  filterPostsByBlockedUsers(prev, [{ userId: targetUserId, fullName: name, username: null }])
                 );
                 Alert.alert("Blocked", `${name} has been blocked.`);
               } catch {

@@ -20,6 +20,7 @@ import {
   unblockUser,
   type BlockedUser
 } from "../services/api";
+import { forgetBlockedUser } from "../social/blockedUsers";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
 const DIVIDER = "rgba(255,255,255,0.1)";
@@ -31,22 +32,26 @@ function getInitial(name: string) {
 
 export function BlockedAccountsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [users, setUsers] = useState<BlockedUser[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!token) {
       setUsers([]);
+      setLoadError(null);
       return;
     }
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await fetchBlockedUsers(token);
       setUsers(data.users || []);
-    } catch {
+    } catch (error) {
       setUsers([]);
+      setLoadError(error instanceof Error ? error.message : "Could not load blocked accounts");
     } finally {
       setLoading(false);
     }
@@ -71,6 +76,7 @@ export function BlockedAccountsScreen() {
               setBusyId(person.userId);
               try {
                 await unblockUser(token, person.userId);
+                await forgetBlockedUser(person.userId, user?.id);
                 setUsers((prev) => prev.filter((u) => u.userId !== person.userId));
               } catch {
                 Alert.alert("Error", "Could not unblock this account. Try again.");
@@ -82,7 +88,7 @@ export function BlockedAccountsScreen() {
         }
       ]);
     },
-    [token]
+    [token, user?.id]
   );
 
   return (
@@ -105,7 +111,9 @@ export function BlockedAccountsScreen() {
           keyExtractor={(item) => String(item.userId)}
           contentContainerStyle={users.length ? styles.list : styles.centered}
           ItemSeparatorComponent={() => <View style={styles.divider} />}
-          ListEmptyComponent={<Text style={styles.emptyText}>No blocked accounts</Text>}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>{loadError || "No blocked accounts"}</Text>
+          }
           renderItem={({ item }) => {
             const username = String(item.username || "").replace(/^@+/, "");
             return (
