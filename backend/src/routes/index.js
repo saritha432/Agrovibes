@@ -1758,6 +1758,53 @@ async function ensureSupportMessagesTable() {
   `);
 }
 
+async function sendResendEmail({ to, subject, text, replyTo }) {
+  const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+  if (!resendKey) return false;
+
+  const fromEmail = String(process.env.SUPPORT_FROM_EMAIL || "Cropvibe Support <no-reply@cropvibe.com>").trim();
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      text,
+      reply_to: replyTo || undefined
+    })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const reason = data?.message || data?.error || `Resend error (${resp.status})`;
+    throw new Error(String(reason));
+  }
+  return true;
+}
+
+function buildSupportAutoReplyText({ firstName, subject }) {
+  const greetingName = String(firstName || "").trim();
+  const greeting = greetingName ? `Hi ${greetingName},` : "Hi,";
+  const subjectLine = String(subject || "").trim() || "your request";
+  return [
+    greeting,
+    "",
+    "Thank you for contacting Cropvibe Support!",
+    "",
+    `We have received your message about "${subjectLine}".`,
+    "Our team will review it and respond within 24 hours.",
+    "",
+    "Support hours: Monday – Saturday, 9:00 AM – 6:00 PM IST.",
+    "",
+    "If your issue is urgent, reply to this email or contact us at info@cropvibe.com.",
+    "",
+    "— Cropvibe Support Team"
+  ].join("\n");
+}
+
 async function sendSupportContactEmail({
   firstName,
   lastName,
@@ -1768,6 +1815,7 @@ async function sendSupportContactEmail({
   const toEmail = String(process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
   const replyTo = String(email || "").trim().toLowerCase();
   const fullName = `${String(firstName || "").trim()} ${String(lastName || "").trim()}`.trim() || "Unknown";
+  const cleanSubject = String(subject || "").trim() || "Support request";
   const textBody = [
     "New support request from Cropvibe web",
     "",
@@ -1775,18 +1823,35 @@ async function sendSupportContactEmail({
     `Last Name: ${String(lastName || "").trim() || "-"}`,
     `Full Name: ${fullName}`,
     `Email: ${replyTo || "-"}`,
-    `Subject: ${String(subject || "").trim() || "-"}`,
+    `Subject: ${cleanSubject}`,
     "",
     "Message:",
     String(message || "").trim() || "-"
   ].join("\n");
 
-  // Prefer FormSubmit so support works without RESEND_API_KEY.
+  const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+  if (resendKey) {
+    await sendResendEmail({
+      to: toEmail,
+      subject: `[Web Support] ${cleanSubject}`,
+      text: textBody,
+      replyTo
+    });
+    await sendResendEmail({
+      to: replyTo,
+      subject: "We received your Cropvibe support request",
+      text: buildSupportAutoReplyText({ firstName, subject: cleanSubject }),
+      replyTo: toEmail
+    });
+    return;
+  }
+
+  // FormSubmit delivers to support inbox only (no AJAX auto-reply).
   const formBody = new URLSearchParams({
     name: fullName,
     email: replyTo,
     _replyto: replyTo,
-    _subject: `[Cropvibe Support] ${String(subject || "").trim() || "Support request"}`,
+    _subject: `[Cropvibe Support] ${cleanSubject}`,
     message: textBody,
     _template: "table",
     _captcha: "false",
@@ -1808,38 +1873,11 @@ async function sendSupportContactEmail({
       String(formData?.message || "")
         .toLowerCase()
         .includes("successfully") ||
-      // FormSubmit may return 200 with empty body after accept.
       Object.keys(formData || {}).length === 0);
 
-  if (formOk) return;
-
-  // Optional Resend fallback if configured.
-  const resendKey = String(process.env.RESEND_API_KEY || "").trim();
-  if (resendKey) {
-    const fromEmail = String(process.env.SUPPORT_FROM_EMAIL || "Cropvibe Support <no-reply@cropvibe.com>").trim();
-    const resp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [toEmail],
-        subject: `[Web Support] ${String(subject || "").trim() || "Support request"}`,
-        reply_to: replyTo || undefined,
-        text: textBody
-      })
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const reason = data?.message || data?.error || `Resend error (${resp.status})`;
-      throw new Error(String(reason));
-    }
-    return;
+  if (!formOk) {
+    throw new Error(String(formData?.message || "Failed to deliver support email"));
   }
-
-  throw new Error(String(formData?.message || "Failed to deliver support email"));
 }
 
 router.post("/v1/support/contact", async (req, res) => {
