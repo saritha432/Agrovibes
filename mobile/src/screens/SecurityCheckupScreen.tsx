@@ -154,7 +154,7 @@ export function SecurityCheckupScreen() {
             />
           </AccountCenterCard>
 
-          <AccountCenterSectionTitle title="Additional Security Steps" />
+          {/* <AccountCenterSectionTitle title="Additional Security Steps" />
           <AccountCenterCard>
             <CheckupRow
               icon="phone-portrait-outline"
@@ -162,7 +162,7 @@ export function SecurityCheckupScreen() {
               subtitle="Set up an extra layer of protection"
               onPress={() => navigation.navigate("TwoFactorAuth")}
             />
-          </AccountCenterCard>
+          </AccountCenterCard> */}
         </>
       )}
     </AccountCenterSubLayout>

@@ -464,16 +464,35 @@ const hideBlockedUsersPostsClause = `
     OR NOT EXISTS (
       SELECT 1
       FROM social_blocks sb
-      JOIN learn_users blocked_u ON (
-        blocked_u.id = p.user_id
-        OR LOWER(TRIM(blocked_u.full_name)) = LOWER(TRIM(p.user_name))
-        OR (
-          blocked_u.username IS NOT NULL AND TRIM(blocked_u.username) <> ''
-          AND LOWER(TRIM(blocked_u.username)) = LOWER(TRIM(p.user_name))
+      WHERE (sb.blocker_id = $1::integer OR sb.blocked_id = $1::integer)
+        AND (
+          (
+            COALESCE(p.user_id, owner.id) IS NOT NULL
+            AND (
+              (sb.blocker_id = $1::integer AND sb.blocked_id = COALESCE(p.user_id, owner.id))
+              OR (sb.blocked_id = $1::integer AND sb.blocker_id = COALESCE(p.user_id, owner.id))
+            )
+          )
+          OR (
+            COALESCE(p.user_id, owner.id) IS NULL
+            AND p.user_name IS NOT NULL AND TRIM(p.user_name) <> ''
+            AND EXISTS (
+              SELECT 1
+              FROM learn_users other_u
+              WHERE (
+                (sb.blocker_id = $1::integer AND other_u.id = sb.blocked_id)
+                OR (sb.blocked_id = $1::integer AND other_u.id = sb.blocker_id)
+              )
+              AND (
+                LOWER(TRIM(other_u.full_name)) = LOWER(TRIM(p.user_name))
+                OR (
+                  other_u.username IS NOT NULL AND TRIM(other_u.username) <> ''
+                  AND LOWER(TRIM(other_u.username)) = LOWER(TRIM(p.user_name))
+                )
+              )
+            )
+          )
         )
-      )
-      WHERE (sb.blocker_id = $1::integer AND sb.blocked_id = blocked_u.id)
-         OR (sb.blocked_id = $1::integer AND sb.blocker_id = blocked_u.id)
     )
   )
 `;
@@ -4535,6 +4554,7 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
 
     await ensureHomePostsTable();
     await purgeExpiredDeletedHomePosts();
+    await backfillHomePostUserIds();
     await ensureLearnUsersTable();
     await ensureSocialFollowsTable();
     await ensureSocialBlocksTable();
@@ -5873,6 +5893,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
   try {
     await ensureHomePostResharesTable();
     await ensureSocialFollowsTable();
+    await ensureSocialBlocksTable();
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
     await ensureHomePostLikesTable();
@@ -5934,6 +5955,22 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         WHERE sf.follower_id = $1
           AND sf.following_id = hpr.user_id
           AND sf.status = 'accepted'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM social_blocks sb
+        WHERE (sb.blocker_id = $1 OR sb.blocked_id = $1)
+          AND (
+            (sb.blocker_id = $1 AND sb.blocked_id = hpr.user_id)
+            OR (sb.blocked_id = $1 AND sb.blocker_id = hpr.user_id)
+            OR (
+              COALESCE(p.user_id, owner.id) IS NOT NULL
+              AND (
+                (sb.blocker_id = $1 AND sb.blocked_id = COALESCE(p.user_id, owner.id))
+                OR (sb.blocked_id = $1 AND sb.blocker_id = COALESCE(p.user_id, owner.id))
+              )
+            )
+          )
       )
       ORDER BY hpr.created_at DESC
       LIMIT $2

@@ -35,14 +35,14 @@ export function PasswordSecurityContent() {
       icon: "lock-closed-outline",
       onPress: () => push("ChangePassword")
     },
-    { key: "two-factor", title: "Two-Factor Authentication", icon: "shield-checkmark-outline", screen: "TwoFactorAuth" },
-    { key: "verification-selfie", title: "Verification Selfie", icon: "scan-outline", screen: "VerificationSelfie" },
+    // { key: "two-factor", title: "Two-Factor Authentication", icon: "shield-checkmark-outline", screen: "TwoFactorAuth" },
+    // { key: "verification-selfie", title: "Verification Selfie", icon: "scan-outline", screen: "VerificationSelfie" },
     { key: "saved-login", title: "Saved Login", icon: "bookmark-outline", screen: "SaveLogin" }
   ];
 
   const securityItems: SecurityRow[] = [
     { key: "where-logged-in", title: "Where You're Logged In", icon: "phone-portrait-outline", screen: "WhereLoggedIn" },
-    { key: "recent-emails", title: "Recent Emails", icon: "mail-outline" },
+    // { key: "recent-emails", title: "Recent Emails", icon: "mail-outline" },
     { key: "security-checkup", title: "Security Checkup", icon: "checkmark-done-outline", screen: "SecurityCheckup" }
   ];
 

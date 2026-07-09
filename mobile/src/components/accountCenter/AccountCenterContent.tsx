@@ -81,18 +81,18 @@ export function AccountCenterContent({ onClose, onNavigate }: AccountCenterConte
   ];
 
   const settingsItems: MenuItem[] = [
-    { key: "password", title: "Password And Security", icon: "key-outline", onPress: () => go("PasswordSecurity") },
-    { key: "connected", title: "Connected Experiences", icon: "git-network-outline", onPress: () => go("ConnectedExperiences") },
-    {
-      key: "permissions",
-      title: "Your Information And Permissions",
-      icon: "shield-checkmark-outline",
-      onPress: () => go("YourInformationPermissions")
-    },
-    { key: "ads", title: "Ad Preferences", icon: "megaphone-outline", onPress: noop },
-    { key: "pay", title: "CropvibePay", icon: "wallet-outline", onPress: noop },
-    { key: "subscriptions", title: "Subscriptions", icon: "cash-outline", onPress: noop },
-    { key: "gallery", title: "Your Media Gallery", icon: "images-outline", onPress: noop }
+    { key: "password", title: "Password And Security", icon: "key-outline", onPress: () => go("PasswordSecurity") }
+    // { key: "connected", title: "Connected Experiences", icon: "git-network-outline", onPress: () => go("ConnectedExperiences") },
+    // {
+    //   key: "permissions",
+    //   title: "Your Information And Permissions",
+    //   icon: "shield-checkmark-outline",
+    //   onPress: () => go("YourInformationPermissions")
+    // },
+    // { key: "ads", title: "Ad Preferences", icon: "megaphone-outline", onPress: noop },
+    // { key: "pay", title: "CropvibePay", icon: "wallet-outline", onPress: noop },
+    // { key: "subscriptions", title: "Subscriptions", icon: "cash-outline", onPress: noop },
+    // { key: "gallery", title: "Your Media Gallery", icon: "images-outline", onPress: noop }
   ];
 
   const manageItems: MenuItem[] = [
