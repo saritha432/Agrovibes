@@ -112,24 +112,11 @@ export function ContactSupportPage() {
       setSubject("");
       setMessage("");
     } catch (error) {
-      const messageText = error instanceof Error ? error.message : "Could not send your support request.";
-      if (messageText.includes("(404)")) {
-        const encodedSubject = encodeURIComponent(subject.trim() || "Cropvibe Support");
-        const body = encodeURIComponent(
-          [
-            `First Name: ${firstName.trim() || "-"}`,
-            `Last Name: ${lastName.trim() || "-"}`,
-            `Email Address: ${email.trim() || "-"}`,
-            "",
-            "Message:",
-            message.trim() || "-"
-          ].join("\n")
-        );
-        window.location.href = `mailto:info@cropvibe.com?subject=${encodedSubject}&body=${body}`;
-        setSubmitted(true);
-      } else {
-        setSubmitError(messageText);
-      }
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : "Could not send your support request. Please email info@cropvibe.com."
+      );
     } finally {
       setSubmitting(false);
     }
