@@ -75,6 +75,7 @@ import {
   blockUser,
   unlikeHomePost,
   unsaveHomePost,
+  unblockUser,
   type MutualConnectionInfo,
   type UserSearchRecord
 } from "../services/api";
@@ -104,11 +105,14 @@ import {
 } from "../social/homeFeedCache";
 import {
   filterPostsByBlockedUsers,
+  forgetBlockedUser,
+  isUserBlocked,
   loadBlockedUsers,
   rememberBlockedUser,
   subscribeBlockedUsersChanged
 } from "../social/blockedUsers";
 import type { BlockedUser } from "../services/api";
+import { confirmAction } from "../utils/confirmAction";
 import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
@@ -3046,48 +3050,97 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const onBlockUserFromPost = useCallback(
     (post: HomePost) => {
-      setActiveReelOptionsPost(null);
       if (!token) {
-        Alert.alert(t("loginRequired"), "Please log in to block accounts.");
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("Please log in to block accounts.");
+        } else {
+          Alert.alert(t("loginRequired"), "Please log in to block accounts.");
+        }
         return;
       }
       if (viewerOwnsPost(post, user)) return;
       const targetUserId = Number(post.userId);
       if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
-        Alert.alert("Error", "Could not find this account to block.");
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("Could not find this account to block.");
+        } else {
+          Alert.alert("Error", "Could not find this account to block.");
+        }
         return;
       }
       const name = String(post.userName || "this account").trim() || "this account";
-      Alert.alert("Block", `Block ${name}? They won't be able to see your posts, and you won't see theirs.`, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Block",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                await blockUser(token, targetUserId);
-                await rememberBlockedUser(
-                  { userId: targetUserId, fullName: name, username: null, avatarUrl: post.authorAvatarUrl ?? null },
-                  user?.id
-                );
-                void clearHomeFeedCache(user?.id);
-                setPosts((prev) =>
-                  filterPostsByBlockedUsers(prev, [{ userId: targetUserId, fullName: name, username: null }])
-                );
-                setRepostFeedItems((prev) =>
-                  filterPostsByBlockedUsers(prev, [{ userId: targetUserId, fullName: name, username: null }])
-                );
-                Alert.alert("Blocked", `${name} has been blocked.`);
-              } catch {
-                Alert.alert("Error", "Could not block this account. Try again.");
-              }
-            })();
+      void (async () => {
+        const confirmed = await confirmAction(
+          "Block",
+          `Block ${name}? They won't be able to see your posts, and you won't see theirs.`,
+          "Block"
+        );
+        if (!confirmed) return;
+        setActiveReelOptionsPost(null);
+        try {
+          await blockUser(token, targetUserId);
+          await rememberBlockedUser(
+            { userId: targetUserId, fullName: name, username: null, avatarUrl: post.authorAvatarUrl ?? null },
+            user?.id
+          );
+          void clearHomeFeedCache(user?.id);
+          setPosts((prev) =>
+            filterPostsByBlockedUsers(prev, [{ userId: targetUserId, fullName: name, username: null }])
+          );
+          setRepostFeedItems((prev) =>
+            filterPostsByBlockedUsers(prev, [{ userId: targetUserId, fullName: name, username: null }])
+          );
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert(`${name} has been blocked.`);
+          } else {
+            Alert.alert("Blocked", `${name} has been blocked.`);
+          }
+        } catch {
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert("Could not block this account. Try again.");
+          } else {
+            Alert.alert("Error", "Could not block this account. Try again.");
           }
         }
-      ]);
+      })();
     },
     [token, user, t]
+  );
+
+  const onUnblockUserFromPost = useCallback(
+    (post: HomePost) => {
+      if (!token) {
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert("Please log in to unblock accounts.");
+        } else {
+          Alert.alert(t("loginRequired"), "Please log in to unblock accounts.");
+        }
+        return;
+      }
+      const targetUserId = Number(post.userId);
+      if (!Number.isFinite(targetUserId) || targetUserId <= 0) return;
+      const name = String(post.userName || "this account").trim() || "this account";
+      void (async () => {
+        setActiveReelOptionsPost(null);
+        try {
+          await unblockUser(token, targetUserId);
+          await forgetBlockedUser(targetUserId, user?.id);
+          await reloadBlockedUsers();
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert(`${name} has been unblocked.`);
+          } else {
+            Alert.alert("Unblocked", `${name} has been unblocked.`);
+          }
+        } catch {
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert("Could not unblock this account. Try again.");
+          } else {
+            Alert.alert("Error", "Could not unblock this account. Try again.");
+          }
+        }
+      })();
+    },
+    [reloadBlockedUsers, token, user?.id, t]
   );
 
   const confirmDeleteOwnPost = useCallback(
@@ -5002,20 +5055,37 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </View>
             </Pressable>
             {activeReelOptionsPost && !viewerOwnsPost(activeReelOptionsPost, user) ? (
-              <Pressable
-                style={styles.reelOptionRow}
-                onPress={() => {
-                  if (activeReelOptionsPost) onBlockUserFromPost(activeReelOptionsPost);
-                }}
-              >
-                <View style={styles.reelOptionIcon}>
-                  <Ionicons name="ban-outline" size={22} color="#ff6b6b" />
-                </View>
-                <View style={styles.reelOptionTextCol}>
-                  <Text style={[styles.reelOptionTitle, styles.reelOptionTitleDanger]}>Block</Text>
-                  <Text style={styles.reelOptionSub}>Stop seeing posts from this account.</Text>
-                </View>
-              </Pressable>
+              isUserBlocked(Number(activeReelOptionsPost.userId), blockedUsers) ? (
+                <Pressable
+                  style={styles.reelOptionRow}
+                  onPress={() => {
+                    if (activeReelOptionsPost) onUnblockUserFromPost(activeReelOptionsPost);
+                  }}
+                >
+                  <View style={styles.reelOptionIcon}>
+                    <Ionicons name="checkmark-circle-outline" size={22} color="#C9FF35" />
+                  </View>
+                  <View style={styles.reelOptionTextCol}>
+                    <Text style={styles.reelOptionTitle}>Unblock</Text>
+                    <Text style={styles.reelOptionSub}>Show posts from this account again.</Text>
+                  </View>
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={styles.reelOptionRow}
+                  onPress={() => {
+                    if (activeReelOptionsPost) onBlockUserFromPost(activeReelOptionsPost);
+                  }}
+                >
+                  <View style={styles.reelOptionIcon}>
+                    <Ionicons name="ban-outline" size={22} color="#ff6b6b" />
+                  </View>
+                  <View style={styles.reelOptionTextCol}>
+                    <Text style={[styles.reelOptionTitle, styles.reelOptionTitleDanger]}>Block</Text>
+                    <Text style={styles.reelOptionSub}>Stop seeing posts from this account.</Text>
+                  </View>
+                </Pressable>
+              )
             ) : null}
             {activeReelOptionsPost && viewerOwnsPost(activeReelOptionsPost, user) ? (
               <Pressable
