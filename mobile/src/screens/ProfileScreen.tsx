@@ -47,6 +47,7 @@ import {
   sendFollowRequest,
   sendDirectMessage,
   unfollowUser,
+  blockUser,
   type FollowStatus
 } from "../services/api";
 import {
@@ -1362,7 +1363,38 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
               </View>
             </DeactivatedChromeWrap>
             {isPublicProfileView ? (
-              <View style={styles.topBarBackBtn} />
+              <Pressable
+                style={styles.topBarMenuBtn}
+                hitSlop={8}
+                accessibilityLabel="More options"
+                onPress={() => {
+                  if (!token || !publicUserId) {
+                    Alert.alert("Login required", "Please log in to block accounts.");
+                    return;
+                  }
+                  const name = profileHeaderName || "this account";
+                  Alert.alert("Block", `Block ${name}? They won't be able to see your posts, and you won't see theirs.`, [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Block",
+                      style: "destructive",
+                      onPress: () => {
+                        void (async () => {
+                          try {
+                            await blockUser(token, publicUserId);
+                            Alert.alert("Blocked", `${name} has been blocked.`);
+                            navigation.goBack();
+                          } catch {
+                            Alert.alert("Error", "Could not block this account. Try again.");
+                          }
+                        })();
+                      }
+                    }
+                  ]);
+                }}
+              >
+                <Ionicons name="ellipsis-horizontal" size={24} color={TEXT} />
+              </Pressable>
             ) : (
               <Pressable
                 style={styles.topBarMenuBtn}

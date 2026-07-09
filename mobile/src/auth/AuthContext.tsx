@@ -20,6 +20,7 @@ export interface AuthUser {
   preferredLanguage?: string;
   locationLabel?: string;
   accountStatus?: "active" | "deactivated";
+  isPrivate?: boolean;
 }
 
 interface AuthState {
@@ -127,7 +128,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bio: data.user.bio,
       website: data.user.website,
       locationLabel: data.user.locationLabel,
-      accountStatus: data.user.accountStatus
+      accountStatus: data.user.accountStatus,
+      isPrivate: data.user.isPrivate
     });
   }, [updateUser]);
 

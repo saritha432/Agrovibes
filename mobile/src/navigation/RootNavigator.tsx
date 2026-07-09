@@ -25,6 +25,24 @@ import { ProfileScreen } from "../screens/ProfileScreen";
 import { DirectChatScreen } from "../screens/messaging/DirectChatScreen";
 import { SettingsMenuScreen } from "../screens/SettingsMenuScreen";
 import { SavedSettingsScreen } from "../screens/SavedSettingsScreen";
+import { YourActivityScreen } from "../screens/YourActivityScreen";
+import { YourActivityLikesScreen } from "../screens/YourActivityLikesScreen";
+import { YourActivityCommentsScreen } from "../screens/YourActivityCommentsScreen";
+import { YourActivityMentionsTagsScreen } from "../screens/YourActivityMentionsTagsScreen";
+import { YourActivityRecentlyDeletedScreen } from "../screens/YourActivityRecentlyDeletedScreen";
+import { YourActivityPostsScreen } from "../screens/YourActivityPostsScreen";
+import { YourActivityDropsScreen } from "../screens/YourActivityDropsScreen";
+import { YourActivityInterestedScreen } from "../screens/YourActivityInterestedScreen";
+import { YourActivityNotInterestedScreen } from "../screens/YourActivityNotInterestedScreen";
+import { YourActivityRecentSearchesScreen } from "../screens/YourActivityRecentSearchesScreen";
+import { YourActivityWatchHistoryScreen } from "../screens/YourActivityWatchHistoryScreen";
+import { YourActivitySharesScreen } from "../screens/YourActivitySharesScreen";
+import { YourActivityHighlightsScreen } from "../screens/YourActivityHighlightsScreen";
+import { YourActivityArchivedScreen } from "../screens/YourActivityArchivedScreen";
+import { YourActivityTimeManagementScreen } from "../screens/YourActivityTimeManagementScreen";
+import { YourActivityLinkHistoryScreen } from "../screens/YourActivityLinkHistoryScreen";
+import { YourActivityAccountHistoryScreen } from "../screens/YourActivityAccountHistoryScreen";
+import { LanguageTranslationsScreen } from "../screens/LanguageTranslationsScreen";
 import { NotificationsSettingsScreen } from "../screens/NotificationsSettingsScreen";
 import { AccountCenterScreen } from "../screens/AccountCenterScreen";
 import { ProfilesPersonalDetailsScreen } from "../screens/ProfilesPersonalDetailsScreen";
@@ -57,6 +75,7 @@ import { WhatYouShouldKnowScreen } from "../screens/WhatYouShouldKnowScreen";
 import { UploadContactsScreen } from "../screens/UploadContactsScreen";
 import { ConnectedAppsScreen } from "../screens/ConnectedAppsScreen";
 import { PrivacyScreen } from "../screens/PrivacyScreen";
+import { BlockedAccountsScreen } from "../screens/BlockedAccountsScreen";
 import { AboutScreen } from "../screens/AboutScreen";
 import type { RootStackParamList } from "./rootStackTypes";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
@@ -116,6 +135,64 @@ export function RootNavigator() {
           contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
         }}
       />
+      <Stack.Screen
+        name="YourActivity"
+        component={YourActivityScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="YourActivityLikes"
+        component={YourActivityLikesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="YourActivityComments"
+        component={YourActivityCommentsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="YourActivityMentionsTags"
+        component={YourActivityMentionsTagsScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen
+        name="YourActivityRecentlyDeleted"
+        component={YourActivityRecentlyDeletedScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: socialDiscoveryTheme.bg }
+        }}
+      />
+      <Stack.Screen name="YourActivityPosts" component={YourActivityPostsScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityDrops" component={YourActivityDropsScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityInterested" component={YourActivityInterestedScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityNotInterested" component={YourActivityNotInterestedScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityRecentSearches" component={YourActivityRecentSearchesScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityWatchHistory" component={YourActivityWatchHistoryScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityShares" component={YourActivitySharesScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityHighlights" component={YourActivityHighlightsScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityArchived" component={YourActivityArchivedScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityTimeManagement" component={YourActivityTimeManagementScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityLinkHistory" component={YourActivityLinkHistoryScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="YourActivityAccountHistory" component={YourActivityAccountHistoryScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
+      <Stack.Screen name="LanguageTranslations" component={LanguageTranslationsScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
       <Stack.Screen
         name="NotificationsSettings"
         component={NotificationsSettingsScreen}
@@ -410,6 +487,7 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="BlockedAccounts" component={BlockedAccountsScreen} options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: socialDiscoveryTheme.bg } }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
