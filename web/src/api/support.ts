@@ -1,3 +1,5 @@
+import { API_BASE_URL, fetchWithRetry, parseJsonOrThrow } from "./client";
+
 const SUPPORT_INBOX = "info@cropvibe.com";
 
 type SupportPayload = {
@@ -9,10 +11,27 @@ type SupportPayload = {
 };
 
 /**
- * Delivers contact-form messages to info@cropvibe.com.
- * Uses FormSubmit (no backend Resend key required).
+ * Sends support request to backend (inbox + user auto-reply when Resend is configured).
+ * Falls back to FormSubmit for inbox delivery only.
  */
 export async function sendSupportContact(payload: SupportPayload) {
+  try {
+    const response = await fetchWithRetry(`${API_BASE_URL}/v1/support/contact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (response.ok) {
+      return (await parseJsonOrThrow(response)) as { success: boolean };
+    }
+  } catch {
+    // Fall through to FormSubmit inbox delivery.
+  }
+
+  return sendViaFormSubmit(payload);
+}
+
+async function sendViaFormSubmit(payload: SupportPayload) {
   const fullName = `${payload.firstName || ""} ${payload.lastName || ""}`.trim() || "Cropvibe user";
   const composedMessage = [
     "New support request from Cropvibe website",
@@ -57,7 +76,5 @@ export async function sendSupportContact(payload: SupportPayload) {
     );
   }
 
-  // FormSubmit accepts the request even before inbox activation;
-  // after first activation email is confirmed, messages arrive in inbox.
   return { success: true as const };
 }
