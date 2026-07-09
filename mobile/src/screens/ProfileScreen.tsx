@@ -48,6 +48,7 @@ import {
   sendDirectMessage,
   unfollowUser,
   blockUser,
+  unblockUser,
   type FollowStatus
 } from "../services/api";
 import {
@@ -61,7 +62,14 @@ import {
 } from "../social/localFollowStore";
 import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
 import { clearHomeFeedCache } from "../social/homeFeedCache";
-import { rememberBlockedUser } from "../social/blockedUsers";
+import {
+  forgetBlockedUser,
+  isUserBlocked,
+  loadBlockedUsers,
+  rememberBlockedUser,
+  subscribeBlockedUsersChanged
+} from "../social/blockedUsers";
+import type { BlockedUser } from "../services/api";
 import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
@@ -198,6 +206,9 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [shareProfileSearch, setShareProfileSearch] = useState("");
   const [profileReelViewer, setProfileReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
+  const [publicProfileMenuOpen, setPublicProfileMenuOpen] = useState(false);
+  const [blockedUsersList, setBlockedUsersList] = useState<BlockedUser[]>([]);
+  const [blockActionBusy, setBlockActionBusy] = useState(false);
   const isMountedRef = useRef(true);
   const profileInitialTabRef = useRef<GalleryTab | undefined>(route?.params?.initialTab);
 
@@ -1111,6 +1122,90 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const publicFollowDisabled = followPublicBusy || publicFollowStatus === "pending";
 
+  const isPublicUserBlocked = useMemo(
+    () => (publicUserId ? isUserBlocked(publicUserId, blockedUsersList) : false),
+    [blockedUsersList, publicUserId]
+  );
+
+  const reloadBlockedUsersForProfile = useCallback(async () => {
+    if (!token) {
+      setBlockedUsersList([]);
+      return;
+    }
+    const users = await loadBlockedUsers(token, user?.id);
+    if (isMountedRef.current) setBlockedUsersList(users);
+  }, [token, user?.id]);
+
+  useEffect(() => {
+    void reloadBlockedUsersForProfile();
+  }, [reloadBlockedUsersForProfile]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeBlockedUsersChanged(() => {
+      void reloadBlockedUsersForProfile();
+    });
+    return unsubscribe;
+  }, [reloadBlockedUsersForProfile]);
+
+  const onBlockPublicUser = useCallback(async () => {
+    if (!token || !publicUserId || blockActionBusy) return;
+    const name = profileHeaderName || "this account";
+    setBlockActionBusy(true);
+    try {
+      await blockUser(token, publicUserId);
+      await rememberBlockedUser(
+        {
+          userId: publicUserId,
+          fullName: name,
+          username: profileSubject?.username ?? null,
+          avatarUrl: profileSubject?.avatarUrl ?? null
+        },
+        user?.id
+      );
+      void clearHomeFeedCache(user?.id);
+      setPublicProfileMenuOpen(false);
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert(`${name} has been blocked.`);
+      } else {
+        Alert.alert("Blocked", `${name} has been blocked.`);
+      }
+      navigation.goBack();
+    } catch {
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert("Could not block this account. Try again.");
+      } else {
+        Alert.alert("Error", "Could not block this account. Try again.");
+      }
+    } finally {
+      setBlockActionBusy(false);
+    }
+  }, [blockActionBusy, navigation, profileHeaderName, profileSubject?.avatarUrl, profileSubject?.username, publicUserId, token, user?.id]);
+
+  const onUnblockPublicUser = useCallback(async () => {
+    if (!token || !publicUserId || blockActionBusy) return;
+    const name = profileHeaderName || "this account";
+    setBlockActionBusy(true);
+    try {
+      await unblockUser(token, publicUserId);
+      await forgetBlockedUser(publicUserId, user?.id);
+      setPublicProfileMenuOpen(false);
+      await reloadBlockedUsersForProfile();
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert(`${name} has been unblocked.`);
+      } else {
+        Alert.alert("Unblocked", `${name} has been unblocked.`);
+      }
+    } catch {
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert("Could not unblock this account. Try again.");
+      } else {
+        Alert.alert("Error", "Could not unblock this account. Try again.");
+      }
+    } finally {
+      setBlockActionBusy(false);
+    }
+  }, [blockActionBusy, profileHeaderName, publicUserId, reloadBlockedUsersForProfile, token, user?.id]);
+
   const followPublicUser = async () => {
     if (!user?.fullName || publicFollowDisabled || publicFollowStatus === "accepted") return;
     setFollowPublicBusy(true);
@@ -1371,38 +1466,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                 accessibilityLabel="More options"
                 onPress={() => {
                   if (!token || !publicUserId) {
-                    Alert.alert("Login required", "Please log in to block accounts.");
+                    if (Platform.OS === "web" && typeof window !== "undefined") {
+                      window.alert("Please log in to manage blocked accounts.");
+                    } else {
+                      Alert.alert("Login required", "Please log in to block accounts.");
+                    }
                     return;
                   }
-                  const name = profileHeaderName || "this account";
-                  Alert.alert("Block", `Block ${name}? They won't be able to see your posts, and you won't see theirs.`, [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Block",
-                      style: "destructive",
-                      onPress: () => {
-                        void (async () => {
-                          try {
-                            await blockUser(token, publicUserId);
-                            await rememberBlockedUser(
-                              {
-                                userId: publicUserId,
-                                fullName: name,
-                                username: profileSubject?.username ?? null,
-                                avatarUrl: profileSubject?.avatarUrl ?? null
-                              },
-                              user?.id
-                            );
-                            void clearHomeFeedCache(user?.id);
-                            Alert.alert("Blocked", `${name} has been blocked.`);
-                            navigation.goBack();
-                          } catch {
-                            Alert.alert("Error", "Could not block this account. Try again.");
-                          }
-                        })();
-                      }
-                    }
-                  ]);
+                  setPublicProfileMenuOpen(true);
                 }}
               >
                 <Ionicons name="ellipsis-horizontal" size={24} color={TEXT} />
@@ -1461,6 +1532,55 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         onPostsChange={handleProfileReelPostsChange}
         canDeleteOwnPosts={canDeleteFromProfileGallery}
       />
+
+      <Modal
+        visible={publicProfileMenuOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPublicProfileMenuOpen(false)}
+      >
+        <View style={styles.overlay}>
+          <Pressable style={styles.overlayTapAboveSheet} onPress={() => setPublicProfileMenuOpen(false)} />
+          <View style={styles.sheet} collapsable={false}>
+            <View style={styles.profileShareHandle} />
+            <Text style={styles.sheetTitle}>Profile options</Text>
+            {isPublicUserBlocked ? (
+              <Pressable
+                style={styles.profileOptionRow}
+                disabled={blockActionBusy}
+                onPress={() => void onUnblockPublicUser()}
+              >
+                <Ionicons name="checkmark-circle-outline" size={22} color={LIME} />
+                <View style={styles.profileOptionTextCol}>
+                  <Text style={styles.profileOptionTitle}>Unblock</Text>
+                  <Text style={styles.profileOptionSub}>
+                    Unblock {profileHeaderName}. You will see their posts again.
+                  </Text>
+                </View>
+                {blockActionBusy ? <ActivityIndicator color={LIME} /> : null}
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.profileOptionRow}
+                disabled={blockActionBusy}
+                onPress={() => void onBlockPublicUser()}
+              >
+                <Ionicons name="ban-outline" size={22} color="#ff6b6b" />
+                <View style={styles.profileOptionTextCol}>
+                  <Text style={[styles.profileOptionTitle, styles.profileOptionTitleDanger]}>Block</Text>
+                  <Text style={styles.profileOptionSub}>
+                    Block {profileHeaderName}. They won&apos;t see your posts, and you won&apos;t see theirs.
+                  </Text>
+                </View>
+                {blockActionBusy ? <ActivityIndicator color={LIME} /> : null}
+              </Pressable>
+            )}
+            <Pressable style={styles.profileOptionCancel} onPress={() => setPublicProfileMenuOpen(false)}>
+              <Text style={styles.profileOptionCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={shareProfileOpen}
@@ -2006,6 +2126,24 @@ const styles = StyleSheet.create({
   sheetTitle: { color: TEXT, fontWeight: "900", fontSize: 17 },
   sheetBody: { paddingTop: 12, gap: 10 },
   sheetEmpty: { color: TEXT, opacity: 0.62, fontWeight: "700" },
+  profileOptionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: SURFACE_ALT
+  },
+  profileOptionTextCol: { flex: 1, gap: 4 },
+  profileOptionTitle: { color: TEXT, fontSize: 16, fontWeight: "700" },
+  profileOptionTitleDanger: { color: "#ff6b6b" },
+  profileOptionSub: { color: TEXT, opacity: 0.62, fontSize: 13, lineHeight: 18 },
+  profileOptionCancel: {
+    marginTop: 8,
+    alignItems: "center",
+    paddingVertical: 14
+  },
+  profileOptionCancelText: { color: TEXT, fontSize: 15, fontWeight: "700" },
   personRow: {
     flexDirection: "row",
     alignItems: "center",

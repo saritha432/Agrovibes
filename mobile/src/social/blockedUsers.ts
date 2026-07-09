@@ -99,6 +99,12 @@ function normalizeName(value?: string | null) {
   return String(value || "").trim().toLowerCase();
 }
 
+export function isUserBlocked(userId: number, blockedUsers: BlockedUser[]): boolean {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return false;
+  return blockedUsers.some((row) => row.userId === id);
+}
+
 export function isPostFromBlockedUser(
   post: Pick<HomePost, "userId" | "userName"> & { repost?: { byUserId?: number | null } | null },
   blockedUsers: BlockedUser[]
