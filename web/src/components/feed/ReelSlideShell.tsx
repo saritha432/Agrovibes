@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
-import { dropCaption } from "../../utils/feedOrder";
+import { dropCaption, dropMusicLabel, postShowsMusicRow } from "../../utils/feedOrder";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
@@ -44,6 +44,8 @@ export function ReelSlideShell({
 
   const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
   const caption = dropCaption(post.caption);
+  const musicLabel = dropMusicLabel(post);
+  const showMusic = postShowsMusicRow(post) && !!musicLabel;
 
   useEffect(() => {
     setLiked(!!post.viewerHasLiked);
@@ -232,6 +234,14 @@ export function ReelSlideShell({
 
         <div className="reel-slide__meta">
           <strong>{post.userName}</strong>
+          {showMusic ? (
+            <p className="reel-slide__music">
+              <span className="reel-slide__music-icon" aria-hidden>
+                ♪
+              </span>
+              {musicLabel}
+            </p>
+          ) : null}
           {caption ? <p>{caption}</p> : null}
         </div>
       </div>

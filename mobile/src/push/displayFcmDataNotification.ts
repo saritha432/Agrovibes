@@ -1,5 +1,6 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { presentDirectMessageNotification } from "./dmNotificationThread";
 import { ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
 type FcmRemoteMessage = {
@@ -18,12 +19,23 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
 
   const title = String(data.title || remoteMessage?.notification?.title || "").trim();
   const rawBody = String(data.message || data.body || remoteMessage?.notification?.body || "").trim();
-  const actorName = String(data.actorName || data.senderName || data.peerName || title || "").trim();
-  const body = isDirectMessage
-    ? actorName && rawBody && !rawBody.toLowerCase().startsWith(`${actorName.toLowerCase()}:`)
-      ? `${actorName}: ${rawBody}`
-      : rawBody
-    : rawBody;
+  const actorName = String(
+    data.actorName || data.senderName || data.peerName || title || ""
+  ).trim();
+  const actorId = String(data.actorId || data.senderId || "").trim();
+
+  if (isDirectMessage && actorId) {
+    await presentDirectMessageNotification({
+      peerUserId: actorId,
+      peerName: actorName || title || "Someone",
+      senderName: actorName || title || "Someone",
+      messageText: rawBody,
+      data: { ...data, type: type || "direct_message" }
+    });
+    return;
+  }
+
+  const body = rawBody;
   if (!title && !body) return;
 
   await ensureAndroidChannels();
@@ -42,11 +54,7 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
       ? Notifications.AndroidNotificationPriority.MAX
       : Notifications.AndroidNotificationPriority.HIGH;
 
-  const actorId = String(data.actorId || "").trim();
-  const identifier = isDirectMessage && actorId ? `dm-${actorId}` : undefined;
-
   await Notifications.scheduleNotificationAsync({
-    identifier,
     content: {
       title: title || "Cropvibe",
       body: body || "New message",

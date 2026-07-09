@@ -7,6 +7,7 @@ import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge"
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
+import { presentDirectMessageNotification } from "./dmNotificationThread";
 import { dismissMissedCallNotification } from "./missedCallNotifications";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
@@ -100,6 +101,18 @@ async function resolveAuthToken(explicit?: string | null) {
   }
 }
 
+async function resolveCurrentUserName() {
+  try {
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return "You";
+    const parsed = JSON.parse(raw) as { user?: { fullName?: string; username?: string } } | null;
+    const name = String(parsed?.user?.fullName || parsed?.user?.username || "").trim();
+    return name || "You";
+  } catch {
+    return "You";
+  }
+}
+
 async function clearNotificationReplyUi(response: Notifications.NotificationResponse) {
   const identifier = String(response.notification.request.identifier || "").trim();
   if (!identifier) return;
@@ -173,8 +186,9 @@ async function handleInlineReply(
   const type = String(data.type || "");
   const senderId = peerIdFromData(data);
   const text = String(response.userText || "").trim();
-
-  await clearNotificationReplyUi(response);
+  const peerName =
+    String(data.peerName || data.actorName || response.notification.request.content.title || "").trim() ||
+    "Someone";
 
   if (type !== "direct_message" || !senderId || !text) return;
 
@@ -185,11 +199,19 @@ async function handleInlineReply(
     const authToken = await resolveAuthToken(options?.authToken);
     if (!authToken) return;
     await sendDirectMessage(authToken, senderId, text);
+    const selfName = await resolveCurrentUserName();
+    await presentDirectMessageNotification({
+      peerUserId: senderId,
+      peerName,
+      senderName: selfName,
+      messageText: text,
+      data: { ...data, type: "direct_message", actorId: String(senderId), peerName }
+    });
     if (isAppReadyForNotificationNavigation()) {
-      navigateToDirectChat({ peerUserId: senderId, peerName: title });
+      navigateToDirectChat({ peerUserId: senderId, peerName });
     }
   } catch {
-    // Reply already cleared from shade; message may retry from chat.
+    // Message may retry from chat.
   } finally {
     replyInFlight.delete(dedupeKey);
   }

@@ -124,6 +124,24 @@ export function formatReelCaption(caption: string | null | undefined, language: 
   return formatFeedText(stripped, language, t);
 }
 
+/** Music line when creator attached a track or labeled audio. */
+export function postMusicDisplayLabel(
+  post: { musicLabel?: string | null; caption?: string | null },
+  language: AppLanguage,
+  t: TranslateFn
+): string | null {
+  const musicSource = String(post.musicLabel || "").trim();
+  if (!musicSource) return null;
+  return formatFeedText(musicSource, language, t);
+}
+
+export function postShowsMusicRow(post: {
+  musicLabel?: string | null;
+  musicAudioUrl?: string | null;
+}): boolean {
+  return Boolean(String(post.musicLabel ?? "").trim() || String(post.musicAudioUrl ?? "").trim());
+}
+
 /** Chat share card label — keeps [REEL] / [POST] prefix visible like Instagram. */
 export function sharedReelCardCaption(caption?: string | null): string {
   const raw = String(caption || "").trim();
