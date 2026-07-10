@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
-import { dropCaption, isDropPost } from "../../utils/feedOrder";
+import { dropCaption, dropMusicLabel, isDropPost, postShowsMusicRow } from "../../utils/feedOrder";
 import { ProfileReelViewer } from "../profile/ProfileReelViewer";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
@@ -51,6 +51,8 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   const videoSrc = resolveWebVideoUrl(post.videoUrl);
   const reel = isReel(post);
   const caption = dropCaption(post.caption);
+  const musicLabel = dropMusicLabel(post);
+  const showMusic = postShowsMusicRow(post) && !!musicLabel;
   const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
   const likeColor = liked ? "#c9ff35" : "currentColor";
 
@@ -324,6 +326,15 @@ export function PostCard({ post, reelPosts = [] }: Props) {
         <button type="button" className="post-card__likes" onClick={openLikes}>
           {likes} {likes === 1 ? "like" : "likes"}
         </button>
+      ) : null}
+
+      {showMusic ? (
+        <p className="post-card__music">
+          <span className="post-card__music-icon" aria-hidden>
+            ♪
+          </span>
+          {musicLabel}
+        </p>
       ) : null}
 
       {caption ? (

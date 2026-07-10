@@ -122,6 +122,8 @@ import {
   formatDisplayName,
   formatFeedText,
   formatReelCaption,
+  postMusicDisplayLabel,
+  postShowsMusicRow,
   resolvePersonDisplayName,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
@@ -1160,6 +1162,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const { token, user, refreshUser } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isCompactHomeChrome = windowHeight > 0 && windowHeight < 700;
   const isFocused = useIsFocused();
   const appIsActive = useAppIsActive();
   const [feedPlaybackSuspended, setFeedPlaybackSuspended] = useState(false);
@@ -3432,6 +3435,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setCommentDraft((d) => (d.trim() ? `${d} ${mention}` : mention));
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    StatusBar.setTranslucent(true);
+    StatusBar.setBackgroundColor("transparent");
+  }, []);
+
+  useEffect(() => {
+    StatusBar.setBarStyle(isReelSurfaceTab || isLiveTab ? "light-content" : "dark-content");
+  }, [isLiveTab, isReelSurfaceTab]);
+
   const listHeader = useMemo(
     () => (
       <DeactivatedChromeWrap>
@@ -3443,7 +3456,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
-          style={[(isReelSurfaceTab || isLiveTab) ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
+          style={[
+            (isReelSurfaceTab || isLiveTab) ? styles.storyRowWrapDark : styles.storyRowWrap,
+            styles.storyRowScrollCompact,
+            isCompactHomeChrome ? styles.storyRowScrollCompactShort : null
+          ]}
           contentContainerStyle={styles.storyRow}
         >
           <Pressable
@@ -3578,8 +3595,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
         </ScrollView>
 
-        <View style={styles.homeTopTabsBarDark}>
-          <View style={styles.homeTopTabsRowDark}>
+        <View style={[styles.homeTopTabsBarDark, isCompactHomeChrome ? styles.homeTopTabsBarCompact : null]}>
+          <View style={[styles.homeTopTabsRowDark, isCompactHomeChrome ? styles.homeTopTabsRowCompact : null]}>
             {visibleHomeTopTabs.map((tab) => {
               const isActive = activeHomeTab === tab;
               return (
@@ -3612,6 +3629,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       avatarLookup,
       displayPersonName,
       homeTabLabel,
+      isCompactHomeChrome,
       isReelSurfaceTab,
       isLiveTab,
       onOpenCreate,
@@ -3672,11 +3690,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
       const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
-      const musicSource =
-        (post.musicLabel && post.musicLabel.trim()) ||
-        stripInternalCaptionPrefix(post.caption).slice(0, 36) ||
-        "";
-      const musicLabel = musicSource ? displayFeedCopy(musicSource) : t("originalAudio");
+      const musicLabel = postMusicDisplayLabel(post, language, t);
+      const showMusicRow = postShowsMusicRow(post) && !!musicLabel;
       const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
       const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
@@ -3882,12 +3897,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   </Pressable>
                 ) : null}
               </View>
-              <View style={styles.reelMusicRow}>
-                <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
-                <Text style={styles.reelMusicText} numberOfLines={1}>
-                  {musicLabel}
-                </Text>
-              </View>
+              {showMusicRow ? (
+                <View style={styles.reelMusicRow}>
+                  <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
+                  <Text style={styles.reelMusicText} numberOfLines={1}>
+                    {musicLabel}
+                  </Text>
+                </View>
+              ) : null}
               {reelCaptionText ? (
                 <Text style={styles.reelCaptionDark} numberOfLines={3}>
                   {reelCaptionText}
@@ -4029,6 +4046,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayFeedCopy,
       displayPersonName,
       displayPostCaption,
+      language,
       t,
       labelForFollowStatus,
       openPostAuthorProfile
@@ -4083,6 +4101,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const feedDisplayName = displayPersonName(post.userName);
       const feedCaption = displayPostCaption(post.caption);
+      const feedMusicLabel = postMusicDisplayLabel(post, language, t);
+      const showFeedMusic = postShowsMusicRow(post) && !!feedMusicLabel;
       const isActive = playingPostId === post.id && !!post.videoUrl;
       const shouldPlayReel = isActive && canPlayMedia;
       const gallery = postImageGallery(post);
@@ -4292,6 +4312,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           <Pressable onPress={() => void openPostLikesSheet(post)} disabled={!post.likesCount}>
             <Text style={styles.likes}>{t("likesCountLabel", { count: post.likesCount })}</Text>
           </Pressable>
+          {showFeedMusic ? (
+            <View style={styles.postMusicRow}>
+              <Ionicons name="musical-notes" size={13} color="#5f6f6a" />
+              <Text style={styles.postMusicText} numberOfLines={1}>
+                {feedMusicLabel}
+              </Text>
+            </View>
+          ) : null}
           <Text style={styles.caption}>
             <Text style={styles.captionUser}>{feedDisplayName}</Text>
             {feedCaption ? ` ${feedCaption}` : ""}
@@ -4327,6 +4355,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayFeedCopy,
       displayPersonName,
       displayPostCaption,
+      language,
       t,
       labelForFollowStatus,
       user?.avatarUrl,
@@ -5203,6 +5232,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     maxHeight: 118
   },
+  storyRowScrollCompactShort: {
+    maxHeight: 98
+  },
   reelSlot: {
     flex: 1,
     minHeight: 0
@@ -5466,6 +5498,9 @@ const styles = StyleSheet.create({
   homeTopTabsBarDark: {
     backgroundColor: APP_DARK_BG
   },
+  homeTopTabsBarCompact: {
+    paddingBottom: 0
+  },
   homeTopTabsSeparator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: "rgba(255,255,255,0.22)"
@@ -5483,6 +5518,11 @@ const styles = StyleSheet.create({
     minHeight: 36,
     alignItems: "center",
     justifyContent: "space-between"
+  },
+  homeTopTabsRowCompact: {
+    paddingTop: 2,
+    paddingBottom: 2,
+    minHeight: 32
   },
   homeTopTabPressablePressed: { opacity: 0.85 },
   homeTopTabPillDark: {
@@ -5765,6 +5805,14 @@ const styles = StyleSheet.create({
   postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
   likes: { marginTop: 6, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29", fontSize: 13 },
+  postMusicRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 10
+  },
+  postMusicText: { color: "#5f6f6a", fontSize: 12, fontWeight: "600", flex: 1 },
   caption: { marginTop: 4, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20, fontSize: 13 },
   captionUser: { fontWeight: "700" },
   friendLikeMeta: { marginTop: 4, paddingHorizontal: 10, color: "#4b5e59", fontSize: 12, fontWeight: "700" },

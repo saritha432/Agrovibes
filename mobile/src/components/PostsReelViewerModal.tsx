@@ -38,6 +38,8 @@ import {
   formatDisplayName,
   formatFeedText,
   formatReelCaption,
+  postMusicDisplayLabel,
+  postShowsMusicRow,
   resolvePersonDisplayName,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
@@ -978,11 +980,8 @@ export function PostsReelViewerModal({
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
       const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
-      const musicSource =
-        (post.musicLabel && post.musicLabel.trim()) ||
-        stripInternalCaptionPrefix(post.caption).slice(0, 36) ||
-        "";
-      const musicLabel = musicSource ? displayFeedCopy(musicSource) : t("originalAudio");
+      const musicLabel = postMusicDisplayLabel(post, language, t);
+      const showMusicRow = postShowsMusicRow(post) && !!musicLabel;
       const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
       const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
@@ -1108,12 +1107,14 @@ export function PostsReelViewerModal({
                   </Text>
                 </Pressable>
               </View>
-              <View style={styles.reelMusicRow}>
-                <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
-                <Text style={styles.reelMusicText} numberOfLines={1}>
-                  {musicLabel}
-                </Text>
-              </View>
+              {showMusicRow ? (
+                <View style={styles.reelMusicRow}>
+                  <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
+                  <Text style={styles.reelMusicText} numberOfLines={1}>
+                    {musicLabel}
+                  </Text>
+                </View>
+              ) : null}
               {reelCaptionText ? (
                 <Text style={styles.reelCaptionDark} numberOfLines={3}>
                   {reelCaptionText}
@@ -1213,6 +1214,7 @@ export function PostsReelViewerModal({
       setRepostTargetPost,
       carouselPageByPostId,
       setShareTargetPost,
+      language,
       t,
       togglePostLike,
       triggerReelLikeBurst,

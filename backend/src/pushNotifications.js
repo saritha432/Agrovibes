@@ -627,6 +627,9 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
     data: {
       type: type || "generic",
       actorId: actorId != null ? String(actorId) : "",
+      actorName: String(actorName || "").trim(),
+      senderName: String(actorName || "").trim(),
+      senderId: actorId != null ? String(actorId) : "",
       postId: postId != null ? String(postId) : "",
       followId: followId != null ? String(followId) : ""
     }

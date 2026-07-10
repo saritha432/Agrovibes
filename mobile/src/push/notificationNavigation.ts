@@ -7,6 +7,7 @@ import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge"
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
+import { presentDirectMessageNotification } from "./dmNotificationThread";
 import { dismissMissedCallNotification } from "./missedCallNotifications";
 
 const AUTH_STORAGE_KEY = "agrovibes.auth";
@@ -100,6 +101,17 @@ async function resolveAuthToken(explicit?: string | null) {
   }
 }
 
+async function resolveCurrentUserName() {
+  try {
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw) as { user?: { fullName?: string; username?: string } } | null;
+    return String(parsed?.user?.fullName || parsed?.user?.username || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function clearNotificationReplyUi(response: Notifications.NotificationResponse) {
   const identifier = String(response.notification.request.identifier || "").trim();
   if (!identifier) return;
@@ -169,27 +181,49 @@ async function handleInlineReply(
   options?: { authToken?: string | null }
 ) {
   const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
-  const title = String(response.notification.request.content.title || "").trim() || "Someone";
   const type = String(data.type || "");
   const senderId = peerIdFromData(data);
   const text = String(response.userText || "").trim();
-
-  await clearNotificationReplyUi(response);
+  const peerName =
+    String(
+      data.peerName ||
+        response.notification.request.content.title ||
+        data.actorName ||
+        data.senderName ||
+        ""
+    ).trim() || "Someone";
+  const previousBody = String(response.notification.request.content.body || "").trim();
+  const replaceIdentifier = String(response.notification.request.identifier || "").trim();
 
   if (type !== "direct_message" || !senderId || !text) return;
 
-  const dedupeKey = `${senderId}:${text}:${response.notification.request.identifier}`;
+  const dedupeKey = `${senderId}:${text}:${replaceIdentifier}`;
   if (replyInFlight.has(dedupeKey)) return;
   replyInFlight.add(dedupeKey);
   try {
     const authToken = await resolveAuthToken(options?.authToken);
     if (!authToken) return;
     await sendDirectMessage(authToken, senderId, text);
-    if (isAppReadyForNotificationNavigation()) {
-      navigateToDirectChat({ peerUserId: senderId, peerName: title });
-    }
+    // Real profile name only — never "You", never fall back to peer name.
+    const selfName = await resolveCurrentUserName();
+    await presentDirectMessageNotification({
+      peerUserId: senderId,
+      peerName,
+      senderName: selfName || "Me",
+      messageText: text,
+      fromPeer: false,
+      previousBody,
+      replaceIdentifier,
+      data: {
+        ...data,
+        type: "direct_message",
+        actorId: String(senderId),
+        peerUserId: String(senderId),
+        peerName
+      }
+    });
   } catch {
-    // Reply already cleared from shade; message may retry from chat.
+    // Message may retry from chat.
   } finally {
     replyInFlight.delete(dedupeKey);
   }

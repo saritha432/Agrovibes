@@ -69,6 +69,14 @@ export function dropCaption(caption?: string | null) {
     .trim();
 }
 
+export function dropMusicLabel(post: HomePost) {
+  return String(post.musicLabel || "").trim() || null;
+}
+
+export function postShowsMusicRow(post: HomePost) {
+  return Boolean(String(post.musicLabel ?? "").trim() || String(post.musicAudioUrl ?? "").trim());
+}
+
 export function reelGridStillUri(post: HomePost): string | null {
   const th = post.thumbnailUrl?.trim();
   if (th) return th;
