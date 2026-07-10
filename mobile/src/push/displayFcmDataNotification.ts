@@ -27,10 +27,17 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
   if (isDirectMessage && actorId) {
     await presentDirectMessageNotification({
       peerUserId: actorId,
-      peerName: actorName || title || "Someone",
+      peerName: title || actorName || "Someone",
       senderName: actorName || title || "Someone",
       messageText: rawBody,
-      data: { ...data, type: type || "direct_message" }
+      fromPeer: true,
+      data: {
+        ...data,
+        type: type || "direct_message",
+        actorId,
+        peerUserId: actorId,
+        peerName: title || actorName || "Someone"
+      }
     });
     return;
   }

@@ -1,75 +1,342 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
+const THREAD_KEY_PREFIX = "cropvibe.dm.notif.thread.v4.";
+const AUTH_STORAGE_KEY = "agrovibes.auth";
+
+export type ThreadMessage = {
+  fromPeer: boolean;
+  senderName: string;
+  text: string;
+  timestamp?: number;
+};
+
 export function stripSenderPrefix(rawBody: string, actorName: string): string {
-  const raw = String(rawBody || "").trim();
-  const name = String(actorName || "").trim();
-  if (!name) return raw;
-  const prefix = `${name}:`;
-  if (raw.toLowerCase().startsWith(prefix.toLowerCase())) {
-    return raw.slice(prefix.length).trim();
+  let raw = String(rawBody || "").trim();
+  const names = [actorName, "You", "you", "Me", "me"]
+    .map((n) => String(n || "").trim())
+    .filter(Boolean);
+  for (const name of names) {
+    const prefix = `${name}:`;
+    if (raw.toLowerCase().startsWith(prefix.toLowerCase())) {
+      raw = raw.slice(prefix.length).trim();
+      break;
+    }
   }
   return raw;
 }
 
 export function dmNotificationIdentifier(peerUserId: string | number): string {
-  return `dm-${peerUserId}`;
+  return `dm-${String(peerUserId).trim()}`;
 }
 
-export async function mergeDmNotificationBody(identifier: string, newLine: string): Promise<string> {
-  const line = String(newLine || "").trim();
-  if (!line) return "";
+function threadStorageKey(peerUserId: string | number) {
+  return `${THREAD_KEY_PREFIX}${String(peerUserId).trim()}`;
+}
 
+export async function resolveSelfDisplayName(): Promise<string> {
   try {
-    const presented = await Notifications.getPresentedNotificationsAsync();
-    const existing = presented.find((n) => n.request.identifier === identifier);
-    const prev = String(existing?.request.content.body || "").trim();
-    if (!prev) return line;
-    if (prev === line || prev.endsWith(`\n${line}`) || prev.includes(`\n${line}\n`)) {
-      return prev;
-    }
-    return `${prev}\n${line}`;
+    const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw) as { user?: { fullName?: string; username?: string } } | null;
+    return String(parsed?.user?.fullName || parsed?.user?.username || "").trim();
   } catch {
-    return line;
+    return "";
   }
 }
 
-export async function presentDirectMessageNotification({
-  peerUserId,
-  peerName,
-  senderName,
-  messageText,
-  data
+function renderNamedThreadBody(messages: ThreadMessage[]): string {
+  return messages
+    .map((msg) => {
+      const name = String(msg.senderName || "").trim() || (msg.fromPeer ? "Someone" : "Me");
+      const text = String(msg.text || "").trim();
+      if (!text) return "";
+      return `${name}: ${text}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseLegacyBody(raw: string, peerName: string, selfName: string): ThreadMessage[] {
+  const peer = String(peerName || "").trim().toLowerCase();
+  const self = String(selfName || "").trim().toLowerCase();
+  const lines = String(raw || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const out: ThreadMessage[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const colon = line.indexOf(":");
+    if (colon > 0) {
+      const name = line.slice(0, colon).trim();
+      const text = line.slice(colon + 1).trim();
+      if (!text) continue;
+      const nameKey = name.toLowerCase();
+      const fromPeer =
+        nameKey === "you" || nameKey === "me"
+          ? false
+          : self && nameKey === self
+            ? false
+            : peer
+              ? nameKey === peer
+              : true;
+      out.push({
+        fromPeer,
+        senderName: fromPeer ? peerName || name : selfName || name,
+        text,
+        timestamp: Date.now() - (lines.length - i) * 1000
+      });
+      continue;
+    }
+
+    const next = lines[i + 1];
+    const nameKey = line.toLowerCase();
+    if (
+      next &&
+      (nameKey === "you" ||
+        nameKey === "me" ||
+        (self && nameKey === self) ||
+        (peer && nameKey === peer))
+    ) {
+      const fromPeer = !(nameKey === "you" || nameKey === "me" || (self && nameKey === self));
+      out.push({
+        fromPeer,
+        senderName: fromPeer ? peerName || line : selfName || line,
+        text: next,
+        timestamp: Date.now() - (lines.length - i) * 1000
+      });
+      i += 1;
+      continue;
+    }
+
+    out.push({
+      fromPeer: true,
+      senderName: peerName || "Someone",
+      text: line,
+      timestamp: Date.now() - (lines.length - i) * 1000
+    });
+  }
+  return out;
+}
+
+async function readStoredThread(peerUserId: string | number): Promise<ThreadMessage[]> {
+  try {
+    const raw = await AsyncStorage.getItem(threadStorageKey(peerUserId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const text = String(row.text || "").trim();
+        if (!text) return null;
+        return {
+          fromPeer: row.fromPeer !== false,
+          senderName: String(row.senderName || "").trim(),
+          text,
+          timestamp: Number(row.timestamp) || Date.now()
+        } as ThreadMessage;
+      })
+      .filter((item): item is ThreadMessage => !!item);
+  } catch {
+    return [];
+  }
+}
+
+async function writeStoredThread(peerUserId: string | number, messages: ThreadMessage[]) {
+  try {
+    await AsyncStorage.setItem(threadStorageKey(peerUserId), JSON.stringify(messages.slice(-8)));
+  } catch {
+    // no-op
+  }
+}
+
+function appendUniqueMessage(messages: ThreadMessage[], next: ThreadMessage): ThreadMessage[] {
+  const last = messages[messages.length - 1];
+  if (
+    last &&
+    last.fromPeer === next.fromPeer &&
+    last.text === next.text &&
+    last.senderName === next.senderName
+  ) {
+    return messages;
+  }
+  return [...messages, next].slice(-8);
+}
+
+export async function dismissDmNotificationsForPeer(
+  peerUserId: string | number,
+  extraIdentifiers: string[] = []
+) {
+  const targetId = dmNotificationIdentifier(peerUserId);
+  const ids = new Set<string>([targetId, ...extraIdentifiers.map((id) => String(id || "").trim()).filter(Boolean)]);
+
+  if (Platform.OS === "android") {
+    try {
+      const notifee = require("@notifee/react-native").default as {
+        cancelNotification: (id: string) => Promise<void>;
+        getDisplayedNotifications: () => Promise<Array<{ id?: string | null; notification?: { id?: string; data?: Record<string, unknown> } }>>;
+      };
+      const displayed = await notifee.getDisplayedNotifications();
+      for (const item of displayed) {
+        const id = String(item.id || item.notification?.id || "").trim();
+        const data = (item.notification?.data || {}) as Record<string, unknown>;
+        const actorId = String(data.actorId || data.peerUserId || "").trim();
+        if (id && (ids.has(id) || (actorId && actorId === String(peerUserId).trim()))) {
+          ids.add(id);
+        }
+      }
+      await Promise.all(
+        [...ids].map(async (id) => {
+          try {
+            await notifee.cancelNotification(id);
+          } catch {
+            // no-op
+          }
+        })
+      );
+    } catch {
+      // fall through to expo
+    }
+  }
+
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const item of presented) {
+      const id = String(item.request.identifier || "").trim();
+      const data = (item.request.content.data || {}) as Record<string, unknown>;
+      const type = String(data.type || "").trim();
+      const actorId = String(data.actorId || data.senderId || data.peerUserId || "").trim();
+      if (type === "direct_message" && actorId && actorId === String(peerUserId).trim()) {
+        if (id) ids.add(id);
+      }
+    }
+  } catch {
+    // continue
+  }
+
+  await Promise.all(
+    [...ids].map(async (id) => {
+      try {
+        await Notifications.dismissNotificationAsync(id);
+      } catch {
+        // no-op
+      }
+    })
+  );
+}
+
+async function ensureNotifeeDmChannel() {
+  const notifee = require("@notifee/react-native").default as {
+    createChannel: (cfg: Record<string, unknown>) => Promise<string>;
+  };
+  const AndroidImportance = require("@notifee/react-native").AndroidImportance as { HIGH: number };
+  await notifee.createChannel({
+    id: "direct_messages",
+    name: "Messages",
+    importance: AndroidImportance.HIGH,
+    sound: "default",
+    vibration: true
+  });
+}
+
+async function presentWithNotifeeMessagingStyle({
+  identifier,
+  conversationTitle,
+  selfName,
+  messages,
+  payloadData
 }: {
-  peerUserId: string | number;
-  peerName: string;
-  senderName: string;
-  messageText: string;
-  data?: Record<string, unknown>;
+  identifier: string;
+  conversationTitle: string;
+  selfName: string;
+  messages: ThreadMessage[];
+  payloadData: Record<string, unknown>;
 }) {
-  const actorId = String(peerUserId).trim();
-  if (!actorId) return;
+  const notifee = require("@notifee/react-native").default as {
+    displayNotification: (notification: Record<string, unknown>) => Promise<string>;
+  };
+  const { AndroidStyle, AndroidImportance } = require("@notifee/react-native") as {
+    AndroidStyle: { MESSAGING: number };
+    AndroidImportance: { HIGH: number };
+  };
 
-  const sender = String(senderName || peerName || "").trim() || "Someone";
-  const text = stripSenderPrefix(String(messageText || "").trim(), sender);
-  const line = text ? `${sender}: ${text}` : sender;
-  const identifier = dmNotificationIdentifier(actorId);
-  const body = await mergeDmNotificationBody(identifier, line);
-  const conversationTitle = String(peerName || sender).trim() || sender;
+  await ensureNotifeeDmChannel();
 
+  const userPerson = {
+    name: selfName || "Me",
+    id: "self"
+  };
+
+  const styleMessages = messages.map((msg, index) => {
+    const ts = Number(msg.timestamp) || Date.now() - (messages.length - index) * 800;
+    if (msg.fromPeer) {
+      return {
+        text: msg.text,
+        timestamp: ts,
+        person: {
+          name: msg.senderName || conversationTitle,
+          id: `peer-${payloadData.actorId || "0"}`
+        }
+      };
+    }
+    // Omit person → Android MessagingStyle labels this as the local user (selfName), bold.
+    return {
+      text: msg.text,
+      timestamp: ts
+    };
+  });
+
+  await notifee.displayNotification({
+    id: identifier,
+    title: conversationTitle,
+    body: messages[messages.length - 1]?.text || "New message",
+    data: Object.fromEntries(
+      Object.entries(payloadData).map(([k, v]) => [k, v == null ? "" : String(v)])
+    ),
+    android: {
+      channelId: "direct_messages",
+      pressAction: { id: "default" },
+      importance: AndroidImportance.HIGH,
+      style: {
+        type: AndroidStyle.MESSAGING,
+        person: userPerson,
+        title: conversationTitle,
+        group: false,
+        messages: styleMessages
+      },
+      actions: [
+        {
+          title: "Reply",
+          pressAction: { id: "REPLY" },
+          input: {
+            allowFreeFormInput: true,
+            placeholder: "Message..."
+          }
+        }
+      ]
+    }
+  });
+}
+
+async function presentWithExpoFallback({
+  identifier,
+  conversationTitle,
+  body,
+  payloadData
+}: {
+  identifier: string;
+  conversationTitle: string;
+  body: string;
+  payloadData: Record<string, unknown>;
+}) {
   await ensureAndroidChannels();
   await setupDirectMessageNotificationCategory();
-
-  const payloadData = {
-    ...(data || {}),
-    type: "direct_message",
-    categoryId: "DIRECT_MESSAGE",
-    actorId,
-    actorName: sender,
-    senderName: sender,
-    peerName: conversationTitle
-  };
 
   await Notifications.scheduleNotificationAsync({
     identifier,
@@ -87,5 +354,119 @@ export async function presentDirectMessageNotification({
         : {})
     },
     trigger: null
+  });
+}
+
+export async function presentDirectMessageNotification({
+  peerUserId,
+  peerName,
+  senderName,
+  messageText,
+  fromPeer,
+  data,
+  previousBody,
+  replaceIdentifier
+}: {
+  peerUserId: string | number;
+  peerName: string;
+  senderName: string;
+  messageText: string;
+  fromPeer?: boolean;
+  data?: Record<string, unknown>;
+  previousBody?: string | null;
+  replaceIdentifier?: string | null;
+}) {
+  const actorId = String(peerUserId).trim();
+  if (!actorId) return;
+
+  const conversationTitle = String(peerName || "").trim() || "Someone";
+  const storedSelfName = await resolveSelfDisplayName();
+  const isFromPeer = fromPeer !== false;
+  const displaySender = isFromPeer
+    ? conversationTitle
+    : String(senderName || "").trim() || storedSelfName || "Me";
+  const selfName = storedSelfName || (isFromPeer ? "" : displaySender) || "Me";
+
+  const text = stripSenderPrefix(String(messageText || "").trim(), displaySender);
+  if (!text) return;
+
+  let messages = await readStoredThread(actorId);
+  if (!messages.length && previousBody) {
+    messages = parseLegacyBody(previousBody, conversationTitle, selfName);
+  }
+  if (!messages.length) {
+    try {
+      const presented = await Notifications.getPresentedNotificationsAsync();
+      const existing =
+        presented.find((n) => n.request.identifier === dmNotificationIdentifier(actorId)) ||
+        presented.find((n) => {
+          const d = (n.request.content.data || {}) as Record<string, unknown>;
+          return (
+            String(d.type || "") === "direct_message" &&
+            String(d.actorId || d.senderId || "").trim() === actorId
+          );
+        });
+      if (existing) {
+        messages = parseLegacyBody(
+          String(existing.request.content.body || ""),
+          conversationTitle,
+          selfName
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  messages = messages.map((m) =>
+    m.fromPeer && !String(m.senderName || "").trim()
+      ? { ...m, senderName: conversationTitle }
+      : m
+  );
+
+  messages = appendUniqueMessage(messages, {
+    fromPeer: isFromPeer,
+    senderName: displaySender,
+    text,
+    timestamp: Date.now()
+  });
+  await writeStoredThread(actorId, messages);
+
+  const body = renderNamedThreadBody(messages);
+  const identifier = dmNotificationIdentifier(actorId);
+
+  await dismissDmNotificationsForPeer(actorId, replaceIdentifier ? [replaceIdentifier] : []);
+
+  const payloadData = {
+    ...(data || {}),
+    type: "direct_message",
+    categoryId: "DIRECT_MESSAGE",
+    actorId,
+    peerName: conversationTitle,
+    peerUserId: actorId,
+    actorName: conversationTitle,
+    senderName: displaySender
+  };
+
+  if (Platform.OS === "android") {
+    try {
+      await presentWithNotifeeMessagingStyle({
+        identifier,
+        conversationTitle,
+        selfName,
+        messages,
+        payloadData
+      });
+      return;
+    } catch {
+      // Fall back to expo text notification.
+    }
+  }
+
+  await presentWithExpoFallback({
+    identifier,
+    conversationTitle,
+    body,
+    payloadData
   });
 }
