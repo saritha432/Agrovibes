@@ -3,14 +3,13 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
-const THREAD_KEY_PREFIX = "cropvibe.dm.notif.thread.v4.";
+const THREAD_KEY_PREFIX = "cropvibe.dm.notif.thread.v5.";
 const AUTH_STORAGE_KEY = "agrovibes.auth";
 
-export type ThreadMessage = {
+type ThreadMessage = {
   fromPeer: boolean;
   senderName: string;
   text: string;
-  timestamp?: number;
 };
 
 export function stripSenderPrefix(rawBody: string, actorName: string): string {
@@ -47,6 +46,7 @@ export async function resolveSelfDisplayName(): Promise<string> {
   }
 }
 
+/** Always "Name: message" so both peer and self names stay visible. */
 function renderNamedThreadBody(messages: ThreadMessage[]): string {
   return messages
     .map((msg) => {
@@ -87,12 +87,12 @@ function parseLegacyBody(raw: string, peerName: string, selfName: string): Threa
       out.push({
         fromPeer,
         senderName: fromPeer ? peerName || name : selfName || name,
-        text,
-        timestamp: Date.now() - (lines.length - i) * 1000
+        text
       });
       continue;
     }
 
+    // Older format: name on one line, text on the next
     const next = lines[i + 1];
     const nameKey = line.toLowerCase();
     if (
@@ -106,8 +106,7 @@ function parseLegacyBody(raw: string, peerName: string, selfName: string): Threa
       out.push({
         fromPeer,
         senderName: fromPeer ? peerName || line : selfName || line,
-        text: next,
-        timestamp: Date.now() - (lines.length - i) * 1000
+        text: next
       });
       i += 1;
       continue;
@@ -116,8 +115,7 @@ function parseLegacyBody(raw: string, peerName: string, selfName: string): Threa
     out.push({
       fromPeer: true,
       senderName: peerName || "Someone",
-      text: line,
-      timestamp: Date.now() - (lines.length - i) * 1000
+      text: line
     });
   }
   return out;
@@ -138,8 +136,7 @@ async function readStoredThread(peerUserId: string | number): Promise<ThreadMess
         return {
           fromPeer: row.fromPeer !== false,
           senderName: String(row.senderName || "").trim(),
-          text,
-          timestamp: Number(row.timestamp) || Date.now()
+          text
         } as ThreadMessage;
       })
       .filter((item): item is ThreadMessage => !!item);
@@ -174,36 +171,10 @@ export async function dismissDmNotificationsForPeer(
   extraIdentifiers: string[] = []
 ) {
   const targetId = dmNotificationIdentifier(peerUserId);
-  const ids = new Set<string>([targetId, ...extraIdentifiers.map((id) => String(id || "").trim()).filter(Boolean)]);
-
-  if (Platform.OS === "android") {
-    try {
-      const notifee = require("@notifee/react-native").default as {
-        cancelNotification: (id: string) => Promise<void>;
-        getDisplayedNotifications: () => Promise<Array<{ id?: string | null; notification?: { id?: string; data?: Record<string, unknown> } }>>;
-      };
-      const displayed = await notifee.getDisplayedNotifications();
-      for (const item of displayed) {
-        const id = String(item.id || item.notification?.id || "").trim();
-        const data = (item.notification?.data || {}) as Record<string, unknown>;
-        const actorId = String(data.actorId || data.peerUserId || "").trim();
-        if (id && (ids.has(id) || (actorId && actorId === String(peerUserId).trim()))) {
-          ids.add(id);
-        }
-      }
-      await Promise.all(
-        [...ids].map(async (id) => {
-          try {
-            await notifee.cancelNotification(id);
-          } catch {
-            // no-op
-          }
-        })
-      );
-    } catch {
-      // fall through to expo
-    }
-  }
+  const ids = new Set<string>([
+    targetId,
+    ...extraIdentifiers.map((id) => String(id || "").trim()).filter(Boolean)
+  ]);
 
   try {
     const presented = await Notifications.getPresentedNotificationsAsync();
@@ -229,132 +200,6 @@ export async function dismissDmNotificationsForPeer(
       }
     })
   );
-}
-
-async function ensureNotifeeDmChannel() {
-  const notifee = require("@notifee/react-native").default as {
-    createChannel: (cfg: Record<string, unknown>) => Promise<string>;
-  };
-  const AndroidImportance = require("@notifee/react-native").AndroidImportance as { HIGH: number };
-  await notifee.createChannel({
-    id: "direct_messages",
-    name: "Messages",
-    importance: AndroidImportance.HIGH,
-    sound: "default",
-    vibration: true
-  });
-}
-
-async function presentWithNotifeeMessagingStyle({
-  identifier,
-  conversationTitle,
-  selfName,
-  messages,
-  payloadData
-}: {
-  identifier: string;
-  conversationTitle: string;
-  selfName: string;
-  messages: ThreadMessage[];
-  payloadData: Record<string, unknown>;
-}) {
-  const notifee = require("@notifee/react-native").default as {
-    displayNotification: (notification: Record<string, unknown>) => Promise<string>;
-  };
-  const { AndroidStyle, AndroidImportance } = require("@notifee/react-native") as {
-    AndroidStyle: { MESSAGING: number };
-    AndroidImportance: { HIGH: number };
-  };
-
-  await ensureNotifeeDmChannel();
-
-  const userPerson = {
-    name: selfName || "Me",
-    id: "self"
-  };
-
-  const styleMessages = messages.map((msg, index) => {
-    const ts = Number(msg.timestamp) || Date.now() - (messages.length - index) * 800;
-    if (msg.fromPeer) {
-      return {
-        text: msg.text,
-        timestamp: ts,
-        person: {
-          name: msg.senderName || conversationTitle,
-          id: `peer-${payloadData.actorId || "0"}`
-        }
-      };
-    }
-    // Omit person → Android MessagingStyle labels this as the local user (selfName), bold.
-    return {
-      text: msg.text,
-      timestamp: ts
-    };
-  });
-
-  await notifee.displayNotification({
-    id: identifier,
-    title: conversationTitle,
-    body: messages[messages.length - 1]?.text || "New message",
-    data: Object.fromEntries(
-      Object.entries(payloadData).map(([k, v]) => [k, v == null ? "" : String(v)])
-    ),
-    android: {
-      channelId: "direct_messages",
-      pressAction: { id: "default" },
-      importance: AndroidImportance.HIGH,
-      style: {
-        type: AndroidStyle.MESSAGING,
-        person: userPerson,
-        title: conversationTitle,
-        group: false,
-        messages: styleMessages
-      },
-      actions: [
-        {
-          title: "Reply",
-          pressAction: { id: "REPLY" },
-          input: {
-            allowFreeFormInput: true,
-            placeholder: "Message..."
-          }
-        }
-      ]
-    }
-  });
-}
-
-async function presentWithExpoFallback({
-  identifier,
-  conversationTitle,
-  body,
-  payloadData
-}: {
-  identifier: string;
-  conversationTitle: string;
-  body: string;
-  payloadData: Record<string, unknown>;
-}) {
-  await ensureAndroidChannels();
-  await setupDirectMessageNotificationCategory();
-
-  await Notifications.scheduleNotificationAsync({
-    identifier,
-    content: {
-      title: conversationTitle,
-      body,
-      data: payloadData,
-      categoryIdentifier: "DIRECT_MESSAGE",
-      sound: "default",
-      ...(Platform.OS === "android"
-        ? {
-            channelId: "direct_messages",
-            priority: Notifications.AndroidNotificationPriority.HIGH
-          }
-        : {})
-    },
-    trigger: null
-  });
 }
 
 export async function presentDirectMessageNotification({
@@ -427,14 +272,15 @@ export async function presentDirectMessageNotification({
   messages = appendUniqueMessage(messages, {
     fromPeer: isFromPeer,
     senderName: displaySender,
-    text,
-    timestamp: Date.now()
+    text
   });
   await writeStoredThread(actorId, messages);
 
   const body = renderNamedThreadBody(messages);
   const identifier = dmNotificationIdentifier(actorId);
 
+  await ensureAndroidChannels();
+  await setupDirectMessageNotificationCategory();
   await dismissDmNotificationsForPeer(actorId, replaceIdentifier ? [replaceIdentifier] : []);
 
   const payloadData = {
@@ -448,25 +294,21 @@ export async function presentDirectMessageNotification({
     senderName: displaySender
   };
 
-  if (Platform.OS === "android") {
-    try {
-      await presentWithNotifeeMessagingStyle({
-        identifier,
-        conversationTitle,
-        selfName,
-        messages,
-        payloadData
-      });
-      return;
-    } catch {
-      // Fall back to expo text notification.
-    }
-  }
-
-  await presentWithExpoFallback({
+  await Notifications.scheduleNotificationAsync({
     identifier,
-    conversationTitle,
-    body,
-    payloadData
+    content: {
+      title: conversationTitle,
+      body,
+      data: payloadData,
+      categoryIdentifier: "DIRECT_MESSAGE",
+      sound: "default",
+      ...(Platform.OS === "android"
+        ? {
+            channelId: "direct_messages",
+            priority: Notifications.AndroidNotificationPriority.HIGH
+          }
+        : {})
+    },
+    trigger: null
   });
 }

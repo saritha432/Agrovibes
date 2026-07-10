@@ -5,6 +5,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -65,30 +66,25 @@ export function BlockedAccountsScreen() {
 
   const onUnblock = useCallback(
     (person: BlockedUser) => {
-      if (!token) return;
-      Alert.alert("Unblock", `Unblock ${person.fullName}?`, [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Unblock",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              setBusyId(person.userId);
-              try {
-                await unblockUser(token, person.userId);
-                await forgetBlockedUser(person.userId, user?.id);
-                setUsers((prev) => prev.filter((u) => u.userId !== person.userId));
-              } catch {
-                Alert.alert("Error", "Could not unblock this account. Try again.");
-              } finally {
-                setBusyId(null);
-              }
-            })();
+      if (!token || busyId != null) return;
+      void (async () => {
+        setBusyId(person.userId);
+        try {
+          await unblockUser(token, person.userId);
+          await forgetBlockedUser(person.userId, user?.id);
+          setUsers((prev) => prev.filter((u) => u.userId !== person.userId));
+        } catch {
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert("Could not unblock this account. Try again.");
+          } else {
+            Alert.alert("Error", "Could not unblock this account. Try again.");
           }
+        } finally {
+          setBusyId(null);
         }
-      ]);
+      })();
     },
-    [token, user?.id]
+    [busyId, token, user?.id]
   );
 
   return (
