@@ -624,7 +624,7 @@ export function DirectCallView({
           />
           <View style={styles.incomingActions}>
             <View style={styles.incomingActionCol}>
-              <Pressable
+                  <Pressable
                 style={[styles.incomingBtn, styles.declineBtn]}
                 onPress={() => {
                   if (endedRef.current) return;
@@ -632,9 +632,13 @@ export function DirectCallView({
                   silenceRingtone();
                   void stopCallSounds();
                   void AudioSession.stopAudioSession().catch(() => undefined);
-                  // Parent handles cancel + history via completeIncomingCallDecline.
-                  onDecline?.();
-                  onClose();
+                  // Parent runs completeIncomingCallDecline + clears UI — do not also onClose
+                  // (that raced and could skip cancel on the caller side).
+                  if (onDecline) {
+                    onDecline();
+                  } else {
+                    onClose();
+                  }
                 }}
               >
                 <Ionicons name="close" size={30} color="#fff" />

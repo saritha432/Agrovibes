@@ -44,14 +44,14 @@ export function isIncomingCallNotificationModuleReady() {
   return hasLinkedCallNotificationNativeModule();
 }
 
-function callPayloadJson(payload: IncomingCallNotificationPayload) {
-  return JSON.stringify({
-    callerId: payload.callerId,
+function callPayloadMap(payload: IncomingCallNotificationPayload) {
+  return {
+    callerId: String(payload.callerId),
     callerName: payload.callerName,
     roomName: payload.roomName,
     mode: payload.mode,
     callerAvatarUrl: payload.callerAvatarUrl || ""
-  });
+  };
 }
 
 export function parseIncomingCallRemoteMessage(
@@ -84,6 +84,8 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
 
   if (isForeground) return;
 
+  // Native module calls getMap("payload") — must be an object, never a JSON string
+  // (String crashes: UnexpectedNativeTypeException ReadableNativeMap).
   const nativeOptions = {
     channelId: CALL_CHANNEL_ID,
     channelName: "Calls",
@@ -93,10 +95,9 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
     answerText: "Answer",
     declineText: "Decline",
     // Native module expects an Android color resource name, not a hex literal.
-    // Passing hex can fail notification rendering and force Expo fallback actions.
     notificationColor: "cropvibe_call_accent",
     isVideo,
-    payload: callPayloadJson(payload)
+    payload: callPayloadMap(payload)
   };
 
   // Same Expo path as direct messages — reliable on closed-test / Play builds.
@@ -116,21 +117,28 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
 export function hideIncomingCallAndroidNotification() {
   const module = getCallNotificationModule();
   if (!module) return;
-  module.hideNotification();
+  try {
+    module.hideNotification();
+  } catch {
+    // no-op
+  }
 }
 
-export function parseIncomingCallActionPayload(payload?: string | null): ParsedIncomingCallPush | null {
+export function parseIncomingCallActionPayload(payload?: string | Record<string, unknown> | null): ParsedIncomingCallPush | null {
+  if (payload && typeof payload === "object") {
+    const callerId = Number((payload as Record<string, unknown>).callerId);
+    const roomName = String((payload as Record<string, unknown>).roomName || "").trim();
+    if (!Number.isFinite(callerId) || callerId <= 0 || !roomName) return null;
+    const mode = String((payload as Record<string, unknown>).mode || "voice") === "video" ? "video" : "voice";
+    const callerName = String((payload as Record<string, unknown>).callerName || "Someone").trim() || "Someone";
+    const callerAvatarUrl = String((payload as Record<string, unknown>).callerAvatarUrl || "").trim() || null;
+    return { callerId, callerName, roomName, mode, callerAvatarUrl };
+  }
   const raw = String(payload || "").trim();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const callerId = Number(parsed.callerId);
-    const roomName = String(parsed.roomName || "").trim();
-    if (!Number.isFinite(callerId) || callerId <= 0 || !roomName) return null;
-    const mode = String(parsed.mode || "voice") === "video" ? "video" : "voice";
-    const callerName = String(parsed.callerName || "Someone").trim() || "Someone";
-    const callerAvatarUrl = String(parsed.callerAvatarUrl || "").trim() || null;
-    return { callerId, callerName, roomName, mode, callerAvatarUrl };
+    return parseIncomingCallActionPayload(parsed);
   } catch {
     return null;
   }

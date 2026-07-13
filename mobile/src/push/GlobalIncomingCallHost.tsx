@@ -75,9 +75,9 @@ export function GlobalIncomingCallHost() {
         const active = call;
         // Close UI immediately; shared decline path cancels caller ring + writes history.
         historySentRef.current = true;
-        clearIncomingCall();
-        setCall(null);
         setConnectEnabled(false);
+        setCall(null);
+        clearIncomingCall();
         if (!active) return;
         void completeIncomingCallDecline({
           callerId: active.callerId,

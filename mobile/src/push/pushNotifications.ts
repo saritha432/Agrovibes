@@ -7,16 +7,18 @@ import { registerPushToken, unregisterPushToken } from "../services/api";
 let incomingCallCategoriesReady: Promise<void> | null = null;
 
 /**
- * Fresh channel IDs force Android to recreate HIGH/MAX importance channels.
- * Existing channel importance cannot be raised after first creation (OEM/user settings).
+ * Fresh channel IDs force Android to recreate channels with sound.
+ * Channel sound/importance cannot be changed after first creation (OEM/user settings).
+ * v3: drop COMMUNICATION_* audio usage — some OEMs routed that to a silent stream
+ * while notification volume was on (other apps sounded fine, Cropvibe did not).
  */
 export const ANDROID_CHANNELS = {
-  default: "default",
+  default: "general_v3",
   /** Heads-up banners for DMs while another app is open */
-  directMessages: "direct_messages_v2",
+  directMessages: "direct_messages_v3",
   /** Heads-up / full-screen style for incoming calls */
-  incomingCalls: "incoming_calls_v2",
-  missedCalls: "missed_calls_v2"
+  incomingCalls: "incoming_calls_v3",
+  missedCalls: "missed_calls_v3"
 } as const;
 
 export function ensureIncomingCallCategoriesReady() {
@@ -62,8 +64,16 @@ Notifications.setNotificationHandler({
 export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
 
-  // Best-effort cleanup of older channels that may have been demoted to "silent".
-  for (const legacyId of ["direct_messages", "incoming_calls", "missed_calls"]) {
+  // Remove older channels that may have been created silent / with bad audio attributes.
+  for (const legacyId of [
+    "default",
+    "direct_messages",
+    "incoming_calls",
+    "missed_calls",
+    "direct_messages_v2",
+    "incoming_calls_v2",
+    "missed_calls_v2"
+  ]) {
     try {
       await Notifications.deleteNotificationChannelAsync(legacyId);
     } catch {
@@ -71,21 +81,14 @@ export async function ensureAndroidChannels() {
     }
   }
 
+  const notificationAudio = {
+    usage: Notifications.AndroidAudioUsage.NOTIFICATION,
+    contentType: Notifications.AndroidAudioContentType.SONIFICATION
+  };
+
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.default, {
-    name: "Default",
-    description: "General Cropvibe notifications",
-    importance: Notifications.AndroidImportance.MAX,
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    bypassDnd: false,
-    sound: "default",
-    enableVibrate: true,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35",
-    showBadge: true
-  });
-  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.directMessages, {
-    name: "Messages",
-    description: "Message alerts that appear on top of other apps",
+    name: "General",
+    description: "Likes, comments, follows, and other Cropvibe alerts",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
@@ -94,15 +97,24 @@ export async function ensureAndroidChannels() {
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35",
     showBadge: true,
-    // Helps OEMs treat this like a messaging heads-up channel.
-    audioAttributes: {
-      usage: Notifications.AndroidAudioUsage.NOTIFICATION_COMMUNICATION_INSTANT,
-      contentType: Notifications.AndroidAudioContentType.SONIFICATION
-    }
+    audioAttributes: notificationAudio
+  });
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.directMessages, {
+    name: "Messages",
+    description: "Direct message alerts (with sound)",
+    importance: Notifications.AndroidImportance.MAX,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: false,
+    sound: "default",
+    enableVibrate: true,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#C9FF35",
+    showBadge: true,
+    audioAttributes: notificationAudio
   });
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.incomingCalls, {
     name: "Calls",
-    description: "Incoming voice and video calls (shows over other apps)",
+    description: "Incoming voice and video calls (with ringtone sound)",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
@@ -126,7 +138,8 @@ export async function ensureAndroidChannels() {
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35",
-    showBadge: true
+    showBadge: true,
+    audioAttributes: notificationAudio
   });
 }
 

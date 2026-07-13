@@ -1701,7 +1701,7 @@ async function relationshipForUsers(viewerUserId, targetUserId) {
   const targetId = Number(targetUserId);
   const result = await query(
     `
-    SELECT follower_id AS "followerId", following_id AS "followingId", status
+    SELECT id, follower_id AS "followerId", following_id AS "followingId", status
     FROM social_follows
     WHERE (follower_id = $1 AND following_id = $2)
        OR (follower_id = $2 AND following_id = $1)
@@ -1712,10 +1712,14 @@ async function relationshipForUsers(viewerUserId, targetUserId) {
   const reverseEdge = result.rows.find((r) => Number(r.followerId) === targetId && Number(r.followingId) === viewerId);
   const viewerStatus = viewerEdge?.status || "none";
   const reverseStatus = reverseEdge?.status || "none";
+  const incomingFollowId =
+    reverseStatus === "pending" && reverseEdge?.id != null ? Number(reverseEdge.id) : null;
   return {
     viewerStatus,
     reverseStatus,
-    canFollowBack: reverseStatus === "accepted" && viewerStatus !== "accepted" && viewerStatus !== "pending"
+    canFollowBack: reverseStatus === "accepted" && viewerStatus !== "accepted" && viewerStatus !== "pending",
+    /** Pending request FROM target → viewer (so viewer can Accept on their profile). */
+    incomingFollowId: Number.isFinite(incomingFollowId) && incomingFollowId > 0 ? incomingFollowId : null
   };
 }
 
@@ -3679,9 +3683,16 @@ router.post("/v1/social/follow/sync-local", authRequired, async (req, res) => {
         VALUES ($1, $2, $3, NOW(), CASE WHEN $3 = 'pending' THEN NULL ELSE NOW() END)
         ON CONFLICT (follower_id, following_id)
         DO UPDATE SET
-          status = EXCLUDED.status,
+          -- Never downgrade an accepted follow back to pending from client sync.
+          status = CASE
+            WHEN social_follows.status = 'accepted' THEN social_follows.status
+            WHEN EXCLUDED.status = 'accepted' THEN 'accepted'
+            ELSE EXCLUDED.status
+          END,
           updated_at = NOW(),
           responded_at = CASE
+            WHEN social_follows.status = 'accepted' OR EXCLUDED.status = 'accepted'
+              THEN COALESCE(social_follows.responded_at, NOW())
             WHEN EXCLUDED.status = 'pending' THEN NULL
             ELSE COALESCE(social_follows.responded_at, NOW())
           END

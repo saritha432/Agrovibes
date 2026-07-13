@@ -21,7 +21,9 @@ export function hideIncomingCallAndroidNotification() {
   // no-op
 }
 
-export function parseIncomingCallActionPayload(_payload?: string | null): ParsedIncomingCallPush | null {
+export function parseIncomingCallActionPayload(
+  _payload?: string | Record<string, unknown> | null
+): ParsedIncomingCallPush | null {
   return null;
 }
 
