@@ -2,8 +2,9 @@ import { AppState, NativeModules, Platform } from "react-native";
 import type { FirebaseMessagingTypes } from "@react-native-firebase/messaging";
 import { displayIncomingCallNotification } from "./incomingCallNotifications";
 import type { IncomingCallNotificationPayload } from "./incomingCallNotifications";
+import { ANDROID_CHANNELS } from "./pushNotifications";
 
-const CALL_CHANNEL_ID = "incoming_calls";
+const CALL_CHANNEL_ID = ANDROID_CHANNELS.incomingCalls;
 const CALL_TIMEOUT_MS = 45_000;
 
 export type ParsedIncomingCallPush = IncomingCallNotificationPayload;

@@ -1,7 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { presentDirectMessageNotification } from "./dmNotificationThread";
-import { ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
+import { ANDROID_CHANNELS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
 type FcmRemoteMessage = {
   data?: Record<string, unknown>;
@@ -51,15 +51,15 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
   }
 
   const channelId = isDirectMessage
-    ? "direct_messages"
-    : String(data.channelId || "default").trim() || "default";
+    ? ANDROID_CHANNELS.directMessages
+    : String(data.channelId || ANDROID_CHANNELS.default).trim() || ANDROID_CHANNELS.default;
   const categoryId = isDirectMessage
     ? "DIRECT_MESSAGE"
     : String(data.categoryId || "").trim() || undefined;
   const priority =
-    channelId === "incoming_calls"
+    channelId === ANDROID_CHANNELS.incomingCalls || type === "incoming_call"
       ? Notifications.AndroidNotificationPriority.MAX
-      : Notifications.AndroidNotificationPriority.HIGH;
+      : Notifications.AndroidNotificationPriority.MAX;
 
   await Notifications.scheduleNotificationAsync({
     content: {
@@ -68,7 +68,13 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
       data: { ...data, type: type || "direct_message", categoryId },
       categoryIdentifier: categoryId,
       sound: "default",
-      ...(Platform.OS === "android" ? { channelId, priority } : {})
+      ...(Platform.OS === "android"
+        ? {
+            channelId,
+            priority,
+            vibrate: [0, 250, 250, 250]
+          }
+        : {})
     },
     trigger: null
   });

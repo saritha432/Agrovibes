@@ -1,6 +1,5 @@
 import React from "react";
 import { AppState, Platform } from "react-native";
-import * as Notifications from "expo-notifications";
 import { useAuth } from "../auth/AuthContext";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { navigateToJoinLive } from "../navigation/navigationRef";
@@ -12,8 +11,7 @@ import {
   setupMissedCallNotificationCategory,
   unregisterPushNotifications
 } from "./pushNotifications";
-import { handleNotificationResponse } from "./notificationNavigation";
-import { registerNotificationResponseHandler } from "./registerNotificationHandlers";
+import { handleColdStartNotificationResponse, registerNotificationResponseHandler } from "./registerNotificationHandlers";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 
 export function PushNotificationBootstrap() {
@@ -74,9 +72,7 @@ export function PushNotificationBootstrap() {
     void setupMissedCallNotificationCategory();
     registerNotificationResponseHandler();
 
-    void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) void handleNotificationResponse(response, { authToken: authTokenRef.current });
-    });
+    void handleColdStartNotificationResponse({ authToken: authTokenRef.current });
 
     const receivedSub = addNotificationReceivedListener((event) => {
       const data = event.request.content.data || {};

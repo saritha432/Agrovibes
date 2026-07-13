@@ -627,9 +627,14 @@ export function DirectCallView({
               <Pressable
                 style={[styles.incomingBtn, styles.declineBtn]}
                 onPress={() => {
+                  if (endedRef.current) return;
+                  endedRef.current = true;
                   silenceRingtone();
+                  void stopCallSounds();
+                  void AudioSession.stopAudioSession().catch(() => undefined);
+                  // Parent handles cancel + history via completeIncomingCallDecline.
                   onDecline?.();
-                  void finishWithoutRoom("declined");
+                  onClose();
                 }}
               >
                 <Ionicons name="close" size={30} color="#fff" />

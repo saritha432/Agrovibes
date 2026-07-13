@@ -6,8 +6,8 @@ import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { sendDirectMessage } from "../services/api";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
+import { completeIncomingCallDecline } from "./incomingCallDecline";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
-import { displayMissedCallNotification } from "./missedCallNotifications";
 
 export function GlobalIncomingCallHost() {
   const { token } = useAuth();
@@ -19,7 +19,7 @@ export function GlobalIncomingCallHost() {
     return subscribeIncomingCall((next) => {
       setCall(next);
       setConnectEnabled(!!next?.autoAccept);
-      historySentRef.current = false;
+      if (next) historySentRef.current = false;
     });
   }, []);
 
@@ -73,17 +73,24 @@ export function GlobalIncomingCallHost() {
       }}
       onDecline={() => {
         const active = call;
-        void finishCall({ status: "declined", durationSec: 0 });
-        if (active) {
-          void displayMissedCallNotification({
-            callerId: active.callerId,
-            callerName: active.callerName,
-            mode: active.mode,
-            callerAvatarUrl: active.callerAvatarUrl
-          });
-        }
+        // Close UI immediately; shared decline path cancels caller ring + writes history.
+        historySentRef.current = true;
+        clearIncomingCall();
+        setCall(null);
+        setConnectEnabled(false);
+        if (!active) return;
+        void completeIncomingCallDecline({
+          callerId: active.callerId,
+          callerName: active.callerName,
+          mode: active.mode,
+          roomName: active.roomName,
+          callerAvatarUrl: active.callerAvatarUrl,
+          authToken: token,
+          status: "declined"
+        });
       }}
       onCallEnded={(result) => {
+        if (result.status === "declined") return;
         void finishCall(result);
       }}
       onClose={() => {

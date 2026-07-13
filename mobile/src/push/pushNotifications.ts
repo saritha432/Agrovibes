@@ -6,6 +6,19 @@ import { registerPushToken, unregisterPushToken } from "../services/api";
 
 let incomingCallCategoriesReady: Promise<void> | null = null;
 
+/**
+ * Fresh channel IDs force Android to recreate HIGH/MAX importance channels.
+ * Existing channel importance cannot be raised after first creation (OEM/user settings).
+ */
+export const ANDROID_CHANNELS = {
+  default: "default",
+  /** Heads-up banners for DMs while another app is open */
+  directMessages: "direct_messages_v2",
+  /** Heads-up / full-screen style for incoming calls */
+  incomingCalls: "incoming_calls_v2",
+  missedCalls: "missed_calls_v2"
+} as const;
+
 export function ensureIncomingCallCategoriesReady() {
   if (!incomingCallCategoriesReady) {
     incomingCallCategoriesReady = setupIncomingCallNotificationCategories().catch(() => {
@@ -28,11 +41,12 @@ Notifications.setNotificationHandler({
       };
     }
     const isIncomingCall = type === "incoming_call";
-    if (isIncomingCall) {
+    const isDirectMessage = type === "direct_message";
+    if (isIncomingCall || isDirectMessage) {
       return {
         shouldShowAlert: true,
         shouldPlaySound: true,
-        shouldSetBadge: false,
+        shouldSetBadge: !isIncomingCall,
         priority: Notifications.AndroidNotificationPriority.MAX
       };
     }
@@ -47,46 +61,72 @@ Notifications.setNotificationHandler({
 
 export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
-  await Notifications.setNotificationChannelAsync("default", {
+
+  // Best-effort cleanup of older channels that may have been demoted to "silent".
+  for (const legacyId of ["direct_messages", "incoming_calls", "missed_calls"]) {
+    try {
+      await Notifications.deleteNotificationChannelAsync(legacyId);
+    } catch {
+      // no-op
+    }
+  }
+
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.default, {
     name: "Default",
     description: "General Cropvibe notifications",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35"
+    lightColor: "#C9FF35",
+    showBadge: true
   });
-  await Notifications.setNotificationChannelAsync("direct_messages", {
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.directMessages, {
     name: "Messages",
-    description: "Direct message notifications with reply",
+    description: "Message alerts that appear on top of other apps",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35"
+    lightColor: "#C9FF35",
+    showBadge: true,
+    // Helps OEMs treat this like a messaging heads-up channel.
+    audioAttributes: {
+      usage: Notifications.AndroidAudioUsage.NOTIFICATION_COMMUNICATION_INSTANT,
+      contentType: Notifications.AndroidAudioContentType.SONIFICATION
+    }
   });
-  await Notifications.setNotificationChannelAsync("incoming_calls", {
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.incomingCalls, {
     name: "Calls",
-    description: "Incoming voice and video calls",
+    description: "Incoming voice and video calls (shows over other apps)",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 800, 400, 800, 400, 800],
     lightColor: "#C9FF35",
-    enableVibrate: true
+    showBadge: false,
+    audioAttributes: {
+      usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
+      contentType: Notifications.AndroidAudioContentType.SONIFICATION
+    }
   });
-  await Notifications.setNotificationChannelAsync("missed_calls", {
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.missedCalls, {
     name: "Missed calls",
     description: "Missed and declined call alerts",
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35"
+    lightColor: "#C9FF35",
+    showBadge: true
   });
 }
 
