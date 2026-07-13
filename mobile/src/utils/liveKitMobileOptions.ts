@@ -1,26 +1,26 @@
 import type { RoomOptions } from "livekit-client";
 import { VideoPresets } from "livekit-client";
 
-const mobilePublishDefaults: NonNullable<RoomOptions["publishDefaults"]> = {
-  simulcast: true,
-  videoCodec: "h264",
-  videoEncoding: {
-    maxBitrate: 450_000,
-    maxFramerate: 24
-  },
-  videoSimulcastLayers: [VideoPresets.h216, VideoPresets.h360],
-  degradationPreference: "maintain-framerate"
-};
-
-/** Live streams — 720p capture cap, modest simulcast. */
+/**
+ * Live streams — VP8 (H.264 often blacks out remote video on Android RN WebRTC),
+ * single layer (no simulcast) for reliable viewer decode.
+ */
 export const LIVEKIT_LIVE_ROOM_OPTIONS: RoomOptions = {
-  adaptiveStream: true,
-  dynacast: true,
+  adaptiveStream: false,
+  dynacast: false,
   stopLocalTrackOnUnpublish: true,
   videoCaptureDefaults: {
     resolution: VideoPresets.h720.resolution
   },
-  publishDefaults: mobilePublishDefaults
+  publishDefaults: {
+    simulcast: false,
+    videoCodec: "vp8",
+    videoEncoding: {
+      maxBitrate: 600_000,
+      maxFramerate: 24
+    },
+    degradationPreference: "maintain-framerate"
+  }
 };
 
 /** 1:1 DM calls — lower capture + bitrate to reduce OOM on mid-range phones. */
@@ -34,11 +34,13 @@ export const LIVEKIT_CALL_ROOM_OPTIONS: RoomOptions = {
     facingMode: "user"
   },
   publishDefaults: {
-    ...mobilePublishDefaults,
+    simulcast: true,
+    videoCodec: "vp8",
     videoEncoding: {
       maxBitrate: 320_000,
       maxFramerate: 20
     },
-    videoSimulcastLayers: [VideoPresets.h180]
+    videoSimulcastLayers: [VideoPresets.h180],
+    degradationPreference: "maintain-framerate"
   }
 };

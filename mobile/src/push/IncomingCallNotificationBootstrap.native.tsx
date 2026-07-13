@@ -105,8 +105,23 @@ export function IncomingCallNotificationBootstrap() {
       const parsed = parseIncomingCallActionPayload(data.payload);
       if (!parsed?.callerId) return;
 
-      if (data.endAction === "ACTION_REJECTED_CALL" || data.endAction === "ACTION_HIDE_CALL") {
+      // User tapped Decline
+      if (data.endAction === "ACTION_REJECTED_CALL") {
         void declineIncomingCall(parsed, tokenRef.current);
+        return;
+      }
+
+      // Auto-timeout / hide — treat as missed, not declined
+      if (data.endAction === "ACTION_HIDE_CALL") {
+        void completeIncomingCallDecline({
+          callerId: parsed.callerId,
+          callerName: parsed.callerName,
+          mode: parsed.mode,
+          roomName: parsed.roomName,
+          callerAvatarUrl: parsed.callerAvatarUrl,
+          authToken: tokenRef.current,
+          status: "missed"
+        });
       }
     };
 

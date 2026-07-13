@@ -15,7 +15,15 @@ import {
   useTracks,
   type TrackReference
 } from "@livekit/react-native";
-import { LocalVideoTrack, ConnectionState, Room, RoomEvent, Track, type Participant } from "livekit-client";
+import {
+  LocalVideoTrack,
+  ConnectionState,
+  Room,
+  RoomEvent,
+  Track,
+  type Participant,
+  type RemoteTrackPublication
+} from "livekit-client";
 import React from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -54,12 +62,30 @@ type LiveKitRoomViewProps = {
   onLiveEnded?: (postId: number, update?: Partial<HomePost>) => void;
 };
 
+function participantPublishesCamera(participant: Participant) {
+  return Array.from(participant.videoTrackPublications.values()).some(
+    (pub) => pub.source === Track.Source.Camera
+  );
+}
+
+/** Prefer a subscribed remote camera track with attached media (DirectCall-style). */
 function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid: string) {
   if (!tracks.length) return undefined;
   if (isHost) {
-    return tracks.find((t) => t.participant.sid === localSid) ?? tracks[0];
+    return (
+      tracks.find((t) => t.participant.sid === localSid && !!t.publication?.track) ??
+      tracks.find((t) => t.participant.sid === localSid)
+    );
   }
-  return tracks.find((t) => t.participant.sid !== localSid) ?? tracks[0];
+  const remotes = tracks.filter((t) => t.participant.sid !== localSid);
+  const hostFirst = [
+    ...remotes.filter((t) => participantPublishesCamera(t.participant) || t.participant.isCameraEnabled),
+    ...remotes
+  ];
+  return (
+    hostFirst.find((t) => !!t.publication?.track && t.publication.isSubscribed !== false) ??
+    hostFirst.find((t) => !!t.publication?.track)
+  );
 }
 
 async function releaseHostCameraAndMic(room: Room) {
@@ -83,12 +109,6 @@ async function releaseHostCameraAndMic(room: Room) {
       // no-op
     }
   }
-}
-
-function participantPublishesCamera(participant: Participant) {
-  return Array.from(participant.videoTrackPublications.values()).some(
-    (pub) => pub.source === Track.Source.Camera && pub.track
-  );
 }
 
 function buildLiveViewers(
@@ -155,6 +175,7 @@ function LiveRoomContent({
   onCloseRef.current = onClose;
   onLiveEndedRef.current = onLiveEnded;
   const liveEndedRef = React.useRef(false);
+  const hostSeenRef = React.useRef(false);
   const [comments, setComments] = React.useState<LiveComment[]>([]);
   const [commentDraft, setCommentDraft] = React.useState("");
   const [liveEnded, setLiveEnded] = React.useState(false);
@@ -163,8 +184,65 @@ function LiveRoomContent({
   const [showViewerList, setShowViewerList] = React.useState(false);
   const [publishError, setPublishError] = React.useState("");
   const [facingFront, setFacingFront] = React.useState(initialCameraFacing !== "back");
+  const [mediaTick, setMediaTick] = React.useState(0);
   const localName = user?.fullName || "You";
   const localSid = room.localParticipant.sid;
+
+  const remoteHasHostCamera = React.useMemo(() => {
+    if (isHost) return true;
+    for (const p of participants) {
+      if (p.sid === localSid) continue;
+      if (participantPublishesCamera(p) || p.isCameraEnabled) return true;
+    }
+    return tracks.some((t) => isTrackReference(t) && t.participant.sid !== localSid);
+  }, [isHost, localSid, participants, tracks]);
+
+  React.useEffect(() => {
+    if (!isHost && remoteHasHostCamera) hostSeenRef.current = true;
+  }, [isHost, remoteHasHostCamera]);
+
+  // Force-subscribe host A/V — do not rely on adaptiveStream attach heuristics.
+  React.useEffect(() => {
+    if (isHost || liveEnded) return;
+    const subscribePub = (pub: RemoteTrackPublication) => {
+      try {
+        if (!pub.isSubscribed) pub.setSubscribed(true);
+      } catch {
+        // no-op
+      }
+    };
+    const subscribeAllRemote = () => {
+      for (const p of room.remoteParticipants.values()) {
+        for (const pub of p.trackPublications.values()) {
+          if (pub.kind === Track.Kind.Video || pub.kind === Track.Kind.Audio) {
+            subscribePub(pub as RemoteTrackPublication);
+          }
+        }
+      }
+    };
+    subscribeAllRemote();
+    const onPublished = (pub: RemoteTrackPublication) => subscribePub(pub);
+    const onParticipantConnected = () => subscribeAllRemote();
+    const bumpMedia = () => setMediaTick((n) => n + 1);
+    room.on(RoomEvent.TrackPublished, onPublished);
+    room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
+    room.on(RoomEvent.Connected, subscribeAllRemote);
+    room.on(RoomEvent.Reconnected, subscribeAllRemote);
+    room.on(RoomEvent.TrackSubscribed, bumpMedia);
+    room.on(RoomEvent.TrackUnsubscribed, bumpMedia);
+    room.on(RoomEvent.TrackMuted, bumpMedia);
+    room.on(RoomEvent.TrackUnmuted, bumpMedia);
+    return () => {
+      room.off(RoomEvent.TrackPublished, onPublished);
+      room.off(RoomEvent.ParticipantConnected, onParticipantConnected);
+      room.off(RoomEvent.Connected, subscribeAllRemote);
+      room.off(RoomEvent.Reconnected, subscribeAllRemote);
+      room.off(RoomEvent.TrackSubscribed, bumpMedia);
+      room.off(RoomEvent.TrackUnsubscribed, bumpMedia);
+      room.off(RoomEvent.TrackMuted, bumpMedia);
+      room.off(RoomEvent.TrackUnmuted, bumpMedia);
+    };
+  }, [isHost, liveEnded, room, participants]);
 
   React.useEffect(() => {
     setStatusText(status);
@@ -305,29 +383,59 @@ function LiveRoomContent({
         }
       ]);
     };
-    const onTrackSubscribed = (track: { kind: Track.Kind }) => {
-      if (!isHost && track.kind === Track.Kind.Video && videoDropTimerRef.current) {
+    const clearVideoDropTimer = () => {
+      if (videoDropTimerRef.current) {
         clearTimeout(videoDropTimerRef.current);
         videoDropTimerRef.current = null;
       }
     };
-    const onTrackUnsubscribed = (track: { kind: Track.Kind }) => {
+    const onTrackSubscribed = (track: { kind: Track.Kind }) => {
       if (!isHost && track.kind === Track.Kind.Video) {
-        if (videoDropTimerRef.current) clearTimeout(videoDropTimerRef.current);
-        videoDropTimerRef.current = setTimeout(() => handleLiveEnded(), 1200);
+        hostSeenRef.current = true;
+        clearVideoDropTimer();
+        setStatusText("Joined live");
       }
     };
-    const onParticipantDisconnected = () => {
+    // Dynacast / adaptiveStream often unsubscribes briefly — do NOT end the live for that.
+    const onTrackUnsubscribed = (track: { kind: Track.Kind }) => {
+      if (isHost || track.kind !== Track.Kind.Video || liveEndedRef.current) return;
+      clearVideoDropTimer();
+      // Only consider ending if host camera stays gone for a long grace period.
+      videoDropTimerRef.current = setTimeout(() => {
+        videoDropTimerRef.current = null;
+        if (liveEndedRef.current || isHost) return;
+        if (room.remoteParticipants.size === 0 && hostSeenRef.current) {
+          handleLiveEnded();
+        } else {
+          setStatusText("Waiting for host...");
+        }
+      }, 12_000);
+    };
+    const onParticipantDisconnected = (participant?: Participant) => {
       if (isHost || liveEndedRef.current) return;
-      if (room.remoteParticipants.size === 0) {
-        if (videoDropTimerRef.current) clearTimeout(videoDropTimerRef.current);
-        videoDropTimerRef.current = setTimeout(() => handleLiveEnded(), 600);
-      }
+      const wasHostCamera =
+        !!participant &&
+        (participantPublishesCamera(participant) ||
+          participant.isCameraEnabled ||
+          Array.from(participant.videoTrackPublications.values()).some((p) => p.source === Track.Source.Camera));
+      // Ignore other viewers leaving. Only react when a camera publisher leaves.
+      if (participant && !wasHostCamera && room.remoteParticipants.size > 0) return;
+      clearVideoDropTimer();
+      videoDropTimerRef.current = setTimeout(() => {
+        videoDropTimerRef.current = null;
+        if (liveEndedRef.current) return;
+        const stillHasRemoteHost = Array.from(room.remoteParticipants.values()).some(
+          (p) => participantPublishesCamera(p) || p.isCameraEnabled
+        );
+        if (!stillHasRemoteHost && hostSeenRef.current && room.remoteParticipants.size === 0) {
+          handleLiveEnded();
+        }
+      }, 8_000);
     };
+    // Brief disconnects / remounts must not close the viewer as "live ended".
     const onDisconnected = () => {
-      if (!isHost && !liveEndedRef.current) {
-        handleLiveEnded();
-      }
+      if (isHost || liveEndedRef.current) return;
+      setStatusText("Reconnecting...");
     };
     room.on(RoomEvent.DataReceived, onData);
     room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
@@ -335,10 +443,7 @@ function LiveRoomContent({
     room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
     room.on(RoomEvent.Disconnected, onDisconnected);
     return () => {
-      if (videoDropTimerRef.current) {
-        clearTimeout(videoDropTimerRef.current);
-        videoDropTimerRef.current = null;
-      }
+      clearVideoDropTimer();
       if (closeTimerRef.current) {
         clearTimeout(closeTimerRef.current);
         closeTimerRef.current = null;
@@ -420,19 +525,31 @@ function LiveRoomContent({
   }, [handleLiveEnded, isHost, onLiveEnded, postId, room, savingRecording, token]);
 
   const cameraRefs = tracks.filter((track): track is TrackReference => isTrackReference(track));
+  void mediaTick;
   const cameraTrack = pickLiveCameraTrack(cameraRefs, isHost, localSid);
+  const cameraTrackSid = cameraTrack?.publication?.trackSid ?? "";
   const watchingCount = liveViewerCount(viewers, isHost);
+  const showCameraVideo = !!cameraTrack && !!cameraTrack.publication?.track;
+
+  React.useEffect(() => {
+    if (isHost || liveEnded || showCameraVideo) return;
+    const id = setInterval(() => setMediaTick((n) => n + 1), 500);
+    return () => clearInterval(id);
+  }, [isHost, liveEnded, showCameraVideo]);
 
   return (
-    <View style={styles.root}>
-      {cameraTrack ? (
-        <VideoTrack
-          trackRef={cameraTrack}
-          style={styles.videoHost}
-          objectFit="cover"
-          mirror={isHost && facingFront}
-          zOrder={0}
-        />
+    <View style={styles.root} collapsable={false}>
+      {showCameraVideo && cameraTrack ? (
+        <View style={styles.videoHost} collapsable={false}>
+          <VideoTrack
+            key={`live-cam-${cameraTrackSid}`}
+            trackRef={cameraTrack}
+            style={styles.videoSurface}
+            objectFit="cover"
+            mirror={isHost && facingFront}
+            zOrder={isHost ? 0 : 1}
+          />
+        </View>
       ) : (
         <View style={[styles.videoHost, styles.videoPlaceholder]}>
           <ActivityIndicator color={APP_LIME} />
@@ -565,11 +682,23 @@ export function LiveKitRoomView({
   onLiveEnded
 }: LiveKitRoomViewProps) {
   const { token, user } = useAuth();
+  const authTokenRef = React.useRef(token);
+  authTokenRef.current = token;
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [status, setStatus] = React.useState("Connecting live...");
   const [errorText, setErrorText] = React.useState("");
   const [debugInfo, setDebugInfo] = React.useState("");
   const [shareOpen, setShareOpen] = React.useState(false);
+  const roomOptions = React.useMemo(
+    () => ({
+      ...LIVEKIT_LIVE_ROOM_OPTIONS,
+      videoCaptureDefaults: {
+        ...LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults,
+        facingMode: (initialCameraFacing === "back" ? "environment" : "user") as "user" | "environment"
+      }
+    }),
+    [initialCameraFacing]
+  );
 
   const liveSharePost = React.useMemo((): HomePost | null => {
     if (sharePost) return sharePost;
@@ -618,19 +747,18 @@ export function LiveKitRoomView({
       cancelled = true;
       AudioSession.stopAudioSession().catch(() => undefined);
       void deactivateKeepAwake().catch(() => undefined);
-      setConnection(null);
     };
   }, [visible]);
 
   React.useEffect(() => {
     if (!visible || !roomName) return;
     let cancelled = false;
-    setConnection(null);
     setErrorText("");
     setStatus("Connecting live...");
 
     (async () => {
-      if (!token) {
+      const authToken = authTokenRef.current;
+      if (!authToken) {
         setErrorText("Please log in to join live.");
         return;
       }
@@ -654,7 +782,7 @@ export function LiveKitRoomView({
           setDebugInfo(`room=${roomName} post=${postId ?? "-"} host=no`);
         }
         setStatus("Requesting LiveKit token...");
-        const lk = await createLiveKitToken(token, { roomName, canPublish: isHost });
+        const lk = await createLiveKitToken(authToken, { roomName, canPublish: isHost });
         if (cancelled) return;
         setConnection({ url: lk.url, token: lk.token });
         setStatus(isHost ? "You are live now" : "Joined live");
@@ -668,7 +796,12 @@ export function LiveKitRoomView({
     return () => {
       cancelled = true;
     };
-  }, [isHost, roomName, token, visible]);
+  }, [isHost, postId, roomName, visible]);
+
+  // Clear connection only when leaving live UI (not on Strict Mode effect re-runs).
+  React.useEffect(() => {
+    if (!visible) setConnection(null);
+  }, [visible]);
 
   if (!visible) return null;
 
@@ -709,13 +842,8 @@ export function LiveKitRoomView({
         connect
         audio={false}
         video={false}
-        options={{
-          ...LIVEKIT_LIVE_ROOM_OPTIONS,
-          videoCaptureDefaults: {
-            ...LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults,
-            facingMode: initialCameraFacing === "back" ? "environment" : "user"
-          }
-        }}
+        options={roomOptions}
+        connectOptions={{ autoSubscribe: true }}
         onError={(error) => {
           const msg = error.message || "";
           if (!isHost && /insufficient permissions/i.test(msg)) return;
@@ -742,8 +870,9 @@ export function LiveKitRoomView({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  videoHost: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000" },
-  videoPlaceholder: { alignItems: "center", justifyContent: "center", padding: 24 },
+  videoHost: { ...StyleSheet.absoluteFillObject },
+  videoSurface: { width: "100%", height: "100%" },
+  videoPlaceholder: { alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#000" },
   videoPlaceholderText: { marginTop: 12, color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: "700", textAlign: "center" },
   videoDebugText: { marginTop: 8, color: "rgba(201,255,53,0.85)", fontSize: 11, fontWeight: "700", textAlign: "center" },
   endedOverlay: {

@@ -46,6 +46,7 @@ export interface HomePost {
   imageUrls?: string[];
   thumbnailUrl?: string;
   musicLabel?: string | null;
+  musicAudioUrl?: string | null;
   createdAt: string;
   viewerHasLiked?: boolean;
   viewerHasSaved?: boolean;

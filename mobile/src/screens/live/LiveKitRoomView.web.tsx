@@ -139,21 +139,25 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
         }
       })
       .on(RoomEvent.TrackUnsubscribed, (track) => {
+        // Dynacast may unsubscribe briefly — keep waiting; only host live_ended / empty room ends.
         if (!isHostRef.current && track.kind === Track.Kind.Video) {
-          handleLiveEnded();
+          setStatus("Waiting for host...");
         }
       })
       .on(RoomEvent.ParticipantConnected, () => refreshViewers(room))
       .on(RoomEvent.ParticipantDisconnected, () => {
         refreshViewers(room);
         if (!isHostRef.current && room.remoteParticipants.size === 0) {
-          handleLiveEnded();
+          window.setTimeout(() => {
+            if (liveEndedRef.current || cancelled) return;
+            if (room.remoteParticipants.size === 0) handleLiveEnded();
+          }, 8_000);
         }
       })
       .on(RoomEvent.DataReceived, onData)
       .on(RoomEvent.Disconnected, () => {
         if (cancelled || liveEndedRef.current) return;
-        if (!isHostRef.current) handleLiveEnded();
+        if (!isHostRef.current) setStatus("Reconnecting...");
       });
 
     (async () => {

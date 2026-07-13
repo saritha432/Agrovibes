@@ -1414,6 +1414,7 @@ export async function fetchProfileStats(token: string, userId: number) {
     viewerStatus: FollowStatus;
     reverseStatus: FollowStatus;
     canFollowBack: boolean;
+    incomingFollowId?: number | null;
   };
 }
 

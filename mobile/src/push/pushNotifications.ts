@@ -6,6 +6,21 @@ import { registerPushToken, unregisterPushToken } from "../services/api";
 
 let incomingCallCategoriesReady: Promise<void> | null = null;
 
+/**
+ * Fresh channel IDs force Android to recreate channels with sound.
+ * Channel sound/importance cannot be changed after first creation (OEM/user settings).
+ * v3: drop COMMUNICATION_* audio usage — some OEMs routed that to a silent stream
+ * while notification volume was on (other apps sounded fine, Cropvibe did not).
+ */
+export const ANDROID_CHANNELS = {
+  default: "general_v3",
+  /** Heads-up banners for DMs while another app is open */
+  directMessages: "direct_messages_v3",
+  /** Heads-up / full-screen style for incoming calls */
+  incomingCalls: "incoming_calls_v3",
+  missedCalls: "missed_calls_v3"
+} as const;
+
 export function ensureIncomingCallCategoriesReady() {
   if (!incomingCallCategoriesReady) {
     incomingCallCategoriesReady = setupIncomingCallNotificationCategories().catch(() => {
@@ -28,11 +43,12 @@ Notifications.setNotificationHandler({
       };
     }
     const isIncomingCall = type === "incoming_call";
-    if (isIncomingCall) {
+    const isDirectMessage = type === "direct_message";
+    if (isIncomingCall || isDirectMessage) {
       return {
         shouldShowAlert: true,
         shouldPlaySound: true,
-        shouldSetBadge: false,
+        shouldSetBadge: !isIncomingCall,
         priority: Notifications.AndroidNotificationPriority.MAX
       };
     }
@@ -47,46 +63,83 @@ Notifications.setNotificationHandler({
 
 export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
-  await Notifications.setNotificationChannelAsync("default", {
-    name: "Default",
-    description: "General Cropvibe notifications",
+
+  // Remove older channels that may have been created silent / with bad audio attributes.
+  for (const legacyId of [
+    "default",
+    "direct_messages",
+    "incoming_calls",
+    "missed_calls",
+    "direct_messages_v2",
+    "incoming_calls_v2",
+    "missed_calls_v2"
+  ]) {
+    try {
+      await Notifications.deleteNotificationChannelAsync(legacyId);
+    } catch {
+      // no-op
+    }
+  }
+
+  const notificationAudio = {
+    usage: Notifications.AndroidAudioUsage.NOTIFICATION,
+    contentType: Notifications.AndroidAudioContentType.SONIFICATION
+  };
+
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.default, {
+    name: "General",
+    description: "Likes, comments, follows, and other Cropvibe alerts",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35"
+    lightColor: "#C9FF35",
+    showBadge: true,
+    audioAttributes: notificationAudio
   });
-  await Notifications.setNotificationChannelAsync("direct_messages", {
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.directMessages, {
     name: "Messages",
-    description: "Direct message notifications with reply",
+    description: "Direct message alerts (with sound)",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35"
+    lightColor: "#C9FF35",
+    showBadge: true,
+    audioAttributes: notificationAudio
   });
-  await Notifications.setNotificationChannelAsync("incoming_calls", {
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.incomingCalls, {
     name: "Calls",
-    description: "Incoming voice and video calls",
+    description: "Incoming voice and video calls (with ringtone sound)",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 800, 400, 800, 400, 800],
     lightColor: "#C9FF35",
-    enableVibrate: true
+    showBadge: false,
+    audioAttributes: {
+      usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
+      contentType: Notifications.AndroidAudioContentType.SONIFICATION
+    }
   });
-  await Notifications.setNotificationChannelAsync("missed_calls", {
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.missedCalls, {
     name: "Missed calls",
     description: "Missed and declined call alerts",
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
     sound: "default",
+    enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#C9FF35"
+    lightColor: "#C9FF35",
+    showBadge: true,
+    audioAttributes: notificationAudio
   });
 }
 

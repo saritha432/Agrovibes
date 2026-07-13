@@ -44,6 +44,7 @@ import {
   HomePost,
   deleteHomePost,
   removeFollower,
+  respondToFollowRequest,
   sendFollowRequest,
   sendDirectMessage,
   unfollowUser,
@@ -167,6 +168,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [publicFollowStatus, setPublicFollowStatus] = useState<FollowStatus>("none");
   const [publicReverseStatus, setPublicReverseStatus] = useState<FollowStatus>("none");
   const [publicCanFollowBack, setPublicCanFollowBack] = useState(false);
+  const [incomingFollowId, setIncomingFollowId] = useState<number | null>(null);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
   const [publicBio, setPublicBio] = useState("");
   const [followPublicBusy, setFollowPublicBusy] = useState(false);
@@ -577,6 +579,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       setPublicFollowStatus(viewerStatus);
       setPublicReverseStatus(reverseStatus);
       setPublicCanFollowBack(!!stats.canFollowBack);
+      const incomingId = Number(stats.incomingFollowId);
+      setIncomingFollowId(
+        reverseStatus === "pending" && Number.isFinite(incomingId) && incomingId > 0 ? incomingId : null
+      );
       setPublicFullName(
         resolvePersonDisplayName({
           fullName: stats.fullName,
@@ -1114,13 +1120,16 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       });
 
   const publicFollowLabel = useMemo(() => {
+    // They sent you a follow request — Accept is more important than Following/Follow.
+    if (publicReverseStatus === "pending" && incomingFollowId) return t("accept") || "Accept";
     if (publicFollowStatus === "accepted") return t("following");
     if (publicFollowStatus === "pending") return t("requested");
     if (publicCanFollowBack) return t("followBackCapital");
     return followPublicBusy ? t("followBusy") : t("follow");
-  }, [followPublicBusy, publicCanFollowBack, publicFollowStatus, t]);
+  }, [followPublicBusy, incomingFollowId, publicCanFollowBack, publicFollowStatus, publicReverseStatus, t]);
 
-  const publicFollowDisabled = followPublicBusy || publicFollowStatus === "pending";
+  const publicFollowDisabled =
+    followPublicBusy || (publicFollowStatus === "pending" && !(publicReverseStatus === "pending" && incomingFollowId));
 
   const isPublicUserBlocked = useMemo(
     () => (publicUserId ? isUserBlocked(publicUserId, blockedUsersList) : false),
@@ -1232,7 +1241,27 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   };
 
   const onPublicFollowPress = async () => {
-    if (!token || !publicUserId || followPublicBusy || publicFollowStatus === "pending") return;
+    if (!token || !publicUserId || followPublicBusy) return;
+
+    // Accept their pending request to follow you (fixes Requested vs Following confusion).
+    if (publicReverseStatus === "pending" && incomingFollowId) {
+      setFollowPublicBusy(true);
+      try {
+        await respondToFollowRequest(token, incomingFollowId, "accept");
+        setPublicReverseStatus("accepted");
+        setIncomingFollowId(null);
+        setFollowersCount((v) => v + 1);
+        setPublicCanFollowBack(publicFollowStatus !== "accepted" && publicFollowStatus !== "pending");
+        await loadPublicProfileStats();
+      } catch {
+        Alert.alert(t("followFailed"), t("tryAgainMoment"));
+      } finally {
+        setFollowPublicBusy(false);
+      }
+      return;
+    }
+
+    if (publicFollowStatus === "pending") return;
     if (publicFollowStatus === "accepted") {
       setFollowPublicBusy(true);
       try {
@@ -1404,6 +1433,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       profileSubject?.username,
       publicFollowLabel,
       publicFollowDisabled,
+      onPublicFollowPress,
       showDeactivatedGallery,
       t
     ]

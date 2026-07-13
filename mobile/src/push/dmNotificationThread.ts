@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
+import { ANDROID_CHANNELS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
 const THREAD_KEY_PREFIX = "cropvibe.dm.notif.thread.v5.";
 const AUTH_STORAGE_KEY = "agrovibes.auth";
@@ -202,6 +202,18 @@ export async function dismissDmNotificationsForPeer(
   );
 }
 
+/** Clear stored thread + shade card after the user opens/reads this chat. */
+export async function clearDmNotificationThread(peerUserId: string | number) {
+  const actorId = String(peerUserId || "").trim();
+  if (!actorId) return;
+  try {
+    await AsyncStorage.removeItem(threadStorageKey(actorId));
+  } catch {
+    // no-op
+  }
+  await dismissDmNotificationsForPeer(actorId);
+}
+
 export async function presentDirectMessageNotification({
   peerUserId,
   peerName,
@@ -283,6 +295,9 @@ export async function presentDirectMessageNotification({
   await setupDirectMessageNotificationCategory();
   await dismissDmNotificationsForPeer(actorId, replaceIdentifier ? [replaceIdentifier] : []);
 
+  // Small delay so Android treats this as a new alert (heads-up), not an in-place update.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
   const payloadData = {
     ...(data || {}),
     type: "direct_message",
@@ -304,8 +319,9 @@ export async function presentDirectMessageNotification({
       sound: "default",
       ...(Platform.OS === "android"
         ? {
-            channelId: "direct_messages",
-            priority: Notifications.AndroidNotificationPriority.HIGH
+            channelId: ANDROID_CHANNELS.directMessages,
+            priority: Notifications.AndroidNotificationPriority.MAX,
+            vibrate: [0, 250, 250, 250]
           }
         : {})
     },

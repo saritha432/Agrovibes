@@ -110,7 +110,7 @@
         "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
       },
       "icon": "./assets/icon-ios.png",
-      "buildNumber": "14"
+      "buildNumber": "16"
     },
     "web": {
       "favicon": "./assets/logo.png"
