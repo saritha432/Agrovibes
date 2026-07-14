@@ -1212,6 +1212,8 @@ export async function createHomePost(payload: {
     textBackground?: boolean;
     font?: string;
   };
+  farmingTopic?: string;
+  farmingConfirmed?: boolean;
 }, token?: string | null) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -1221,7 +1223,14 @@ export async function createHomePost(payload: {
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    throw new Error("Failed to create post");
+    let detail = "Failed to create post";
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body?.message) detail = String(body.message);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
   }
   const data = (await response.json()) as { post: HomePost };
   return { post: sanitizeHomePost(data.post) };

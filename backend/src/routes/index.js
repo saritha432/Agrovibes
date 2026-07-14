@@ -48,6 +48,7 @@ const {
   directMessagePushPayload
 } = require("../pushNotifications");
 const { buildShareReelHtml } = require("../shareReelPage");
+const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
 const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, getSocketIo } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
 
@@ -1225,6 +1226,7 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_status TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_ended_at TIMESTAMPTZ`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS farming_topic TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
@@ -4780,7 +4782,9 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
       taggedUserIds,
       musicLabel,
       musicAudioUrl,
-      creativeMeta
+      creativeMeta,
+      farmingTopic,
+      farmingConfirmed
     } = req.body || {};
 
     let urlList = Array.isArray(imageUrls)
@@ -4807,6 +4811,17 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     }
     if (hasVideo && hasImage) {
       res.status(400).json({ message: "Send either a video or images for one post, not both" });
+      return;
+    }
+
+    const farmingPolicy = evaluateFarmingPostPolicy({
+      caption,
+      farmingTopic,
+      farmingConfirmed: farmingConfirmed === true || farmingConfirmed === "true" || farmingConfirmed === 1,
+      isLivePost
+    });
+    if (!farmingPolicy.ok) {
+      res.status(farmingPolicy.status).json({ message: farmingPolicy.message });
       return;
     }
 
@@ -4847,8 +4862,8 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url, creative_meta)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12::jsonb)
+      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url, creative_meta, farming_topic)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12::jsonb, $13)
       RETURNING
         id,
         user_id AS "userId",
@@ -4865,6 +4880,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         music_label AS "musicLabel",
         music_audio_url AS "musicAudioUrl",
         creative_meta AS "creativeMeta",
+        farming_topic AS "farmingTopic",
         created_at AS "createdAt"
       `,
       [
@@ -4879,7 +4895,8 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         taggedJson,
         cleanMusicLabel,
         cleanMusicAudioUrl,
-        JSON.stringify(cleanCreativeMeta)
+        JSON.stringify(cleanCreativeMeta),
+        farmingPolicy.farmingTopic
       ]
     );
 

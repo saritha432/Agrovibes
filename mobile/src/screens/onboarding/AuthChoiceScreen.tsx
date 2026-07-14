@@ -219,13 +219,18 @@ export function AuthChoiceScreen() {
             <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#9aa5ad" />
           </Pressable>
         </View>
+
+        {mode === "register" ? (
+          <View style={styles.legalNoticeWrap}>
+            <SignupLegalNotice />
+          </View>
+        ) : null}
+
         <Pressable onPress={submit} style={[styles.primaryBtn, !canSubmit ? styles.disabled : null]} disabled={!canSubmit}>
           <Text style={styles.primaryBtnText}>
             {loadingSubmit ? "Submitting..." : mode === "register" ? t("submit") : t("login")}
           </Text>
         </Pressable>
-
-        {mode === "register" ? <SignupLegalNotice /> : null}
 
         {mode === "login" ? (
           <Pressable onPress={() => navigation.navigate("ForgotPassword")} style={styles.forgotPasswordLink}>
@@ -290,6 +295,7 @@ const styles = StyleSheet.create({
     backgroundColor: APP_SURFACE
   },
   spaced: { marginTop: 10 },
+  legalNoticeWrap: { marginTop: 14 },
   passwordRow: {
     flexDirection: "row",
     alignItems: "center",
