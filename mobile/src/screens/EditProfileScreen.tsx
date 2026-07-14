@@ -28,6 +28,7 @@ import { useAuth } from "../auth/AuthContext";
 import { updateMyProfile, uploadImageFile } from "../services/api";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
+import { isChosenUsername } from "../localization/feedDisplay";
 const BG = APP_BLACK;
 const CARD = APP_SURFACE;
 const BORDER = "#3a3a3a";
@@ -125,7 +126,11 @@ export function EditProfileScreen() {
   const { user, token, signIn, updateUser } = useAuth();
 
   const [fullName, setFullName] = useState(user?.fullName || "");
-  const [username, setUsername] = useState(() => safeHandle(user?.username || (user?.email || "").split("@")[0] || ""));
+  const [username, setUsername] = useState(() =>
+    isChosenUsername(user?.username, { phone: user?.phone, email: user?.email })
+      ? safeHandle(user?.username || "")
+      : ""
+  );
   const [bio, setBio] = useState(user?.bio || "");
   const [website, setWebsite] = useState(user?.website || "");
   const [location, setLocation] = useState(user?.locationLabel || "");
@@ -206,9 +211,15 @@ export function EditProfileScreen() {
       }
     }
 
+    const cleanedUsername = safeHandle(username);
+    const usernamePayload =
+      cleanedUsername && isChosenUsername(cleanedUsername, { phone: user?.phone, email: user?.email })
+        ? cleanedUsername
+        : null;
+
     const payload = {
       fullName: name,
-      username: safeHandle(username) || undefined,
+      username: usernamePayload,
       bio: bio.trim() || undefined,
       website: website.trim() || undefined,
       locationLabel: location.trim() || undefined,
@@ -365,6 +376,7 @@ export function EditProfileScreen() {
                   placeholder={t("usernamePlaceholder")}
                   placeholderTextColor={LABEL}
                 />
+                <Text style={styles.fieldHint}>{t("usernameOptionalHint")}</Text>
               </FieldRow>
 
               <FieldRow label={t("gender")}>
@@ -677,6 +689,13 @@ const styles = StyleSheet.create({
   fieldValuePlaceholder: {
     color: LABEL,
     fontWeight: "500"
+  },
+  fieldHint: {
+    marginTop: 6,
+    color: LABEL,
+    fontSize: 11,
+    fontWeight: "600",
+    lineHeight: 15
   },
   bioInput: {
     minHeight: 96,

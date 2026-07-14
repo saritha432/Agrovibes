@@ -480,7 +480,7 @@ export async function updateMyProfile(
   token: string,
   payload: {
     fullName: string;
-    username?: string;
+    username?: string | null;
     bio?: string;
     website?: string;
     locationLabel?: string;
@@ -597,6 +597,8 @@ export interface HomePost {
   caption: string;
   likesCount: number;
   commentsCount: number;
+  /** Total reposts/reshares of this post. */
+  resharesCount?: number;
   videoUrl?: string | null;
   imageUrl?: string | null;
   /** Present when the post is a multi-image carousel (2+ photos). */
@@ -1015,13 +1017,13 @@ export async function reshareHomePost(token: string, postId: number, quoteCaptio
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
-  })) as { reshared: boolean; quoteCaption?: string | null };
+  })) as { reshared: boolean; quoteCaption?: string | null; resharesCount?: number };
 }
 
 export async function unreshareHomePost(token: string, postId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unreshare`, token, {
     method: "POST"
-  })) as { reshared: boolean };
+  })) as { reshared: boolean; resharesCount?: number };
 }
 
 export async function deleteHomePost(token: string, postId: number) {
@@ -1061,6 +1063,18 @@ export async function reportHomePost(token: string, postId: number, reason?: str
       body: JSON.stringify(body)
     }
   )) as { ok: boolean };
+}
+
+export async function reportUser(token: string, userId: number, reason?: string) {
+  const body: { reason?: string } = {};
+  if (reason != null && String(reason).trim()) {
+    body.reason = String(reason).trim().slice(0, 500);
+  }
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/users/${encodeURIComponent(String(userId))}/report`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })) as { ok: boolean };
 }
 
 export async function fetchHomePostComments(postId: number, token?: string | null) {

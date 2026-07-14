@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -11,6 +11,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister, formatAuthError } from "../../services/api";
 import { getLoginDevicePayload } from "../../utils/deviceInfo";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
+import { SignupLegalNotice } from "../../components/SignupLegalNotice";
 
 const GREEN = APP_LIME;
 const BG = APP_BLACK;
@@ -132,6 +133,11 @@ export function AuthChoiceScreen() {
 
   return (
     <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.header}>
         <Text style={styles.label}>{mode === "register" ? t("createAccount") : t("login")}</Text>
         <Text style={styles.subtag}>
@@ -219,6 +225,8 @@ export function AuthChoiceScreen() {
           </Text>
         </Pressable>
 
+        {mode === "register" ? <SignupLegalNotice /> : null}
+
         {mode === "login" ? (
           <Pressable onPress={() => navigation.navigate("ForgotPassword")} style={styles.forgotPasswordLink}>
             <Text style={styles.forgotPasswordText}>{t("forgotPasswordLink")}</Text>
@@ -230,6 +238,7 @@ export function AuthChoiceScreen() {
           {mode === "register" ? t("registerHelper") : t("loginHelper")}
         </Text>
       </View>
+      </ScrollView>
       {Platform.OS === "ios" ? <View style={styles.bottomHomeBar} /> : null}
     </View>
   );
@@ -237,6 +246,7 @@ export function AuthChoiceScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 48 },
+  scrollContent: { paddingBottom: 28 },
   header: { marginBottom: 14 },
   modeSegment: {
     flexDirection: "row",

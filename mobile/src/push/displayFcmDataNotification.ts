@@ -1,7 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { presentDirectMessageNotification } from "./dmNotificationThread";
-import { ANDROID_CHANNELS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
+import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
 type FcmRemoteMessage = {
   data?: Record<string, unknown>;
@@ -61,13 +61,16 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
       ? Notifications.AndroidNotificationPriority.MAX
       : Notifications.AndroidNotificationPriority.MAX;
 
+  const sound =
+    type === "incoming_call" ? NOTIFICATION_SOUNDS.incomingCall : NOTIFICATION_SOUNDS.message;
+
   await Notifications.scheduleNotificationAsync({
     content: {
       title: title || "Cropvibe",
       body: body || "New message",
       data: { ...data, type: type || "direct_message", categoryId },
       categoryIdentifier: categoryId,
-      sound: "default",
+      sound,
       ...(Platform.OS === "android"
         ? {
             channelId,

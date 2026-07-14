@@ -163,7 +163,11 @@
         {
           "icon": "./assets/logo-adaptive-foreground.png",
           "color": "#FFFFFF",
-          "defaultChannel": "default"
+          "defaultChannel": "general_v4",
+          "sounds": [
+            "./assets/sounds/incoming_ring.wav",
+            "./assets/sounds/outgoing_ring.wav"
+          ]
         }
       ],
       [

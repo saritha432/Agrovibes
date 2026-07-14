@@ -39,13 +39,54 @@ export function looksLikePhoneNumber(value: string): boolean {
   return !letters || letters.length === 0;
 }
 
+/** Username the user chose in Edit Profile — not phone/login id auto-filled from registration. */
+export function isChosenUsername(
+  username?: string | null,
+  options?: { phone?: string | null; email?: string | null }
+): boolean {
+  const bare = String(username || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+  if (!bare) return false;
+  if (looksLikePhoneNumber(bare)) return false;
+  if (bare.includes("@phone.agrovibes")) return false;
+  const phoneDigits = String(options?.phone || "")
+    .replace(/\D/g, "")
+    .slice(-10);
+  const emailLocal = String(options?.email || "")
+    .split("@")[0]
+    .replace(/\D/g, "")
+    .slice(-10);
+  const bareDigits = bare.replace(/\D/g, "").slice(-10);
+  if (phoneDigits.length >= 10 && bareDigits === phoneDigits) return false;
+  if (emailLocal.length >= 10 && bareDigits === emailLocal) return false;
+  return true;
+}
+
+/** @handle for profile when user set a username; otherwise null. */
+export function formatProfileHandle(
+  username?: string | null,
+  options?: { phone?: string | null; email?: string | null }
+): string | null {
+  if (!isChosenUsername(username, options)) return null;
+  return `@${String(username).trim().replace(/^@+/, "")}`;
+}
+
 /** Prefer real names; skip phone numbers and synthetic emails used as identifiers. */
 export function resolvePersonDisplayName(options: {
   fullName?: string | null;
   username?: string | null;
   fallback?: string | null;
+  phone?: string | null;
+  email?: string | null;
 }): string {
-  const candidates = [options.fullName, options.username, options.fallback]
+  const chosenUsername = isChosenUsername(options.username, options)
+    ? String(options.username || "")
+        .trim()
+        .replace(/^@+/, "")
+    : null;
+  const candidates = [options.fullName, options.fallback]
     .map((v) => String(v || "").trim())
     .filter(Boolean);
   for (const candidate of candidates) {
@@ -53,10 +94,7 @@ export function resolvePersonDisplayName(options: {
     if (candidate.includes("@phone.agrovibes")) continue;
     return candidate;
   }
-  const bareUsername = String(options.username || "")
-    .trim()
-    .replace(/^@+/, "");
-  if (bareUsername && !looksLikePhoneNumber(bareUsername)) return bareUsername;
+  if (chosenUsername) return chosenUsername;
   return "User";
 }
 

@@ -67,6 +67,7 @@ let homePostCommentsTableReady = false;
 let homePostSavesTableReady = false;
 let homePostResharesTableReady = false;
 let postReportsTableReady = false;
+let userReportsTableReady = false;
 let directMessagesTableReady = false;
 let scheduledLivesTableReady = false;
 const phoneOtpMemory = new Map();
@@ -93,24 +94,46 @@ function looksLikePhoneNumber(value) {
   return !letters || letters.length === 0;
 }
 
-function sanitizePersonDisplayName(fullName, username) {
-  const candidates = [fullName, username].map((v) => String(v || "").trim()).filter(Boolean);
+function isChosenUsername(username, phone, email) {
+  const bare = String(username || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase();
+  if (!bare) return false;
+  if (looksLikePhoneNumber(bare)) return false;
+  if (bare.includes("@phone.agrovibes")) return false;
+  const phoneDigits = String(phone || "")
+    .replace(/\D/g, "")
+    .slice(-10);
+  const emailLocal = String(email || "")
+    .split("@")[0]
+    .replace(/\D/g, "")
+    .slice(-10);
+  const bareDigits = bare.replace(/\D/g, "").slice(-10);
+  if (phoneDigits.length >= 10 && bareDigits === phoneDigits) return false;
+  if (emailLocal.length >= 10 && bareDigits === emailLocal) return false;
+  return true;
+}
+
+function sanitizePersonDisplayName(fullName, username, phone, email) {
+  const candidates = [fullName].map((v) => String(v || "").trim()).filter(Boolean);
   for (const candidate of candidates) {
     if (looksLikePhoneNumber(candidate)) continue;
     if (candidate.includes("@phone.agrovibes")) continue;
     return candidate;
   }
-  const bareUsername = String(username || "")
-    .trim()
-    .replace(/^@+/, "");
-  if (bareUsername && !looksLikePhoneNumber(bareUsername)) return bareUsername;
+  if (isChosenUsername(username, phone, email)) {
+    return String(username || "")
+      .trim()
+      .replace(/^@+/, "");
+  }
   return "User";
 }
 
 async function actorDisplayName(userId) {
-  const result = await query(`SELECT full_name, username FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
+  const result = await query(`SELECT full_name, username, phone, email FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
   const row = result.rows[0];
-  return sanitizePersonDisplayName(row?.full_name, row?.username);
+  return sanitizePersonDisplayName(row?.full_name, row?.username, row?.phone, row?.email);
 }
 
 const uploadsRootDir = path.join(process.cwd(), "uploads");
@@ -426,13 +449,15 @@ function isLegacySyntheticPostAuthorEmail(email) {
 
 function authUserFromRow(row) {
   if (!row) return null;
+  const rawUsername = row.username || undefined;
+  const username = isChosenUsername(rawUsername, row.phone, row.email) ? String(rawUsername).trim() : undefined;
   return {
     id: row.id,
     email: row.email,
     fullName: row.fullName,
     role: row.role,
     phone: row.phone || undefined,
-    username: row.username || undefined,
+    username,
     avatarUrl: stripLegacyCloudinaryUrl(row.avatarUrl) || undefined,
     bio: row.bio || undefined,
     website: row.website || undefined,
@@ -1219,7 +1244,29 @@ async function ensurePostReportsTable() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_post_idx ON post_reports (post_id)`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_created_idx ON post_reports (created_at DESC)`);
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS post_reports_post_reporter_uidx ON post_reports (post_id, reporter_user_id)`
+  );
   postReportsTableReady = true;
+}
+
+async function ensureUserReportsTable() {
+  if (userReportsTableReady) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS user_reports (
+      id SERIAL PRIMARY KEY,
+      reported_user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      reporter_user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS user_reports_reported_idx ON user_reports (reported_user_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS user_reports_created_idx ON user_reports (created_at DESC)`);
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS user_reports_reporter_reported_uidx ON user_reports (reported_user_id, reporter_user_id)`
+  );
+  userReportsTableReady = true;
 }
 
 /** Same rules as mobile `normalizeIdentity` — compare post.user_name to learn_users.full_name reliably. */
@@ -1357,6 +1404,7 @@ function normalizeHomePostRow(row) {
   delete base.repostByUserName;
   delete base.repostByAvatarUrl;
   delete base.repostQuoteCaption;
+  base.resharesCount = Number(base.resharesCount ?? 0) || 0;
   return sanitizeHomePostRowMedia(base);
 }
 
@@ -1378,6 +1426,13 @@ function paginateHomeFeedRows(rows, limit) {
   return { page, nextCursor, hasMore };
 }
 
+const HOME_POST_RESHARES_COUNT_SQL = `(SELECT COUNT(*)::int FROM home_post_reshares hpr_count WHERE hpr_count.post_id = p.id) AS "resharesCount"`;
+
+async function getHomePostResharesCount(postId) {
+  const result = await query(`SELECT COUNT(*)::int AS c FROM home_post_reshares WHERE post_id = $1`, [postId]);
+  return Number(result.rows[0]?.c || 0);
+}
+
 function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
   const videoClause = videoOnly
     ? `AND p.video_url IS NOT NULL AND TRIM(p.video_url) <> ''`
@@ -1394,6 +1449,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       p.caption,
       p.likes_count AS "likesCount",
       p.comments_count AS "commentsCount",
+      ${HOME_POST_RESHARES_COUNT_SQL},
       p.video_url AS "videoUrl",
       p.image_url AS "imageUrl",
       p.image_urls AS "image_urls",
@@ -2984,12 +3040,15 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
     const fullName = String(req.body?.fullName || "").trim();
-    const usernameRaw = String(req.body?.username || "").trim().toLowerCase();
+    const hasUsernameField = Object.prototype.hasOwnProperty.call(req.body || {}, "username");
+    const usernameRaw = hasUsernameField ? String(req.body?.username || "").trim().toLowerCase() : undefined;
     const username = usernameRaw
       ? usernameRaw
           .replace(/[^a-z0-9_.]+/g, "_")
           .replace(/^_+|_+$/g, "")
-      : null;
+      : hasUsernameField
+        ? null
+        : undefined;
     const bio = String(req.body?.bio || "").trim().slice(0, 150) || null;
     const website = String(req.body?.website || "").trim().slice(0, 200) || null;
     const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 120) || null;
@@ -3003,6 +3062,19 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
       res.status(400).json({ message: "Username can only include letters, numbers, underscores, and dots" });
       return;
     }
+    if (username && looksLikePhoneNumber(username)) {
+      res.status(400).json({ message: "Username cannot be a phone number" });
+      return;
+    }
+
+    const current = await query(`SELECT phone, email, username FROM learn_users WHERE id = $1 LIMIT 1`, [req.user.userId]);
+    const currentRow = current.rows[0] || {};
+    const nextUsername =
+      username === undefined
+        ? currentRow.username || null
+        : username && isChosenUsername(username, currentRow.phone, currentRow.email)
+          ? username
+          : null;
 
     const updated = await query(
       `
@@ -3017,7 +3089,7 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
       WHERE id = $7
       RETURNING ${authUserSelect}
       `,
-      [fullName, username, bio, website, locationLabel, avatarUrl, req.user.userId]
+      [fullName, nextUsername, bio, website, locationLabel, avatarUrl, req.user.userId]
     );
     const user = authUserFromRow(updated.rows[0]);
     if (!user) {
@@ -5405,6 +5477,7 @@ router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => 
         p.caption,
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -5571,12 +5644,59 @@ router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
     const rawReason = req.body && typeof req.body.reason === "string" ? req.body.reason.trim() : "";
     const reason = rawReason ? rawReason.slice(0, 500) : null;
     await query(
-      `INSERT INTO post_reports (post_id, reporter_user_id, reason) VALUES ($1, $2, $3)`,
+      `
+      INSERT INTO post_reports (post_id, reporter_user_id, reason)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (post_id, reporter_user_id) DO UPDATE SET
+        reason = EXCLUDED.reason,
+        created_at = NOW()
+      `,
       [postId, me, reason]
     );
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to submit report", error: error.message });
+  }
+});
+
+router.post("/v1/users/:userId/report", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    await ensureUserReportsTable();
+    const reportedUserId = Number(req.params.userId);
+    const reporterId = Number(req.user.userId);
+    if (!Number.isFinite(reportedUserId) || reportedUserId <= 0) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+    if (!Number.isFinite(reporterId) || reporterId <= 0) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (reportedUserId === reporterId) {
+      res.status(400).json({ message: "You cannot report yourself" });
+      return;
+    }
+    const existsRes = await query(`SELECT 1 FROM learn_users WHERE id = $1 LIMIT 1`, [reportedUserId]);
+    if (!existsRes.rows.length) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+    const rawReason = req.body && typeof req.body.reason === "string" ? req.body.reason.trim() : "";
+    const reason = rawReason ? rawReason.slice(0, 500) : null;
+    await query(
+      `
+      INSERT INTO user_reports (reported_user_id, reporter_user_id, reason)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (reported_user_id, reporter_user_id) DO UPDATE SET
+        reason = EXCLUDED.reason,
+        created_at = NOW()
+      `,
+      [reportedUserId, reporterId, reason]
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to submit user report", error: error.message });
   }
 });
 
@@ -5615,6 +5735,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         p.caption,
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -5689,6 +5810,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         p.caption,
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -5748,6 +5870,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.caption,
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -5804,6 +5927,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
         p.caption,
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -5905,6 +6029,7 @@ router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
         p.caption,
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -5975,7 +6100,8 @@ router.post("/v1/home/posts/:postId/reshare", authRequired, async (req, res) => 
       [postId, userId, quoteCaption]
     );
     await cacheIncr("home:posts:gen");
-    res.json({ reshared: true, quoteCaption });
+    const resharesCount = await getHomePostResharesCount(postId);
+    res.json({ reshared: true, quoteCaption, resharesCount });
   } catch (error) {
     res.status(500).json({ message: "Failed to reshare post", error: error.message });
   }
@@ -5992,7 +6118,8 @@ router.post("/v1/home/posts/:postId/unreshare", authRequired, async (req, res) =
     }
     await query(`DELETE FROM home_post_reshares WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
     await cacheIncr("home:posts:gen");
-    res.json({ reshared: false });
+    const resharesCount = await getHomePostResharesCount(postId);
+    res.json({ reshared: false, resharesCount });
   } catch (error) {
     res.status(500).json({ message: "Failed to unreshare post", error: error.message });
   }
@@ -6021,6 +6148,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         p.caption,
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6188,6 +6316,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         p.caption,
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6279,6 +6408,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         p.caption,
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
+        ${HOME_POST_RESHARES_COUNT_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",

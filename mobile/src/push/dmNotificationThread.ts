@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { ANDROID_CHANNELS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
+import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
 const THREAD_KEY_PREFIX = "cropvibe.dm.notif.thread.v5.";
 const AUTH_STORAGE_KEY = "agrovibes.auth";
@@ -316,7 +316,7 @@ export async function presentDirectMessageNotification({
       body,
       data: payloadData,
       categoryIdentifier: "DIRECT_MESSAGE",
-      sound: "default",
+      sound: NOTIFICATION_SOUNDS.message,
       ...(Platform.OS === "android"
         ? {
             channelId: ANDROID_CHANNELS.directMessages,
