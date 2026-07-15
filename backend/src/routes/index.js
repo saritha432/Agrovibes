@@ -600,6 +600,13 @@ const hideDeactivatedPostOwnersClause = `
   )
 `;
 const hideSoftDeletedPostsClause = `AND p.deleted_at IS NULL`;
+/** Hide posts auto-suppressed after many reports — still visible to the uploader. */
+const hideHighReportFeedPostsClause = `
+  AND (
+    p.feed_hidden_at IS NULL
+    OR ($1::integer IS NOT NULL AND p.user_id = $1::integer)
+  )
+`;
 
 async function purgeExpiredDeletedHomePosts() {
   await ensureHomePostsTable();
@@ -1227,11 +1234,27 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS live_ended_at TIMESTAMPTZ`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS farming_topic TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS report_count INT NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS feed_hidden_at TIMESTAMPTZ`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_feed_hidden_at_idx ON home_posts (feed_hidden_at)`);
   homePostsTableReady = true;
 }
+
+const POST_REPORT_AUTO_HIDE_THRESHOLD = 10;
+const POST_REPORT_PRIORITY_REASONS = new Set(["harmful_chemicals", "fake_advice", "scam", "harassment"]);
+const POST_REPORT_VALID_REASONS = new Set([
+  "spam",
+  "fake_advice",
+  "harmful_chemicals",
+  "copyright",
+  "harassment",
+  "inappropriate",
+  "scam",
+  "other"
+]);
 
 async function ensurePostReportsTable() {
   if (postReportsTableReady) return;
@@ -1244,12 +1267,42 @@ async function ensurePostReportsTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await query(`ALTER TABLE post_reports ADD COLUMN IF NOT EXISTS description TEXT`);
+  await query(`ALTER TABLE post_reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`);
+  await query(`ALTER TABLE post_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_post_idx ON post_reports (post_id)`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_created_idx ON post_reports (created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS post_reports_status_idx ON post_reports (status)`);
   await query(
     `CREATE UNIQUE INDEX IF NOT EXISTS post_reports_post_reporter_uidx ON post_reports (post_id, reporter_user_id)`
   );
   postReportsTableReady = true;
+}
+
+async function refreshPostReportCount(postId) {
+  const countRes = await query(
+    `
+    SELECT COUNT(*)::int AS c
+    FROM post_reports
+    WHERE post_id = $1 AND status = 'pending'
+    `,
+    [postId]
+  );
+  const count = Number(countRes.rows[0]?.c || 0);
+  await query(
+    `
+    UPDATE home_posts
+    SET
+      report_count = $2,
+      feed_hidden_at = CASE
+        WHEN $2 >= $3 THEN COALESCE(feed_hidden_at, NOW())
+        ELSE NULL
+      END
+    WHERE id = $1
+    `,
+    [postId, count, POST_REPORT_AUTO_HIDE_THRESHOLD]
+  );
+  return count;
 }
 
 async function ensureUserReportsTable() {
@@ -1494,7 +1547,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       ORDER BY id ASC
       LIMIT 1
     ) u ON TRUE
-    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${hideSoftDeletedPostsClause} ${hidePrivateAccountPostsClause} ${hideBlockedUsersPostsClause} ${videoClause} ${cursorClause}
+    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${hideSoftDeletedPostsClause} ${hideHighReportFeedPostsClause} ${hidePrivateAccountPostsClause} ${hideBlockedUsersPostsClause} ${videoClause} ${cursorClause}
     ORDER BY p.id DESC
   `;
 }
@@ -1864,6 +1917,82 @@ async function sendResendEmail({ to, subject, text, replyTo }) {
     throw new Error(String(reason));
   }
   return true;
+}
+
+function adminReportsNotifyTo() {
+  return String(process.env.REPORT_NOTIFY_TO || process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
+}
+
+/** Fire-and-forget email to admins when a reel/post is reported. */
+async function notifyAdminOfPostReport({
+  postId,
+  reason,
+  description,
+  reportCount,
+  autoHidden,
+  reporterId,
+  uploaderId,
+  uploaderName,
+  caption
+}) {
+  try {
+    const toEmail = adminReportsNotifyTo();
+    const reporterRes = await query(
+      `SELECT full_name AS "fullName", email, username FROM learn_users WHERE id = $1 LIMIT 1`,
+      [reporterId]
+    );
+    const reporter = reporterRes.rows[0] || {};
+    const reporterLabel =
+      String(reporter.fullName || "").trim() ||
+      String(reporter.username || "").trim() ||
+      `User #${reporterId}`;
+    const webOrigin = String(process.env.WEB_APP_ORIGIN || "https://cropvibe.com").replace(/\/$/, "");
+    const priority = POST_REPORT_PRIORITY_REASONS.has(String(reason || "")) ? "HIGH PRIORITY" : "Normal";
+    const textBody = [
+      "New content report on Cropvibe",
+      "",
+      `Priority: ${priority}`,
+      `Post/Reel ID: ${postId}`,
+      `Uploader: ${String(uploaderName || "").trim() || "-"} (userId=${uploaderId || "-"})`,
+      `Reporter: ${reporterLabel} (userId=${reporterId})`,
+      `Reporter email: ${String(reporter.email || "").trim() || "-"}`,
+      `Reason: ${String(reason || "").trim() || "-"}`,
+      `Description: ${String(description || "").trim() || "-"}`,
+      `Pending report count: ${reportCount}`,
+      `Auto-hidden from feed: ${autoHidden ? "yes" : "no"}`,
+      "",
+      `Caption: ${String(caption || "").trim().slice(0, 280) || "-"}`,
+      "",
+      `Review queue: ${webOrigin}/admin/reports`,
+      `Direct post: ${webOrigin}/watch/${postId}`
+    ].join("\n");
+
+    const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+    if (resendKey) {
+      await sendResendEmail({
+        to: toEmail,
+        subject: `[Cropvibe Report] ${priority === "HIGH PRIORITY" ? "⚠ " : ""}Post #${postId} — ${reason}`,
+        text: textBody,
+        replyTo: String(reporter.email || "").trim() || undefined
+      });
+      return;
+    }
+
+    // Fallback when Resend is not configured (same path as support contact).
+    const formBody = new URLSearchParams({
+      name: "Cropvibe Reports",
+      email: toEmail,
+      _subject: `[Cropvibe Report] Post #${postId} — ${reason}`,
+      message: textBody
+    });
+    await fetch("https://formsubmit.co/ajax/" + encodeURIComponent(toEmail), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: formBody
+    }).catch(() => null);
+  } catch (error) {
+    console.warn("[reports] admin email notify failed:", error?.message || error);
+  }
 }
 
 function buildSupportAutoReplyText({ firstName, subject }) {
@@ -5663,12 +5792,12 @@ router.delete("/v1/home/posts/:postId/permanent", authRequired, async (req, res)
   }
 });
 
-router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
+async function handleSubmitHomePostReport(req, res, postIdOverride) {
   try {
     await ensureHomePostsTable();
     await ensureLearnUsersTable();
     await ensurePostReportsTable();
-    const postId = Number(req.params.postId);
+    const postId = Number(postIdOverride ?? req.params.postId);
     if (!Number.isFinite(postId) || postId <= 0) {
       res.status(400).json({ message: "Valid postId is required" });
       return;
@@ -5678,26 +5807,389 @@ router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
-    const existsRes = await query(`SELECT 1 FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [postId]);
+    const existsRes = await query(
+      `
+      SELECT id, user_id AS "userId", user_name AS "userName", caption
+      FROM home_posts
+      WHERE id = $1 AND deleted_at IS NULL
+      LIMIT 1
+      `,
+      [postId]
+    );
     if (!existsRes.rows.length) {
       res.status(404).json({ message: "Post not found" });
       return;
     }
-    const rawReason = req.body && typeof req.body.reason === "string" ? req.body.reason.trim() : "";
-    const reason = rawReason ? rawReason.slice(0, 500) : null;
-    await query(
+    const postRow = existsRes.rows[0];
+    if (Number(postRow.userId) === me) {
+      res.status(400).json({ message: "You cannot report your own post" });
+      return;
+    }
+
+    const rawReason =
+      typeof req.body?.reason === "string"
+        ? req.body.reason.trim()
+        : typeof req.body?.reasonKey === "string"
+          ? req.body.reasonKey.trim()
+          : "";
+    const reasonKey = rawReason.includes(":") ? rawReason.split(":")[0].trim() : rawReason;
+    if (!reasonKey || !POST_REPORT_VALID_REASONS.has(reasonKey)) {
+      res.status(400).json({ message: "Valid report reason is required" });
+      return;
+    }
+    let description =
+      typeof req.body?.description === "string" ? req.body.description.trim().slice(0, 500) : "";
+    if (!description && rawReason.includes(":")) {
+      description = rawReason.slice(rawReason.indexOf(":") + 1).trim().slice(0, 500);
+    }
+
+    const existing = await query(
       `
-      INSERT INTO post_reports (post_id, reporter_user_id, reason)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (post_id, reporter_user_id) DO UPDATE SET
-        reason = EXCLUDED.reason,
-        created_at = NOW()
+      SELECT id, status
+      FROM post_reports
+      WHERE post_id = $1 AND reporter_user_id = $2
+      LIMIT 1
       `,
-      [postId, me, reason]
+      [postId, me]
     );
-    res.json({ ok: true });
+    if (existing.rows.length && existing.rows[0].status === "pending") {
+      res.status(409).json({ message: "You already reported this reel", alreadyReported: true });
+      return;
+    }
+
+    if (existing.rows.length) {
+      await query(
+        `
+        UPDATE post_reports
+        SET reason = $2, description = $3, status = 'pending', updated_at = NOW(), created_at = NOW()
+        WHERE id = $1
+        `,
+        [existing.rows[0].id, reasonKey, description || null]
+      );
+    } else {
+      await query(
+        `
+        INSERT INTO post_reports (post_id, reporter_user_id, reason, description, status)
+        VALUES ($1, $2, $3, $4, 'pending')
+        `,
+        [postId, me, reasonKey, description || null]
+      );
+    }
+
+    const reportCount = await refreshPostReportCount(postId);
+    const autoHidden = reportCount >= POST_REPORT_AUTO_HIDE_THRESHOLD;
+    await cacheIncr("home:posts:gen");
+
+    // Don't block the reporter on email delivery.
+    void notifyAdminOfPostReport({
+      postId,
+      reason: reasonKey,
+      description,
+      reportCount,
+      autoHidden,
+      reporterId: me,
+      uploaderId: postRow.userId,
+      uploaderName: postRow.userName,
+      caption: postRow.caption
+    });
+
+    res.json({
+      success: true,
+      ok: true,
+      reportCount,
+      autoHidden
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to submit report", error: error.message });
+  }
+}
+
+router.post("/v1/home/posts/:postId/report", authRequired, async (req, res) => {
+  await handleSubmitHomePostReport(req, res);
+});
+
+/** Alias matching product docs: POST /v1/reports { reelId|postId, reason, description } */
+router.post("/v1/reports", authRequired, async (req, res) => {
+  const reelId = Number(req.body?.reelId ?? req.body?.postId);
+  if (!Number.isFinite(reelId) || reelId <= 0) {
+    res.status(400).json({ message: "Valid reelId/postId is required" });
+    return;
+  }
+  await handleSubmitHomePostReport(req, res, reelId);
+});
+
+router.post("/v1/home/posts/:postId/report/withdraw", authRequired, async (req, res) => {
+  try {
+    await ensurePostReportsTable();
+    await ensureHomePostsTable();
+    const postId = Number(req.params.postId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    if (!Number.isFinite(me) || me <= 0) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const updated = await query(
+      `
+      UPDATE post_reports
+      SET status = 'withdrawn', updated_at = NOW()
+      WHERE post_id = $1 AND reporter_user_id = $2 AND status = 'pending'
+      RETURNING id
+      `,
+      [postId, me]
+    );
+    if (!updated.rows.length) {
+      res.status(404).json({ message: "No pending report to withdraw" });
+      return;
+    }
+    const reportCount = await refreshPostReportCount(postId);
+    await cacheIncr("home:posts:gen");
+    res.json({ success: true, ok: true, reportCount });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to withdraw report", error: error.message });
+  }
+});
+
+function requireAdmin(req, res) {
+  if (req.user?.role !== "admin") {
+    res.status(403).json({ message: "Admin access required" });
+    return false;
+  }
+  return true;
+}
+
+router.get("/v1/admin/reports/posts", authRequired, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    await ensureHomePostsTable();
+    await ensurePostReportsTable();
+    await ensureLearnUsersTable();
+    const status = String(req.query.status || "pending").trim().toLowerCase();
+    const limitRaw = Number(req.query.limit);
+    const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : 40, 1), 100);
+
+    const result = await query(
+      `
+      SELECT
+        p.id,
+        p.user_id AS "userId",
+        p.user_name AS "userName",
+        p.caption,
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.report_count AS "reportCount",
+        p.feed_hidden_at AS "feedHiddenAt",
+        p.created_at AS "createdAt",
+        (
+          SELECT pr.reason
+          FROM post_reports pr
+          WHERE pr.post_id = p.id AND pr.status = 'pending'
+          ORDER BY
+            CASE
+              WHEN pr.reason = ANY($2::text[]) THEN 0
+              ELSE 1
+            END,
+            pr.created_at DESC
+          LIMIT 1
+        ) AS "latestReason",
+        (
+          SELECT MAX(pr.created_at)
+          FROM post_reports pr
+          WHERE pr.post_id = p.id AND pr.status = 'pending'
+        ) AS "latestReportAt"
+      FROM home_posts p
+      WHERE p.deleted_at IS NULL
+        AND p.report_count > 0
+        AND EXISTS (
+          SELECT 1 FROM post_reports pr
+          WHERE pr.post_id = p.id AND pr.status = $1
+        )
+      ORDER BY
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM post_reports pr
+            WHERE pr.post_id = p.id AND pr.status = 'pending' AND pr.reason = ANY($2::text[])
+          ) THEN 0
+          ELSE 1
+        END,
+        p.report_count DESC,
+        p.id DESC
+      LIMIT $3
+      `,
+      [status === "pending" ? "pending" : status, [...POST_REPORT_PRIORITY_REASONS], limit]
+    );
+
+    res.json({ posts: result.rows.map((row) => normalizeHomePostRow(row)) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load reported posts", error: error.message });
+  }
+});
+
+router.get("/v1/admin/reports/posts/:postId", authRequired, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    await ensureHomePostsTable();
+    await ensurePostReportsTable();
+    await ensureLearnUsersTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const postRes = await query(
+      `
+      SELECT
+        p.id,
+        p.user_id AS "userId",
+        p.user_name AS "userName",
+        p.caption,
+        p.video_url AS "videoUrl",
+        p.image_url AS "imageUrl",
+        p.thumbnail_url AS "thumbnailUrl",
+        p.report_count AS "reportCount",
+        p.feed_hidden_at AS "feedHiddenAt",
+        p.created_at AS "createdAt"
+      FROM home_posts p
+      WHERE p.id = $1
+      LIMIT 1
+      `,
+      [postId]
+    );
+    if (!postRes.rows.length) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const reportsRes = await query(
+      `
+      SELECT
+        pr.id,
+        pr.reason,
+        pr.description,
+        pr.status,
+        pr.created_at AS "createdAt",
+        pr.reporter_user_id AS "reporterUserId",
+        COALESCE(u.full_name, 'User') AS "reporterName"
+      FROM post_reports pr
+      LEFT JOIN learn_users u ON u.id = pr.reporter_user_id
+      WHERE pr.post_id = $1
+      ORDER BY pr.created_at DESC
+      `,
+      [postId]
+    );
+    res.json({
+      post: normalizeHomePostRow(postRes.rows[0]),
+      reports: reportsRes.rows
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load report details", error: error.message });
+  }
+});
+
+router.post("/v1/admin/reports/posts/:postId/dismiss", authRequired, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    await ensureHomePostsTable();
+    await ensurePostReportsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    await query(
+      `
+      UPDATE post_reports
+      SET status = 'dismissed', updated_at = NOW()
+      WHERE post_id = $1 AND status = 'pending'
+      `,
+      [postId]
+    );
+    await query(
+      `
+      UPDATE home_posts
+      SET report_count = 0, feed_hidden_at = NULL
+      WHERE id = $1
+      `,
+      [postId]
+    );
+    await cacheIncr("home:posts:gen");
+    res.json({ success: true, ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to dismiss reports", error: error.message });
+  }
+});
+
+router.post("/v1/admin/reports/posts/:postId/remove", authRequired, async (req, res) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+    await ensureHomePostsTable();
+    await ensurePostReportsTable();
+    await ensureSocialNotificationsTable();
+    const postId = Number(req.params.postId);
+    if (!Number.isFinite(postId) || postId <= 0) {
+      res.status(400).json({ message: "Valid postId is required" });
+      return;
+    }
+    const postRes = await query(
+      `
+      SELECT id, user_id AS "userId", user_name AS "userName"
+      FROM home_posts
+      WHERE id = $1 AND deleted_at IS NULL
+      LIMIT 1
+      `,
+      [postId]
+    );
+    if (!postRes.rows.length) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
+    const reasonRes = await query(
+      `
+      SELECT reason
+      FROM post_reports
+      WHERE post_id = $1 AND status = 'pending'
+      ORDER BY
+        CASE WHEN reason = ANY($2::text[]) THEN 0 ELSE 1 END,
+        created_at DESC
+      LIMIT 1
+      `,
+      [postId, [...POST_REPORT_PRIORITY_REASONS]]
+    );
+    const reason = String(reasonRes.rows[0]?.reason || "policy").slice(0, 80);
+
+    await query(`UPDATE home_posts SET deleted_at = NOW() WHERE id = $1`, [postId]);
+    await query(
+      `
+      UPDATE post_reports
+      SET status = 'actioned', updated_at = NOW()
+      WHERE post_id = $1 AND status = 'pending'
+      `,
+      [postId]
+    );
+    await query(
+      `UPDATE home_posts SET report_count = 0, feed_hidden_at = NULL WHERE id = $1`,
+      [postId]
+    );
+
+    const ownerId = Number(postRes.rows[0].userId);
+    const adminId = Number(req.user.userId);
+    if (Number.isFinite(ownerId) && ownerId > 0 && Number.isFinite(adminId) && adminId > 0) {
+      await query(
+        `
+        INSERT INTO social_notifications (user_id, actor_id, type, is_read, post_id, comment_excerpt)
+        VALUES ($1, $2, 'moderation_remove', false, $3, $4)
+        `,
+        [ownerId, adminId, postId, `Your reel was removed. Reason: ${reason}`]
+      );
+    }
+
+    await cacheIncr("home:posts:gen");
+    res.json({ success: true, ok: true, reason });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to remove reported post", error: error.message });
   }
 });
 
@@ -5726,17 +6218,67 @@ router.post("/v1/users/:userId/report", authRequired, async (req, res) => {
     }
     const rawReason = req.body && typeof req.body.reason === "string" ? req.body.reason.trim() : "";
     const reason = rawReason ? rawReason.slice(0, 500) : null;
+    const existing = await query(
+      `
+      SELECT id FROM user_reports
+      WHERE reported_user_id = $1 AND reporter_user_id = $2
+      LIMIT 1
+      `,
+      [reportedUserId, reporterId]
+    );
+    if (existing.rows.length) {
+      res.status(409).json({ message: "You already reported this account", alreadyReported: true });
+      return;
+    }
     await query(
       `
       INSERT INTO user_reports (reported_user_id, reporter_user_id, reason)
       VALUES ($1, $2, $3)
-      ON CONFLICT (reported_user_id, reporter_user_id) DO UPDATE SET
-        reason = EXCLUDED.reason,
-        created_at = NOW()
       `,
       [reportedUserId, reporterId, reason]
     );
-    res.json({ ok: true });
+
+    void (async () => {
+      try {
+        const toEmail = adminReportsNotifyTo();
+        const people = await query(
+          `
+          SELECT id, full_name AS "fullName", email, username
+          FROM learn_users
+          WHERE id = ANY($1::int[])
+          `,
+          [[reportedUserId, reporterId]]
+        );
+        const byId = new Map(people.rows.map((r) => [Number(r.id), r]));
+        const reporter = byId.get(reporterId) || {};
+        const reported = byId.get(reportedUserId) || {};
+        const label = (u, fallback) =>
+          String(u.fullName || "").trim() || String(u.username || "").trim() || fallback;
+        const textBody = [
+          "New user/account report on Cropvibe",
+          "",
+          `Reported account: ${label(reported, `#${reportedUserId}`)} (userId=${reportedUserId})`,
+          `Reporter: ${label(reporter, `#${reporterId}`)} (userId=${reporterId})`,
+          `Reporter email: ${String(reporter.email || "").trim() || "-"}`,
+          `Reason: ${String(reason || "").trim() || "-"}`,
+          "",
+          `Admin queue: ${String(process.env.WEB_APP_ORIGIN || "https://cropvibe.com").replace(/\/$/, "")}/admin/reports`
+        ].join("\n");
+        const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+        if (resendKey) {
+          await sendResendEmail({
+            to: toEmail,
+            subject: `[Cropvibe Report] Account #${reportedUserId}`,
+            text: textBody,
+            replyTo: String(reporter.email || "").trim() || undefined
+          });
+        }
+      } catch (error) {
+        console.warn("[reports] user report email notify failed:", error?.message || error);
+      }
+    })();
+
+    res.json({ success: true, ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to submit user report", error: error.message });
   }

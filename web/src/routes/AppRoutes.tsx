@@ -20,6 +20,7 @@ import { DeleteAccount } from "../pages/DeleteAccount";
 import { ChildSafety } from "../pages/ChildSafety";
 import { ContactSupportPage } from "../pages/ContactSupportPage";
 import { TermsOfUse } from "../pages/TermsOfUse";
+import { AdminReportsPage } from "../pages/AdminReportsPage";
 
 function ProtectedLayout() {
   const { token, loading } = useAuth();
@@ -46,6 +47,7 @@ export function AppRoutes() {
       <Route path="/child-safety" element={<ChildSafety />} />
       <Route path="/contact-support" element={<ContactSupportPage />} />
       <Route path="/support" element={<Navigate to="/contact-support" replace />} />
+      <Route path="/admin/reports" element={<AdminReportsPage />} />
       <Route path="/watch/:postId" element={<ReelWatchPage />} />
       <Route path="/profile/:userIdOrHandle" element={<PublicProfilePage />} />
       <Route element={<ProtectedLayout />}>

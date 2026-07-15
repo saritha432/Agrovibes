@@ -3031,28 +3031,23 @@ export function CreateModal({
                   placeholderTextColor="#7f8b88"
                 />
                 {(createType === "post" || createType === "reel") ? (
-                  <View style={styles.farmingPolicyCardLight}>
+                  <View style={styles.farmingPolicyCard}>
                     <View style={styles.farmingPolicyHeader}>
                       <Ionicons name="leaf-outline" size={18} color="#C9FF35" />
-                      <Text style={styles.farmingPolicyTitleDark}>{t("farmingPolicyTitle")}</Text>
+                      <Text style={styles.farmingPolicyTitle}>{t("farmingPolicyTitle")}</Text>
                     </View>
-                    <Text style={styles.farmingPolicyBodyDark}>{t("farmingPolicyBody")}</Text>
-                    <Text style={styles.farmingTopicLabelDark}>{t("farmingTopicLabel")}</Text>
+                    <Text style={styles.farmingPolicyBody}>{t("farmingPolicyBody")}</Text>
+                    <Text style={styles.farmingTopicLabel}>{t("farmingTopicLabel")}</Text>
                     <View style={styles.farmingTopicWrap}>
                       {FARMING_TOPICS.map((topic) => {
                         const selected = farmingTopicId === topic.id;
                         return (
                           <Pressable
                             key={topic.id}
-                            style={[styles.farmingTopicChipLight, selected ? styles.farmingTopicChipOn : null]}
+                            style={[styles.farmingTopicChip, selected ? styles.farmingTopicChipOn : null]}
                             onPress={() => setFarmingTopicId(topic.id)}
                           >
-                            <Text
-                              style={[
-                                styles.farmingTopicChipTextDark,
-                                selected ? styles.farmingTopicChipTextOn : null
-                              ]}
-                            >
+                            <Text style={[styles.farmingTopicChipText, selected ? styles.farmingTopicChipTextOn : null]}>
                               {t(topic.labelKey)}
                             </Text>
                           </Pressable>
@@ -3068,9 +3063,9 @@ export function CreateModal({
                       <Ionicons
                         name={farmingConfirmed ? "checkbox" : "square-outline"}
                         size={22}
-                        color={farmingConfirmed ? "#5f7a1a" : "#97a0a8"}
+                        color={farmingConfirmed ? "#C9FF35" : "rgba(255,255,255,0.55)"}
                       />
-                      <Text style={styles.farmingConfirmTextDark}>{t("farmingConfirmLabel")}</Text>
+                      <Text style={styles.farmingConfirmText}>{t("farmingConfirmLabel")}</Text>
                     </Pressable>
                   </View>
                 ) : null}
@@ -3110,28 +3105,23 @@ export function CreateModal({
                   />
                 </View>
                 {(createType === "post" || createType === "reel") ? (
-                  <View style={styles.farmingPolicyCardLight}>
+                  <View style={styles.farmingPolicyCard}>
                     <View style={styles.farmingPolicyHeader}>
                       <Ionicons name="leaf-outline" size={18} color="#C9FF35" />
-                      <Text style={styles.farmingPolicyTitleDark}>{t("farmingPolicyTitle")}</Text>
+                      <Text style={styles.farmingPolicyTitle}>{t("farmingPolicyTitle")}</Text>
                     </View>
-                    <Text style={styles.farmingPolicyBodyDark}>{t("farmingPolicyBody")}</Text>
-                    <Text style={styles.farmingTopicLabelDark}>{t("farmingTopicLabel")}</Text>
+                    <Text style={styles.farmingPolicyBody}>{t("farmingPolicyBody")}</Text>
+                    <Text style={styles.farmingTopicLabel}>{t("farmingTopicLabel")}</Text>
                     <View style={styles.farmingTopicWrap}>
                       {FARMING_TOPICS.map((topic) => {
                         const selected = farmingTopicId === topic.id;
                         return (
                           <Pressable
                             key={topic.id}
-                            style={[styles.farmingTopicChipLight, selected ? styles.farmingTopicChipOn : null]}
+                            style={[styles.farmingTopicChip, selected ? styles.farmingTopicChipOn : null]}
                             onPress={() => setFarmingTopicId(topic.id)}
                           >
-                            <Text
-                              style={[
-                                styles.farmingTopicChipTextDark,
-                                selected ? styles.farmingTopicChipTextOn : null
-                              ]}
-                            >
+                            <Text style={[styles.farmingTopicChipText, selected ? styles.farmingTopicChipTextOn : null]}>
                               {t(topic.labelKey)}
                             </Text>
                           </Pressable>
@@ -3147,9 +3137,9 @@ export function CreateModal({
                       <Ionicons
                         name={farmingConfirmed ? "checkbox" : "square-outline"}
                         size={22}
-                        color={farmingConfirmed ? "#5f7a1a" : "#97a0a8"}
+                        color={farmingConfirmed ? "#C9FF35" : "rgba(255,255,255,0.55)"}
                       />
-                      <Text style={styles.farmingConfirmTextDark}>{t("farmingConfirmLabel")}</Text>
+                      <Text style={styles.farmingConfirmText}>{t("farmingConfirmLabel")}</Text>
                     </Pressable>
                   </View>
                 ) : null}

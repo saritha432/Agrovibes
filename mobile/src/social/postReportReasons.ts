@@ -1,11 +1,11 @@
 export const POST_REPORT_REASONS = [
   { key: "spam", labelKey: "reportSpam" },
+  { key: "fake_advice", labelKey: "reportFakeAdvice" },
+  { key: "harmful_chemicals", labelKey: "reportHarmfulChemicals" },
+  { key: "copyright", labelKey: "reportCopyright" },
   { key: "harassment", labelKey: "reportHarassment" },
-  { key: "hate", labelKey: "reportHate" },
-  { key: "nudity", labelKey: "reportNudity" },
-  { key: "violence", labelKey: "reportViolence" },
+  { key: "inappropriate", labelKey: "reportInappropriate" },
   { key: "scam", labelKey: "reportScam" },
-  { key: "ip", labelKey: "reportIp" },
   { key: "other", labelKey: "reportOther" }
 ] as const;
 
