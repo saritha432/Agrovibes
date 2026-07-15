@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import React from "react";
-import { Image, Pressable, StyleSheet, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, View } from "react-native";
 import { fetchHomePost, type HomePost } from "../services/api";
+import { APP_LIME } from "../theme/appColors";
 import { reelGridStillUri } from "../utils/reelGrid";
-import { staticReelPreviewUri } from "../utils/reelPreviewThumb";
+import { resolveNotificationVideoThumbnail, staticReelPreviewUri } from "../utils/reelPreviewThumb";
 import { sanitizeHomePost } from "../utils/mediaUrls";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
@@ -39,7 +40,7 @@ function toPreviewPost(props: NotificationPostThumbProps): HomePost | null {
   });
 }
 
-/** Paused video frame — reliable reel preview when no thumbnail image exists. */
+/** Last-resort paused video frame (web / when no still image exists). */
 function NotificationVideoFrame({ uri }: { uri: string }) {
   const videoRef = React.useRef<Video | null>(null);
   const [ready, setReady] = React.useState(false);
@@ -116,31 +117,44 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
       const video = String(next.videoUrl || "").trim();
       if (still) setImageUri(still);
       if (video) setVideoUri(video);
+      return { still, video };
     };
 
     applyPost(post);
 
     const id = Number(props.postId);
-    if (!Number.isFinite(id) || id <= 0) return () => {
-      cancelled = true;
-    };
-
-    const needsFetch =
-      !stillFromPost(post) && !String(post?.videoUrl || "").trim();
-
-    if (!needsFetch) {
+    if (!Number.isFinite(id) || id <= 0) {
       return () => {
         cancelled = true;
       };
-    }
+    };
 
     void (async () => {
+      let still = stillFromPost(post);
+      let video = String(post?.videoUrl || "").trim();
+
+      // Always hydrate from API when we don't have a still — reels often lack thumbnail on the notification payload.
+      if (!still) {
+        try {
+          const { post: loaded } = await fetchHomePost(props.token ?? null, id);
+          if (cancelled) return;
+          const applied = applyPost(sanitizeHomePost(loaded));
+          still = applied?.still || null;
+          video = applied?.video || video;
+        } catch {
+          // unavailable
+        }
+      }
+
+      if (cancelled || still || !video) return;
+
+      // Native: extract a frame. Web falls through to NotificationVideoFrame.
+      if (Platform.OS === "web") return;
       try {
-        const { post: loaded } = await fetchHomePost(props.token ?? null, id);
-        if (cancelled) return;
-        applyPost(sanitizeHomePost(loaded));
+        const thumb = await resolveNotificationVideoThumbnail(video, id);
+        if (!cancelled && thumb) setImageUri(thumb);
       } catch {
-        // unavailable
+        // keep placeholder / video frame fallback
       }
     })();
 
@@ -152,11 +166,12 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
   if (!post) return null;
 
   const isReel = props.postIsReel || !!videoUri;
-  // Never mount expo-av Video in the notifications list — it blocks the JS thread.
   const content = (
     <>
       {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+      ) : videoUri ? (
+        <NotificationVideoFrame uri={videoUri} />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <Ionicons
@@ -220,7 +235,7 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 5,
-    backgroundColor: "#c9ff35",
+    backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center"
   }

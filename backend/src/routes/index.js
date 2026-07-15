@@ -4106,9 +4106,12 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
           ELSE false
         END AS "postIsReel",
-        p.thumbnail_url AS "postThumbnailUrl",
+        COALESCE(
+          NULLIF(TRIM(p.thumbnail_url), ''),
+          NULLIF(TRIM(p.image_url), '')
+        ) AS "postThumbnailUrl",
         p.image_url AS "postImageUrl",
-        NULL::text AS "postVideoUrl",
+        p.video_url AS "postVideoUrl",
         p.live_status AS "postLiveStatus",
         p.live_ended_at AS "postLiveEndedAt"
       FROM social_notifications n
