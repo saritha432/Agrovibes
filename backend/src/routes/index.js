@@ -3629,6 +3629,8 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
     );
 
     let followRow = null;
+    let becameAccepted = false;
+    let createdPendingRequest = false;
     if (!existing.rows[0]) {
       const inserted = await query(
         `
@@ -3639,6 +3641,8 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
         [actorUserId, targetUserId, initialStatus]
       );
       followRow = inserted.rows[0];
+      createdPendingRequest = followRow?.status === "pending";
+      becameAccepted = followRow?.status === "accepted";
     } else if (existing.rows[0].status === "accepted") {
       followRow = existing.rows[0];
     } else if (existing.rows[0].status === "pending" && targetIsPrivate) {
@@ -3654,6 +3658,7 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
         [existing.rows[0].id]
       );
       followRow = updated.rows[0];
+      becameAccepted = true;
     } else {
       const updated = await query(
         `
@@ -3665,9 +3670,11 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
         [existing.rows[0].id, initialStatus]
       );
       followRow = updated.rows[0];
+      createdPendingRequest = followRow?.status === "pending" && existing.rows[0].status !== "pending";
+      becameAccepted = followRow?.status === "accepted" && existing.rows[0].status !== "accepted";
     }
 
-    if (followRow?.status === "pending") {
+    if (createdPendingRequest) {
       await query(
         `
         INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read)
@@ -3678,6 +3685,21 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
       fireSocialPush({
         userId: targetUserId,
         type: "follow_request",
+        actorName: await actorDisplayName(actorUserId),
+        followId: followRow.id
+      });
+    } else if (becameAccepted) {
+      // Public account (or promoted to accepted): tell the person someone is now following them.
+      await query(
+        `
+        INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read)
+        VALUES ($1, $2, $3, 'new_follow', false)
+        `,
+        [targetUserId, actorUserId, followRow.id]
+      );
+      fireSocialPush({
+        userId: targetUserId,
+        type: "new_follow",
         actorName: await actorDisplayName(actorUserId),
         followId: followRow.id
       });
@@ -4040,6 +4062,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
 
     const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
     const followAccepted = result.rows.filter((r) => r.type === "follow_accept");
+    const newFollows = result.rows.filter((r) => r.type === "new_follow");
     const postLikes = result.rows.filter((r) => r.type === "post_like");
     const postComments = result.rows.filter(
       (r) => r.type === "post_comment" || r.type === "comment_reply"
@@ -4056,6 +4079,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       if (r.type === "follow_request") return r.followStatus === "pending";
       return (
         r.type === "follow_accept" ||
+        r.type === "new_follow" ||
         r.type === "post_like" ||
         r.type === "post_comment" ||
         r.type === "comment_reply" ||
@@ -4068,6 +4092,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     res.json({
       followRequests,
       followAccepted,
+      newFollows,
       postLikes,
       postComments,
       liveStarts,
