@@ -37,9 +37,10 @@ export function SwipeReplyMessageRow({
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => enabled,
+      // Don't steal the first touch — only claim after a clear horizontal swipe.
+      onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_evt, gesture) =>
-        enabled && gesture.dx > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35,
+        enabled && gesture.dx > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.4,
       onPanResponderGrant: () => {
         if (!enabled) return;
         longPressFiredRef.current = false;

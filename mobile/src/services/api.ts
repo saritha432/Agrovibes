@@ -1070,7 +1070,7 @@ export async function reportHomePost(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     }
-  )) as { ok: boolean; success?: boolean; reportCount?: number; autoHidden?: boolean };
+  )) as { ok: boolean; success?: boolean; reportCount?: number; autoHidden?: boolean; alreadyReported?: boolean; emailSent?: boolean; emailError?: string };
 }
 
 export async function reportUser(token: string, userId: number, reason?: string) {

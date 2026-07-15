@@ -1,14 +1,16 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
 import {
+  blockUser,
   fetchHomePost,
   fetchMessageThreads,
   fetchRelationships,
   markSocialNotificationRead,
+  removeFollower,
   respondToFollowRequest,
   sendFollowRequest
 } from "../services/api";
@@ -20,6 +22,7 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { markLocalEngagementRead } from "../social/localEngagementStore";
+import { rememberBlockedUser } from "../social/blockedUsers";
 import {
   countUnreadSocialNotifications,
   fetchNotificationFeedSnapshot,
@@ -27,7 +30,7 @@ import {
 } from "../social/notificationFeedSnapshot";
 import { APP_LIME } from "../theme/appColors";
 import { NotificationPostThumb } from "../components/NotificationPostThumb";
-import { SwipeToDeleteRow } from "../components/SwipeToDeleteRow";
+import { SwipeActionsRow, type SwipeAction } from "../components/SwipeActionsRow";
 import { UserAvatar } from "../components/UserAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive } from "../navigation/navigationRef";
@@ -77,6 +80,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [lastSeenReady, setLastSeenReady] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   const [followRequestsExpanded, setFollowRequestsExpanded] = useState(false);
+  const [listScrollEnabled, setListScrollEnabled] = useState(true);
 
   const viewerUserId = useMemo(() => {
     const parsed = Number(user?.id);
@@ -213,28 +217,32 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     ]
   );
 
+  const loadMessageUnread = useCallback(async () => {
+    if (!token) {
+      setMessageUnreadCount(0);
+      return;
+    }
+    try {
+      const threads = await fetchMessageThreads(token);
+      const remoteMessageUnread = (threads.threads || []).reduce((sum, t) => {
+        const hasUnreadCount = t.unreadCount != null;
+        const unreadCount = Number(t.unreadCount || 0);
+        if (Number.isFinite(unreadCount) && unreadCount > 0) {
+          return sum + unreadCount;
+        }
+        if (!hasUnreadCount && viewerUserId && Number(t.lastSenderId) > 0 && Number(t.lastSenderId) !== viewerUserId) {
+          return sum + 1;
+        }
+        return sum;
+      }, 0);
+      setMessageUnreadCount(remoteMessageUnread);
+    } catch {
+      /* keep previous badge */
+    }
+  }, [token, viewerUserId]);
+
   const loadNotifications = useCallback(async () => {
     if (!user?.fullName) return;
-    let remoteMessageUnread = 0;
-    if (token) {
-      try {
-        const threads = await fetchMessageThreads(token);
-        remoteMessageUnread = (threads.threads || []).reduce((sum, t) => {
-          const hasUnreadCount = t.unreadCount != null;
-          const unreadCount = Number(t.unreadCount || 0);
-          if (Number.isFinite(unreadCount) && unreadCount > 0) {
-            return sum + unreadCount;
-          }
-          if (!hasUnreadCount && viewerUserId && Number(t.lastSenderId) > 0 && Number(t.lastSenderId) !== viewerUserId) {
-            return sum + 1;
-          }
-          return sum;
-        }, 0);
-      } catch {
-        remoteMessageUnread = 0;
-      }
-    }
-    setMessageUnreadCount(remoteMessageUnread);
 
     const snap = await fetchNotificationFeedSnapshot({
       token,
@@ -268,28 +276,18 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     const names = [...nameSet];
     if (names.length && user?.fullName) {
-      const localMap = await getLocalRelationshipMapByNames(
-        { name: user.fullName, key: user.email || String(user.id || "") },
-        names
-      );
-      const next: Record<string, "none" | "pending" | "accepted"> = {};
       const actorIds = [
-        ...new Set(
-          [...mergedPending, ...fbQueue, ...remoteNewFollows]
-            .map((n) => Number(n.actorId))
-            .filter((id) => Number.isFinite(id) && id > 0)
-        )
+        ...new Set([...mergedPending, ...fbQueue].map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))
       ];
-      let remoteRel: Record<number, { viewerStatus: string }> = {};
-      if (token && actorIds.length) {
-        try {
-          const data = await fetchRelationships(token, actorIds);
-          remoteRel = data.relationships || {};
-        } catch {
-          /* ignore */
-        }
-      }
-      for (const n of [...mergedPending, ...fbQueue, ...remoteNewFollows]) {
+      const [localMap, remoteData] = await Promise.all([
+        getLocalRelationshipMapByNames({ name: user.fullName, key: user.email || String(user.id || "") }, names),
+        token && actorIds.length
+          ? fetchRelationships(token, actorIds).catch(() => ({ relationships: {} as Record<number, { viewerStatus: string }> }))
+          : Promise.resolve({ relationships: {} as Record<number, { viewerStatus: string }> })
+      ]);
+      const remoteRel = remoteData.relationships || {};
+      const next: Record<string, "none" | "pending" | "accepted"> = {};
+      for (const n of [...mergedPending, ...fbQueue]) {
         const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
         const nm = String(n.actorName || "").toLowerCase();
         let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
@@ -301,14 +299,26 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       }
       setFollowBackStatusByKey(next);
     }
-  }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id, viewerUserId]);
+  }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id]);
 
   useEffect(() => {
     if (!appIsActive || !dismissedReady) return;
-    loadNotifications();
-    const timer = setInterval(loadNotifications, 4000);
+    void loadNotifications();
+    // Background badge refresh — keep light so JS thread stays free for swipes.
+    const timer = setInterval(() => {
+      void loadNotifications();
+    }, sheetOpen ? 20000 : 15000);
     return () => clearInterval(timer);
-  }, [appIsActive, dismissedReady, loadNotifications]);
+  }, [appIsActive, dismissedReady, loadNotifications, sheetOpen]);
+
+  useEffect(() => {
+    if (!appIsActive) return;
+    void loadMessageUnread();
+    const timer = setInterval(() => {
+      void loadMessageUnread();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [appIsActive, loadMessageUnread]);
 
   useEffect(() => {
     let mounted = true;
@@ -497,11 +507,150 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     optimisticDismissNotification(entry);
   };
 
-  const dismissibleRow = (key: string, onDelete: () => void, row: React.ReactNode) => (
-    <SwipeToDeleteRow key={key} onDelete={onDelete} deleteLabel={t("deleteConfirm")} style={styles.swipeShell}>
-      {row}
-    </SwipeToDeleteRow>
+  const resolveActorId = (entry: any): number | null => {
+    const id = Number(entry?.actorId);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  };
+
+  const onRemoveFollowerFromNotif = useCallback(
+    (entry: any) => {
+      const actorId = resolveActorId(entry);
+      const name = String(entry?.actorName || "this user").trim() || "this user";
+      if (!token || !actorId) {
+        Alert.alert(t("loginRequired") || "Login required", t("loginRequiredReport") || "Please sign in again.");
+        return;
+      }
+      Alert.alert(
+        t("removeFollowerConfirmTitle") || "Remove follower?",
+        t("removeFollowerConfirmBody", { name }) || `Cropvibe won't tell ${name} they were removed.`,
+        [
+          { text: t("cancel") || "Cancel", style: "cancel" },
+          {
+            text: t("removeFollowerAction") || "Remove",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                try {
+                  await removeFollower(token, actorId);
+                  optimisticDismissNotification(entry);
+                } catch (e: unknown) {
+                  Alert.alert(t("error") || "Error", e instanceof Error ? e.message : "Could not remove follower");
+                }
+              })();
+            }
+          }
+        ]
+      );
+    },
+    [optimisticDismissNotification, t, token]
   );
+
+  const onBlockUserFromNotif = useCallback(
+    (entry: any) => {
+      const actorId = resolveActorId(entry);
+      const name = String(entry?.actorName || "this user").trim() || "this user";
+      if (!token || !actorId) {
+        Alert.alert(t("loginRequired") || "Login required", t("loginRequiredReport") || "Please sign in again.");
+        return;
+      }
+      Alert.alert(
+        t("blockUserConfirmTitle", { name }) || `Block ${name}?`,
+        t("blockUserConfirmBody", { name }) ||
+          `They won't be able to find your profile or posts. Cropvibe won't tell them you blocked them.`,
+        [
+          { text: t("cancel") || "Cancel", style: "cancel" },
+          {
+            text: t("blockAccount") || "Block",
+            style: "destructive",
+            onPress: () => {
+              void (async () => {
+                try {
+                  await blockUser(token, actorId);
+                  await rememberBlockedUser(
+                    {
+                      userId: actorId,
+                      fullName: name,
+                      username: null,
+                      avatarUrl: entry?.actorAvatarUrl ?? null
+                    },
+                    user?.id
+                  );
+                  optimisticDismissNotification(entry);
+                } catch (e: unknown) {
+                  Alert.alert(t("error") || "Error", e instanceof Error ? e.message : "Could not block user");
+                }
+              })();
+            }
+          }
+        ]
+      );
+    },
+    [optimisticDismissNotification, t, token, user?.id]
+  );
+
+  const onSwipeActiveChange = useCallback((active: boolean) => {
+    setListScrollEnabled(!active);
+  }, []);
+
+  const swipeRow = (key: string, actions: SwipeAction[], row: React.ReactNode) => (
+    <SwipeActionsRow
+      key={key}
+      actions={actions}
+      style={styles.swipeShell}
+      onSwipeActiveChange={onSwipeActiveChange}
+    >
+      {row}
+    </SwipeActionsRow>
+  );
+
+  const dismissibleRow = (key: string, onDelete: () => void, row: React.ReactNode) =>
+    swipeRow(
+      key,
+      [
+        {
+          key: "more",
+          label: "More",
+          icon: "ellipsis-horizontal",
+          backgroundColor: "#525252",
+          onPress: () => {
+            Alert.alert("More", undefined, [
+              { text: t("deleteConfirm") || "Delete", style: "destructive", onPress: onDelete },
+              { text: t("cancel") || "Cancel", style: "cancel" }
+            ]);
+          }
+        },
+        {
+          key: "delete",
+          label: t("deleteConfirm") || "Delete",
+          icon: "trash",
+          backgroundColor: "#ed4956",
+          onPress: onDelete
+        }
+      ],
+      row
+    );
+
+  const followActionRow = (key: string, entry: any, _onDismiss: () => void, row: React.ReactNode) =>
+    swipeRow(
+      key,
+      [
+        {
+          key: "remove",
+          label: t("removeFollowerAction") || "Remove",
+          icon: "person-remove",
+          backgroundColor: "#525252",
+          onPress: () => onRemoveFollowerFromNotif(entry)
+        },
+        {
+          key: "block",
+          label: t("blockAccount") || "Block",
+          icon: "ban",
+          backgroundColor: "#ed4956",
+          onPress: () => onBlockUserFromNotif(entry)
+        }
+      ],
+      row
+    );
 
   const renderPostActivityNotification = (
     itemKey: string,
@@ -753,7 +902,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
               <Text style={styles.sheetTitle}>{t("notifications")}</Text>
               <View style={styles.headerBackBtn} />
             </View>
-            <ScrollView contentContainerStyle={styles.sheetBody}>
+            <ScrollView
+              contentContainerStyle={styles.sheetBody}
+              scrollEnabled={listScrollEnabled}
+              directionalLockEnabled
+            >
               {notificationItems.length === 0 ? (
                 <Text style={styles.emptyText}>{t("noNotifications")}</Text>
               ) : null}
@@ -944,8 +1097,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     if (item.kind === "pending") {
                       return <View key={item.key}>{rowCore}</View>;
                     }
-                    if (item.kind === "follow_back") {
-                      return dismissibleRow(item.key, () => onDismissFollowBack(n), rowCore);
+                    if (item.kind === "follow_back" || item.kind === "new_follow" || item.kind === "accepted") {
+                      return followActionRow(
+                        item.key,
+                        n,
+                        () => (item.kind === "follow_back" ? onDismissFollowBack(n) : onDismissNotification(n)),
+                        rowCore
+                      );
                     }
                     return dismissibleRow(item.key, () => onDismissNotification(n), rowCore);
                   })}

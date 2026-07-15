@@ -320,6 +320,9 @@ async function ensureSocialNotificationsTable() {
   await query(`ALTER TABLE social_notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
   await query(`ALTER TABLE social_notifications ADD COLUMN IF NOT EXISTS post_id INT`);
   await query(`ALTER TABLE social_notifications ADD COLUMN IF NOT EXISTS comment_excerpt TEXT`);
+  await query(
+    `CREATE INDEX IF NOT EXISTS social_notifications_user_created_idx ON social_notifications (user_id, created_at DESC)`
+  );
   socialNotificationsTableReady = true;
 }
 
@@ -1923,7 +1926,68 @@ function adminReportsNotifyTo() {
   return String(process.env.REPORT_NOTIFY_TO || process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
 }
 
-/** Fire-and-forget email to admins when a reel/post is reported. */
+function looksLikeEmail(value) {
+  const v = String(value || "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+async function deliverAdminAlertEmail({ to, subject, text, replyTo }) {
+  const toEmail = String(to || "").trim() || adminReportsNotifyTo();
+  const cleanSubject = String(subject || "Cropvibe alert").trim().slice(0, 200);
+  const textBody = String(text || "").trim() || "-";
+  const reply = looksLikeEmail(replyTo) ? String(replyTo).trim().toLowerCase() : undefined;
+
+  const resendKey = String(process.env.RESEND_API_KEY || "").trim();
+  if (resendKey) {
+    try {
+      await sendResendEmail({
+        to: toEmail,
+        subject: cleanSubject,
+        text: textBody,
+        replyTo: reply
+      });
+      console.log(`[reports] email sent via Resend to ${toEmail}: ${cleanSubject}`);
+      return { ok: true, via: "resend" };
+    } catch (error) {
+      console.warn("[reports] Resend failed, trying FormSubmit:", error?.message || error);
+    }
+  }
+
+  const formBody = new URLSearchParams({
+    name: "Cropvibe Reports",
+    email: reply || toEmail,
+    _replyto: reply || toEmail,
+    _subject: cleanSubject,
+    message: textBody,
+    _template: "table",
+    _captcha: "false",
+    _honey: ""
+  });
+  const formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json"
+    },
+    body: formBody
+  });
+  const formData = await formResp.json().catch(() => ({}));
+  const formOk =
+    formResp.ok &&
+    (formData?.success === true ||
+      formData?.success === "true" ||
+      String(formData?.message || "")
+        .toLowerCase()
+        .includes("successfully") ||
+      Object.keys(formData || {}).length === 0);
+  if (!formOk) {
+    throw new Error(String(formData?.message || `FormSubmit failed (${formResp.status})`));
+  }
+  console.log(`[reports] email sent via FormSubmit to ${toEmail}: ${cleanSubject}`);
+  return { ok: true, via: "formsubmit" };
+}
+
+/** Email admins when a reel/post is reported. Awaits delivery so Render does not cut off the request. */
 async function notifyAdminOfPostReport({
   postId,
   reason,
@@ -1935,64 +1999,43 @@ async function notifyAdminOfPostReport({
   uploaderName,
   caption
 }) {
-  try {
-    const toEmail = adminReportsNotifyTo();
-    const reporterRes = await query(
-      `SELECT full_name AS "fullName", email, username FROM learn_users WHERE id = $1 LIMIT 1`,
-      [reporterId]
-    );
-    const reporter = reporterRes.rows[0] || {};
-    const reporterLabel =
-      String(reporter.fullName || "").trim() ||
-      String(reporter.username || "").trim() ||
-      `User #${reporterId}`;
-    const webOrigin = String(process.env.WEB_APP_ORIGIN || "https://cropvibe.com").replace(/\/$/, "");
-    const priority = POST_REPORT_PRIORITY_REASONS.has(String(reason || "")) ? "HIGH PRIORITY" : "Normal";
-    const textBody = [
-      "New content report on Cropvibe",
-      "",
-      `Priority: ${priority}`,
-      `Post/Reel ID: ${postId}`,
-      `Uploader: ${String(uploaderName || "").trim() || "-"} (userId=${uploaderId || "-"})`,
-      `Reporter: ${reporterLabel} (userId=${reporterId})`,
-      `Reporter email: ${String(reporter.email || "").trim() || "-"}`,
-      `Reason: ${String(reason || "").trim() || "-"}`,
-      `Description: ${String(description || "").trim() || "-"}`,
-      `Pending report count: ${reportCount}`,
-      `Auto-hidden from feed: ${autoHidden ? "yes" : "no"}`,
-      "",
-      `Caption: ${String(caption || "").trim().slice(0, 280) || "-"}`,
-      "",
-      `Review queue: ${webOrigin}/admin/reports`,
-      `Direct post: ${webOrigin}/watch/${postId}`
-    ].join("\n");
+  const toEmail = adminReportsNotifyTo();
+  const reporterRes = await query(
+    `SELECT full_name AS "fullName", email, username FROM learn_users WHERE id = $1 LIMIT 1`,
+    [reporterId]
+  );
+  const reporter = reporterRes.rows[0] || {};
+  const reporterLabel =
+    String(reporter.fullName || "").trim() ||
+    String(reporter.username || "").trim() ||
+    `User #${reporterId}`;
+  const webOrigin = String(process.env.WEB_APP_ORIGIN || "https://cropvibe.com").replace(/\/$/, "");
+  const priority = POST_REPORT_PRIORITY_REASONS.has(String(reason || "")) ? "HIGH PRIORITY" : "Normal";
+  const textBody = [
+    "New content report on Cropvibe",
+    "",
+    `Priority: ${priority}`,
+    `Post/Reel ID: ${postId}`,
+    `Uploader: ${String(uploaderName || "").trim() || "-"} (userId=${uploaderId || "-"})`,
+    `Reporter: ${reporterLabel} (userId=${reporterId})`,
+    `Reporter email: ${String(reporter.email || "").trim() || "-"}`,
+    `Reason: ${String(reason || "").trim() || "-"}`,
+    `Description: ${String(description || "").trim() || "-"}`,
+    `Pending report count: ${reportCount}`,
+    `Auto-hidden from feed: ${autoHidden ? "yes" : "no"}`,
+    "",
+    `Caption: ${String(caption || "").trim().slice(0, 280) || "-"}`,
+    "",
+    `Review queue: ${webOrigin}/admin/reports`,
+    `Direct post: ${webOrigin}/watch/${postId}`
+  ].join("\n");
 
-    const resendKey = String(process.env.RESEND_API_KEY || "").trim();
-    if (resendKey) {
-      await sendResendEmail({
-        to: toEmail,
-        subject: `[Cropvibe Report] ${priority === "HIGH PRIORITY" ? "⚠ " : ""}Post #${postId} — ${reason}`,
-        text: textBody,
-        replyTo: String(reporter.email || "").trim() || undefined
-      });
-      return;
-    }
-
-    // Fallback when Resend is not configured (same path as support contact).
-    const formBody = new URLSearchParams({
-      name: "Cropvibe Reports",
-      email: toEmail,
-      _subject: `[Cropvibe Report] Post #${postId} — ${reason}`,
-      message: textBody
-    });
-    await fetch("https://formsubmit.co/ajax/" + encodeURIComponent(toEmail), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
-      body: formBody
-    }).catch(() => null);
-  } catch (error) {
-    console.warn("[reports] admin email notify failed:", error?.message || error);
-  }
+  return deliverAdminAlertEmail({
+    to: toEmail,
+    subject: `[Cropvibe Report] ${priority === "HIGH PRIORITY" ? "URGENT " : ""}Post #${postId} — ${reason}`,
+    text: textBody,
+    replyTo: reporter.email
+  });
 }
 
 function buildSupportAutoReplyText({ firstName, subject }) {
@@ -4045,7 +4088,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         END AS "postIsReel",
         p.thumbnail_url AS "postThumbnailUrl",
         p.image_url AS "postImageUrl",
-        p.video_url AS "postVideoUrl",
+        NULL::text AS "postVideoUrl",
         p.live_status AS "postLiveStatus",
         p.live_ended_at AS "postLiveEndedAt"
       FROM social_notifications n
@@ -4055,7 +4098,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       WHERE n.user_id = $1
         AND n.created_at <= NOW()
       ORDER BY n.created_at DESC
-      LIMIT 100
+      LIMIT 50
       `,
       [currentUserId]
     );
@@ -5852,10 +5895,7 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
       `,
       [postId, me]
     );
-    if (existing.rows.length && existing.rows[0].status === "pending") {
-      res.status(409).json({ message: "You already reported this reel", alreadyReported: true });
-      return;
-    }
+    const isUpdate = Boolean(existing.rows.length && existing.rows[0].status === "pending");
 
     if (existing.rows.length) {
       await query(
@@ -5880,24 +5920,34 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
     const autoHidden = reportCount >= POST_REPORT_AUTO_HIDE_THRESHOLD;
     await cacheIncr("home:posts:gen");
 
-    // Don't block the reporter on email delivery.
-    void notifyAdminOfPostReport({
-      postId,
-      reason: reasonKey,
-      description,
-      reportCount,
-      autoHidden,
-      reporterId: me,
-      uploaderId: postRow.userId,
-      uploaderName: postRow.userName,
-      caption: postRow.caption
-    });
+    let emailSent = false;
+    let emailError = null;
+    try {
+      const mail = await notifyAdminOfPostReport({
+        postId,
+        reason: reasonKey,
+        description,
+        reportCount,
+        autoHidden,
+        reporterId: me,
+        uploaderId: postRow.userId,
+        uploaderName: postRow.userName,
+        caption: postRow.caption
+      });
+      emailSent = Boolean(mail?.ok);
+    } catch (error) {
+      emailError = String(error?.message || error || "email_failed");
+      console.warn("[reports] admin email notify failed:", emailError);
+    }
 
     res.json({
       success: true,
       ok: true,
       reportCount,
-      autoHidden
+      autoHidden,
+      alreadyReported: isUpdate,
+      emailSent,
+      ...(emailError ? { emailError } : {})
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to submit report", error: error.message });

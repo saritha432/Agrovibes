@@ -6,6 +6,11 @@ export const postSheetStyles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end"
   },
+  /** Backdrop above the sheet (do not use absoluteFill — it steals Submit taps). */
+  dimFlex: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)"
+  },
   dimTap: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.55)"
@@ -17,7 +22,9 @@ export const postSheetStyles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: "#343b43",
     paddingHorizontal: 14,
-    paddingTop: 8
+    paddingTop: 8,
+    zIndex: 2,
+    elevation: 8
   },
   handle: {
     width: 52,
