@@ -41,6 +41,7 @@ export interface HomePost {
   caption: string;
   likesCount: number;
   commentsCount: number;
+  resharesCount?: number;
   videoUrl?: string | null;
   imageUrl?: string | null;
   imageUrls?: string[];

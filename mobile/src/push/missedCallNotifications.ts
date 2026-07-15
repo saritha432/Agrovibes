@@ -1,6 +1,6 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { ANDROID_CHANNELS, setupMissedCallNotificationCategory } from "./pushNotifications";
+import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, setupMissedCallNotificationCategory } from "./pushNotifications";
 
 export type MissedCallNotificationPayload = {
   callerId: number;
@@ -38,7 +38,7 @@ export async function displayMissedCallNotification(payload: MissedCallNotificat
       title: callerName,
       body,
       categoryIdentifier: "MISSED_CALL",
-      sound: "default",
+      sound: NOTIFICATION_SOUNDS.missedCall,
       data: {
         type: "missed_call",
         mode,

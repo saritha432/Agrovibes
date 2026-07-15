@@ -9,17 +9,25 @@ let incomingCallCategoriesReady: Promise<void> | null = null;
 /**
  * Fresh channel IDs force Android to recreate channels with sound.
  * Channel sound/importance cannot be changed after first creation (OEM/user settings).
- * v3: drop COMMUNICATION_* audio usage — some OEMs routed that to a silent stream
- * while notification volume was on (other apps sounded fine, Cropvibe did not).
+ * v4: distinct sounds — messages = system default, calls = incoming_ring ringtone.
  */
 export const ANDROID_CHANNELS = {
-  default: "general_v3",
+  default: "general_v4",
   /** Heads-up banners for DMs while another app is open */
-  directMessages: "direct_messages_v3",
+  directMessages: "direct_messages_v4",
   /** Heads-up / full-screen style for incoming calls */
-  incomingCalls: "incoming_calls_v3",
-  missedCalls: "missed_calls_v3"
+  incomingCalls: "incoming_calls_v4",
+  missedCalls: "missed_calls_v4"
 } as const;
+
+/** Filenames registered under expo-notifications `sounds` (see app.json). */
+export const NOTIFICATION_SOUNDS = {
+  /** Short system chime for DMs / general alerts */
+  message: "default" as const,
+  /** In-app ringtone asset for incoming call notifications */
+  incomingCall: "incoming_ring.wav" as const,
+  missedCall: "default" as const
+};
 
 export function ensureIncomingCallCategoriesReady() {
   if (!incomingCallCategoriesReady) {
@@ -64,15 +72,19 @@ Notifications.setNotificationHandler({
 export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
 
-  // Remove older channels that may have been created silent / with bad audio attributes.
+  // Remove older channels that may have been created silent / with shared default sound.
   for (const legacyId of [
     "default",
+    "general_v3",
     "direct_messages",
     "incoming_calls",
     "missed_calls",
     "direct_messages_v2",
     "incoming_calls_v2",
-    "missed_calls_v2"
+    "missed_calls_v2",
+    "direct_messages_v3",
+    "incoming_calls_v3",
+    "missed_calls_v3"
   ]) {
     try {
       await Notifications.deleteNotificationChannelAsync(legacyId);
@@ -92,7 +104,7 @@ export async function ensureAndroidChannels() {
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
-    sound: "default",
+    sound: NOTIFICATION_SOUNDS.message,
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35",
@@ -101,11 +113,11 @@ export async function ensureAndroidChannels() {
   });
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.directMessages, {
     name: "Messages",
-    description: "Direct message alerts (with sound)",
+    description: "Direct message alerts (message chime)",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
-    sound: "default",
+    sound: NOTIFICATION_SOUNDS.message,
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35",
@@ -114,11 +126,11 @@ export async function ensureAndroidChannels() {
   });
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNELS.incomingCalls, {
     name: "Calls",
-    description: "Incoming voice and video calls (with ringtone sound)",
+    description: "Incoming voice and video calls (ringtone)",
     importance: Notifications.AndroidImportance.MAX,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
-    sound: "default",
+    sound: NOTIFICATION_SOUNDS.incomingCall,
     enableVibrate: true,
     vibrationPattern: [0, 800, 400, 800, 400, 800],
     lightColor: "#C9FF35",
@@ -134,7 +146,7 @@ export async function ensureAndroidChannels() {
     importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
-    sound: "default",
+    sound: NOTIFICATION_SOUNDS.missedCall,
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: "#C9FF35",

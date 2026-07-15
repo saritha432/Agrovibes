@@ -96,6 +96,8 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
     declineText: "Decline",
     // Native module expects an Android color resource name, not a hex literal.
     notificationColor: "cropvibe_call_accent",
+    // Raw resource name (no extension) — bundled via expo-notifications sounds plugin.
+    notificationSound: "incoming_ring",
     isVideo,
     payload: callPayloadMap(payload)
   };

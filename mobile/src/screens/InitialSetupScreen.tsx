@@ -1,5 +1,4 @@
 import { Asset } from "expo-asset";
-import { ResizeMode, Video } from "expo-av";
 import React, { createElement } from "react";
 import {
   FlatList,
@@ -78,13 +77,14 @@ const SLIDES = [
   }
 ] as const;
 
-const CROPVIBE_INTRO_MP4 = require("../../assets/onboarding/cropvibe.mp4");
+const CROPVIBE_INTRO_IMAGE = require("../../assets/onboarding/cropvibe_intro.png");
 
 type OnboardingImageKey = "media" | "marketplace" | "community" | "learn" | "logistics" | "alldone";
 
 /** Metro may return a URL string on web, or a numeric module id on native. */
 type OnboardingArtModule = number | string | { uri?: string; default?: string };
 
+/** Large bottom illustrations (farmer / market artwork). */
 const ONBOARDING_ART: Record<OnboardingImageKey, OnboardingArtModule> = {
   media: require("../../assets/onboarding/media.svg"),
   marketplace: require("../../assets/onboarding/marketplace.svg"),
@@ -92,6 +92,26 @@ const ONBOARDING_ART: Record<OnboardingImageKey, OnboardingArtModule> = {
   learn: require("../../assets/onboarding/educators.svg"),
   logistics: require("../../assets/onboarding/logistics.svg"),
   alldone: require("../../assets/onboarding/alldone.svg")
+};
+
+/** Intrinsic SVG aspect ratios (width / height) so art can fill screen width. */
+const ONBOARDING_ART_ASPECT: Record<OnboardingImageKey, number> = {
+  media: 428 / 427,
+  marketplace: 430 / 405,
+  community: 397 / 385,
+  learn: 430 / 437,
+  logistics: 384 / 371,
+  alldone: 429 / 429
+};
+
+/** Small top tag icons next to Media / Marketplace / etc. */
+const ONBOARDING_TAG_ICONS: Record<OnboardingImageKey, number> = {
+  media: require("../../assets/onboarding/media-icon.png"),
+  marketplace: require("../../assets/onboarding/market-icon.png"),
+  community: require("../../assets/onboarding/community-icon.png"),
+  learn: require("../../assets/onboarding/educator-icon.png"),
+  logistics: require("../../assets/onboarding/logistics-icon.png"),
+  alldone: require("../../assets/onboarding/done-icon.png")
 };
 
 function artModuleToUri(module: OnboardingArtModule): string | null {
@@ -110,7 +130,7 @@ function artModuleToUri(module: OnboardingArtModule): string | null {
 function OnboardingIllustration({ imageKey }: { imageKey: OnboardingImageKey }) {
   const artSource = ONBOARDING_ART[imageKey];
   const [uri, setUri] = React.useState<string | null>(() => artModuleToUri(artSource));
-  const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
+  const [width, setWidth] = React.useState(0);
 
   React.useEffect(() => {
     const direct = artModuleToUri(artSource);
@@ -135,14 +155,16 @@ function OnboardingIllustration({ imageKey }: { imageKey: OnboardingImageKey }) 
     };
   }, [artSource]);
 
-  const onLayout = (e: { nativeEvent: { layout: { width: number; height: number } } }) => {
-    const { width, height } = e.nativeEvent.layout;
-    if (width > 0 && height > 0) {
-      setSize({ w: Math.round(width), h: Math.round(height) });
-    }
+  const onLayout = (e: { nativeEvent: { layout: { width: number } } }) => {
+    const next = Math.round(e.nativeEvent.layout.width);
+    if (next > 0) setWidth(next);
   };
 
-  if (!size || !uri) {
+  const aspect = ONBOARDING_ART_ASPECT[imageKey];
+  const drawW = width;
+  const drawH = width > 0 ? Math.round(width / aspect) : 0;
+
+  if (!uri || drawW <= 0) {
     return <View style={styles.featureArtSvgWrap} onLayout={onLayout} />;
   }
 
@@ -153,8 +175,8 @@ function OnboardingIllustration({ imageKey }: { imageKey: OnboardingImageKey }) 
           src: uri,
           alt: "",
           style: {
-            width: size.w,
-            height: size.h,
+            width: drawW,
+            height: drawH,
             objectFit: "contain",
             display: "block",
             pointerEvents: "none"
@@ -167,7 +189,7 @@ function OnboardingIllustration({ imageKey }: { imageKey: OnboardingImageKey }) 
   const { SvgUri } = require("react-native-svg") as typeof import("react-native-svg");
   return (
     <View style={styles.featureArtSvgWrap} onLayout={onLayout}>
-      <SvgUri uri={uri} width={size.w} height={size.h} />
+      <SvgUri uri={uri} width={drawW} height={drawH} />
     </View>
   );
 }
@@ -181,58 +203,21 @@ const COLORS = {
   mutedDark: "#3d3d3d"
 };
 
-function brandIntroVideoSource() {
-  const uri = artModuleToUri(CROPVIBE_INTRO_MP4 as OnboardingArtModule);
-  return uri ? { uri } : CROPVIBE_INTRO_MP4;
-}
-
-function BrandSplashGif({ playing }: { playing: boolean }) {
-  const source = brandIntroVideoSource();
-  const webUri = artModuleToUri(CROPVIBE_INTRO_MP4 as OnboardingArtModule);
-
-  if (Platform.OS === "web" && webUri) {
-    return (
-      <View style={styles.brandGifWrap}>
-        {createElement("video", {
-          key: webUri,
-          src: webUri,
-          autoPlay: playing,
-          loop: true,
-          muted: true,
-          playsInline: true,
-          style: {
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-            backgroundColor: "#000",
-            display: "block"
-          }
-        })}
-      </View>
-    );
-  }
-
+function BrandSplashImage() {
   return (
     <View style={styles.brandGifWrap}>
-      <Video
-        source={source}
-        style={styles.brandGif}
-        resizeMode={ResizeMode.CONTAIN}
-        shouldPlay={playing}
-        isLooping
-        isMuted
-      />
+      <Image source={CROPVIBE_INTRO_IMAGE} style={styles.brandGif} resizeMode="cover" />
     </View>
   );
 }
 
 /** Auto-advance between onboarding slides (lower ms = faster). */
-const AUTOPLAY_INTERVAL_MS = 1000;
+const AUTOPLAY_INTERVAL_MS = 3500;
 
 /** Matches fixed footer: 2 buttons + language row + padding (prevents art clipped under buttons). */
 const ONBOARDING_FOOTER_BASE_HEIGHT = 186;
 
-/** Auto-scroll loops feature slides only; index 0 is the brand GIF (manual swipe to view). */
+/** Auto-scroll loops feature slides only; index 0 is the brand intro (manual swipe to view). */
 const ONBOARDING_AUTOPLAY_START_INDEX = 1;
 
 const ONBOARDING_PROGRESS_STEP_COUNT = SLIDES.length - ONBOARDING_AUTOPLAY_START_INDEX;
@@ -323,7 +308,7 @@ export function InitialSetupScreen() {
   return (
     <SafeAreaView
       style={[styles.root, currentSlideInverted ? styles.rootLime : null]}
-      edges={["top", "left", "right"]}
+      edges={isBrandSlide ? [] : ["top"]}
     >
       <View style={[styles.carouselShell, currentSlideInverted ? styles.carouselShellLime : null]} pointerEvents="box-none">
         <FlatList
@@ -413,14 +398,21 @@ export function InitialSetupScreen() {
               ) : null}
               <View style={styles.content}>
                 {item.mode === "brand" ? (
-                  <BrandSplashGif playing={isFocused && index === 0} />
+                  <BrandSplashImage />
                 ) : (
                   <View style={[styles.featureWrap, item.mode === "cta" ? styles.featureWrapCta : null]}>
                     <View style={[styles.copyWrap, item.mode === "cta" ? styles.copyWrapCta : null]}>
-                      {item.descriptionKey ? (
-                        <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>
-                          {t(item.descriptionKey)}
-                        </Text>
+                      {"imageKey" in item && item.imageKey ? (
+                        <View style={styles.slideTagRow}>
+                          <Image
+                            source={ONBOARDING_TAG_ICONS[item.imageKey]}
+                            style={styles.slideTagIcon}
+                            resizeMode="contain"
+                          />
+                          <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>
+                            {t(item.descriptionKey)}
+                          </Text>
+                        </View>
                       ) : null}
                       <Text
                         style={[
@@ -587,10 +579,10 @@ const styles = StyleSheet.create({
   carouselShell: { flex: 1, position: "relative" },
   carouselShellLime: { backgroundColor: COLORS.lime },
   list: { flex: 1 },
-  page: { backgroundColor: COLORS.dark, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 12, justifyContent: "space-between" },
-  pageBrand: { paddingHorizontal: 0, paddingBottom: 0 },
+  page: { backgroundColor: COLORS.dark, paddingHorizontal: 0, paddingTop: 8, paddingBottom: 12, justifyContent: "space-between" },
+  pageBrand: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
   pageInverted: { backgroundColor: COLORS.lime },
-  topBarWrap: { height: 24, justifyContent: "center", alignItems: "center", paddingHorizontal: 2 },
+  topBarWrap: { height: 24, justifyContent: "center", alignItems: "center", paddingHorizontal: 12 },
   progressRow: { flexDirection: "row", alignItems: "center", gap: 5, width: "100%" },
   progressSegment: { flex: 1, height: 4, borderRadius: 2 },
   progressSegmentDoneDark: { backgroundColor: COLORS.lime, opacity: 0.95 },
@@ -602,47 +594,55 @@ const styles = StyleSheet.create({
     flex: 1,
     width: "100%",
     backgroundColor: "#000",
-    alignItems: "center",
+    alignItems: "stretch",
     justifyContent: "center",
     overflow: "hidden"
   },
   brandGif: {
+    ...StyleSheet.absoluteFillObject,
     width: "100%",
-    height: "100%",
-    alignSelf: "center"
+    height: "100%"
   },
-  heroWrap: { flex: 1, marginHorizontal: -18, justifyContent: "flex-start" },
+  heroWrap: { flex: 1, justifyContent: "flex-start" },
   heroLogoArea: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 18, minHeight: 200 },
   logoImage: { width: "82%", height: 62 },
   heroPatternWrap: { width: "100%", height: "45%", justifyContent: "flex-end" },
   heroPatternImage: { width: "100%", height: "100%" },
-  featureWrap: { flex: 1, paddingTop: 44 },
-  featureWrapCta: { paddingTop: 28 },
-  copyWrap: { paddingTop: 12, paddingHorizontal: 2, minHeight: 130 },
-  copyWrapCta: { minHeight: 0, paddingTop: 4 },
-  slideTag: { color: COLORS.lime, fontSize: 18, fontWeight: "600", letterSpacing: 0.1, marginBottom: 10 },
+  featureWrap: { flex: 1, paddingTop: 12 },
+  featureWrapCta: { paddingTop: 8 },
+  copyWrap: { paddingTop: 0, paddingHorizontal: 16, minHeight: 130 },
+  copyWrapCta: { minHeight: 0, paddingTop: 0 },
+  slideTag: { color: COLORS.lime, fontSize: 18, fontWeight: "600", letterSpacing: 0.1 },
+  slideTagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10
+  },
+  slideTagIcon: {
+    width: 22,
+    height: 22
+  },
   featureArtWrap: {
     flex: 1,
-    marginTop: 36,
-    marginHorizontal: -18,
-    paddingTop: 16,
+    marginTop: 12,
+    width: "100%",
+    paddingTop: 8,
     alignItems: "center",
     justifyContent: "flex-end",
-    minHeight: 220
+    minHeight: 220,
+    overflow: "hidden"
   },
   featureArtWrapCta: {
-    marginTop: 40,
-    paddingTop: 16,
+    marginTop: 20,
+    paddingTop: 8,
     justifyContent: "center",
     minHeight: 260
   },
   featureArtSvgWrap: {
     width: "100%",
-    flex: 1,
-    minHeight: 220,
-    maxHeight: 308,
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "flex-end"
   },
   slideTagInverted: { color: "#262626" },
   copyText: {
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 18,
+    paddingHorizontal: 12,
     paddingBottom: 16,
     paddingTop: 10
   },

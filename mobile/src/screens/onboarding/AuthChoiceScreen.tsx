@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -11,6 +11,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister, formatAuthError } from "../../services/api";
 import { getLoginDevicePayload } from "../../utils/deviceInfo";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
+import { SignupLegalNotice } from "../../components/SignupLegalNotice";
 
 const GREEN = APP_LIME;
 const BG = APP_BLACK;
@@ -132,6 +133,11 @@ export function AuthChoiceScreen() {
 
   return (
     <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.header}>
         <Text style={styles.label}>{mode === "register" ? t("createAccount") : t("login")}</Text>
         <Text style={styles.subtag}>
@@ -213,6 +219,13 @@ export function AuthChoiceScreen() {
             <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#9aa5ad" />
           </Pressable>
         </View>
+
+        {mode === "register" ? (
+          <View style={styles.legalNoticeWrap}>
+            <SignupLegalNotice />
+          </View>
+        ) : null}
+
         <Pressable onPress={submit} style={[styles.primaryBtn, !canSubmit ? styles.disabled : null]} disabled={!canSubmit}>
           <Text style={styles.primaryBtnText}>
             {loadingSubmit ? "Submitting..." : mode === "register" ? t("submit") : t("login")}
@@ -230,6 +243,7 @@ export function AuthChoiceScreen() {
           {mode === "register" ? t("registerHelper") : t("loginHelper")}
         </Text>
       </View>
+      </ScrollView>
       {Platform.OS === "ios" ? <View style={styles.bottomHomeBar} /> : null}
     </View>
   );
@@ -237,6 +251,7 @@ export function AuthChoiceScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 48 },
+  scrollContent: { paddingBottom: 28 },
   header: { marginBottom: 14 },
   modeSegment: {
     flexDirection: "row",
@@ -280,6 +295,7 @@ const styles = StyleSheet.create({
     backgroundColor: APP_SURFACE
   },
   spaced: { marginTop: 10 },
+  legalNoticeWrap: { marginTop: 14 },
   passwordRow: {
     flexDirection: "row",
     alignItems: "center",

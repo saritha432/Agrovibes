@@ -55,7 +55,15 @@ export function mergeHomeFeedPosts(fresh: HomePost[], existing: HomePost[]): Hom
   for (const post of existing) byId.set(post.id, post);
   for (const post of fresh) {
     const prev = byId.get(post.id);
-    byId.set(post.id, prev ? { ...prev, ...post } : post);
+    if (!prev) {
+      byId.set(post.id, post);
+      continue;
+    }
+    byId.set(post.id, {
+      ...prev,
+      ...post,
+      resharesCount: Math.max(Number(prev.resharesCount ?? 0), Number(post.resharesCount ?? 0))
+    });
   }
   return Array.from(byId.values()).sort((a, b) => {
     const bTime = Date.parse(String(b.createdAt || "")) || 0;
@@ -80,8 +88,14 @@ export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePos
   }
 
   const out: HomePost[] = basePosts.map((post) => {
-    const repostMeta = repostByPostId.get(post.id)?.repost;
-    return repostMeta ? { ...post, repost: repostMeta } : post;
+    const repostRow = repostByPostId.get(post.id);
+    if (!repostRow?.repost) return post;
+    return {
+      ...post,
+      repost: repostRow.repost,
+      resharesCount: Math.max(Number(post.resharesCount ?? 0), Number(repostRow.resharesCount ?? 0)),
+      viewerHasReshared: post.viewerHasReshared ?? repostRow.viewerHasReshared
+    };
   });
 
   const presentIds = new Set(out.map((post) => post.id));
@@ -89,4 +103,12 @@ export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePos
     if (!presentIds.has(repostPost.id)) out.push(repostPost);
   }
   return out.sort((a, b) => feedSortTime(b) - feedSortTime(a) || b.id - a.id);
+}
+
+/** Prefer API count; fall back when repost metadata exists but count was not loaded yet. */
+export function shownResharesCount(post: HomePost): number {
+  const fromApi = Number(post.resharesCount ?? 0);
+  if (fromApi > 0) return fromApi;
+  if (post.repost || post.viewerHasReshared) return 1;
+  return 0;
 }

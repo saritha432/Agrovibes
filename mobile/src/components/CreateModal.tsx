@@ -58,6 +58,11 @@ import { ensureMediaLibraryAccess } from "../utils/mediaLibraryPermission";
 import { APP_LIME, APP_LIME_SOFT_BG } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { UserAvatar } from "./UserAvatar";
+import {
+  evaluateFarmingPostPolicy,
+  FARMING_TOPICS,
+  type FarmingTopicId
+} from "../social/farmingContentPolicy";
 
 type TaggedPerson = { id: number; name: string };
 
@@ -475,6 +480,8 @@ export function CreateModal({
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
   const [entryType, setEntryType] = useState<CreateType>("story");
   const [caption, setCaption] = useState("");
+  const [farmingTopicId, setFarmingTopicId] = useState<FarmingTopicId | null>(null);
+  const [farmingConfirmed, setFarmingConfirmed] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState("");
   const [liveMode, setLiveMode] = useState<"now" | "schedule" | null>(null);
@@ -879,6 +886,8 @@ export function CreateModal({
     setShowEditPanel(false);
     setShowAudioPanel(false);
     void stopAudioPreview();
+    setFarmingTopicId(null);
+    setFarmingConfirmed(false);
     onClose();
   };
 
@@ -1670,6 +1679,25 @@ export function CreateModal({
           setSubmitting(false);
           return;
         }
+        const farmingCheck = evaluateFarmingPostPolicy({
+          caption: caption.trim(),
+          farmingTopicId,
+          farmingConfirmed
+        });
+        if (!farmingCheck.ok) {
+          const message =
+            farmingCheck.code === "topic_required"
+              ? t("farmingTopicRequired")
+              : farmingCheck.code === "confirm_required"
+                ? t("farmingConfirmRequired")
+                : t("farmingOffTopicMsg");
+          setErrorText(message);
+          if (farmingCheck.code === "off_topic") {
+            Alert.alert(t("farmingOffTopicTitle"), message);
+          }
+          setSubmitting(false);
+          return;
+        }
         const assets = [...pickedPostAssets];
         if (!assets.length) {
           setErrorText(createType === "reel" ? t("createErrReelMedia") : t("createErrPostMedia"));
@@ -1728,17 +1756,22 @@ export function CreateModal({
                   }
                 }
               : {};
-          const { post: newPost } = await createHomePost({
-            userId: user?.id,
-            userName: user?.fullName?.trim() || "Farmer",
-            location: resolvedLocation,
-            caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-            videoUrl: mediaUrl,
-            thumbnailUrl: derivedThumb,
-            ...(taggedIds.length ? { taggedUserIds: taggedIds } : {}),
-            ...reelAudio,
-            ...reelCreative
-          });
+          const { post: newPost } = await createHomePost(
+            {
+              userId: user?.id,
+              userName: user?.fullName?.trim() || "Farmer",
+              location: resolvedLocation,
+              caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
+              videoUrl: mediaUrl,
+              thumbnailUrl: derivedThumb,
+              farmingTopic: farmingTopicId || undefined,
+              farmingConfirmed: true,
+              ...(taggedIds.length ? { taggedUserIds: taggedIds } : {}),
+              ...reelAudio,
+              ...reelCreative
+            },
+            token ?? null
+          );
           createdFeedPost = newPost;
         } else {
           const urls: string[] = [];
@@ -1754,21 +1787,28 @@ export function CreateModal({
             setSubmitting(false);
             return;
           }
-          const { post: newPost } = await createHomePost({
-            userId: user?.id,
-            userName: user?.fullName?.trim() || "Farmer",
-            location: resolvedLocation,
-            caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-            imageUrl: urls[0],
-            imageUrls: urls,
-            ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
-          });
+          const { post: newPost } = await createHomePost(
+            {
+              userId: user?.id,
+              userName: user?.fullName?.trim() || "Farmer",
+              location: resolvedLocation,
+              caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
+              imageUrl: urls[0],
+              imageUrls: urls,
+              farmingTopic: farmingTopicId || undefined,
+              farmingConfirmed: true,
+              ...(taggedIds.length ? { taggedUserIds: taggedIds } : {})
+            },
+            token ?? null
+          );
           createdFeedPost = newPost;
         }
       }
       setCreateType(null);
       setCreateStep("preview");
       setCaption("");
+      setFarmingTopicId(null);
+      setFarmingConfirmed(false);
       setVideoUrl("");
       setThumbnailUrl("");
       setPickedStoryMediaType(null);
@@ -2577,10 +2617,48 @@ export function CreateModal({
                 value={caption}
                 onChangeText={setCaption}
                 style={styles.igPostComposeCaption}
-                placeholder="Add A Caption"
+                placeholder={t("farmingCaptionPlaceholder")}
                 placeholderTextColor="rgba(255,255,255,0.45)"
                 multiline
               />
+
+              <View style={styles.farmingPolicyCard}>
+                <View style={styles.farmingPolicyHeader}>
+                  <Ionicons name="leaf-outline" size={18} color="#C9FF35" />
+                  <Text style={styles.farmingPolicyTitle}>{t("farmingPolicyTitle")}</Text>
+                </View>
+                <Text style={styles.farmingPolicyBody}>{t("farmingPolicyBody")}</Text>
+                <Text style={styles.farmingTopicLabel}>{t("farmingTopicLabel")}</Text>
+                <View style={styles.farmingTopicWrap}>
+                  {FARMING_TOPICS.map((topic) => {
+                    const selected = farmingTopicId === topic.id;
+                    return (
+                      <Pressable
+                        key={topic.id}
+                        style={[styles.farmingTopicChip, selected ? styles.farmingTopicChipOn : null]}
+                        onPress={() => setFarmingTopicId(topic.id)}
+                      >
+                        <Text style={[styles.farmingTopicChipText, selected ? styles.farmingTopicChipTextOn : null]}>
+                          {t(topic.labelKey)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Pressable
+                  style={styles.farmingConfirmRow}
+                  onPress={() => setFarmingConfirmed((v) => !v)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: farmingConfirmed }}
+                >
+                  <Ionicons
+                    name={farmingConfirmed ? "checkbox" : "square-outline"}
+                    size={22}
+                    color={farmingConfirmed ? "#C9FF35" : "rgba(255,255,255,0.55)"}
+                  />
+                  <Text style={styles.farmingConfirmText}>{t("farmingConfirmLabel")}</Text>
+                </Pressable>
+              </View>
 
               <View style={styles.igPostComposeQuickRow}>
                 <Pressable style={styles.igPostComposeQuickBtn} onPress={() => Alert.alert("Poll", "Polls coming soon.")}>
@@ -2946,10 +3024,54 @@ export function CreateModal({
                   value={caption}
                   onChangeText={setCaption}
                   style={styles.igComposeCaptionInputFull}
-                  placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                  placeholder={t("farmingCaptionPlaceholder")}
                   multiline
                   placeholderTextColor="#7f8b88"
                 />
+                {(createType === "post" || createType === "reel") ? (
+                  <View style={styles.farmingPolicyCardLight}>
+                    <View style={styles.farmingPolicyHeader}>
+                      <Ionicons name="leaf-outline" size={18} color="#C9FF35" />
+                      <Text style={styles.farmingPolicyTitleDark}>{t("farmingPolicyTitle")}</Text>
+                    </View>
+                    <Text style={styles.farmingPolicyBodyDark}>{t("farmingPolicyBody")}</Text>
+                    <Text style={styles.farmingTopicLabelDark}>{t("farmingTopicLabel")}</Text>
+                    <View style={styles.farmingTopicWrap}>
+                      {FARMING_TOPICS.map((topic) => {
+                        const selected = farmingTopicId === topic.id;
+                        return (
+                          <Pressable
+                            key={topic.id}
+                            style={[styles.farmingTopicChipLight, selected ? styles.farmingTopicChipOn : null]}
+                            onPress={() => setFarmingTopicId(topic.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.farmingTopicChipTextDark,
+                                selected ? styles.farmingTopicChipTextOn : null
+                              ]}
+                            >
+                              {t(topic.labelKey)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Pressable
+                      style={styles.farmingConfirmRow}
+                      onPress={() => setFarmingConfirmed((v) => !v)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: farmingConfirmed }}
+                    >
+                      <Ionicons
+                        name={farmingConfirmed ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={farmingConfirmed ? "#5f7a1a" : "#97a0a8"}
+                      />
+                      <Text style={styles.farmingConfirmTextDark}>{t("farmingConfirmLabel")}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
                 {createType === "post" || createType === "reel" ? (
                   <View style={styles.igComposeOptions}>
                     {composeOptions.map(({ icon, label, onPress, displayText }) => (
@@ -2980,11 +3102,55 @@ export function CreateModal({
                     value={caption}
                     onChangeText={setCaption}
                     style={styles.igComposeCaptionInput}
-                    placeholder={createType === "reel" ? "Write a reel caption..." : "Write a caption..."}
+                    placeholder={t("farmingCaptionPlaceholder")}
                     multiline
                     placeholderTextColor="#7f8b88"
                   />
                 </View>
+                {(createType === "post" || createType === "reel") ? (
+                  <View style={styles.farmingPolicyCardLight}>
+                    <View style={styles.farmingPolicyHeader}>
+                      <Ionicons name="leaf-outline" size={18} color="#C9FF35" />
+                      <Text style={styles.farmingPolicyTitleDark}>{t("farmingPolicyTitle")}</Text>
+                    </View>
+                    <Text style={styles.farmingPolicyBodyDark}>{t("farmingPolicyBody")}</Text>
+                    <Text style={styles.farmingTopicLabelDark}>{t("farmingTopicLabel")}</Text>
+                    <View style={styles.farmingTopicWrap}>
+                      {FARMING_TOPICS.map((topic) => {
+                        const selected = farmingTopicId === topic.id;
+                        return (
+                          <Pressable
+                            key={topic.id}
+                            style={[styles.farmingTopicChipLight, selected ? styles.farmingTopicChipOn : null]}
+                            onPress={() => setFarmingTopicId(topic.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.farmingTopicChipTextDark,
+                                selected ? styles.farmingTopicChipTextOn : null
+                              ]}
+                            >
+                              {t(topic.labelKey)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Pressable
+                      style={styles.farmingConfirmRow}
+                      onPress={() => setFarmingConfirmed((v) => !v)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: farmingConfirmed }}
+                    >
+                      <Ionicons
+                        name={farmingConfirmed ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={farmingConfirmed ? "#5f7a1a" : "#97a0a8"}
+                      />
+                      <Text style={styles.farmingConfirmTextDark}>{t("farmingConfirmLabel")}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
                 {createType === "post" || createType === "reel" ? (
                   <View style={styles.igComposeOptionsInline}>
                     {composeOptions.map(({ icon, label, onPress, displayText }) => (
@@ -3845,6 +4011,101 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
     paddingVertical: 4,
     marginBottom: 4
+  },
+  farmingPolicyCard: {
+    marginTop: 8,
+    marginBottom: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(201,255,53,0.28)",
+    backgroundColor: "rgba(201,255,53,0.08)",
+    padding: 12
+  },
+  farmingPolicyCardLight: {
+    marginTop: 10,
+    marginBottom: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(95,122,26,0.25)",
+    backgroundColor: "rgba(201,255,53,0.12)",
+    padding: 12
+  },
+  farmingPolicyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6
+  },
+  farmingPolicyTitle: { color: "#C9FF35", fontWeight: "900", fontSize: 13 },
+  farmingPolicyTitleDark: { color: "#2f3a12", fontWeight: "900", fontSize: 13 },
+  farmingPolicyBody: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "600",
+    marginBottom: 10
+  },
+  farmingPolicyBodyDark: {
+    color: "#3d4630",
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "600",
+    marginBottom: 10
+  },
+  farmingTopicLabel: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 11,
+    fontWeight: "800",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.4
+  },
+  farmingTopicLabelDark: {
+    color: "#5f6b52",
+    fontSize: 11,
+    fontWeight: "800",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.4
+  },
+  farmingTopicWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  farmingTopicChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(0,0,0,0.18)"
+  },
+  farmingTopicChipLight: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(47,58,18,0.2)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255,255,255,0.55)"
+  },
+  farmingTopicChipOn: {
+    borderColor: "#C9FF35",
+    backgroundColor: "rgba(201,255,53,0.28)"
+  },
+  farmingTopicChipText: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "700" },
+  farmingTopicChipTextDark: { color: "#2f3a12", fontSize: 12, fontWeight: "700" },
+  farmingTopicChipTextOn: { color: "#111", fontWeight: "900" },
+  farmingConfirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  farmingConfirmText: {
+    flex: 1,
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17
+  },
+  farmingConfirmTextDark: {
+    flex: 1,
+    color: "#2f3a12",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17
   },
   igPostComposeQuickRow: {
     flexDirection: "row",

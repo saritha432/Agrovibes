@@ -21,11 +21,23 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPresets,
+  createLocalAudioTrack,
+  createLocalVideoTrack,
   type Participant,
   type RemoteTrackPublication
 } from "livekit-client";
 import React from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiveShareSheet } from "../../components/LiveShareSheet";
 import { useAuth } from "../../auth/AuthContext";
@@ -68,7 +80,9 @@ function participantPublishesCamera(participant: Participant) {
   );
 }
 
-/** Prefer a subscribed remote camera track with attached media (DirectCall-style). */
+/**
+ * Prefer a subscribed remote camera track with attached media (DirectCall-style).
+ */
 function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid: string) {
   if (!tracks.length) return undefined;
   if (isHost) {
@@ -86,6 +100,48 @@ function pickLiveCameraTrack(tracks: TrackReference[], isHost: boolean, localSid
     hostFirst.find((t) => !!t.publication?.track && t.publication.isSubscribed !== false) ??
     hostFirst.find((t) => !!t.publication?.track)
   );
+}
+
+const LIVE_CONNECT_OPTIONS = { autoSubscribe: true };
+const LIVE_PUBLISH_OPTIONS = {
+  source: Track.Source.Camera,
+  videoCodec: "vp8" as const,
+  simulcast: false,
+  backupCodec: false as const
+};
+
+/** Join response often lists H264 first on Android — lock host to VP8 before publishing. */
+function lockHostPublishToVp8(room: Room) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    room.localParticipant.setEnabledPublishCodecs([{ mime: "video/VP8", fmtpLine: "" } as any]);
+  } catch {
+    // no-op
+  }
+}
+
+async function publishHostCameraAndMic(room: Room, facing: LiveCameraFacing) {
+  lockHostPublishToVp8(room);
+  await releaseHostCameraAndMic(room);
+
+  const videoTrack = await createLocalVideoTrack({
+    facingMode: facing === "back" ? "environment" : "user",
+    resolution: VideoPresets.h360.resolution
+  });
+  const videoPub = await room.localParticipant.publishTrack(videoTrack, LIVE_PUBLISH_OPTIONS);
+  const audioTrack = await createLocalAudioTrack();
+  await room.localParticipant.publishTrack(audioTrack, { source: Track.Source.Microphone });
+
+  const mime = String(videoPub?.mimeType || "");
+  console.log("[live-host] published camera", {
+    mime,
+    sid: videoPub?.trackSid,
+    vp8: /vp8/i.test(mime)
+  });
+  if (mime && /h264/i.test(mime)) {
+    console.warn("[live-host] server still selected H264 — remote Android viewers may see black video");
+  }
+  return videoPub;
 }
 
 async function releaseHostCameraAndMic(room: Room) {
@@ -166,7 +222,7 @@ function LiveRoomContent({
   const insets = useSafeAreaInsets();
   const room = useRoomContext();
   const participants = useParticipants();
-  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+  const tracks = useTracks([Track.Source.Camera], { onlySubscribed: !isHost });
   const commentsRef = React.useRef<ScrollView | null>(null);
   const videoDropTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -242,7 +298,7 @@ function LiveRoomContent({
       room.off(RoomEvent.TrackMuted, bumpMedia);
       room.off(RoomEvent.TrackUnmuted, bumpMedia);
     };
-  }, [isHost, liveEnded, room, participants]);
+  }, [isHost, liveEnded, room]);
 
   React.useEffect(() => {
     setStatusText(status);
@@ -254,14 +310,7 @@ function LiveRoomContent({
     const publishHostTracks = async () => {
       try {
         setPublishError("");
-        await room.localParticipant.setCameraEnabled(true, {
-          facingMode: initialCameraFacing === "back" ? "environment" : "user",
-          resolution: LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults?.resolution
-        });
-        if (cancelled) return;
-        await room.localParticipant.setMicrophoneEnabled(true);
-        if (cancelled || liveEndedRef.current) return;
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        await publishHostCameraAndMic(room, initialCameraFacing);
         if (cancelled || liveEndedRef.current) return;
         // RESTORE WHEN SUPABASE PAID — uncomment block below (live replay → Supabase egress).
         // if (token) {
@@ -389,11 +438,21 @@ function LiveRoomContent({
         videoDropTimerRef.current = null;
       }
     };
-    const onTrackSubscribed = (track: { kind: Track.Kind }) => {
+    const onTrackSubscribed = (track: { kind: Track.Kind; mediaStreamTrack?: MediaStreamTrack; codec?: string }, publication?: { trackSid?: string; mimeType?: string }) => {
       if (!isHost && track.kind === Track.Kind.Video) {
         hostSeenRef.current = true;
         clearVideoDropTimer();
         setStatusText("Joined live");
+        try {
+          console.log("[live-viewer] video subscribed", {
+            sid: publication?.trackSid,
+            mime: publication?.mimeType,
+            codec: (track as { codec?: string }).codec,
+            readyState: track.mediaStreamTrack?.readyState
+          });
+        } catch {
+          // no-op
+        }
       }
     };
     // Dynacast / adaptiveStream often unsubscribes briefly — do NOT end the live for that.
@@ -529,25 +588,29 @@ function LiveRoomContent({
   const cameraTrack = pickLiveCameraTrack(cameraRefs, isHost, localSid);
   const cameraTrackSid = cameraTrack?.publication?.trackSid ?? "";
   const watchingCount = liveViewerCount(viewers, isHost);
-  const showCameraVideo = !!cameraTrack && !!cameraTrack.publication?.track;
+  // Match DirectCall: require subscribed track with media attached.
+  const showCameraVideo =
+    !!cameraTrack &&
+    !!cameraTrack.publication?.track &&
+    (isHost || cameraTrack.publication.isSubscribed !== false);
 
   React.useEffect(() => {
     if (isHost || liveEnded || showCameraVideo) return;
-    const id = setInterval(() => setMediaTick((n) => n + 1), 500);
+    const id = setInterval(() => setMediaTick((n) => n + 1), 400);
     return () => clearInterval(id);
   }, [isHost, liveEnded, showCameraVideo]);
 
   return (
     <View style={styles.root} collapsable={false}>
       {showCameraVideo && cameraTrack ? (
-        <View style={styles.videoHost} collapsable={false}>
+        <View style={styles.videoHost} collapsable={false} pointerEvents="none">
           <VideoTrack
-            key={`live-cam-${cameraTrackSid}`}
+            key={`live-cam-${cameraTrackSid}-${mediaTick > 0 ? "ready" : "boot"}`}
             trackRef={cameraTrack}
             style={styles.videoSurface}
             objectFit="cover"
             mirror={isHost && facingFront}
-            zOrder={isHost ? 0 : 1}
+            zOrder={0}
           />
         </View>
       ) : (
@@ -689,16 +752,16 @@ export function LiveKitRoomView({
   const [errorText, setErrorText] = React.useState("");
   const [debugInfo, setDebugInfo] = React.useState("");
   const [shareOpen, setShareOpen] = React.useState(false);
-  const roomOptions = React.useMemo(
-    () => ({
-      ...LIVEKIT_LIVE_ROOM_OPTIONS,
-      videoCaptureDefaults: {
-        ...LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults,
-        facingMode: (initialCameraFacing === "back" ? "environment" : "user") as "user" | "environment"
-      }
-    }),
-    [initialCameraFacing]
+  const [liveRoom, setLiveRoom] = React.useState<Room | null>(null);
+  const handleRoomError = React.useCallback(
+    (error: Error) => {
+      const msg = error.message || "";
+      if (!isHost && /insufficient permissions/i.test(msg)) return;
+      setErrorText(formatLiveStreamError(error));
+    },
+    [isHost]
   );
+  const openShare = React.useCallback(() => setShareOpen(true), []);
 
   const liveSharePost = React.useMemo((): HomePost | null => {
     if (sharePost) return sharePost;
@@ -723,6 +786,32 @@ export function LiveKitRoomView({
     setActiveHostRoomName(roomName);
     return () => setActiveHostRoomName(null);
   }, [isHost, roomName, visible]);
+
+  // Fresh Room per session so singlePeerConnection:false always applies (required for RN remote video).
+  React.useEffect(() => {
+    if (!visible) {
+      setLiveRoom(null);
+      setConnection(null);
+      return;
+    }
+    ensureLiveKitGlobals();
+    const room = new Room({
+      ...LIVEKIT_LIVE_ROOM_OPTIONS,
+      videoCaptureDefaults: {
+        ...LIVEKIT_LIVE_ROOM_OPTIONS.videoCaptureDefaults,
+        facingMode: (initialCameraFacing === "back" ? "environment" : "user") as "user" | "environment"
+      }
+    });
+    setLiveRoom(room);
+    return () => {
+      try {
+        room.disconnect();
+      } catch {
+        // no-op
+      }
+      setLiveRoom((cur) => (cur === room ? null : cur));
+    };
+  }, [initialCameraFacing, roomName, visible]);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -751,7 +840,7 @@ export function LiveKitRoomView({
   }, [visible]);
 
   React.useEffect(() => {
-    if (!visible || !roomName) return;
+    if (!visible || !roomName || !liveRoom) return;
     let cancelled = false;
     setErrorText("");
     setStatus("Connecting live...");
@@ -796,12 +885,7 @@ export function LiveKitRoomView({
     return () => {
       cancelled = true;
     };
-  }, [isHost, postId, roomName, visible]);
-
-  // Clear connection only when leaving live UI (not on Strict Mode effect re-runs).
-  React.useEffect(() => {
-    if (!visible) setConnection(null);
-  }, [visible]);
+  }, [isHost, liveRoom, postId, roomName, visible]);
 
   if (!visible) return null;
 
@@ -822,7 +906,7 @@ export function LiveKitRoomView({
     );
   }
 
-  if (!connection) {
+  if (!connection || !liveRoom) {
     return (
       <View style={styles.root}>
         <View style={[styles.videoHost, styles.videoPlaceholder]}>
@@ -842,13 +926,9 @@ export function LiveKitRoomView({
         connect
         audio={false}
         video={false}
-        options={roomOptions}
-        connectOptions={{ autoSubscribe: true }}
-        onError={(error) => {
-          const msg = error.message || "";
-          if (!isHost && /insufficient permissions/i.test(msg)) return;
-          setErrorText(formatLiveStreamError(error));
-        }}
+        room={liveRoom}
+        connectOptions={LIVE_CONNECT_OPTIONS}
+        onError={handleRoomError}
       >
         <LiveRoomContent
           isHost={isHost}
@@ -858,7 +938,7 @@ export function LiveKitRoomView({
           initialCameraFacing={initialCameraFacing}
           onClose={onClose}
           onLiveEnded={onLiveEnded}
-          onShare={liveSharePost ? () => setShareOpen(true) : undefined}
+          onShare={liveSharePost ? openShare : undefined}
           errorText={errorText}
           status={status}
         />
@@ -870,8 +950,8 @@ export function LiveKitRoomView({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  videoHost: { ...StyleSheet.absoluteFillObject },
-  videoSurface: { width: "100%", height: "100%" },
+  videoHost: { ...StyleSheet.absoluteFillObject, backgroundColor: "transparent" },
+  videoSurface: { ...StyleSheet.absoluteFillObject },
   videoPlaceholder: { alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#000" },
   videoPlaceholderText: { marginTop: 12, color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: "700", textAlign: "center" },
   videoDebugText: { marginTop: 8, color: "rgba(201,255,53,0.85)", fontSize: 11, fontWeight: "700", textAlign: "center" },
