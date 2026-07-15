@@ -2073,6 +2073,7 @@ export function CreateModal({
             </View>
 
             <FlatList
+              style={styles.igPostEntryGridList}
               data={postGridData}
               keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
               numColumns={4}
@@ -2136,6 +2137,7 @@ export function CreateModal({
             </View>
 
             <FlatList
+              style={styles.igPostEntryGridList}
               data={postGridData}
               keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
               numColumns={4}
@@ -2166,7 +2168,7 @@ export function CreateModal({
 
             {errorText ? <Text style={styles.igCamErrorBanner}>{errorText}</Text> : null}
 
-            <View style={styles.igCamBottomModes}>
+            <View style={styles.igCaptureGalleryModes}>
               {createModes.map((m) => (
                 <Pressable
                   key={m.key}
@@ -3901,7 +3903,9 @@ const styles = StyleSheet.create({
   igPostEntrySelectBtnOn: { backgroundColor: "rgba(201,255,53,0.16)", borderColor: "#C9FF35" },
   igPostEntrySelectText: { color: "#f8fafc", fontWeight: "700", fontSize: 12 },
   igPostEntrySelectTextOn: { color: "#C9FF35" },
-  igPostEntryGrid: { paddingBottom: 8 },
+  /** FlatList must grow so mode tabs stay pinned under empty gallery space. */
+  igPostEntryGridList: { flex: 1 },
+  igPostEntryGrid: { flexGrow: 1, paddingBottom: 8 },
   igPostEntryCell: {
     width: "25%",
     aspectRatio: 1,
@@ -3934,6 +3938,8 @@ const styles = StyleSheet.create({
   },
   igPostEntrySelectedText: { color: "#111", fontSize: 12, fontWeight: "900" },
   igPostEntryModes: {
+    flexGrow: 0,
+    flexShrink: 0,
     height: 48,
     flexDirection: "row",
     alignItems: "center",
@@ -4277,6 +4283,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 12,
     paddingBottom: 10
+  },
+  /** Bottom mode strip for gallery (POST/STORY/REEL/LIVE) — pinned under flex list. */
+  igCaptureGalleryModes: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.12)"
   },
   igCameraEntryRoot: {
     flex: 1,

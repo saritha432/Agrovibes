@@ -179,6 +179,7 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
       <Pressable
         style={styles.wrap}
         onPress={props.onPress}
+        delayPressIn={80}
         accessibilityRole="button"
         accessibilityLabel="Open post"
       >

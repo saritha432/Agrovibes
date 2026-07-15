@@ -196,7 +196,10 @@ function shouldSendPushForType(settings, type) {
   if (settings.sleepMode) return false;
   const normalizedType = String(type || "").trim();
   const isMessageType = normalizedType === "direct_message" || normalizedType === "live_share";
-  const isFollowType = normalizedType === "follow_request" || normalizedType === "follow_accept";
+  const isFollowType =
+    normalizedType === "follow_request" ||
+    normalizedType === "follow_accept" ||
+    normalizedType === "new_follow";
   const isLiveType =
     normalizedType === "live_start" ||
     normalizedType === "live_scheduled" ||
@@ -404,6 +407,8 @@ function socialPushCopy({ type, actorName, commentExcerpt }) {
       return { title: "New follow request", body: `${actor} requested to follow you` };
     case "follow_accept":
       return { title: "Follow accepted", body: `${actor} accepted your follow request` };
+    case "new_follow":
+      return { title: "New follower", body: `${actor} started following you` };
     case "post_like":
       return { title: "New like", body: `${actor} liked your post` };
     case "post_comment":

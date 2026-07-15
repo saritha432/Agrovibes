@@ -1185,16 +1185,35 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       legacyStatus: "none" | "pending" | "accepted",
       busy: boolean
     ) => {
-      if (viewerStatus === "accepted" || localViewerStatus === "accepted" || legacyStatus === "accepted") {
-        return t("following");
+      // Prefer server relationship when present — stale local "accepted" must not hide pending requests.
+      if (viewerStatus === "accepted") return t("following");
+      if (viewerStatus === "pending") return t("requested");
+      if (viewerStatus === "none") {
+        if (busy) return t("followBusy");
+        return t("follow");
       }
-      if (viewerStatus === "pending" || localViewerStatus === "pending" || legacyStatus === "pending") {
-        return t("requested");
-      }
+      if (localViewerStatus === "accepted" || legacyStatus === "accepted") return t("following");
+      if (localViewerStatus === "pending" || legacyStatus === "pending") return t("requested");
       if (busy) return t("followBusy");
       return t("follow");
     },
     [t]
+  );
+
+  const resolveFollowStatus = React.useCallback(
+    (
+      viewerStatus: string | undefined,
+      localViewerStatus: string | undefined,
+      legacyStatus: "none" | "pending" | "accepted"
+    ): "none" | "pending" | "accepted" => {
+      if (viewerStatus === "accepted") return "accepted";
+      if (viewerStatus === "pending") return "pending";
+      if (viewerStatus === "none") return "none";
+      if (localViewerStatus === "accepted" || legacyStatus === "accepted") return "accepted";
+      if (localViewerStatus === "pending" || legacyStatus === "pending") return "pending";
+      return "none";
+    },
+    []
   );
 
   const feedMediaWidth = windowWidth - 20;
@@ -2415,17 +2434,34 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setFollowBusyByUserId((prev) => ({ ...prev, [targetUserId]: true }));
       try {
         const data = await sendFollowRequest(token, targetUserId);
-        if (data.follow.status === "accepted") {
+        const nextStatus =
+          data.follow.status === "accepted" ? "accepted" : data.follow.status === "pending" ? "pending" : "none";
+        if (nextStatus === "accepted") {
           setFollowingUserIds((prev) => new Set(prev).add(targetUserId));
         }
         setRelationships((prev) => ({
           ...prev,
           [targetUserId]: {
             ...(prev[targetUserId] || { reverseStatus: "none", canFollowBack: false }),
-            viewerStatus: data.follow.status,
+            viewerStatus: nextStatus,
             canFollowBack: false
           }
         }));
+        setLegacyFollowStateByName((prev) => ({ ...prev, [legacyKey]: nextStatus }));
+        setLegacyRelationshipByName((prev) => ({
+          ...prev,
+          [legacyKey]: {
+            ...(prev[legacyKey] || { canFollowBack: false }),
+            viewerStatus: nextStatus,
+            canFollowBack: false
+          }
+        }));
+        if (nextStatus === "pending") {
+          await sendLocalFollowRequestByIdentity(
+            { name: user?.fullName || "Farmer", key: user?.email || String(user?.id || "") },
+            { name: postUserName || "Farmer", key: String(targetUserId) }
+          );
+        }
       } catch (error: any) {
         Alert.alert(t("followFailed"), error?.message || t("followFailedMessage"));
       } finally {
@@ -3658,12 +3694,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const relationship = postUserId > 0 ? relationships[postUserId] : null;
       const localRelationship = legacyRelationshipByName[normalizedPostName];
       const legacyStatus = legacyFollowStateByName[normalizedPostName] || "none";
-      const currentFollowStatus: "none" | "pending" | "accepted" =
-        relationship?.viewerStatus === "accepted" || localRelationship?.viewerStatus === "accepted" || legacyStatus === "accepted"
-          ? "accepted"
-          : relationship?.viewerStatus === "pending" || localRelationship?.viewerStatus === "pending" || legacyStatus === "pending"
-            ? "pending"
-            : "none";
+      const currentFollowStatus = resolveFollowStatus(
+        relationship?.viewerStatus,
+        localRelationship?.viewerStatus,
+        legacyStatus
+      );
       const followLabel = labelForFollowStatus(
         relationship?.viewerStatus,
         localRelationship?.viewerStatus,
@@ -4052,6 +4087,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       language,
       t,
       labelForFollowStatus,
+      resolveFollowStatus,
       openPostAuthorProfile,
       openReposterProfile
     ]
@@ -4120,12 +4156,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const relationship = postUserId > 0 ? relationships[postUserId] : null;
       const localRelationship = legacyRelationshipByName[normalizedPostName];
       const legacyStatus = legacyFollowStateByName[normalizedPostName] || "none";
-      const currentFollowStatus: "none" | "pending" | "accepted" =
-        relationship?.viewerStatus === "accepted" || localRelationship?.viewerStatus === "accepted" || legacyStatus === "accepted"
-          ? "accepted"
-          : relationship?.viewerStatus === "pending" || localRelationship?.viewerStatus === "pending" || legacyStatus === "pending"
-            ? "pending"
-            : "none";
+      const currentFollowStatus = resolveFollowStatus(
+        relationship?.viewerStatus,
+        localRelationship?.viewerStatus,
+        legacyStatus
+      );
       const followLabel = labelForFollowStatus(
         relationship?.viewerStatus,
         localRelationship?.viewerStatus,
@@ -4363,6 +4398,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       language,
       t,
       labelForFollowStatus,
+      resolveFollowStatus,
       user?.avatarUrl,
       user?.fullName,
       user?.id

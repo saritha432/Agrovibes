@@ -7,6 +7,7 @@ export type NotificationFeedSnapshot = {
   pending: any[];
   accepted: any[];
   declined: any[];
+  newFollows: any[];
   postLikes: any[];
   postComments: any[];
   liveStarts: any[];
@@ -31,6 +32,7 @@ export async function fetchNotificationFeedSnapshot(params: {
 
   const remoteReq = remote?.followRequests || [];
   const remoteAccepted = remote?.followAccepted || [];
+  const remoteNewFollows = remote?.newFollows || [];
   const remotePostLikes = remote?.postLikes || [];
   const remotePostComments = remote?.postComments || [];
   const remoteLiveStarts = remote?.liveStarts || [];
@@ -44,6 +46,7 @@ export async function fetchNotificationFeedSnapshot(params: {
     ...(local.acceptedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))
   ];
   const declined = [...(local.declinedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))];
+  const newFollows = [...remoteNewFollows];
   const postLikes = [
     ...remotePostLikes,
     ...localEng.postLikes.map((n) => ({
@@ -74,11 +77,27 @@ export async function fetchNotificationFeedSnapshot(params: {
     }))
   ];
 
-  return { pending: mergedPending, accepted, declined, postLikes, postComments, liveStarts: remoteLiveStarts };
+  return {
+    pending: mergedPending,
+    accepted,
+    declined,
+    newFollows,
+    postLikes,
+    postComments,
+    liveStarts: remoteLiveStarts
+  };
 }
 
 export function flattenNotificationFeedSnapshot(snap: NotificationFeedSnapshot): any[] {
-  return [...snap.pending, ...snap.accepted, ...snap.declined, ...snap.postLikes, ...snap.postComments, ...snap.liveStarts];
+  return [
+    ...snap.pending,
+    ...snap.accepted,
+    ...snap.declined,
+    ...snap.newFollows,
+    ...snap.postLikes,
+    ...snap.postComments,
+    ...snap.liveStarts
+  ];
 }
 
 /** Badge = notifications newer than when the user last closed the panel (not full history). */
