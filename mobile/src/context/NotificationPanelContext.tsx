@@ -275,19 +275,22 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       if (nm) nameSet.add(nm);
     }
     const names = [...nameSet];
-    if (names.length && user?.fullName) {
-      const actorIds = [
-        ...new Set([...mergedPending, ...fbQueue].map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))
-      ];
+    const statusEntries = [...mergedPending, ...fbQueue, ...remoteNewFollows];
+    const actorIds = [
+      ...new Set(statusEntries.map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))
+    ];
+    if ((names.length || actorIds.length) && (user?.fullName || token)) {
       const [localMap, remoteData] = await Promise.all([
-        getLocalRelationshipMapByNames({ name: user.fullName, key: user.email || String(user.id || "") }, names),
+        user?.fullName && names.length
+          ? getLocalRelationshipMapByNames({ name: user.fullName, key: user.email || String(user.id || "") }, names)
+          : Promise.resolve({} as Record<string, { viewerStatus?: string }>),
         token && actorIds.length
           ? fetchRelationships(token, actorIds).catch(() => ({ relationships: {} as Record<number, { viewerStatus: string }> }))
           : Promise.resolve({ relationships: {} as Record<number, { viewerStatus: string }> })
       ]);
       const remoteRel = remoteData.relationships || {};
       const next: Record<string, "none" | "pending" | "accepted"> = {};
-      for (const n of [...mergedPending, ...fbQueue]) {
+      for (const n of statusEntries) {
         const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
         const nm = String(n.actorName || "").toLowerCase();
         let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
@@ -297,7 +300,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         }
         next[key] = st;
       }
-      setFollowBackStatusByKey(next);
+      setFollowBackStatusByKey((prev) => ({ ...prev, ...next }));
     }
   }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id]);
 
@@ -478,8 +481,16 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       return;
     }
     if (token && entry?.actorId) {
-      await sendFollowRequest(token, Number(entry.actorId));
-      setFollowBackStatusByKey((prev) => ({ ...prev, [key]: "pending" }));
+      try {
+        const res = await sendFollowRequest(token, Number(entry.actorId));
+        const st = String(res?.follow?.status || "").toLowerCase();
+        setFollowBackStatusByKey((prev) => ({
+          ...prev,
+          [key]: st === "accepted" ? "accepted" : "pending"
+        }));
+      } catch {
+        setFollowBackStatusByKey((prev) => ({ ...prev, [key]: "pending" }));
+      }
       setFollowBackPromptByKey((prev) => ({ ...prev, [key]: false }));
     }
   };
@@ -966,8 +977,18 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                   {section.items.map((item, idx) => {
                     const n = item.entry;
                     const isLastRow = idx === section.items.length - 1;
+                    const followKey =
+                      n.actorId != null && Number(n.actorId) > 0
+                        ? `id:${n.actorId}`
+                        : `name:${String(n.actorName || "").toLowerCase()}`;
+                    const followStatus =
+                      item.kind === "follow_back" || item.kind === "new_follow"
+                        ? followBackStatusByKey[followKey] || "none"
+                        : "none";
                     const hideRightPaneForType =
-                      item.kind === "accepted" || item.kind === "declined";
+                      item.kind === "accepted" ||
+                      item.kind === "declined" ||
+                      ((item.kind === "follow_back" || item.kind === "new_follow") && followStatus === "accepted");
 
                     const rowCore = (
                       <View style={[styles.figRow, !isLastRow ? styles.figRowDivider : null]}>
@@ -1025,29 +1046,15 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                 </Pressable>
                               </View>
                             ) : item.kind === "follow_back" || item.kind === "new_follow" ? (
-                              (() => {
-                                const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-                                const status = followBackStatusByKey[key] || "none";
-                                if (status === "accepted") {
-                                  return (
-                                    <View style={styles.followingPill}>
-                                      <Text style={styles.followingText}>{t("following")}</Text>
-                                    </View>
-                                  );
-                                }
-                                if (status === "pending") {
-                                  return (
-                                    <View style={styles.requestedPill}>
-                                      <Text style={styles.requestedText}>{t("requested")}</Text>
-                                    </View>
-                                  );
-                                }
-                                return (
-                                  <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
-                                    <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
-                                  </Pressable>
-                                );
-                              })()
+                              followStatus === "pending" ? (
+                                <View style={styles.requestedPill}>
+                                  <Text style={styles.requestedText}>{t("requested")}</Text>
+                                </View>
+                              ) : (
+                                <Pressable style={styles.followBackBtn} onPress={() => onFollowBack(n)}>
+                                  <Text style={styles.followBackText}>{t("followBackCapital")}</Text>
+                                </Pressable>
+                              )
                             ) : item.kind === "live_host_reminder" ? (
                               <Pressable style={styles.joinLiveBtn} onPress={() => onStartScheduledLiveFromNotif(n)}>
                                 <Text style={styles.joinLiveText}>{t("goLive")}</Text>
