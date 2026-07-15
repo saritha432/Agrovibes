@@ -29,7 +29,7 @@ import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { useLanguage } from "../localization/LanguageContext";
-import { resolvePersonDisplayName, looksLikePhoneNumber } from "../localization/feedDisplay";
+import { resolvePersonDisplayName, looksLikePhoneNumber, formatProfileHandle, isChosenUsername } from "../localization/feedDisplay";
 import {
   fetchHomePosts,
   fetchResharedHomePosts,
@@ -44,6 +44,7 @@ import {
   HomePost,
   deleteHomePost,
   removeFollower,
+  respondToFollowRequest,
   sendFollowRequest,
   sendDirectMessage,
   unfollowUser,
@@ -72,6 +73,7 @@ import {
 import type { BlockedUser } from "../services/api";
 import { navigateToEditProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
+import { UserReportSheet } from "../components/UserReportSheet";
 import { ReelGridTile } from "../components/ReelGridTile";
 import { useReelGridAutoplay } from "../hooks/useReelGridAutoplay";
 import { APP_LIME } from "../theme/appColors";
@@ -167,6 +169,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [publicFollowStatus, setPublicFollowStatus] = useState<FollowStatus>("none");
   const [publicReverseStatus, setPublicReverseStatus] = useState<FollowStatus>("none");
   const [publicCanFollowBack, setPublicCanFollowBack] = useState(false);
+  const [incomingFollowId, setIncomingFollowId] = useState<number | null>(null);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
   const [publicBio, setPublicBio] = useState("");
   const [followPublicBusy, setFollowPublicBusy] = useState(false);
@@ -207,6 +210,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [profileReelViewer, setProfileReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
   const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
   const [publicProfileMenuOpen, setPublicProfileMenuOpen] = useState(false);
+  const [reportUserOpen, setReportUserOpen] = useState(false);
   const [blockedUsersList, setBlockedUsersList] = useState<BlockedUser[]>([]);
   const [blockActionBusy, setBlockActionBusy] = useState(false);
   const isMountedRef = useRef(true);
@@ -577,13 +581,19 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       setPublicFollowStatus(viewerStatus);
       setPublicReverseStatus(reverseStatus);
       setPublicCanFollowBack(!!stats.canFollowBack);
+      const incomingId = Number(stats.incomingFollowId);
+      setIncomingFollowId(
+        reverseStatus === "pending" && Number.isFinite(incomingId) && incomingId > 0 ? incomingId : null
+      );
       setPublicFullName(
         resolvePersonDisplayName({
           fullName: stats.fullName,
-          username: stats.username
+          fallback: looksLikePhoneNumber(publicUserName) ? null : publicUserName
         })
       );
-      setPublicUsername(stats.username ? String(stats.username) : null);
+      setPublicUsername(
+        isChosenUsername(stats.username) ? String(stats.username) : null
+      );
       setPublicBio(String(stats.bio || "").trim());
       const fromApi =
         stats.avatarUrl != null && String(stats.avatarUrl).trim().length > 0 ? String(stats.avatarUrl).trim() : null;
@@ -864,13 +874,12 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (isPublicProfileView) {
       const displayName = resolvePersonDisplayName({
         fullName: publicFullName,
-        username: publicUsername,
         fallback: looksLikePhoneNumber(publicUserName) ? null : publicUserName
       });
       return {
         id: publicUserId,
         fullName: displayName,
-        username: publicUsername,
+        username: isChosenUsername(publicUsername) ? publicUsername : null,
         avatarUrl: publicAvatarUrl,
         bio: publicBio
       };
@@ -878,8 +887,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (!user) return null;
     return {
       id: user.id,
-      fullName: resolvePersonDisplayName({ fullName: user.fullName, username: user.username }),
-      username: user.username,
+      fullName: resolvePersonDisplayName({ fullName: user.fullName, phone: user.phone, email: user.email }),
+      username: isChosenUsername(user.username, { phone: user.phone, email: user.email }) ? user.username : null,
       avatarUrl: user.avatarUrl,
       bio: user.bio
     };
@@ -896,17 +905,19 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const profileModel = useMemo(() => {
     if (!profileSubject) return null;
-    const handle = profileSubject.username
-      ? `@${String(profileSubject.username).replace(/^@+/, "")}`
-      : safeHandle(profileSubject.fullName || "user");
+    const profileHandle = formatProfileHandle(profileSubject.username, {
+      phone: isPublicProfileView ? undefined : user?.phone,
+      email: isPublicProfileView ? undefined : user?.email
+    });
+    const handle = profileHandle || safeHandle(profileSubject.fullName || "user");
     const initials = String(profileSubject.fullName || "U")
       .split(" ")
       .filter(Boolean)
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase())
       .join("");
-    return { posts: userPosts.length, followers: followersCount, following: followingCount, handle, initials: initials || "U" };
-  }, [followersCount, followingCount, profileSubject, userPosts.length]);
+    return { posts: userPosts.length, followers: followersCount, following: followingCount, handle, profileHandle, initials: initials || "U" };
+  }, [followersCount, followingCount, isPublicProfileView, profileSubject, user?.email, user?.phone, userPosts.length]);
 
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
 
@@ -1105,22 +1116,29 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const profileHeaderName = isPublicProfileView
     ? resolvePersonDisplayName({
         fullName: publicFullName,
-        username: publicUsername,
         fallback: looksLikePhoneNumber(publicUserName) ? null : publicUserName
       })
     : resolvePersonDisplayName({
         fullName: user?.fullName,
-        username: user?.username
+        phone: user?.phone,
+        email: user?.email
       });
 
+  const profileHeaderHandle = isPublicProfileView
+    ? formatProfileHandle(publicUsername)
+    : formatProfileHandle(user?.username, { phone: user?.phone, email: user?.email });
+
   const publicFollowLabel = useMemo(() => {
+    // They sent you a follow request — Accept is more important than Following/Follow.
+    if (publicReverseStatus === "pending" && incomingFollowId) return t("accept") || "Accept";
     if (publicFollowStatus === "accepted") return t("following");
     if (publicFollowStatus === "pending") return t("requested");
     if (publicCanFollowBack) return t("followBackCapital");
     return followPublicBusy ? t("followBusy") : t("follow");
-  }, [followPublicBusy, publicCanFollowBack, publicFollowStatus, t]);
+  }, [followPublicBusy, incomingFollowId, publicCanFollowBack, publicFollowStatus, publicReverseStatus, t]);
 
-  const publicFollowDisabled = followPublicBusy || publicFollowStatus === "pending";
+  const publicFollowDisabled =
+    followPublicBusy || (publicFollowStatus === "pending" && !(publicReverseStatus === "pending" && incomingFollowId));
 
   const isPublicUserBlocked = useMemo(
     () => (publicUserId ? isUserBlocked(publicUserId, blockedUsersList) : false),
@@ -1232,7 +1250,27 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   };
 
   const onPublicFollowPress = async () => {
-    if (!token || !publicUserId || followPublicBusy || publicFollowStatus === "pending") return;
+    if (!token || !publicUserId || followPublicBusy) return;
+
+    // Accept their pending request to follow you (fixes Requested vs Following confusion).
+    if (publicReverseStatus === "pending" && incomingFollowId) {
+      setFollowPublicBusy(true);
+      try {
+        await respondToFollowRequest(token, incomingFollowId, "accept");
+        setPublicReverseStatus("accepted");
+        setIncomingFollowId(null);
+        setFollowersCount((v) => v + 1);
+        setPublicCanFollowBack(publicFollowStatus !== "accepted" && publicFollowStatus !== "pending");
+        await loadPublicProfileStats();
+      } catch {
+        Alert.alert(t("followFailed"), t("tryAgainMoment"));
+      } finally {
+        setFollowPublicBusy(false);
+      }
+      return;
+    }
+
+    if (publicFollowStatus === "pending") return;
     if (publicFollowStatus === "accepted") {
       setFollowPublicBusy(true);
       try {
@@ -1328,6 +1366,9 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             </View>
           </View>
 
+          <Text style={styles.profileDisplayName}>{profileSubject?.fullName}</Text>
+          {profileHeaderHandle ? <Text style={styles.profileDisplayHandle}>{profileHeaderHandle}</Text> : null}
+
           {profileSubject?.bio?.trim() ? <Text style={styles.bio}>{profileSubject.bio.trim()}</Text> : null}
 
           {isPublicProfileView ? (
@@ -1401,9 +1442,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       profileSubject?.avatarUrl,
       profileSubject?.bio,
       profileSubject?.fullName,
-      profileSubject?.username,
+      profileHeaderHandle,
       publicFollowLabel,
       publicFollowDisabled,
+      onPublicFollowPress,
       showDeactivatedGallery,
       t
     ]
@@ -1455,7 +1497,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             <DeactivatedChromeWrap active={showDeactivatedGallery} style={styles.topBarUsernameChrome}>
               <View style={[styles.topBarUsernameWrap, isPublicProfileView ? styles.topBarUsernameWrapPublic : null]}>
                 <Text style={styles.topBarUsername} numberOfLines={1}>
-                  {profileHeaderName}
+                  {profileHeaderHandle ? profileHeaderHandle.replace(/^@/, "") : profileHeaderName}
                 </Text>
               </View>
             </DeactivatedChromeWrap>
@@ -1543,7 +1585,20 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           <Pressable style={styles.overlayTapAboveSheet} onPress={() => setPublicProfileMenuOpen(false)} />
           <View style={styles.sheet} collapsable={false}>
             <View style={styles.profileShareHandle} />
-            <Text style={styles.sheetTitle}>Profile options</Text>
+            <Text style={styles.sheetTitle}>{t("profileOptions")}</Text>
+            <Pressable
+              style={styles.profileOptionRow}
+              onPress={() => {
+                setPublicProfileMenuOpen(false);
+                setReportUserOpen(true);
+              }}
+            >
+              <Ionicons name="flag-outline" size={22} color={LIME} />
+              <View style={styles.profileOptionTextCol}>
+                <Text style={styles.profileOptionTitle}>{t("reportOption")}</Text>
+                <Text style={styles.profileOptionSub}>{t("reportOptionSub")}</Text>
+              </View>
+            </Pressable>
             {isPublicUserBlocked ? (
               <Pressable
                 style={styles.profileOptionRow}
@@ -1581,6 +1636,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           </View>
         </View>
       </Modal>
+
+      <UserReportSheet
+        visible={reportUserOpen}
+        userId={publicUserId ?? null}
+        userName={profileHeaderName}
+        onClose={() => setReportUserOpen(false)}
+        onBlockUser={!isPublicUserBlocked ? () => void onBlockPublicUser() : undefined}
+      />
 
       <Modal
         visible={shareProfileOpen}
@@ -1961,6 +2024,19 @@ const styles = StyleSheet.create({
   },
 
   bio: { marginTop: 14, color: TEXT, fontWeight: "500", fontSize: 13, lineHeight: 19 },
+  profileDisplayName: {
+    marginTop: 12,
+    color: TEXT,
+    fontWeight: "800",
+    fontSize: 15
+  },
+  profileDisplayHandle: {
+    marginTop: 2,
+    color: TEXT,
+    opacity: 0.62,
+    fontWeight: "600",
+    fontSize: 13
+  },
 
   profileActionsRow: {
     marginTop: 14,

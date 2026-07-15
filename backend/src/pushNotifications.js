@@ -452,7 +452,7 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
     payloadData.message = pushBody;
     payloadData.type = String((data || {}).type || payloadData.type || "direct_message");
     payloadData.categoryId = String(categoryId);
-    payloadData.channelId = isIncomingCallCategory ? "incoming_calls" : "direct_messages";
+    payloadData.channelId = isIncomingCallCategory ? "incoming_calls_v4" : "direct_messages_v4";
     payloadData.priority = isIncomingCallCategory ? "max" : "high";
     if (isIncomingCallCategory) {
       payloadData.sticky = "true";
@@ -572,11 +572,12 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
     android: {
       priority: "high",
       notification: {
-        channelId: "default",
+        channelId: "general_v4",
         priority: "max",
         visibility: "public",
         defaultSound: true,
         defaultVibrateTimings: true,
+        sound: "default",
         ...(hasImage ? { imageUrl: image } : {})
       }
     },
@@ -627,6 +628,9 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
     data: {
       type: type || "generic",
       actorId: actorId != null ? String(actorId) : "",
+      actorName: String(actorName || "").trim(),
+      senderName: String(actorName || "").trim(),
+      senderId: actorId != null ? String(actorId) : "",
       postId: postId != null ? String(postId) : "",
       followId: followId != null ? String(followId) : ""
     }
@@ -667,7 +671,7 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
       title: name,
       message: label,
       categoryId,
-      channelId: "incoming_calls",
+      channelId: "incoming_calls_v4",
       priority: "max",
       sticky: "true",
       vibrate: JSON.stringify([0, 800, 400, 800, 400, 800])
@@ -696,7 +700,7 @@ async function sendIncomingCallPush({ userId, callerName, mode, roomName, caller
       title: name,
       message: label,
       categoryId,
-      channelId: "incoming_calls",
+      channelId: "incoming_calls_v4",
       priority: "max",
       sticky: "true",
       vibrate: JSON.stringify([0, 800, 400, 800, 400, 800])
@@ -749,7 +753,7 @@ async function sendCallCancelledPush({ userId, roomName, callerId }) {
     type: "call_cancelled",
     roomName: String(roomName || ""),
     callerId: callerId != null ? String(callerId) : "",
-    channelId: "incoming_calls"
+    channelId: "incoming_calls_v4"
   };
 
   let sent = 0;

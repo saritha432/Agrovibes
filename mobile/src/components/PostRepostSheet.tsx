@@ -25,7 +25,7 @@ type PostRepostSheetProps = {
   visible: boolean;
   post: HomePost | null;
   onClose: () => void;
-  onRepostChange: (postId: number, reshared: boolean, quoteCaption?: string) => void;
+  onRepostChange: (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number) => void;
 };
 
 export function PostRepostSheet({ visible, post, onClose, onRepostChange }: PostRepostSheetProps) {
@@ -64,7 +64,7 @@ export function PostRepostSheet({ visible, post, onClose, onRepostChange }: Post
     setBusy(true);
     try {
       const res = await reshareHomePost(token, post.id, quote || undefined);
-      onRepostChange(post.id, res.reshared, res.quoteCaption || quote || undefined);
+      onRepostChange(post.id, res.reshared, res.quoteCaption || quote || undefined, res.resharesCount);
       onClose();
       Alert.alert(t("reposted"), alreadyReposted ? t("repostUpdated") : t("repostSuccess"));
     } catch {
@@ -78,8 +78,8 @@ export function PostRepostSheet({ visible, post, onClose, onRepostChange }: Post
     if (!token) return;
     setBusy(true);
     try {
-      await unreshareHomePost(token, post.id);
-      onRepostChange(post.id, false);
+      const res = await unreshareHomePost(token, post.id);
+      onRepostChange(post.id, false, undefined, res.resharesCount);
       onClose();
       Alert.alert(t("repostRemoved"), t("repostRemovedMsg"));
     } catch {

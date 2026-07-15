@@ -40,6 +40,9 @@ import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
 import { PostRepostSheet } from "../components/PostRepostSheet";
+import { PostOptionsSheet } from "../components/PostOptionsSheet";
+import { PostReportSheet } from "../components/PostReportSheet";
+import { RepostAttribution } from "../components/RepostAttribution";
 import { UserAvatar } from "../components/UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { ReelSeekBar } from "../components/ReelSeekBar";
@@ -51,7 +54,6 @@ import {
   createHomePostComment,
   deleteHomePost,
   deleteHomePostComment,
-  reportHomePost,
   fetchHomePostComments,
   fetchHomePostLikes,
   fetchHomePosts,
@@ -100,6 +102,7 @@ import {
   clearHomeFeedCache,
   mergeHomeFeedPosts,
   mergeRepostFeedItems,
+  shownResharesCount,
   readHomeFeedCache,
   writeHomeFeedCache
 } from "../social/homeFeedCache";
@@ -122,6 +125,8 @@ import {
   formatDisplayName,
   formatFeedText,
   formatReelCaption,
+  postMusicDisplayLabel,
+  postShowsMusicRow,
   resolvePersonDisplayName,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
@@ -279,17 +284,6 @@ function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number, viewer
   rest.sort((a, b) => seededPostScore(a, seed) - seededPostScore(b, seed) || postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
   return [...(pinned ? [pinned] : []), ...fresh, ...rest];
 }
-
-const REPORT_REASON_KEYS = [
-  { key: "spam", labelKey: "reportSpam" },
-  { key: "harassment", labelKey: "reportHarassment" },
-  { key: "hate", labelKey: "reportHate" },
-  { key: "nudity", labelKey: "reportNudity" },
-  { key: "violence", labelKey: "reportViolence" },
-  { key: "scam", labelKey: "reportScam" },
-  { key: "ip", labelKey: "reportIp" },
-  { key: "other", labelKey: "reportOther" }
-] as const;
 
 function dismissedPostsStorageKey(userId: string | number | undefined) {
   if (userId != null && String(userId) !== "" && Number(userId) > 0) {
@@ -1160,6 +1154,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const { token, user, refreshUser } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isCompactHomeChrome = windowHeight > 0 && windowHeight < 700;
   const isFocused = useIsFocused();
   const appIsActive = useAppIsActive();
   const [feedPlaybackSuspended, setFeedPlaybackSuspended] = useState(false);
@@ -1180,11 +1175,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (tab === "Friends") return t("tabFriends");
       return tab;
     },
-    [t]
-  );
-
-  const reportReasons = React.useMemo(
-    () => REPORT_REASON_KEYS.map((r) => ({ key: r.key, label: t(r.labelKey) })),
     [t]
   );
 
@@ -1226,8 +1216,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [feedShuffleSeed, setFeedShuffleSeed] = useState(() => Date.now());
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
-  const [reportModalPost, setReportModalPost] = useState<HomePost | null>(null);
-  const [reportSubmitBusy, setReportSubmitBusy] = useState(false);
+  const [reportTargetPost, setReportTargetPost] = useState<HomePost | null>(null);
   const postsRef = useRef<HomePost[]>([]);
   postsRef.current = posts;
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
@@ -1256,6 +1245,26 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       });
     },
     [user?.fullName, user?.id]
+  );
+
+  const openReposterProfile = React.useCallback(
+    (post: HomePost) => {
+      const repost = post.repost;
+      if (!repost) return;
+      const reposterId = Number(repost.byUserId);
+      const isOwn = reposterId > 0 && reposterId === Number(user?.id);
+      setReelViewerOpen(null);
+      if (isOwn) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: reposterId > 0 ? reposterId : undefined,
+        userName: resolvePersonDisplayName({ fullName: repost.byUserName, fallback: repost.byUserName }),
+        avatarUrl: repost.byAvatarUrl ?? null
+      });
+    },
+    [user?.id]
   );
 
   const reelViewerListRef = useRef<FlatList<ReelViewerFeedItem> | null>(null);
@@ -2971,15 +2980,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const applyRepostState = useCallback(
-    (postId: number, reshared: boolean, quoteCaption?: string) => {
-      const patch = (p: HomePost): HomePost =>
-        p.id === postId
-          ? {
-              ...p,
-              viewerHasReshared: reshared,
-              ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
-            }
-          : p;
+    (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number) => {
+      const patch = (p: HomePost): HomePost => {
+        if (p.id !== postId) return p;
+        const nextResharesCount =
+          resharesCount ??
+          Math.max(
+            0,
+            (p.resharesCount ?? 0) + (reshared && !p.viewerHasReshared ? 1 : !reshared && p.viewerHasReshared ? -1 : 0)
+          );
+        return {
+          ...p,
+          viewerHasReshared: reshared,
+          resharesCount: nextResharesCount,
+          ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
+        };
+      };
       setPosts((prev) => prev.map(patch));
       setRepostPost((cur) => (cur?.id === postId ? patch(cur) : cur));
       setActiveReelOptionsPost((cur) => (cur?.id === postId ? patch(cur) : cur));
@@ -3018,24 +3034,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     Alert.alert(t("gotItHidePost"), t("gotItHidePostMsg"));
   }, []);
 
-  const submitReportWithReason = useCallback(
-    async (reasonKey: string) => {
-      if (!reportModalPost || !token) return;
-      setReportSubmitBusy(true);
-      try {
-        await reportHomePost(token, reportModalPost.id, reasonKey);
-        setReportModalPost(null);
-        Alert.alert(t("thanksReport"), t("thanksReportMsg"));
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Could not send report.";
-        Alert.alert(t("reportFailed"), msg);
-      } finally {
-        setReportSubmitBusy(false);
-      }
-    },
-    [reportModalPost, token]
-  );
-
   const onReportPost = useCallback(
     (post: HomePost) => {
       setActiveReelOptionsPost(null);
@@ -3043,9 +3041,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         Alert.alert(t("loginRequired"), t("loginRequiredReport"));
         return;
       }
-      setReportModalPost(post);
+      setReportTargetPost(post);
     },
-    [token]
+    [token, t]
   );
 
   const onBlockUserFromPost = useCallback(
@@ -3432,6 +3430,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setCommentDraft((d) => (d.trim() ? `${d} ${mention}` : mention));
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    StatusBar.setTranslucent(true);
+    StatusBar.setBackgroundColor("transparent");
+  }, []);
+
+  useEffect(() => {
+    StatusBar.setBarStyle(isReelSurfaceTab || isLiveTab ? "light-content" : "dark-content");
+  }, [isLiveTab, isReelSurfaceTab]);
+
   const listHeader = useMemo(
     () => (
       <DeactivatedChromeWrap>
@@ -3443,7 +3451,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
-          style={[(isReelSurfaceTab || isLiveTab) ? styles.storyRowWrapDark : styles.storyRowWrap, styles.storyRowScrollCompact]}
+          style={[
+            (isReelSurfaceTab || isLiveTab) ? styles.storyRowWrapDark : styles.storyRowWrap,
+            styles.storyRowScrollCompact,
+            isCompactHomeChrome ? styles.storyRowScrollCompactShort : null
+          ]}
           contentContainerStyle={styles.storyRow}
         >
           <Pressable
@@ -3578,8 +3590,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
         </ScrollView>
 
-        <View style={styles.homeTopTabsBarDark}>
-          <View style={styles.homeTopTabsRowDark}>
+        <View style={[styles.homeTopTabsBarDark, isCompactHomeChrome ? styles.homeTopTabsBarCompact : null]}>
+          <View style={[styles.homeTopTabsRowDark, isCompactHomeChrome ? styles.homeTopTabsRowCompact : null]}>
             {visibleHomeTopTabs.map((tab) => {
               const isActive = activeHomeTab === tab;
               return (
@@ -3612,6 +3624,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       avatarLookup,
       displayPersonName,
       homeTabLabel,
+      isCompactHomeChrome,
       isReelSurfaceTab,
       isLiveTab,
       onOpenCreate,
@@ -3659,6 +3672,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       );
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
+      const shownRepostsCount = shownResharesCount(post);
       const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
       const activeIndex = reelRowPosts.findIndex((p) => p.id === playingPostId);
       const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
@@ -3672,11 +3686,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
       const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
-      const musicSource =
-        (post.musicLabel && post.musicLabel.trim()) ||
-        stripInternalCaptionPrefix(post.caption).slice(0, 36) ||
-        "";
-      const musicLabel = musicSource ? displayFeedCopy(musicSource) : t("originalAudio");
+      const musicLabel = postMusicDisplayLabel(post, language, t);
+      const showMusicRow = postShowsMusicRow(post) && !!musicLabel;
       const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
       const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
@@ -3832,9 +3843,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               {post.repost ? (
-                <Text style={styles.reelRepostMeta} numberOfLines={1}>
-                  {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
-                </Text>
+                <RepostAttribution
+                  variant="reel"
+                  byUserName={displayPersonName(post.repost.byUserName)}
+                  byAvatarUrl={post.repost.byAvatarUrl}
+                  actionLabel={t("repostedAction")}
+                  onPress={() => openReposterProfile(post)}
+                />
               ) : null}
               <View style={styles.reelUserFollowRow}>
                 <Pressable
@@ -3882,12 +3897,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   </Pressable>
                 ) : null}
               </View>
-              <View style={styles.reelMusicRow}>
-                <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
-                <Text style={styles.reelMusicText} numberOfLines={1}>
-                  {musicLabel}
-                </Text>
-              </View>
+              {showMusicRow ? (
+                <View style={styles.reelMusicRow}>
+                  <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
+                  <Text style={styles.reelMusicText} numberOfLines={1}>
+                    {musicLabel}
+                  </Text>
+                </View>
+              ) : null}
               {reelCaptionText ? (
                 <Text style={styles.reelCaptionDark} numberOfLines={3}>
                   {reelCaptionText}
@@ -3943,6 +3960,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   size={REEL_ACTION_ICON + 3}
                   color={post.viewerHasReshared ? APP_LIME : "#fff"}
                 />
+                <Text style={[styles.reelActionCount, post.viewerHasReshared ? styles.reelActionCountLiked : null]}>
+                  {shownRepostsCount}
+                </Text>
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
@@ -4029,9 +4049,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayFeedCopy,
       displayPersonName,
       displayPostCaption,
+      language,
       t,
       labelForFollowStatus,
-      openPostAuthorProfile
+      openPostAuthorProfile,
+      openReposterProfile
     ]
   );
 
@@ -4083,6 +4105,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const feedDisplayName = displayPersonName(post.userName);
       const feedCaption = displayPostCaption(post.caption);
+      const feedMusicLabel = postMusicDisplayLabel(post, language, t);
+      const showFeedMusic = postShowsMusicRow(post) && !!feedMusicLabel;
       const isActive = playingPostId === post.id && !!post.videoUrl;
       const shouldPlayReel = isActive && canPlayMedia;
       const gallery = postImageGallery(post);
@@ -4112,12 +4136,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         <>
         <View style={styles.postCard}>
           {post.repost ? (
-            <View style={styles.repostHeader}>
-              <Ionicons name="repeat" size={14} color="#7a8680" />
-              <Text style={styles.repostHeaderText}>
-                {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
-              </Text>
-            </View>
+            <RepostAttribution
+              variant="feed"
+              byUserName={displayPersonName(post.repost.byUserName)}
+              byAvatarUrl={post.repost.byAvatarUrl}
+              actionLabel={t("repostedAction")}
+              onPress={() => openReposterProfile(post)}
+            />
           ) : null}
           {post.repost?.quoteCaption ? (
             <Text style={styles.repostQuote}>{displayFeedCopy(post.repost.quoteCaption)}</Text>
@@ -4292,6 +4317,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           <Pressable onPress={() => void openPostLikesSheet(post)} disabled={!post.likesCount}>
             <Text style={styles.likes}>{t("likesCountLabel", { count: post.likesCount })}</Text>
           </Pressable>
+          {showFeedMusic ? (
+            <View style={styles.postMusicRow}>
+              <Ionicons name="musical-notes" size={13} color="#5f6f6a" />
+              <Text style={styles.postMusicText} numberOfLines={1}>
+                {feedMusicLabel}
+              </Text>
+            </View>
+          ) : null}
           <Text style={styles.caption}>
             <Text style={styles.captionUser}>{feedDisplayName}</Text>
             {feedCaption ? ` ${feedCaption}` : ""}
@@ -4327,6 +4360,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       displayFeedCopy,
       displayPersonName,
       displayPostCaption,
+      language,
       t,
       labelForFollowStatus,
       user?.avatarUrl,
@@ -4977,186 +5011,64 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         </View>
       </Modal>
 
-      <Modal visible={!!activeReelOptionsPost} transparent animationType="slide" onRequestClose={() => setActiveReelOptionsPost(null)}>
-        <View style={styles.reelOptionsModalRoot}>
-          <Pressable
-            accessibilityLabel="Dismiss menu"
-            style={[StyleSheet.absoluteFillObject, styles.reelOptionsDimTap]}
-            onPress={() => setActiveReelOptionsPost(null)}
-          />
-          <View style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22) }]}>
-            <View style={styles.shareHandle} />
-            <Text style={styles.reelOptionsTitle}>
-              {activeReelOptionsPost?.videoUrl && isReelPost(activeReelOptionsPost) ? "Reel options" : "Post options"}
-            </Text>
-            <Pressable
-              style={styles.reelOptionRow}
-              disabled={!activeReelOptionsPost || !!saveBusyByPostId[activeReelOptionsPost.id]}
-              onPress={async () => {
-                if (!activeReelOptionsPost) return;
+      <PostOptionsSheet
+        visible={!!activeReelOptionsPost}
+        post={activeReelOptionsPost}
+        onClose={() => setActiveReelOptionsPost(null)}
+        isOwnPost={!!activeReelOptionsPost && viewerOwnsPost(activeReelOptionsPost, user)}
+        isBlocked={
+          !!activeReelOptionsPost && isUserBlocked(Number(activeReelOptionsPost.userId), blockedUsers)
+        }
+        isSaved={!!activeReelOptionsPost?.viewerHasSaved}
+        saveBusy={!!activeReelOptionsPost && !!saveBusyByPostId[activeReelOptionsPost.id]}
+        onToggleSave={
+          activeReelOptionsPost
+            ? async () => {
                 await togglePostSave(activeReelOptionsPost);
                 setActiveReelOptionsPost(null);
-              }}
-            >
-              <View style={styles.reelOptionIcon}>
-                <Ionicons
-                  name={activeReelOptionsPost?.viewerHasSaved ? "bookmark" : "bookmark-outline"}
-                  size={22}
-                  color="#C9FF35"
-                />
-              </View>
-              <View style={styles.reelOptionTextCol}>
-                <Text style={styles.reelOptionTitle}>
-                  {activeReelOptionsPost?.viewerHasSaved ? t("removeFromSaved") : t("savePost")}
-                </Text>
-                <Text style={styles.reelOptionSub}>{t("savedPostsHint")}</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              style={styles.reelOptionRow}
-              onPress={() => {
-                if (activeReelOptionsPost) void onCopyPostLink(activeReelOptionsPost);
-              }}
-            >
-              <View style={styles.reelOptionIcon}>
-                <Ionicons name="link-outline" size={22} color="#C9FF35" />
-              </View>
-              <View style={styles.reelOptionTextCol}>
-                <Text style={styles.reelOptionTitle}>Copy link</Text>
-                <Text style={styles.reelOptionSub}>Copy the post URL to your clipboard.</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              style={styles.reelOptionRow}
-              onPress={() => {
-                if (activeReelOptionsPost) onNotInterestedInPost(activeReelOptionsPost);
-              }}
-            >
-              <View style={styles.reelOptionIcon}>
-                <Ionicons name="eye-off-outline" size={22} color="#C9FF35" />
-              </View>
-              <View style={styles.reelOptionTextCol}>
-                <Text style={styles.reelOptionTitle}>Not interested</Text>
-                <Text style={styles.reelOptionSub}>Hide this post from your feed on this device.</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              style={styles.reelOptionRow}
-              onPress={() => {
-                if (activeReelOptionsPost) onReportPost(activeReelOptionsPost);
-              }}
-            >
-              <View style={styles.reelOptionIcon}>
-                <Ionicons name="flag-outline" size={22} color="#C9FF35" />
-              </View>
-              <View style={styles.reelOptionTextCol}>
-                <Text style={styles.reelOptionTitle}>Report</Text>
-                <Text style={styles.reelOptionSub}>Flag this content for review.</Text>
-              </View>
-            </Pressable>
-            {activeReelOptionsPost && !viewerOwnsPost(activeReelOptionsPost, user) ? (
-              isUserBlocked(Number(activeReelOptionsPost.userId), blockedUsers) ? (
-                <Pressable
-                  style={styles.reelOptionRow}
-                  onPress={() => {
-                    if (activeReelOptionsPost) onUnblockUserFromPost(activeReelOptionsPost);
-                  }}
-                >
-                  <View style={styles.reelOptionIcon}>
-                    <Ionicons name="checkmark-circle-outline" size={22} color="#C9FF35" />
-                  </View>
-                  <View style={styles.reelOptionTextCol}>
-                    <Text style={styles.reelOptionTitle}>Unblock</Text>
-                    <Text style={styles.reelOptionSub}>Show posts from this account again.</Text>
-                  </View>
-                </Pressable>
-              ) : (
-                <Pressable
-                  style={styles.reelOptionRow}
-                  onPress={() => {
-                    if (activeReelOptionsPost) onBlockUserFromPost(activeReelOptionsPost);
-                  }}
-                >
-                  <View style={styles.reelOptionIcon}>
-                    <Ionicons name="ban-outline" size={22} color="#ff6b6b" />
-                  </View>
-                  <View style={styles.reelOptionTextCol}>
-                    <Text style={[styles.reelOptionTitle, styles.reelOptionTitleDanger]}>Block</Text>
-                    <Text style={styles.reelOptionSub}>Stop seeing posts from this account.</Text>
-                  </View>
-                </Pressable>
-              )
-            ) : null}
-            {activeReelOptionsPost && viewerOwnsPost(activeReelOptionsPost, user) ? (
-              <Pressable
-                style={styles.reelOptionRow}
-                onPress={() => {
-                  if (activeReelOptionsPost) confirmDeleteOwnPost(activeReelOptionsPost);
-                }}
-              >
-                <View style={styles.reelOptionIcon}>
-                  <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
-                </View>
-                <View style={styles.reelOptionTextCol}>
-                  <Text style={[styles.reelOptionTitle, styles.reelOptionTitleDanger]}>Delete</Text>
-                  <Text style={styles.reelOptionSub}>Remove this post permanently. Only you can do this.</Text>
-                </View>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={!!reportModalPost}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
-          if (!reportSubmitBusy) setReportModalPost(null);
+              }
+            : undefined
+        }
+        onCopyLink={
+          activeReelOptionsPost
+            ? () => {
+                void onCopyPostLink(activeReelOptionsPost);
+              }
+            : undefined
+        }
+        onNotInterested={
+          activeReelOptionsPost
+            ? () => {
+                onNotInterestedInPost(activeReelOptionsPost);
+              }
+            : undefined
+        }
+        onReport={() => {
+          if (activeReelOptionsPost) onReportPost(activeReelOptionsPost);
         }}
-      >
-        <Pressable style={styles.shareBackdrop} onPress={() => !reportSubmitBusy && setReportModalPost(null)}>
-          <Pressable
-            style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22), maxHeight: windowHeight * 0.72 }]}
-            onPress={(e) => e.stopPropagation?.()}
-          >
-            <View style={styles.shareHandle} />
-            <Text style={styles.reelOptionsTitle}>Report post</Text>
-            <Text style={[styles.reelOptionSub, { marginBottom: 6 }]}>
-              {reportModalPost ? t("reportUserPrompt", { name: displayPersonName(reportModalPost.userName) }) : ""}
-            </Text>
-            {reportSubmitBusy ? (
-              <View style={{ paddingVertical: 24, alignItems: "center" }}>
-                <ActivityIndicator color="#C9FF35" />
-              </View>
-            ) : (
-              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                {reportReasons.map((r) => (
-                  <Pressable
-                    key={r.key}
-                    style={styles.reelOptionRow}
-                    onPress={() => void submitReportWithReason(r.key)}
-                  >
-                    <View style={styles.reelOptionIcon}>
-                      <Ionicons name="alert-circle-outline" size={22} color="#C9FF35" />
-                    </View>
-                    <View style={styles.reelOptionTextCol}>
-                      <Text style={styles.reelOptionTitle}>{r.label}</Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            )}
-            <Pressable
-              style={[styles.reelOptionRow, { borderBottomWidth: 0 }]}
-              disabled={reportSubmitBusy}
-              onPress={() => setReportModalPost(null)}
-            >
-              <Text style={[styles.reelOptionTitle, { flex: 1, textAlign: "center" }]}>{t("cancel")}</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        onBlock={
+          activeReelOptionsPost && !viewerOwnsPost(activeReelOptionsPost, user)
+            ? () => onBlockUserFromPost(activeReelOptionsPost)
+            : undefined
+        }
+        onUnblock={
+          activeReelOptionsPost && !viewerOwnsPost(activeReelOptionsPost, user)
+            ? () => onUnblockUserFromPost(activeReelOptionsPost)
+            : undefined
+        }
+        onDelete={
+          activeReelOptionsPost && viewerOwnsPost(activeReelOptionsPost, user)
+            ? () => confirmDeleteOwnPost(activeReelOptionsPost)
+            : undefined
+        }
+      />
+
+      <PostReportSheet
+        visible={!!reportTargetPost}
+        post={reportTargetPost}
+        onClose={() => setReportTargetPost(null)}
+        onBlockAuthor={(post) => onBlockUserFromPost(post)}
+      />
 
       <PostShareSheet
         visible={!!sharePost}
@@ -5202,6 +5114,9 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
     maxHeight: 118
+  },
+  storyRowScrollCompactShort: {
+    maxHeight: 98
   },
   reelSlot: {
     flex: 1,
@@ -5466,6 +5381,9 @@ const styles = StyleSheet.create({
   homeTopTabsBarDark: {
     backgroundColor: APP_DARK_BG
   },
+  homeTopTabsBarCompact: {
+    paddingBottom: 0
+  },
   homeTopTabsSeparator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: "rgba(255,255,255,0.22)"
@@ -5483,6 +5401,11 @@ const styles = StyleSheet.create({
     minHeight: 36,
     alignItems: "center",
     justifyContent: "space-between"
+  },
+  homeTopTabsRowCompact: {
+    paddingTop: 2,
+    paddingBottom: 2,
+    minHeight: 32
   },
   homeTopTabPressablePressed: { opacity: 0.85 },
   homeTopTabPillDark: {
@@ -5765,6 +5688,14 @@ const styles = StyleSheet.create({
   postViewerFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   postViewerFallbackText: { color: "rgba(255,255,255,0.8)" },
   likes: { marginTop: 6, paddingHorizontal: 10, fontWeight: "700", color: "#1f2c29", fontSize: 13 },
+  postMusicRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+    paddingHorizontal: 10
+  },
+  postMusicText: { color: "#5f6f6a", fontSize: 12, fontWeight: "600", flex: 1 },
   caption: { marginTop: 4, paddingHorizontal: 10, color: "#1f2c29", lineHeight: 20, fontSize: 13 },
   captionUser: { fontWeight: "700" },
   friendLikeMeta: { marginTop: 4, paddingHorizontal: 10, color: "#4b5e59", fontSize: 12, fontWeight: "700" },

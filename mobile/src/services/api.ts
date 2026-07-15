@@ -480,7 +480,7 @@ export async function updateMyProfile(
   token: string,
   payload: {
     fullName: string;
-    username?: string;
+    username?: string | null;
     bio?: string;
     website?: string;
     locationLabel?: string;
@@ -597,6 +597,8 @@ export interface HomePost {
   caption: string;
   likesCount: number;
   commentsCount: number;
+  /** Total reposts/reshares of this post. */
+  resharesCount?: number;
   videoUrl?: string | null;
   imageUrl?: string | null;
   /** Present when the post is a multi-image carousel (2+ photos). */
@@ -1015,13 +1017,13 @@ export async function reshareHomePost(token: string, postId: number, quoteCaptio
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
-  })) as { reshared: boolean; quoteCaption?: string | null };
+  })) as { reshared: boolean; quoteCaption?: string | null; resharesCount?: number };
 }
 
 export async function unreshareHomePost(token: string, postId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unreshare`, token, {
     method: "POST"
-  })) as { reshared: boolean };
+  })) as { reshared: boolean; resharesCount?: number };
 }
 
 export async function deleteHomePost(token: string, postId: number) {
@@ -1061,6 +1063,18 @@ export async function reportHomePost(token: string, postId: number, reason?: str
       body: JSON.stringify(body)
     }
   )) as { ok: boolean };
+}
+
+export async function reportUser(token: string, userId: number, reason?: string) {
+  const body: { reason?: string } = {};
+  if (reason != null && String(reason).trim()) {
+    body.reason = String(reason).trim().slice(0, 500);
+  }
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/users/${encodeURIComponent(String(userId))}/report`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })) as { ok: boolean };
 }
 
 export async function fetchHomePostComments(postId: number, token?: string | null) {
@@ -1198,6 +1212,8 @@ export async function createHomePost(payload: {
     textBackground?: boolean;
     font?: string;
   };
+  farmingTopic?: string;
+  farmingConfirmed?: boolean;
 }, token?: string | null) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -1207,7 +1223,14 @@ export async function createHomePost(payload: {
     body: JSON.stringify(payload)
   });
   if (!response.ok) {
-    throw new Error("Failed to create post");
+    let detail = "Failed to create post";
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body?.message) detail = String(body.message);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
   }
   const data = (await response.json()) as { post: HomePost };
   return { post: sanitizeHomePost(data.post) };
@@ -1414,6 +1437,7 @@ export async function fetchProfileStats(token: string, userId: number) {
     viewerStatus: FollowStatus;
     reverseStatus: FollowStatus;
     canFollowBack: boolean;
+    incomingFollowId?: number | null;
   };
 }
 

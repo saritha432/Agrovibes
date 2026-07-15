@@ -1,7 +1,7 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
-import { setupIncomingCallNotificationCategories } from "./pushNotifications";
+import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, setupIncomingCallNotificationCategories } from "./pushNotifications";
 
 export type IncomingCallNotificationPayload = {
   callerId: number;
@@ -44,7 +44,7 @@ export async function displayIncomingCallNotification(payload: IncomingCallNotif
       title: callerName,
       body: mode === "video" ? "Incoming video call" : "Incoming voice call",
       categoryIdentifier: categoryForMode(mode),
-      sound: "default",
+      sound: NOTIFICATION_SOUNDS.incomingCall,
       sticky: true,
       data: {
         type: "incoming_call",
@@ -55,8 +55,9 @@ export async function displayIncomingCallNotification(payload: IncomingCallNotif
       },
       ...(Platform.OS === "android"
         ? {
-            channelId: "incoming_calls",
-            priority: Notifications.AndroidNotificationPriority.MAX
+            channelId: ANDROID_CHANNELS.incomingCalls,
+            priority: Notifications.AndroidNotificationPriority.MAX,
+            vibrate: [0, 800, 400, 800, 400, 800]
           }
         : { priority: Notifications.AndroidNotificationPriority.MAX })
     },

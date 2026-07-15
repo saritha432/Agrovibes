@@ -142,6 +142,22 @@
   font-weight: 600;
 }
 
+.post-card__music {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 16px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.post-card__music-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
 .post-card__likes:hover {
   opacity: 0.85;
 }

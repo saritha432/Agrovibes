@@ -61,21 +61,22 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
     currentUserId === postUserId;
   const alreadyHostingThisRoom = !!post && isHost && isAlreadyHostingRoom(liveRoomName(post));
 
-  return (
-    <Modal visible={post != null} animationType="slide" onRequestClose={onClose}>
-      {post ? (
-        <View style={styles.viewerRoot}>
-          {isActiveLiveStream(post) ? (
-            alreadyHostingThisRoom ? (
-              <View style={styles.alreadyHostingRoot}>
-                <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
-                  <Ionicons name="close" size={28} color="#fff" />
-                </Pressable>
-                <Ionicons name="radio-outline" size={48} color="#C9FF35" />
-                <Text style={styles.alreadyHostingTitle}>You are already live</Text>
-                <Text style={styles.alreadyHostingSub}>Use the host screen to manage this stream.</Text>
-              </View>
-            ) : (
+  // Active live in fullScreen Modal (same as DirectCall) — SurfaceView must live in its own
+  // window. Absolute overlays with elevation/Animated parents leave remote RTCView black on Android.
+  if (post && isActiveLiveStream(post)) {
+    return (
+      <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+        {alreadyHostingThisRoom ? (
+          <View style={styles.alreadyHostingRoot} collapsable={false}>
+            <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </Pressable>
+            <Ionicons name="radio-outline" size={48} color="#C9FF35" />
+            <Text style={styles.alreadyHostingTitle}>You are already live</Text>
+            <Text style={styles.alreadyHostingSub}>Use the host screen to manage this stream.</Text>
+          </View>
+        ) : (
+          <View style={styles.viewerRoot} collapsable={false}>
             <LiveKitRoomView
               visible
               roomName={liveRoomName(post)}
@@ -86,63 +87,68 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
               onLiveEnded={onLiveEnded}
               onClose={onClose}
             />
-            )
+          </View>
+        )}
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal visible={post != null} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      {post ? (
+        <View style={styles.viewerRoot}>
+          <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </Pressable>
+          {canDelete ? (
+            <Pressable
+              style={[styles.viewerDelete, { top: insets.top + 8 }]}
+              onPress={() => {
+                onDeletePost?.(post);
+                onClose();
+              }}
+              hitSlop={12}
+            >
+              <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
+            </Pressable>
+          ) : null}
+          {post.videoUrl ? (
+            <Video
+              source={{ uri: videoPlaybackUrl(post.videoUrl) }}
+              style={styles.viewerVideo}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isLooping={false}
+              isMuted={false}
+              useNativeControls
+            />
+          ) : livePosterUri(post) ? (
+            <Image source={{ uri: livePosterUri(post)! }} style={styles.viewerVideo} resizeMode="contain" />
           ) : (
-            <>
-              <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
-                <Ionicons name="close" size={28} color="#fff" />
-              </Pressable>
-              {canDelete ? (
-                <Pressable
-                  style={[styles.viewerDelete, { top: insets.top + 8 }]}
-                  onPress={() => {
-                    onDeletePost?.(post);
-                    onClose();
-                  }}
-                  hitSlop={12}
-                >
-                  <Ionicons name="trash-outline" size={24} color="#ff6b6b" />
-                </Pressable>
-              ) : null}
-              {post.videoUrl ? (
-                <Video
-                  source={{ uri: videoPlaybackUrl(post.videoUrl) }}
-                  style={styles.viewerVideo}
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay
-                  isLooping={false}
-                  isMuted={false}
-                  useNativeControls
-                />
-              ) : livePosterUri(post) ? (
-                <Image source={{ uri: livePosterUri(post)! }} style={styles.viewerVideo} resizeMode="contain" />
-              ) : (
-                <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
-                  <Ionicons name="checkmark-done-circle-outline" size={48} color="rgba(255,255,255,0.4)" />
-                  <Text style={styles.viewerVideoPlaceholderText}>{t("liveCompletedLabel")}</Text>
-                  <Text style={styles.viewerVideoPlaceholderSub}>{t("noCompletedRecording")}</Text>
-                </View>
-              )}
-              <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
-              <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
-                <View style={styles.viewerEndedPill}>
-                  <Ionicons name="checkmark-circle" size={12} color="#fff" />
-                  <Text style={styles.viewerEndedText}>{t("liveEndedBadge")}</Text>
-                </View>
-              </View>
-              <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
-                <View style={styles.viewerHostRow}>
-                  <UserAvatar uri={post.authorAvatarUrl} name={post.userName} size={40} borderRadius={20} />
-                  <View style={styles.viewerHostText}>
-                    <Text style={styles.viewerHostName}>{post.userName}</Text>
-                    <Text style={styles.viewerHostTitle} numberOfLines={2}>
-                      {liveTitle(post, language, t)}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </>
+            <View style={[styles.viewerVideo, styles.viewerVideoPlaceholder]}>
+              <Ionicons name="checkmark-done-circle-outline" size={48} color="rgba(255,255,255,0.4)" />
+              <Text style={styles.viewerVideoPlaceholderText}>{t("liveCompletedLabel")}</Text>
+              <Text style={styles.viewerVideoPlaceholderSub}>{t("noCompletedRecording")}</Text>
+            </View>
           )}
+          <LinearGradient colors={["transparent", "rgba(0,0,0,0.85)"]} style={styles.viewerGradient} pointerEvents="none" />
+          <View style={[styles.viewerTopMeta, { top: insets.top + 52 }]}>
+            <View style={styles.viewerEndedPill}>
+              <Ionicons name="checkmark-circle" size={12} color="#fff" />
+              <Text style={styles.viewerEndedText}>{t("liveEndedBadge")}</Text>
+            </View>
+          </View>
+          <View style={[styles.viewerBottom, { paddingBottom: Math.max(20, insets.bottom + 12) }]}>
+            <View style={styles.viewerHostRow}>
+              <UserAvatar uri={post.authorAvatarUrl} name={post.userName} size={40} borderRadius={20} />
+              <View style={styles.viewerHostText}>
+                <Text style={styles.viewerHostName}>{post.userName}</Text>
+                <Text style={styles.viewerHostTitle} numberOfLines={2}>
+                  {liveTitle(post, language, t)}
+                </Text>
+              </View>
+            </View>
+          </View>
         </View>
       ) : null}
     </Modal>

@@ -36,6 +36,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
   leaveDirectThread,
@@ -598,6 +599,8 @@ export function DirectChatScreen() {
       void reload();
       if (!token || !peerUserId) return;
       joinDirectThread(peerUserId);
+      // User opened the chat = previous messages are read; next push starts a fresh thread.
+      void clearDmNotificationThread(peerUserId);
       return () => {
         Keyboard.dismiss();
         composerInputRef.current?.blur();

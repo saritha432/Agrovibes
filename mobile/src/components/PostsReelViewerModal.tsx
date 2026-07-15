@@ -31,13 +31,20 @@ import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/
 import { UserAvatar } from "./UserAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet, type SharePeer } from "./PostShareSheet";
+import * as Clipboard from "expo-clipboard";
+import { PostOptionsSheet } from "./PostOptionsSheet";
+import { PostReportSheet } from "./PostReportSheet";
 import { PostRepostSheet } from "./PostRepostSheet";
+import { RepostAttribution } from "./RepostAttribution";
 import { ReelSeekBar } from "./ReelSeekBar";
+import { shownResharesCount } from "../social/homeFeedCache";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
   formatFeedText,
   formatReelCaption,
+  postMusicDisplayLabel,
+  postShowsMusicRow,
   resolvePersonDisplayName,
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
@@ -47,7 +54,9 @@ import {
   fetchHomePostComments,
   HomePost,
   likeHomePost,
-  unlikeHomePost
+  saveHomePost,
+  unlikeHomePost,
+  unsaveHomePost
 } from "../services/api";
 import {
   addLocalCommentForPost,
@@ -58,6 +67,7 @@ import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { useModalTopChromeInset } from "../theme/topChromeInset";
 
 import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
+import { buildPostShareLink } from "../utils/postShare";
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
 const REEL_ACTION_ICON_LIKE = 24;
@@ -539,6 +549,8 @@ export function PostsReelViewerModal({
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const commentSubmittingRef = useRef(false);
   const [optionsPost, setOptionsPost] = useState<HomePost | null>(null);
+  const [reportTargetPost, setReportTargetPost] = useState<HomePost | null>(null);
+  const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
   const [shareTargetPost, setShareTargetPost] = useState<HomePost | null>(null);
   const [repostTargetPost, setRepostTargetPost] = useState<HomePost | null>(null);
 
@@ -598,6 +610,26 @@ export function PostsReelViewerModal({
       });
     },
     [onClose, user]
+  );
+
+  const openReposterProfile = useCallback(
+    (post: HomePost) => {
+      const repost = post.repost;
+      if (!repost) return;
+      const reposterId = Number(repost.byUserId);
+      const isOwn = reposterId > 0 && reposterId === Number(user?.id);
+      onClose();
+      if (isOwn) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: reposterId > 0 ? reposterId : undefined,
+        userName: resolvePersonDisplayName({ fullName: repost.byUserName, fallback: repost.byUserName }),
+        avatarUrl: repost.byAvatarUrl ?? null
+      });
+    },
+    [onClose, user?.id]
   );
 
   const applyPosts = useCallback(
@@ -719,17 +751,23 @@ export function PostsReelViewerModal({
   );
 
   const applyRepostState = useCallback(
-    (postId: number, reshared: boolean, quoteCaption?: string) => {
+    (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number) => {
       applyPosts((prev) =>
-        prev.map((p) =>
-          p.id === postId
-            ? {
-                ...p,
-                viewerHasReshared: reshared,
-                ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
-              }
-            : p
-        )
+        prev.map((p) => {
+          if (p.id !== postId) return p;
+          const nextResharesCount =
+            resharesCount ??
+            Math.max(
+              0,
+              (p.resharesCount ?? 0) + (reshared && !p.viewerHasReshared ? 1 : !reshared && p.viewerHasReshared ? -1 : 0)
+            );
+          return {
+            ...p,
+            viewerHasReshared: reshared,
+            resharesCount: nextResharesCount,
+            ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
+          };
+        })
       );
     },
     [applyPosts]
@@ -919,6 +957,73 @@ export function PostsReelViewerModal({
     [applyPosts, canDeleteOwnPosts, onClose, t, token, user]
   );
 
+  const togglePostSave = useCallback(
+    async (post: HomePost) => {
+      if (!token) {
+        Alert.alert(t("loginRequired"), t("loginRequiredSave"));
+        return;
+      }
+      setSaveBusyByPostId((prev) => ({ ...prev, [post.id]: true }));
+      try {
+        const res = post.viewerHasSaved ? await unsaveHomePost(token, post.id) : await saveHomePost(token, post.id);
+        applyPosts((prev) => prev.map((p) => (p.id === post.id ? { ...p, viewerHasSaved: res.saved } : p)));
+        setOptionsPost((cur) => (cur?.id === post.id ? { ...cur, viewerHasSaved: res.saved } : cur));
+      } catch {
+        Alert.alert(t("savePostFailed"));
+      } finally {
+        setSaveBusyByPostId((prev) => ({ ...prev, [post.id]: false }));
+      }
+    },
+    [applyPosts, t, token]
+  );
+
+  const onCopyPostLink = useCallback(
+    async (post: HomePost) => {
+      try {
+        await Clipboard.setStringAsync(buildPostShareLink(post));
+        setOptionsPost(null);
+        Alert.alert(t("copied"), t("copiedPostLink"));
+      } catch {
+        Alert.alert(t("copyFailedTitle"), t("copyFailed"));
+      }
+    },
+    [t]
+  );
+
+  const onNotInterestedInPost = useCallback(
+    (post: HomePost) => {
+      applyPosts((prev) => {
+        const deletedIx = prev.findIndex((p) => p.id === post.id);
+        const next = prev.filter((p) => p.id !== post.id);
+        if (next.length === 0) {
+          onClose();
+        } else {
+          setPlayingPostId((cur) => {
+            if (cur !== post.id) return cur;
+            const nextIx = Math.min(deletedIx >= 0 ? deletedIx : 0, next.length - 1);
+            return next[nextIx]?.id ?? next[0]?.id ?? null;
+          });
+        }
+        return next;
+      });
+      setOptionsPost(null);
+      Alert.alert(t("gotItHidePost"), t("gotItHidePostMsg"));
+    },
+    [applyPosts, onClose, t]
+  );
+
+  const onReportPost = useCallback(
+    (post: HomePost) => {
+      setOptionsPost(null);
+      if (!token) {
+        Alert.alert(t("loginRequired"), t("loginRequiredReport"));
+        return;
+      }
+      setReportTargetPost(post);
+    },
+    [token, t]
+  );
+
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const ordered = viewableItems
       .filter((v) => v.isViewable && v.item != null)
@@ -978,17 +1083,15 @@ export function PostsReelViewerModal({
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
       const creativeTextColor = reelCreativeTextColor(creativeMeta.textColor);
-      const musicSource =
-        (post.musicLabel && post.musicLabel.trim()) ||
-        stripInternalCaptionPrefix(post.caption).slice(0, 36) ||
-        "";
-      const musicLabel = musicSource ? displayFeedCopy(musicSource) : t("originalAudio");
+      const musicLabel = postMusicDisplayLabel(post, language, t);
+      const showMusicRow = postShowsMusicRow(post) && !!musicLabel;
       const reelCaptionText = displayPostCaption(post.caption);
       const reelDisplayName = displayPersonName(post.userName);
       const reelOverlayText = creativeOverlayTextRaw ? displayFeedCopy(creativeOverlayTextRaw) : "";
       const showVolumeControl = postShowsVolumeControl(post);
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
+      const shownRepostsCount = shownResharesCount(post);
       const mediaContentH = pageH - modalTopInset - reelBottomInset;
       const mediaFrameStyle = {
         position: "absolute" as const,
@@ -1085,9 +1188,13 @@ export function PostsReelViewerModal({
           <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, reelBottomInset + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
               {post.repost ? (
-                <Text style={styles.reelRepostMeta} numberOfLines={1}>
-                  {t("repostedBy", { name: displayPersonName(post.repost.byUserName) })}
-                </Text>
+                <RepostAttribution
+                  variant="reel"
+                  byUserName={displayPersonName(post.repost.byUserName)}
+                  byAvatarUrl={post.repost.byAvatarUrl}
+                  actionLabel={t("repostedAction")}
+                  onPress={() => openReposterProfile(post)}
+                />
               ) : null}
               <View style={styles.reelUserFollowRow}>
                 <Pressable
@@ -1108,12 +1215,14 @@ export function PostsReelViewerModal({
                   </Text>
                 </Pressable>
               </View>
-              <View style={styles.reelMusicRow}>
-                <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
-                <Text style={styles.reelMusicText} numberOfLines={1}>
-                  {musicLabel}
-                </Text>
-              </View>
+              {showMusicRow ? (
+                <View style={styles.reelMusicRow}>
+                  <Ionicons name="musical-notes" size={14} color="rgba(255,255,255,0.95)" />
+                  <Text style={styles.reelMusicText} numberOfLines={1}>
+                    {musicLabel}
+                  </Text>
+                </View>
+              ) : null}
               {reelCaptionText ? (
                 <Text style={styles.reelCaptionDark} numberOfLines={3}>
                   {reelCaptionText}
@@ -1158,6 +1267,9 @@ export function PostsReelViewerModal({
                   size={REEL_ACTION_ICON}
                   color={post.viewerHasReshared ? APP_LIME : "#fff"}
                 />
+                <Text style={[styles.reelActionCount, post.viewerHasReshared ? styles.reelActionCountLiked : null]}>
+                  {shownRepostsCount}
+                </Text>
               </Pressable>
               <Pressable style={styles.reelActionItem} onPress={() => setOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
@@ -1207,12 +1319,14 @@ export function PostsReelViewerModal({
       onReelSurfaceTap,
       openCommentsForPost,
       openPostAuthorProfile,
+      openReposterProfile,
       effectivePlayingId,
       reelLikeBurstByPostId,
       reelProgressByPostId,
       setRepostTargetPost,
       carouselPageByPostId,
       setShareTargetPost,
+      language,
       t,
       togglePostLike,
       triggerReelLikeBurst,
@@ -1379,28 +1493,31 @@ export function PostsReelViewerModal({
         </View>
       </Modal>
 
-      <Modal visible={!!optionsPost} transparent animationType="slide" onRequestClose={() => setOptionsPost(null)}>
-        <View style={styles.reelOptionsModalRoot}>
-          <Pressable style={[StyleSheet.absoluteFillObject, styles.reelOptionsDimTap]} onPress={() => setOptionsPost(null)} />
-          <View style={[styles.reelOptionsSheet, { paddingBottom: Math.max(insets.bottom + 12, 22) }]}>
-            <View style={styles.shareHandle} />
-            <Text style={styles.reelOptionsTitle}>Post options</Text>
-            {optionsPost && canDeleteOwnPosts && viewerOwnsPost(optionsPost, user ? { id: user.id, fullName: user.fullName } : null) ? (
-              <Pressable style={styles.reelOptionRow} onPress={() => optionsPost && confirmDeletePost(optionsPost)}>
-                <View style={styles.reelOptionIcon}>
-                  <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
-                </View>
-                <View style={styles.reelOptionTextCol}>
-                  <Text style={[styles.reelOptionTitle, styles.reelOptionTitleDanger]}>{t("deleteConfirm")}</Text>
-                  <Text style={styles.reelOptionSub}>{t("deletePostBody")}</Text>
-                </View>
-              </Pressable>
-            ) : (
-              <Text style={styles.reelOptionSub}>No actions available.</Text>
-            )}
-          </View>
-        </View>
-      </Modal>
+      <PostOptionsSheet
+        visible={!!optionsPost}
+        post={optionsPost}
+        onClose={() => setOptionsPost(null)}
+        isOwnPost={!!optionsPost && viewerOwnsPost(optionsPost, user ? { id: user.id, fullName: user.fullName } : null)}
+        isSaved={!!optionsPost?.viewerHasSaved}
+        saveBusy={!!optionsPost && !!saveBusyByPostId[optionsPost.id]}
+        onToggleSave={optionsPost ? () => togglePostSave(optionsPost) : undefined}
+        onCopyLink={optionsPost ? () => void onCopyPostLink(optionsPost) : undefined}
+        onNotInterested={optionsPost ? () => onNotInterestedInPost(optionsPost) : undefined}
+        onReport={() => {
+          if (optionsPost) onReportPost(optionsPost);
+        }}
+        onDelete={
+          optionsPost && canDeleteOwnPosts && viewerOwnsPost(optionsPost, user ? { id: user.id, fullName: user.fullName } : null)
+            ? () => confirmDeletePost(optionsPost)
+            : undefined
+        }
+      />
+
+      <PostReportSheet
+        visible={!!reportTargetPost}
+        post={reportTargetPost}
+        onClose={() => setReportTargetPost(null)}
+      />
 
       <PostShareSheet
         visible={!!shareTargetPost}

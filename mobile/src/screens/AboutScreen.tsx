@@ -1,11 +1,12 @@
 import React from "react";
-import { Image, Linking, Pressable, StyleSheet, Text, View, ScrollView } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage } from "../localization/LanguageContext";
 import Constants from "expo-constants";
+import { getWebAppOrigin } from "../services/api";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../theme/appColors";
 
 const BG = APP_BLACK;
@@ -49,12 +50,10 @@ export function AboutScreen() {
         </View>
 
         <View style={styles.section}>
-          <Pressable style={styles.menuItem} onPress={() => Linking.openURL("https://cropvibe.com/terms")}>
-            <Ionicons name="document-text-outline" size={20} color={LIME} />
-            <Text style={styles.menuItemText}>Terms of Service</Text>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
-          <Pressable style={styles.menuItem} onPress={() => Linking.openURL("https://cropvibe.com/privacy")}>
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => void Linking.openURL(`${getWebAppOrigin()}/privacy-policy`)}
+          >
             <Ionicons name="shield-outline" size={20} color={LIME} />
             <Text style={styles.menuItemText}>Privacy Policy</Text>
             <Ionicons name="chevron-forward" size={16} color={MUTED} />
@@ -64,7 +63,10 @@ export function AboutScreen() {
             <Text style={styles.menuItemText}>Website</Text>
             <Ionicons name="chevron-forward" size={16} color={MUTED} />
           </Pressable>
-          <Pressable style={styles.menuItem} onPress={() => Linking.openURL("mailto:support@cropvibe.com")}>
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => void Linking.openURL(`${getWebAppOrigin()}/contact-support`)}
+          >
             <Ionicons name="mail-outline" size={20} color={LIME} />
             <Text style={styles.menuItemText}>Contact Us</Text>
             <Ionicons name="chevron-forward" size={16} color={MUTED} />
