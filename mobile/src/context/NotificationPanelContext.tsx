@@ -72,6 +72,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [postLikes, setPostLikes] = useState<any[]>([]);
   const [postComments, setPostComments] = useState<any[]>([]);
   const [liveStarts, setLiveStarts] = useState<any[]>([]);
+  const [newFollows, setNewFollows] = useState<any[]>([]);
   const [lastSeenMs, setLastSeenMs] = useState(0);
   const [lastSeenReady, setLastSeenReady] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
@@ -181,6 +182,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       setAccepted((prev) => filterOutNotificationEntry(prev, entry));
       setDeclined((prev) => filterOutNotificationEntry(prev, entry));
       setPending((prev) => filterOutNotificationEntry(prev, entry));
+      setNewFollows((prev) => filterOutNotificationEntry(prev, entry));
 
       const entryId = notificationEntryId(entry);
       if (entryId) void persistDismissedId(entryId);
@@ -244,6 +246,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     setPending(mergedPending);
     setAccepted((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.accepted)));
     setDeclined((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.declined)));
+    setNewFollows((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.newFollows || [])));
     setPostLikes((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postLikes)));
     setPostComments((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postComments)));
     setLiveStarts((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.liveStarts)));
@@ -258,6 +261,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       const nm = String(n.actorName || "").trim();
       if (nm) nameSet.add(nm);
     }
+    const remoteNewFollows = filterDismissedNotifications(snap.newFollows || []);
+    for (const n of remoteNewFollows) {
+      const nm = String(n.actorName || "").trim();
+      if (nm) nameSet.add(nm);
+    }
     const names = [...nameSet];
     if (names.length && user?.fullName) {
       const localMap = await getLocalRelationshipMapByNames(
@@ -265,7 +273,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         names
       );
       const next: Record<string, "none" | "pending" | "accepted"> = {};
-      const actorIds = [...new Set([...mergedPending, ...fbQueue].map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))];
+      const actorIds = [
+        ...new Set(
+          [...mergedPending, ...fbQueue, ...remoteNewFollows]
+            .map((n) => Number(n.actorId))
+            .filter((id) => Number.isFinite(id) && id > 0)
+        )
+      ];
       let remoteRel: Record<number, { viewerStatus: string }> = {};
       if (token && actorIds.length) {
         try {
@@ -275,17 +289,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
           /* ignore */
         }
       }
-      for (const n of mergedPending) {
-        const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-        const nm = String(n.actorName || "").toLowerCase();
-        let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
-        if (n.actorId && remoteRel[Number(n.actorId)]?.viewerStatus) {
-          const rs = String(remoteRel[Number(n.actorId)].viewerStatus) as "none" | "pending" | "accepted";
-          if (rs === "accepted" || rs === "pending") st = rs;
-        }
-        next[key] = st;
-      }
-      for (const n of fbQueue) {
+      for (const n of [...mergedPending, ...fbQueue, ...remoteNewFollows]) {
         const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
         const nm = String(n.actorName || "").toLowerCase();
         let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
@@ -363,12 +367,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       pending,
       accepted,
       declined,
+      newFollows,
       postLikes,
       postComments,
       liveStarts
     });
     return countUnreadSocialNotifications(entries, lastSeenMs);
-  }, [accepted, declined, lastSeenMs, lastSeenReady, liveStarts, sheetOpen, pending, postComments, postLikes]);
+  }, [accepted, declined, lastSeenMs, lastSeenReady, liveStarts, newFollows, sheetOpen, pending, postComments, postLikes]);
 
   const openNotificationSheet = useCallback(() => {
     setFollowRequestsExpanded(false);
@@ -613,6 +618,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
       items.push({ kind: "follow_back", createdAt: n.createdAt || "", entry: n, key: `fb-${key}` });
     }
+    for (const n of newFollows) {
+      const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
+      if (items.some((item) => item.key === `fb-${key}` || item.key === `nf-${key}`)) continue;
+      items.push({ kind: "new_follow", createdAt: n.createdAt || "", entry: n, key: `nf-${key}` });
+    }
     for (const n of accepted) items.push({ kind: "accepted", createdAt: n.createdAt || "", entry: n, key: `accepted-${String(n.id)}` });
     for (const n of declined) items.push({ kind: "declined", createdAt: n.createdAt || "", entry: n, key: `declined-${String(n.id)}` });
     for (const n of liveStarts) {
@@ -626,7 +636,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     items.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
     return items;
-  }, [accepted, declined, followBackQueue, liveStarts, pending, postComments, postLikes]);
+  }, [accepted, declined, followBackQueue, liveStarts, newFollows, pending, postComments, postLikes]);
 
   const pendingRequestItems = useMemo(
     () => notificationItems.filter((item) => item.kind === "pending"),
@@ -703,7 +713,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 
   const notificationBadgeIcon = useCallback((kind: string): keyof typeof Ionicons.glyphMap => {
     if (kind === "post_comment" || kind === "comment_reply") return "chatbubble";
-    if (kind === "follow_back" || kind === "pending") return "person-add";
+    if (kind === "follow_back" || kind === "new_follow" || kind === "pending") return "person-add";
     if (kind === "accepted") return "checkmark";
     if (kind === "declined") return "close";
     if (kind.startsWith("live")) return "radio";
@@ -831,7 +841,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                             <Text style={styles.figMessageText}>
                               {t("notifFollowRequest", { name: String(n.actorName || "") })}
                             </Text>
-                          ) : item.kind === "follow_back" ? (
+                          ) : item.kind === "follow_back" || item.kind === "new_follow" ? (
                             <Text style={styles.figMessageText}>
                               {t("notifNowFollowing", { name: String(n.actorName || "") })}
                             </Text>
@@ -861,7 +871,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                   <Text style={styles.declineText}>{t("decline")}</Text>
                                 </Pressable>
                               </View>
-                            ) : item.kind === "follow_back" ? (
+                            ) : item.kind === "follow_back" || item.kind === "new_follow" ? (
                               (() => {
                                 const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
                                 const status = followBackStatusByKey[key] || "none";

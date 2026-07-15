@@ -690,7 +690,7 @@ export interface DirectMessageItem {
 
 export interface SocialNotificationItem {
   id: number;
-  type: "follow_request" | "follow_accept";
+  type: "follow_request" | "follow_accept" | "new_follow";
   isRead: boolean;
   createdAt: string;
   followId: number;
@@ -1499,6 +1499,7 @@ export async function fetchSocialNotifications(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications`, token)) as {
     followRequests: SocialNotificationItem[];
     followAccepted: SocialNotificationItem[];
+    newFollows?: SocialNotificationItem[];
     postLikes?: SocialPostActivityNotification[];
     postComments?: SocialPostActivityNotification[];
     liveStarts?: SocialPostActivityNotification[];

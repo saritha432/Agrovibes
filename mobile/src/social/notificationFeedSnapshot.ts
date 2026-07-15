@@ -7,6 +7,7 @@ export type NotificationFeedSnapshot = {
   pending: any[];
   accepted: any[];
   declined: any[];
+  newFollows: any[];
   postLikes: any[];
   postComments: any[];
   liveStarts: any[];
@@ -24,6 +25,7 @@ export async function fetchNotificationFeedSnapshot(params: {
   const localEng = await getLocalEngagementNotificationsForViewer(userFullName);
   let remoteReq: any[] = [];
   let remoteAccepted: any[] = [];
+  let remoteNewFollows: any[] = [];
   let remotePostLikes: any[] = [];
   let remotePostComments: any[] = [];
   let remoteLiveStarts: any[] = [];
@@ -32,6 +34,7 @@ export async function fetchNotificationFeedSnapshot(params: {
       const remote = await fetchSocialNotifications(token);
       remoteReq = remote.followRequests || [];
       remoteAccepted = remote.followAccepted || [];
+      remoteNewFollows = remote.newFollows || [];
       remotePostLikes = remote.postLikes || [];
       remotePostComments = remote.postComments || [];
       remoteLiveStarts = remote.liveStarts || [];
@@ -49,6 +52,7 @@ export async function fetchNotificationFeedSnapshot(params: {
     ...(local.acceptedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))
   ];
   const declined = [...(local.declinedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))];
+  const newFollows = [...(remoteNewFollows || [])];
   const postLikes = [
     ...remotePostLikes,
     ...localEng.postLikes.map((n) => ({
@@ -79,11 +83,27 @@ export async function fetchNotificationFeedSnapshot(params: {
     }))
   ];
 
-  return { pending: mergedPending, accepted, declined, postLikes, postComments, liveStarts: remoteLiveStarts };
+  return {
+    pending: mergedPending,
+    accepted,
+    declined,
+    newFollows,
+    postLikes,
+    postComments,
+    liveStarts: remoteLiveStarts
+  };
 }
 
 export function flattenNotificationFeedSnapshot(snap: NotificationFeedSnapshot): any[] {
-  return [...snap.pending, ...snap.accepted, ...snap.declined, ...snap.postLikes, ...snap.postComments, ...snap.liveStarts];
+  return [
+    ...snap.pending,
+    ...snap.accepted,
+    ...snap.declined,
+    ...snap.newFollows,
+    ...snap.postLikes,
+    ...snap.postComments,
+    ...snap.liveStarts
+  ];
 }
 
 /** Badge = notifications newer than when the user last closed the panel (not full history). */
