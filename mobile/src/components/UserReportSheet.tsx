@@ -38,6 +38,7 @@ export function UserReportSheet({ visible, userId, userName, onClose, onBlockUse
   const [busy, setBusy] = React.useState(false);
   const [description, setDescription] = React.useState("");
   const [selectedReason, setSelectedReason] = React.useState<PostReportReasonKey | null>(null);
+  const [alreadyReported, setAlreadyReported] = React.useState(false);
 
   React.useEffect(() => {
     if (!visible) {
@@ -45,6 +46,7 @@ export function UserReportSheet({ visible, userId, userName, onClose, onBlockUse
       setBusy(false);
       setDescription("");
       setSelectedReason(null);
+      setAlreadyReported(false);
     }
   }, [visible, userId]);
 
@@ -66,8 +68,15 @@ export function UserReportSheet({ visible, userId, userName, onClose, onBlockUse
     try {
       const payload = description.trim() ? `${selectedReason}: ${description.trim()}` : selectedReason;
       await reportUser(token, userId, payload);
+      setAlreadyReported(false);
       setStep("done");
     } catch (e: unknown) {
+      const err = e as { status?: number; payload?: { alreadyReported?: boolean } };
+      if (err?.status === 409 || err?.payload?.alreadyReported) {
+        setAlreadyReported(true);
+        setStep("done");
+        return;
+      }
       const msg = e instanceof Error ? e.message : t("reportFailed");
       Alert.alert(t("reportFailed"), msg);
     } finally {
@@ -87,8 +96,8 @@ export function UserReportSheet({ visible, userId, userName, onClose, onBlockUse
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onBack}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalRoot}>
-        <Pressable style={styles.dimTap} onPress={onBack} accessibilityLabel={t("cancel")} />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom + 12, 20), maxHeight: "78%" }]}>
+        <Pressable style={styles.dimFlex} onPress={onBack} accessibilityLabel={t("cancel")} />
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom + 12, 20), maxHeight: "78%" }]} pointerEvents="auto">
           <View style={styles.handle} />
 
           {step === "done" ? (
@@ -96,8 +105,15 @@ export function UserReportSheet({ visible, userId, userName, onClose, onBlockUse
               <View style={styles.doneIconWrap}>
                 <Ionicons name="checkmark-circle" size={44} color="#C9FF35" />
               </View>
-              <Text style={styles.doneTitle}>{t("reportDoneTitle")}</Text>
-              <Text style={styles.doneMsg}>{t("reportUserDoneMsg")}</Text>
+              <Text style={styles.doneTitle}>
+                {alreadyReported ? t("reportAlreadyReported") : t("reportDoneTitle")}
+              </Text>
+              <Text style={styles.doneMsg}>
+                {alreadyReported
+                  ? t("reportAlreadyReportedMsg") ||
+                    "We already have your report. Our team will review it."
+                  : t("reportUserDoneMsg")}
+              </Text>
               {onBlockUser ? (
                 <Pressable
                   style={styles.secondaryBtn}

@@ -211,28 +211,32 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     ]
   );
 
+  const loadMessageUnread = useCallback(async () => {
+    if (!token) {
+      setMessageUnreadCount(0);
+      return;
+    }
+    try {
+      const threads = await fetchMessageThreads(token);
+      const remoteMessageUnread = (threads.threads || []).reduce((sum, t) => {
+        const hasUnreadCount = t.unreadCount != null;
+        const unreadCount = Number(t.unreadCount || 0);
+        if (Number.isFinite(unreadCount) && unreadCount > 0) {
+          return sum + unreadCount;
+        }
+        if (!hasUnreadCount && viewerUserId && Number(t.lastSenderId) > 0 && Number(t.lastSenderId) !== viewerUserId) {
+          return sum + 1;
+        }
+        return sum;
+      }, 0);
+      setMessageUnreadCount(remoteMessageUnread);
+    } catch {
+      /* keep previous badge */
+    }
+  }, [token, viewerUserId]);
+
   const loadNotifications = useCallback(async () => {
     if (!user?.fullName) return;
-    let remoteMessageUnread = 0;
-    if (token) {
-      try {
-        const threads = await fetchMessageThreads(token);
-        remoteMessageUnread = (threads.threads || []).reduce((sum, t) => {
-          const hasUnreadCount = t.unreadCount != null;
-          const unreadCount = Number(t.unreadCount || 0);
-          if (Number.isFinite(unreadCount) && unreadCount > 0) {
-            return sum + unreadCount;
-          }
-          if (!hasUnreadCount && viewerUserId && Number(t.lastSenderId) > 0 && Number(t.lastSenderId) !== viewerUserId) {
-            return sum + 1;
-          }
-          return sum;
-        }, 0);
-      } catch {
-        remoteMessageUnread = 0;
-      }
-    }
-    setMessageUnreadCount(remoteMessageUnread);
 
     const snap = await fetchNotificationFeedSnapshot({
       token,
@@ -260,32 +264,18 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     const names = [...nameSet];
     if (names.length && user?.fullName) {
-      const localMap = await getLocalRelationshipMapByNames(
-        { name: user.fullName, key: user.email || String(user.id || "") },
-        names
-      );
+      const actorIds = [
+        ...new Set([...mergedPending, ...fbQueue].map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))
+      ];
+      const [localMap, remoteData] = await Promise.all([
+        getLocalRelationshipMapByNames({ name: user.fullName, key: user.email || String(user.id || "") }, names),
+        token && actorIds.length
+          ? fetchRelationships(token, actorIds).catch(() => ({ relationships: {} as Record<number, { viewerStatus: string }> }))
+          : Promise.resolve({ relationships: {} as Record<number, { viewerStatus: string }> })
+      ]);
+      const remoteRel = remoteData.relationships || {};
       const next: Record<string, "none" | "pending" | "accepted"> = {};
-      const actorIds = [...new Set([...mergedPending, ...fbQueue].map((n) => Number(n.actorId)).filter((id) => Number.isFinite(id) && id > 0))];
-      let remoteRel: Record<number, { viewerStatus: string }> = {};
-      if (token && actorIds.length) {
-        try {
-          const data = await fetchRelationships(token, actorIds);
-          remoteRel = data.relationships || {};
-        } catch {
-          /* ignore */
-        }
-      }
-      for (const n of mergedPending) {
-        const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
-        const nm = String(n.actorName || "").toLowerCase();
-        let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
-        if (n.actorId && remoteRel[Number(n.actorId)]?.viewerStatus) {
-          const rs = String(remoteRel[Number(n.actorId)].viewerStatus) as "none" | "pending" | "accepted";
-          if (rs === "accepted" || rs === "pending") st = rs;
-        }
-        next[key] = st;
-      }
-      for (const n of fbQueue) {
+      for (const n of [...mergedPending, ...fbQueue]) {
         const key = n.actorId ? `id:${n.actorId}` : `name:${String(n.actorName || "").toLowerCase()}`;
         const nm = String(n.actorName || "").toLowerCase();
         let st: "none" | "pending" | "accepted" = (localMap[nm]?.viewerStatus as "none" | "pending" | "accepted") || "none";
@@ -297,14 +287,26 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       }
       setFollowBackStatusByKey(next);
     }
-  }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id, viewerUserId]);
+  }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id]);
 
   useEffect(() => {
     if (!appIsActive || !dismissedReady) return;
-    loadNotifications();
-    const timer = setInterval(loadNotifications, 4000);
+    void loadNotifications();
+    // Background badge refresh — keep light so JS thread stays free for swipes.
+    const timer = setInterval(() => {
+      void loadNotifications();
+    }, sheetOpen ? 20000 : 15000);
     return () => clearInterval(timer);
-  }, [appIsActive, dismissedReady, loadNotifications]);
+  }, [appIsActive, dismissedReady, loadNotifications, sheetOpen]);
+
+  useEffect(() => {
+    if (!appIsActive) return;
+    void loadMessageUnread();
+    const timer = setInterval(() => {
+      void loadMessageUnread();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [appIsActive, loadMessageUnread]);
 
   useEffect(() => {
     let mounted = true;
