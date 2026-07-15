@@ -85,7 +85,17 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
         setStep("done");
         return;
       }
-      const msg = e instanceof Error ? e.message : t("reportFailed");
+      const err = e as { status?: number; payload?: { message?: string; error?: string }; message?: string };
+      console.warn("[reportHomePost] failed", {
+        postId: post.id,
+        reason: selectedReason,
+        status: err?.status,
+        message: err?.message,
+        payload: err?.payload
+      });
+      const msg =
+        (typeof err?.payload?.error === "string" && err.payload.error) ||
+        (e instanceof Error ? e.message : t("reportFailed"));
       Alert.alert(t("reportFailed"), msg);
     } finally {
       setBusy(false);

@@ -1276,9 +1276,14 @@ async function ensurePostReportsTable() {
   await query(`CREATE INDEX IF NOT EXISTS post_reports_post_idx ON post_reports (post_id)`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_created_idx ON post_reports (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_status_idx ON post_reports (status)`);
-  await query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS post_reports_post_reporter_uidx ON post_reports (post_id, reporter_user_id)`
-  );
+  try {
+    await query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS post_reports_post_reporter_uidx ON post_reports (post_id, reporter_user_id)`
+    );
+  } catch (error) {
+    // Duplicates from older builds shouldn't block new reports.
+    console.warn("[reports] unique index ensure skipped:", error?.message || error);
+  }
   postReportsTableReady = true;
 }
 
@@ -1963,14 +1968,22 @@ async function deliverAdminAlertEmail({ to, subject, text, replyTo }) {
     _captcha: "false",
     _honey: ""
   });
-  const formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
-    },
-    body: formBody
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  let formResp;
+  try {
+    formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json"
+      },
+      body: formBody,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   const formData = await formResp.json().catch(() => ({}));
   const formOk =
     formResp.ok &&
@@ -5895,7 +5908,7 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
       `,
       [postId, me]
     );
-    const isUpdate = Boolean(existing.rows.length && existing.rows[0].status === "pending");
+    const isUpdate = Boolean(existing.rows.length);
 
     if (existing.rows.length) {
       await query(
@@ -5907,49 +5920,59 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
         [existing.rows[0].id, reasonKey, description || null]
       );
     } else {
-      await query(
-        `
-        INSERT INTO post_reports (post_id, reporter_user_id, reason, description, status)
-        VALUES ($1, $2, $3, $4, 'pending')
-        `,
-        [postId, me, reasonKey, description || null]
-      );
+      try {
+        await query(
+          `
+          INSERT INTO post_reports (post_id, reporter_user_id, reason, description, status)
+          VALUES ($1, $2, $3, $4, 'pending')
+          `,
+          [postId, me, reasonKey, description || null]
+        );
+      } catch (error) {
+        // Race / unique index: treat as update so submit still succeeds.
+        if (String(error?.code || "") === "23505") {
+          await query(
+            `
+            UPDATE post_reports
+            SET reason = $3, description = $4, status = 'pending', updated_at = NOW(), created_at = NOW()
+            WHERE post_id = $1 AND reporter_user_id = $2
+            `,
+            [postId, me, reasonKey, description || null]
+          );
+        } else {
+          throw error;
+        }
+      }
     }
 
     const reportCount = await refreshPostReportCount(postId);
     const autoHidden = reportCount >= POST_REPORT_AUTO_HIDE_THRESHOLD;
     await cacheIncr("home:posts:gen");
 
-    let emailSent = false;
-    let emailError = null;
-    try {
-      const mail = await notifyAdminOfPostReport({
-        postId,
-        reason: reasonKey,
-        description,
-        reportCount,
-        autoHidden,
-        reporterId: me,
-        uploaderId: postRow.userId,
-        uploaderName: postRow.userName,
-        caption: postRow.caption
-      });
-      emailSent = Boolean(mail?.ok);
-    } catch (error) {
-      emailError = String(error?.message || error || "email_failed");
-      console.warn("[reports] admin email notify failed:", emailError);
-    }
+    // Never block the reporter on outbound email (FormSubmit/Resend can hang).
+    void notifyAdminOfPostReport({
+      postId,
+      reason: reasonKey,
+      description,
+      reportCount,
+      autoHidden,
+      reporterId: me,
+      uploaderId: postRow.userId,
+      uploaderName: postRow.userName,
+      caption: postRow.caption
+    }).catch((error) => {
+      console.warn("[reports] admin email notify failed:", error?.message || error);
+    });
 
     res.json({
       success: true,
       ok: true,
       reportCount,
       autoHidden,
-      alreadyReported: isUpdate,
-      emailSent,
-      ...(emailError ? { emailError } : {})
+      alreadyReported: isUpdate
     });
   } catch (error) {
+    console.error("[reports] submit failed:", error?.message || error, error?.code || "");
     res.status(500).json({ message: "Failed to submit report", error: error.message });
   }
 }
