@@ -298,6 +298,29 @@ function directMessagePushPayload(body) {
   const text = String(body || "").trim();
   if (!text) return { excerpt: "Message", imageUrl: null };
 
+  if (text.startsWith("[Cropvibe Story]")) {
+    const jsonText = text.slice("[Cropvibe Story]".length).trim();
+    if (jsonText.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        const preview = String(parsed?.previewUrl || "").trim();
+        const imageUrl = /^https?:\/\//i.test(preview) ? preview : null;
+        if (parsed?.kind === "like") {
+          return { excerpt: "Liked your story", imageUrl };
+        }
+        const replyText = String(parsed?.text || "").trim();
+        if (replyText) {
+          const excerpt = replyText.length > 120 ? `${replyText.slice(0, 117)}...` : replyText;
+          return { excerpt, imageUrl };
+        }
+        return { excerpt: "Replied to your story", imageUrl };
+      } catch {
+        // fall through
+      }
+    }
+    return { excerpt: "Story reply", imageUrl: null };
+  }
+
   if (text.startsWith("[Cropvibe Live]")) {
     return { excerpt: "Live video", imageUrl: null };
   }

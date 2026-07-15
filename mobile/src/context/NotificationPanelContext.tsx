@@ -1116,8 +1116,8 @@ const styles = StyleSheet.create({
   followBackText: { color: "#1b1f23", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: "#323a44", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedText: { color: "#d8dde3", fontWeight: "800", fontSize: 12 },
-  followingPill: { backgroundColor: "#1f6f43", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  followingText: { color: "#e8fff2", fontWeight: "800", fontSize: 12 },
+  followingPill: { backgroundColor: APP_LIME, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  followingText: { color: "#1b1f23", fontWeight: "800", fontSize: 12 },
   acceptedRow: {
     flexDirection: "row",
     alignItems: "center",

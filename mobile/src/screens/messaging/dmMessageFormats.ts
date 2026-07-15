@@ -295,6 +295,17 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return t("sharedReel");
   if (text.startsWith("[Cropvibe Post]")) return t("sharedPost");
   if (text.startsWith("[Cropvibe Profile]")) return t("sharedProfile");
+  if (text.startsWith("[Cropvibe Story]")) {
+    try {
+      const jsonText = text.slice("[Cropvibe Story]".length).trim();
+      const parsed = JSON.parse(jsonText) as { text?: string; kind?: string };
+      if (parsed?.kind === "like") return "Liked a story";
+      const reply = String(parsed?.text || "").trim();
+      return reply || "Replied to story";
+    } catch {
+      return "Replied to story";
+    }
+  }
 
   return text;
 }

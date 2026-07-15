@@ -348,6 +348,30 @@ function parseSharedProfileContent(body: string): { userId?: number; userName: s
   }
 }
 
+function parseStoryReplyContent(
+  body: string
+): { storyId: number; text: string; previewUrl?: string | null; userName?: string; kind: "reply" | "like" } | null {
+  const prefix = "[Cropvibe Story]";
+  if (!String(body || "").startsWith(prefix)) return null;
+  const jsonText = String(body || "").slice(prefix.length).trim();
+  if (!jsonText.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    const storyId = Number(parsed.storyId);
+    const text = String(parsed.text || "").trim();
+    if (!Number.isFinite(storyId) || storyId <= 0 || !text) return null;
+    return {
+      storyId,
+      text,
+      previewUrl: parsed.previewUrl ? String(parsed.previewUrl).trim() || null : null,
+      userName: String(parsed.userName || "").trim() || undefined,
+      kind: parsed.kind === "like" ? "like" : "reply"
+    };
+  } catch {
+    return null;
+  }
+}
+
 function hasRenderableMedia(post: HomePost) {
   return !!(
     String(post.videoUrl || "").trim() ||
@@ -1206,6 +1230,7 @@ export function DirectChatScreen() {
           const sharedVoice = parseDmVoiceMessage(messageItem.body);
           const sharedCall = parseDmCallMessage(messageItem.body);
           const sharedReply = parseDmReplyMessage(messageItem.body);
+          const storyReply = parseStoryReplyContent(messageItem.body);
           const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice || sharedCall);
           const repliedToMessage = sharedReply ? messagesById.get(sharedReply.replyToId) : undefined;
           const replyQuotePreview = repliedToMessage
@@ -1305,6 +1330,33 @@ export function DirectChatScreen() {
                   <ChatVoiceNoteBubble voice={sharedVoice} isSelf={isSelf} />
                 ) : sharedCall ? (
                   <CallHistoryBubble call={sharedCall} isSelf={isSelf} t={t} />
+                ) : storyReply ? (
+                  <View style={styles.storyReplyCard}>
+                    <View style={[styles.storyReplyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}>
+                      {storyReply.previewUrl ? (
+                        <Image source={{ uri: storyReply.previewUrl }} style={styles.replyQuoteThumb} resizeMode="cover" />
+                      ) : (
+                        <View style={[styles.replyQuoteThumb, styles.storyReplyThumbFallback]}>
+                          <Ionicons name="ellipse-outline" size={16} color="rgba(255,255,255,0.55)" />
+                        </View>
+                      )}
+                      <Text
+                        style={[styles.replyQuoteText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}
+                        numberOfLines={2}
+                      >
+                        {storyReply.kind === "like"
+                          ? `Liked story${storyReply.userName ? ` · ${storyReply.userName}` : ""}`
+                          : `Replied to story${storyReply.userName ? ` · ${storyReply.userName}` : ""}`}
+                      </Text>
+                    </View>
+                    {storyReply.kind === "like" ? (
+                      <Text style={styles.storyLikeHeart}>❤️</Text>
+                    ) : (
+                      <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
+                        {storyReply.text}
+                      </Text>
+                    )}
+                  </View>
                 ) : sharedReply ? (
                   <>
                     <Pressable
@@ -1810,6 +1862,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#1a1a1a"
   },
   replyQuoteText: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  storyReplyCard: { gap: 6, minWidth: 200 },
+  storyReplyQuote: {
+    borderLeftWidth: 2,
+    paddingLeft: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    opacity: 0.9
+  },
+  storyReplyThumbFallback: { alignItems: "center", justifyContent: "center" },
+  storyLikeHeart: { fontSize: 28, lineHeight: 34, marginTop: 2 },
   chatMediaViewerBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.94)"
