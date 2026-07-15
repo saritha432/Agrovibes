@@ -20,7 +20,7 @@ import { POST_REPORT_REASONS, type PostReportReasonKey } from "../social/postRep
 import { reportHomePost, type HomePost } from "../services/api";
 import { postSheetStyles as styles } from "./postSheetStyles";
 
-type ReportStep = "reasons" | "other" | "done";
+type ReportStep = "reasons" | "details" | "done";
 
 type PostReportSheetProps = {
   visible: boolean;
@@ -36,14 +36,14 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
   const { t, language } = useLanguage();
   const [step, setStep] = React.useState<ReportStep>("reasons");
   const [busy, setBusy] = React.useState(false);
-  const [otherDraft, setOtherDraft] = React.useState("");
+  const [description, setDescription] = React.useState("");
   const [selectedReason, setSelectedReason] = React.useState<PostReportReasonKey | null>(null);
 
   React.useEffect(() => {
     if (!visible) {
       setStep("reasons");
       setBusy(false);
-      setOtherDraft("");
+      setDescription("");
       setSelectedReason(null);
     }
   }, [visible, post?.id]);
@@ -53,15 +53,18 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
   const authorName = formatDisplayName(post.userName, language, t);
   const reasons = POST_REPORT_REASONS.map((r) => ({ key: r.key, label: t(r.labelKey) }));
 
-  const submitReport = async (reasonKey: PostReportReasonKey, detail?: string) => {
+  const submitReport = async () => {
     if (!token) {
       Alert.alert(t("loginRequired"), t("loginRequiredReport"));
       return;
     }
+    if (!selectedReason) {
+      Alert.alert(t("reportPostTitle"), t("reportPickReason") || "Please select a reason");
+      return;
+    }
     setBusy(true);
     try {
-      const payload = detail?.trim() ? `${reasonKey}: ${detail.trim()}` : reasonKey;
-      await reportHomePost(token, post.id, payload);
+      await reportHomePost(token, post.id, selectedReason, description.trim() || undefined);
       setStep("done");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : t("reportFailed");
@@ -71,22 +74,10 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
     }
   };
 
-  const onPickReason = (key: PostReportReasonKey) => {
-    if (busy) return;
-    setSelectedReason(key);
-    if (key === "other") {
-      setStep("other");
-      return;
-    }
-    void submitReport(key);
-  };
-
   const onBack = () => {
     if (busy) return;
-    if (step === "other") {
+    if (step === "details") {
       setStep("reasons");
-      setOtherDraft("");
-      setSelectedReason(null);
       return;
     }
     onClose();
@@ -125,7 +116,7 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
             <>
               <View style={styles.headerRow}>
                 <Pressable style={styles.headerBtn} onPress={onBack} hitSlop={8} accessibilityLabel={t("back")}>
-                  <Ionicons name={step === "other" ? "chevron-back" : "close"} size={22} color="#eef4f8" />
+                  <Ionicons name={step === "details" ? "chevron-back" : "close"} size={22} color="#eef4f8" />
                 </Pressable>
                 <Text style={[styles.title, { flex: 1, textAlign: "center" }]}>{t("reportPostTitle")}</Text>
                 <View style={styles.headerBtn} />
@@ -134,27 +125,39 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
               {step === "reasons" ? (
                 <>
                   <Text style={styles.subtitle}>{t("reportPostPrompt")}</Text>
-                  {busy ? (
-                    <View style={{ paddingVertical: 28, alignItems: "center" }}>
-                      <ActivityIndicator color="#C9FF35" />
-                    </View>
-                  ) : (
-                    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                      {reasons.map((r) => (
-                        <Pressable key={r.key} style={styles.reasonRow} onPress={() => onPickReason(r.key)}>
+                  <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                    {reasons.map((r) => {
+                      const selected = selectedReason === r.key;
+                      return (
+                        <Pressable
+                          key={r.key}
+                          style={[styles.reasonRow, selected ? { backgroundColor: "rgba(201,255,53,0.08)" } : null]}
+                          onPress={() => setSelectedReason(r.key)}
+                        >
                           <Text style={styles.reasonLabel}>{r.label}</Text>
-                          <Ionicons name="chevron-forward" size={18} color="#6b7280" />
+                          <Ionicons
+                            name={selected ? "radio-button-on" : "radio-button-off"}
+                            size={20}
+                            color={selected ? "#C9FF35" : "#6b7280"}
+                          />
                         </Pressable>
-                      ))}
-                    </ScrollView>
-                  )}
+                      );
+                    })}
+                  </ScrollView>
+                  <Pressable
+                    style={[styles.primaryBtn, !selectedReason ? { opacity: 0.45 } : null]}
+                    disabled={!selectedReason}
+                    onPress={() => setStep("details")}
+                  >
+                    <Text style={styles.primaryBtnText}>{t("reportNext") || "Next"}</Text>
+                  </Pressable>
                 </>
               ) : (
                 <>
                   <Text style={styles.subtitle}>{t("reportOtherDetails")}</Text>
                   <TextInput
-                    value={otherDraft}
-                    onChangeText={setOtherDraft}
+                    value={description}
+                    onChangeText={setDescription}
                     placeholder={t("reportOtherPlaceholder")}
                     placeholderTextColor="#6b7280"
                     style={styles.quoteInput}
@@ -165,7 +168,7 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
                   <Pressable
                     style={[styles.primaryBtn, busy ? { opacity: 0.6 } : null]}
                     disabled={busy}
-                    onPress={() => void submitReport(selectedReason || "other", otherDraft)}
+                    onPress={() => void submitReport()}
                   >
                     {busy ? (
                       <ActivityIndicator color="#111" />

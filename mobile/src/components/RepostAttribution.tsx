@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { APP_BLACK, APP_LIME } from "../theme/appColors";
 import { UserAvatar } from "./UserAvatar";
 
 type RepostAttributionProps = {
@@ -14,7 +15,7 @@ type RepostAttributionProps = {
 };
 
 /**
- * Instagram-style repost mark: large avatar with purple ↻ badge — no “Name reposted” text.
+ * Instagram-style repost mark: large avatar with lemon-yellow ↻ badge — no “Name reposted” text.
  */
 export function RepostAttribution({
   byUserName,
@@ -60,7 +61,7 @@ export function RepostAttribution({
             }
           ]}
         >
-          <Ionicons name="repeat" size={icon} color="#fff" />
+          <Ionicons name="repeat" size={icon} color={APP_BLACK} />
         </View>
       </View>
     </Pressable>
@@ -86,7 +87,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: -2,
     bottom: -2,
-    backgroundColor: "#A855F7",
+    backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center"
   }

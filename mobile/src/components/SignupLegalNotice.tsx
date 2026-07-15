@@ -50,7 +50,7 @@ export function SignupLegalNotice({ compact }: SignupLegalNoticeProps) {
 
       <Text style={styles.paragraph}>
         {submitPrefix}{" "}
-        <Text style={styles.linkBold} onPress={() => openLegalUrl("/privacy-policy")} accessibilityRole="link">
+        <Text style={styles.linkBold} onPress={() => openLegalUrl("/terms")} accessibilityRole="link">
           {terms}
         </Text>
         ,{" "}

@@ -1049,10 +1049,18 @@ export async function permanentlyDeleteHomePost(token: string, postId: number) {
   })) as { ok: boolean };
 }
 
-export async function reportHomePost(token: string, postId: number, reason?: string) {
-  const body: { reason?: string } = {};
+export async function reportHomePost(
+  token: string,
+  postId: number,
+  reason?: string,
+  description?: string
+) {
+  const body: { reason?: string; description?: string } = {};
   if (reason != null && String(reason).trim()) {
-    body.reason = String(reason).trim().slice(0, 500);
+    body.reason = String(reason).trim().slice(0, 80);
+  }
+  if (description != null && String(description).trim()) {
+    body.description = String(description).trim().slice(0, 500);
   }
   return (await fetchWithAuth(
     `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/report`,
@@ -1062,7 +1070,7 @@ export async function reportHomePost(token: string, postId: number, reason?: str
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     }
-  )) as { ok: boolean };
+  )) as { ok: boolean; success?: boolean; reportCount?: number; autoHidden?: boolean };
 }
 
 export async function reportUser(token: string, userId: number, reason?: string) {
