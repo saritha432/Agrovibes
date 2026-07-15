@@ -152,14 +152,11 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
   if (!post) return null;
 
   const isReel = props.postIsReel || !!videoUri;
-  const showVideo = !imageUri && !!videoUri;
-
+  // Never mount expo-av Video in the notifications list — it blocks the JS thread.
   const content = (
     <>
       {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
-      ) : showVideo ? (
-        <NotificationVideoFrame uri={videoUri} />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <Ionicons
@@ -182,6 +179,7 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
       <Pressable
         style={styles.wrap}
         onPress={props.onPress}
+        delayPressIn={80}
         accessibilityRole="button"
         accessibilityLabel="Open post"
       >

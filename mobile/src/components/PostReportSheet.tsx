@@ -3,6 +3,7 @@ import React from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -30,6 +31,12 @@ type PostReportSheetProps = {
   onBlockAuthor?: (post: HomePost) => void;
 };
 
+function isAlreadyReportedError(error: unknown): boolean {
+  const err = error as { status?: number; payload?: { alreadyReported?: boolean }; message?: string };
+  if (err?.status === 409 || err?.payload?.alreadyReported) return true;
+  return /already reported/i.test(String(err?.message || ""));
+}
+
 export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostReportSheetProps) {
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
@@ -38,6 +45,7 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
   const [busy, setBusy] = React.useState(false);
   const [description, setDescription] = React.useState("");
   const [selectedReason, setSelectedReason] = React.useState<PostReportReasonKey | null>(null);
+  const [alreadyReported, setAlreadyReported] = React.useState(false);
 
   React.useEffect(() => {
     if (!visible) {
@@ -45,8 +53,9 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
       setBusy(false);
       setDescription("");
       setSelectedReason(null);
+      setAlreadyReported(false);
     }
-  }, [visible, post?.id]);
+  }, [visible]);
 
   if (!post) return null;
 
@@ -54,6 +63,7 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
   const reasons = POST_REPORT_REASONS.map((r) => ({ key: r.key, label: t(r.labelKey) }));
 
   const submitReport = async () => {
+    if (busy) return;
     if (!token) {
       Alert.alert(t("loginRequired"), t("loginRequiredReport"));
       return;
@@ -62,11 +72,19 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
       Alert.alert(t("reportPostTitle"), t("reportPickReason") || "Please select a reason");
       return;
     }
+
+    Keyboard.dismiss();
     setBusy(true);
     try {
-      await reportHomePost(token, post.id, selectedReason, description.trim() || undefined);
+      const result = await reportHomePost(token, post.id, selectedReason, description.trim() || undefined);
+      setAlreadyReported(Boolean(result?.alreadyReported));
       setStep("done");
     } catch (e: unknown) {
+      if (isAlreadyReportedError(e)) {
+        setAlreadyReported(true);
+        setStep("done");
+        return;
+      }
       const msg = e instanceof Error ? e.message : t("reportFailed");
       Alert.alert(t("reportFailed"), msg);
     } finally {
@@ -80,14 +98,25 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
       setStep("reasons");
       return;
     }
+    if (step === "done") {
+      onClose();
+      return;
+    }
     onClose();
   };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onBack}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalRoot}>
-        <Pressable style={styles.dimTap} onPress={onBack} accessibilityLabel={t("cancel")} />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom + 12, 20), maxHeight: "78%" }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.modalRoot}
+      >
+        {/* flex:1 dim above the sheet — absoluteFill was stealing Submit taps */}
+        <Pressable style={styles.dimFlex} onPress={onBack} accessibilityLabel={t("cancel")} />
+        <View
+          style={[styles.sheet, { paddingBottom: Math.max(insets.bottom + 12, 20), maxHeight: "78%" }]}
+          pointerEvents="auto"
+        >
           <View style={styles.handle} />
 
           {step === "done" ? (
@@ -95,8 +124,15 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
               <View style={styles.doneIconWrap}>
                 <Ionicons name="checkmark-circle" size={44} color="#C9FF35" />
               </View>
-              <Text style={styles.doneTitle}>{t("reportDoneTitle")}</Text>
-              <Text style={styles.doneMsg}>{t("reportDoneMsg")}</Text>
+              <Text style={styles.doneTitle}>
+                {alreadyReported ? t("reportAlreadyReported") : t("reportDoneTitle")}
+              </Text>
+              <Text style={styles.doneMsg}>
+                {alreadyReported
+                  ? t("reportAlreadyReportedMsg") ||
+                    "We already have your report for this reel. Our team will review it."
+                  : t("reportDoneMsg")}
+              </Text>
               {onBlockAuthor ? (
                 <Pressable
                   style={styles.secondaryBtn}
@@ -163,12 +199,13 @@ export function PostReportSheet({ visible, post, onClose, onBlockAuthor }: PostR
                     style={styles.quoteInput}
                     multiline
                     maxLength={500}
-                    autoFocus
                   />
                   <Pressable
                     style={[styles.primaryBtn, busy ? { opacity: 0.6 } : null]}
                     disabled={busy}
-                    onPress={() => void submitReport()}
+                    onPress={() => {
+                      void submitReport();
+                    }}
                   >
                     {busy ? (
                       <ActivityIndicator color="#111" />

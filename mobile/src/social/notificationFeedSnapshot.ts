@@ -21,27 +21,21 @@ export async function fetchNotificationFeedSnapshot(params: {
 }): Promise<NotificationFeedSnapshot> {
   const { token, userFullName, userEmail, userId } = params;
   const identity = { name: userFullName, key: userEmail || String(userId || "") };
-  const local = await getLocalFollowNotificationsByIdentity(identity);
-  const localEng = await getLocalEngagementNotificationsForViewer(userFullName);
-  let remoteReq: any[] = [];
-  let remoteAccepted: any[] = [];
-  let remoteNewFollows: any[] = [];
-  let remotePostLikes: any[] = [];
-  let remotePostComments: any[] = [];
-  let remoteLiveStarts: any[] = [];
-  if (token) {
-    try {
-      const remote = await fetchSocialNotifications(token);
-      remoteReq = remote.followRequests || [];
-      remoteAccepted = remote.followAccepted || [];
-      remoteNewFollows = remote.newFollows || [];
-      remotePostLikes = remote.postLikes || [];
-      remotePostComments = remote.postComments || [];
-      remoteLiveStarts = remote.liveStarts || [];
-    } catch {
-      // keep local only
-    }
-  }
+
+  const [local, localEng, remote] = await Promise.all([
+    getLocalFollowNotificationsByIdentity(identity),
+    getLocalEngagementNotificationsForViewer(userFullName),
+    token
+      ? fetchSocialNotifications(token).catch(() => null)
+      : Promise.resolve(null)
+  ]);
+
+  const remoteReq = remote?.followRequests || [];
+  const remoteAccepted = remote?.followAccepted || [];
+  const remoteNewFollows = remote?.newFollows || [];
+  const remotePostLikes = remote?.postLikes || [];
+  const remotePostComments = remote?.postComments || [];
+  const remoteLiveStarts = remote?.liveStarts || [];
 
   const mergedPending = [
     ...(remoteReq || []),
@@ -52,7 +46,7 @@ export async function fetchNotificationFeedSnapshot(params: {
     ...(local.acceptedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))
   ];
   const declined = [...(local.declinedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))];
-  const newFollows = [...(remoteNewFollows || [])];
+  const newFollows = [...remoteNewFollows];
   const postLikes = [
     ...remotePostLikes,
     ...localEng.postLikes.map((n) => ({
