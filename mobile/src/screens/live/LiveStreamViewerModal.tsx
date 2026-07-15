@@ -61,12 +61,13 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
     currentUserId === postUserId;
   const alreadyHostingThisRoom = !!post && isHost && isAlreadyHostingRoom(liveRoomName(post));
 
-  // Active live: NO React Native Modal — Android SurfaceView/RTCView often stays black inside Modal.
+  // Active live in fullScreen Modal (same as DirectCall) — SurfaceView must live in its own
+  // window. Absolute overlays with elevation/Animated parents leave remote RTCView black on Android.
   if (post && isActiveLiveStream(post)) {
-    if (alreadyHostingThisRoom) {
-      return (
-        <View style={styles.liveOverlay} collapsable={false}>
-          <View style={styles.alreadyHostingRoot}>
+    return (
+      <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+        {alreadyHostingThisRoom ? (
+          <View style={styles.alreadyHostingRoot} collapsable={false}>
             <Pressable style={[styles.viewerClose, { top: insets.top + 8 }]} onPress={onClose} hitSlop={12}>
               <Ionicons name="close" size={28} color="#fff" />
             </Pressable>
@@ -74,22 +75,21 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
             <Text style={styles.alreadyHostingTitle}>You are already live</Text>
             <Text style={styles.alreadyHostingSub}>Use the host screen to manage this stream.</Text>
           </View>
-        </View>
-      );
-    }
-    return (
-      <View style={styles.liveOverlay} collapsable={false}>
-        <LiveKitRoomView
-          visible
-          roomName={liveRoomName(post)}
-          isHost={isHost}
-          sharePost={post}
-          title={liveTitle(post, language, t)}
-          postId={post.id}
-          onLiveEnded={onLiveEnded}
-          onClose={onClose}
-        />
-      </View>
+        ) : (
+          <View style={styles.viewerRoot} collapsable={false}>
+            <LiveKitRoomView
+              visible
+              roomName={liveRoomName(post)}
+              isHost={isHost}
+              sharePost={post}
+              title={liveTitle(post, language, t)}
+              postId={post.id}
+              onLiveEnded={onLiveEnded}
+              onClose={onClose}
+            />
+          </View>
+        )}
+      </Modal>
     );
   }
 
@@ -216,12 +216,6 @@ const ringStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  liveOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 10000,
-    elevation: 10000,
-    backgroundColor: "#000"
-  },
   viewerRoot: { flex: 1, backgroundColor: "#000" },
   alreadyHostingRoot: {
     flex: 1,
