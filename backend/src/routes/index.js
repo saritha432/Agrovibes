@@ -1297,18 +1297,19 @@ async function refreshPostReportCount(postId) {
     [postId]
   );
   const count = Number(countRes.rows[0]?.c || 0);
+  const threshold = Number(POST_REPORT_AUTO_HIDE_THRESHOLD);
   await query(
     `
     UPDATE home_posts
     SET
-      report_count = $2,
+      report_count = $2::int,
       feed_hidden_at = CASE
-        WHEN $2 >= $3 THEN COALESCE(feed_hidden_at, NOW())
+        WHEN $2::int >= $3::int THEN COALESCE(feed_hidden_at, NOW())
         ELSE NULL
       END
     WHERE id = $1
     `,
-    [postId, count, POST_REPORT_AUTO_HIDE_THRESHOLD]
+    [postId, count, threshold]
   );
   return count;
 }
