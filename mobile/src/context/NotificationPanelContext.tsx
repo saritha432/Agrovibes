@@ -6,6 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
 import {
   blockUser,
+  fetchActiveHomeStories,
   fetchHomePost,
   fetchMessageThreads,
   fetchRelationships,
@@ -31,12 +32,13 @@ import {
 import { APP_LIME } from "../theme/appColors";
 import { NotificationPostThumb } from "../components/NotificationPostThumb";
 import { SwipeActionsRow, type SwipeAction } from "../components/SwipeActionsRow";
-import { UserAvatar } from "../components/UserAvatar";
+import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive } from "../navigation/navigationRef";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenLiveCreate } from "../navigation/liveCreateBridge";
+import { publishActiveStories } from "../navigation/storyActivityBridge";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
 type NotificationPanelContextValue = {
@@ -301,6 +303,21 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         next[key] = st;
       }
       setFollowBackStatusByKey((prev) => ({ ...prev, ...next }));
+    }
+
+    const actorStoryIds = [
+      ...new Set(
+        [...mergedPending, ...fbQueue, ...remoteNewFollows, ...(snap.postLikes || []), ...(snap.postComments || [])]
+          .map((n) => Number(n.actorId))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    ].slice(0, 80);
+    if (token && actorStoryIds.length) {
+      void fetchActiveHomeStories(token, actorStoryIds)
+        .then((data) => {
+          publishActiveStories(data.stories || []);
+        })
+        .catch(() => {});
     }
   }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id]);
 
@@ -941,9 +958,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     return (
                       <View key={item.key} style={[styles.figRow, !isLastRow ? styles.figRowDivider : null]}>
                         <View style={styles.figAvatarWrap}>
-                          <UserAvatar
+                          <StoryRingAvatar
                             uri={actorAvatarUri(n)}
                             name={actorDisplayName(n)}
+                            userId={n.actorId}
+                            userName={n.actorName}
                             size={42}
                             borderRadius={21}
                             fallbackBackgroundColor="#404040"
@@ -993,9 +1012,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                     const rowCore = (
                       <View style={[styles.figRow, !isLastRow ? styles.figRowDivider : null]}>
                         <View style={styles.figAvatarWrap}>
-                          <UserAvatar
+                          <StoryRingAvatar
                             uri={actorAvatarUri(n)}
                             name={actorDisplayName(n)}
+                            userId={n.actorId}
+                            userName={n.actorName}
                             size={42}
                             borderRadius={21}
                             fallbackBackgroundColor="#404040"

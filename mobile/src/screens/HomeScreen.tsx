@@ -30,10 +30,19 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { navigateToMyProfile, navigateToPublicProfile, navigateToHome } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
+import {
+  publishActiveStories,
+  setStoryViewedIds,
+  markStoryIdsViewed,
+  getStoriesForUser,
+  subscribeOpenUserStories,
+  takePendingOpenUserStories,
+  type OpenUserStoriesRequest
+} from "../navigation/storyActivityBridge";
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
@@ -44,6 +53,7 @@ import { PostOptionsSheet } from "../components/PostOptionsSheet";
 import { PostReportSheet } from "../components/PostReportSheet";
 import { RepostAttribution } from "../components/RepostAttribution";
 import { UserAvatar } from "../components/UserAvatar";
+import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
 import { ReelSeekBar } from "../components/ReelSeekBar";
 import { ReelSuggestionsPage } from "../components/ReelSuggestionsPage";
@@ -68,6 +78,8 @@ import {
   fetchSocialNotifications,
   type HomePostLiker,
   fetchHomeStories,
+  fetchHomeStoriesForUser,
+  fetchActiveHomeStories,
   fetchRelationships,
   fetchSocialNetwork,
   fetchUsers,
@@ -525,9 +537,26 @@ function storyTimeMs(s: HomeStory) {
   return Number.isFinite(t) ? t : 0;
 }
 
+function formatStoryRelativeTime(createdAt: string | null | undefined) {
+  const createdMs = Date.parse(String(createdAt || ""));
+  if (!Number.isFinite(createdMs)) return "";
+  const diffMs = Math.max(0, Date.now() - createdMs);
+  const mins = Math.floor(diffMs / (60 * 1000));
+  if (mins < 1) return "Just now";
+  if (mins < 60) return mins === 1 ? "1min ago" : `${mins}mins ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours === 1 ? "1hr ago" : `${hours}hrs ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1day ago" : `${days}days ago`;
+}
+
 /** Oldest first (left-to-right segments like Instagram). */
 function sortStoriesForPlayback(rows: HomeStory[]) {
   return [...rows].sort((a, b) => storyTimeMs(a) - storyTimeMs(b) || a.id - b.id);
+}
+
+function groupHasUnseenStories(group: { stories: HomeStory[] }, viewedIds: Set<number>) {
+  return group.stories.some((s) => storyIsUnviewed(s, viewedIds));
 }
 
 function postImageGallery(post: HomePost | null | undefined): string[] {
@@ -1967,20 +1996,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [followingSharePeers]);
 
   const otherStories = useMemo(() => {
-    if (!token || !socialNetworkHydrated) return [];
-    return stories.filter((s) => {
-      if (storyViewerOwns(s, currentUserId, currentUserStoryKeys)) return false;
-      return storyIsFromAcceptedFollow(s, followingUserIds, followingNameKeys);
-    });
-  }, [
-    currentUserId,
-    currentUserStoryKeys,
-    followingNameKeys,
-    followingUserIds,
-    socialNetworkHydrated,
-    stories,
-    token
-  ]);
+    if (!token) return [];
+    // Server already scopes: own + followed + public accounts.
+    return stories.filter((s) => !storyViewerOwns(s, currentUserId, currentUserStoryKeys));
+  }, [currentUserId, currentUserStoryKeys, stories, token]);
 
   const avatarLookup = useMemo(
     () => buildAvatarLookup(posts, user, socialAvatarsByUserId),
@@ -2016,14 +2035,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         stories: sorted
       });
     }
-    groups.sort((a, b) => storyTimeMs(b.stories[b.stories.length - 1]) - storyTimeMs(a.stories[a.stories.length - 1]));
+    groups.sort((a, b) => {
+      const aUnseen = groupHasUnseenStories(a, viewedStoryIds);
+      const bUnseen = groupHasUnseenStories(b, viewedStoryIds);
+      if (aUnseen !== bUnseen) return aUnseen ? -1 : 1;
+      return storyTimeMs(b.stories[b.stories.length - 1]) - storyTimeMs(a.stories[a.stories.length - 1]);
+    });
     return groups;
-  }, [avatarLookup, otherStories, posts, user]);
+  }, [avatarLookup, otherStories, posts, user, viewedStoryIds]);
 
   const storyGroupsWithoutLive = useMemo(() => otherStoryGroups, [otherStoryGroups]);
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
   const activeStoryAvatarUri = activeStory ? storyAuthorAvatarUri(activeStory, user, avatarLookup, posts) : undefined;
+  const activeStoryTimeLabel = activeStory ? formatStoryRelativeTime(activeStory.createdAt) : "";
   const isOwnActiveStory = !!activeStory && storyViewerOwns(activeStory, currentUserId, currentUserStoryKeys);
 
   const applyViewedStories = useCallback(
@@ -2177,7 +2202,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     try {
       await replyToHomeStory(token, activeStory.id, text, {
         peerUserId: activeStory.userId,
-        previewUrl: activeStory.imageUrl || activeStory.videoUrl || null,
+        previewUrl: activeStory.imageUrl || null,
+        imageUrl: activeStory.imageUrl || null,
+        videoUrl: activeStory.videoUrl || null,
         userName: activeStory.userName
       });
       setStoryReplyDraft("");
@@ -2198,7 +2225,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     try {
       await likeHomeStory(token, activeStory.id, {
         peerUserId: activeStory.userId,
-        previewUrl: activeStory.imageUrl || activeStory.videoUrl || null,
+        previewUrl: activeStory.imageUrl || null,
+        imageUrl: activeStory.imageUrl || null,
+        videoUrl: activeStory.videoUrl || null,
         userName: activeStory.userName
       });
       setStoryLikedIds((prev) => {
@@ -2270,8 +2299,111 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       next.add(activeStory.id);
       return next;
     });
+    markStoryIdsViewed([activeStory.id]);
     setStories((prev) => prev.map((s) => (s.id === activeStory.id ? { ...s, viewed: true } : s)));
   }, [activeStory?.id, isStoryOpen]);
+
+  useEffect(() => {
+    publishActiveStories(stories);
+  }, [stories]);
+
+  useEffect(() => {
+    setStoryViewedIds(viewedStoryIds);
+  }, [viewedStoryIds]);
+
+  useEffect(() => {
+    if (!token || !posts.length) return;
+    const ids = [
+      ...new Set(
+        posts
+          .map((p) => Number(p.userId))
+          .filter((id) => Number.isFinite(id) && id > 0 && id !== currentUserId)
+      )
+    ].slice(0, 80);
+    if (!ids.length) return;
+    let cancelled = false;
+    void fetchActiveHomeStories(token, ids)
+      .then((data) => {
+        if (cancelled) return;
+        const rows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
+        if (!rows.length) return;
+        publishActiveStories(rows);
+        setStories((prev) => applyViewedStories(mergeStories(prev, rows)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [applyViewedStories, currentUserId, posts, token]);
+
+  const openUserStoriesRequest = useCallback(
+    async (req: OpenUserStoriesRequest) => {
+      navigateToHome();
+      const uid = Number(req.userId);
+      let queue =
+        (req.stories && req.stories.length
+          ? req.stories.map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>))
+          : getStoriesForUser(uid, req.userName || undefined)
+        ).filter((s) => storyHasMedia(s));
+
+      if (!queue.length && token && Number.isFinite(uid) && uid > 0) {
+        try {
+          const data = await fetchHomeStoriesForUser(token, uid);
+          const rows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
+          publishActiveStories(rows);
+          setStories((prev) => applyViewedStories(mergeStories(prev, rows)));
+          queue = rows.filter((s) => storyHasMedia(s));
+        } catch {
+          return;
+        }
+      }
+
+      queue = sortStoriesForPlayback(queue);
+      if (!queue.length) {
+        if (req.preferredStoryId) {
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert("This story is no longer available.");
+          } else {
+            Alert.alert("Story unavailable", "This story is no longer available.");
+          }
+        }
+        return;
+      }
+      const preferredId = Number(req.preferredStoryId);
+      let startIndex = 0;
+      if (Number.isFinite(preferredId) && preferredId > 0) {
+        const idx = queue.findIndex((s) => Number(s.id) === preferredId);
+        if (idx < 0) {
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            window.alert("This story is no longer available.");
+          } else {
+            Alert.alert("Story unavailable", "This story is no longer available.");
+          }
+          return;
+        }
+        startIndex = idx;
+      }
+      setStoryPlaybackQueue(queue);
+      setActiveStoryIndex(startIndex);
+      setStoryOpen(true);
+    },
+    [applyViewedStories, token]
+  );
+
+  useEffect(() => {
+    const pending = takePendingOpenUserStories();
+    if (pending) void openUserStoriesRequest(pending);
+    return subscribeOpenUserStories((req) => {
+      void openUserStoriesRequest(req);
+    });
+  }, [openUserStoriesRequest]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const pending = takePendingOpenUserStories();
+      if (pending) void openUserStoriesRequest(pending);
+    }, [openUserStoriesRequest])
+  );
 
   useEffect(() => {
     if (!isStoryOpen || !activeStory?.id || !token) return;
@@ -4038,20 +4170,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 />
               ) : null}
               <View style={styles.reelUserFollowRow}>
+                <StoryRingAvatar
+                  uri={postAuthorAvatarUri(post, user)}
+                  name={post.userName}
+                  userId={post.userId}
+                  userName={post.userName}
+                  size={44}
+                  onPressFallback={() => openPostAuthorProfile(post)}
+                  accessibilityLabel={reelDisplayName}
+                />
                 <Pressable
-                  style={styles.reelAuthorTap}
+                  style={styles.reelUserNamePress}
                   onPress={() => openPostAuthorProfile(post)}
                   accessibilityRole="button"
-                  accessibilityLabel={reelDisplayName}
                 >
-                  <UserAvatar
-                    uri={postAuthorAvatarUri(post, user)}
-                    name={post.userName}
-                    size={44}
-                    borderRadius={12}
-                    style={styles.reelAvatarSq}
-                  />
-                  <Text style={styles.reelUserName} numberOfLines={1}>
+                  <Text style={styles.reelUserName} numberOfLines={1} ellipsizeMode="tail">
                     {reelDisplayName}
                   </Text>
                 </Pressable>
@@ -4335,19 +4468,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           ) : null}
           <View style={styles.postTop}>
             <View style={styles.postUserRow}>
-              <UserAvatar
+              <StoryRingAvatar
                 uri={postAuthorAvatarUri(post, user)}
                 name={post.userName}
+                userId={post.userId}
+                userName={post.userName}
                 size={34}
                 style={styles.userAvatar}
                 fallbackBackgroundColor={APP_LIME}
                 initialsColor="#fff"
+                onPressFallback={() => openPostAuthorProfile(post)}
               />
-              <View>
+              <Pressable onPress={() => openPostAuthorProfile(post)}>
                 <Text style={styles.userName}>
                   {feedDisplayName} <Text style={styles.timeText}>• 13h</Text>
                 </Text>
-              </View>
+              </Pressable>
             </View>
             <View style={styles.postTopActions}>
               {!isOwnPost ? (
@@ -4771,10 +4907,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   fallbackBackgroundColor={APP_LIME}
                   initialsColor="#fff"
                 />
-                <View>
-                  <Text style={styles.storyViewerName}>
+                <View style={styles.storyViewerMeta}>
+                  <Text style={styles.storyViewerName} numberOfLines={1}>
                     {activeStory?.userName ? displayPersonName(activeStory.userName) : ""}
                   </Text>
+                  {activeStoryTimeLabel ? (
+                    <Text style={styles.storyViewerTime}>{activeStoryTimeLabel}</Text>
+                  ) : null}
                 </View>
               </View>
               <View style={styles.storyViewerTopActions}>
@@ -5557,23 +5696,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     flexWrap: "nowrap",
-    minWidth: 0
+    minWidth: 0,
+    width: "100%"
   },
-  reelAuthorTap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+  reelUserNamePress: {
     flex: 1,
+    flexShrink: 1,
     minWidth: 0
   },
-  reelAvatarSq: {
+  reelAvatarCircle: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)"
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 22,
+    overflow: "hidden"
   },
   reelAvatarSqText: { color: "#fff", fontWeight: "800", fontSize: 17 },
   reelUserName: {
-    flex: 1,
-    minWidth: 0,
     color: "#C9FF35",
     fontWeight: "800",
     fontSize: 16,
@@ -5966,10 +6104,12 @@ const styles = StyleSheet.create({
   storyProgressTrack: { flex: 1, height: 2.5, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 2, overflow: "hidden" },
   storyProgressFill: { height: "100%", backgroundColor: "#fff" },
   storyViewerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 },
-  storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
+  storyViewerUser: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
   storyViewerAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: APP_LIME, alignItems: "center", justifyContent: "center" },
   storyViewerAvatarText: { color: "#fff", fontWeight: "800" },
-  storyViewerName: { color: "#fff", fontWeight: "800" },
+  storyViewerMeta: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1, minWidth: 0 },
+  storyViewerName: { color: "#fff", fontWeight: "800", flexShrink: 1 },
+  storyViewerTime: { color: "rgba(255,255,255,0.72)", fontWeight: "600", fontSize: 13, flexShrink: 0 },
   storyViewerBody: {
     flex: 1,
     minHeight: 0,

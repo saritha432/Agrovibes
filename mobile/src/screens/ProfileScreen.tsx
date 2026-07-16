@@ -27,6 +27,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
+import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { useLanguage } from "../localization/LanguageContext";
 import { resolvePersonDisplayName, looksLikePhoneNumber, formatProfileHandle, isChosenUsername } from "../localization/feedDisplay";
@@ -50,8 +51,10 @@ import {
   unfollowUser,
   blockUser,
   unblockUser,
+  fetchHomeStoriesForUser,
   type FollowStatus
 } from "../services/api";
+import { publishActiveStories } from "../navigation/storyActivityBridge";
 import {
   getLocalFollowCountsByIdentity,
   getLocalFollowEdgesForServerSync,
@@ -543,6 +546,22 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (isPublicProfileView) return;
     void refreshMergedFollowStats();
   }, [isPublicProfileView, refreshMergedFollowStats]);
+
+  useEffect(() => {
+    if (!token) return;
+    const targetId = isPublicProfileView ? Number(publicUserId) : Number(user?.id);
+    if (!Number.isFinite(targetId) || targetId <= 0) return;
+    let cancelled = false;
+    void fetchHomeStoriesForUser(token, targetId)
+      .then((data) => {
+        if (cancelled) return;
+        publishActiveStories(data.stories || []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isPublicProfileView, publicUserId, token, user?.id]);
 
   const loadPublicProfileStats = useCallback(async () => {
     if (!isPublicProfileView || !token || !publicUserId) {
@@ -1315,23 +1334,21 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       <>
         <View style={styles.profileCard}>
           <View style={styles.headerMidRow}>
-            <Pressable
-              onPress={() => displayAvatarUrl && setAvatarPreviewOpen(true)}
-              disabled={!displayAvatarUrl}
-              style={({ pressed }) => [styles.avatarPressable, pressed && displayAvatarUrl ? { opacity: 0.85 } : null]}
-              accessibilityRole="button"
+            <StoryRingAvatar
+              uri={profileSubject?.avatarUrl}
+              name={profileSubject?.fullName || profileSubject?.username || "U"}
+              userId={isPublicProfileView ? publicUserId : user?.id}
+              userName={profileSubject?.fullName || profileSubject?.username || publicUserName || ""}
+              size={88}
+              borderRadius={44}
+              fallbackBackgroundColor={SURFACE}
+              initialsColor={TEXT}
+              style={styles.avatar}
+              onPressFallback={() => {
+                if (displayAvatarUrl) setAvatarPreviewOpen(true);
+              }}
               accessibilityLabel={t("viewProfilePhoto")}
-            >
-              <UserAvatar
-                uri={profileSubject?.avatarUrl}
-                name={profileSubject?.fullName || profileSubject?.username || "U"}
-                size={88}
-                borderRadius={44}
-                fallbackBackgroundColor={SURFACE}
-                initialsColor={TEXT}
-                style={styles.avatar}
-              />
-            </Pressable>
+            />
 
             <View style={styles.headerInfo}>
               <View style={styles.statsRow}>
