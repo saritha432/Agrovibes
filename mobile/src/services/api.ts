@@ -792,6 +792,24 @@ export async function fetchHomeStories(token?: string | null) {
   return { stories: data.stories.map(sanitizeHomeStory) };
 }
 
+export async function fetchHomeStoriesForUser(token: string, userId: number) {
+  const data = (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/user/${encodeURIComponent(String(userId))}`,
+    token
+  )) as { stories: HomeStory[] };
+  return { stories: (data.stories || []).map(sanitizeHomeStory) };
+}
+
+export async function fetchActiveHomeStories(token: string, userIds: number[]) {
+  const cleaned = [...new Set(userIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))].slice(0, 80);
+  if (!cleaned.length) return { stories: [] as HomeStory[] };
+  const data = (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/active?userIds=${encodeURIComponent(cleaned.join(","))}`,
+    token
+  )) as { stories: HomeStory[] };
+  return { stories: (data.stories || []).map(sanitizeHomeStory) };
+}
+
 export async function createHomeStory(
   payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string; musicLabel?: string },
   token?: string | null
@@ -839,6 +857,8 @@ export async function fetchHomeStoryViewers(token: string, storyId: number) {
 export type StoryDmContext = {
   peerUserId?: number | null;
   previewUrl?: string | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
   userName?: string | null;
 };
 
@@ -846,13 +866,22 @@ function buildStoryDmBody(payload: {
   storyId: number;
   text: string;
   previewUrl?: string | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
   userName?: string | null;
+  ownerId?: number | null;
   kind: "reply" | "like";
 }) {
+  const imageUrl = String(payload.imageUrl || "").trim() || null;
+  const videoUrl = String(payload.videoUrl || "").trim() || null;
+  const previewUrl = imageUrl || String(payload.previewUrl || "").trim() || null;
   return `[Cropvibe Story] ${JSON.stringify({
     storyId: payload.storyId,
+    ownerId: Number(payload.ownerId) > 0 ? Number(payload.ownerId) : null,
     text: payload.text,
-    previewUrl: payload.previewUrl || null,
+    previewUrl,
+    imageUrl,
+    videoUrl,
     userName: String(payload.userName || "").trim() || "Story",
     kind: payload.kind
   })}`;
@@ -1714,7 +1743,10 @@ async function sendStoryDmViaThread(
   const body = buildStoryDmBody({
     storyId,
     text,
-    previewUrl: ctx?.previewUrl,
+    previewUrl: ctx?.imageUrl || ctx?.previewUrl,
+    imageUrl: ctx?.imageUrl,
+    videoUrl: ctx?.videoUrl,
+    ownerId: peerUserId,
     userName: ctx?.userName,
     kind
   });

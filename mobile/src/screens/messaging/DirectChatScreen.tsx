@@ -33,10 +33,12 @@ import { ChatMediaBubble } from "../../components/ChatMediaBubble";
 import { ChatVoiceNoteBubble } from "../../components/ChatVoiceNoteBubble";
 import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
 import { SharedReelChatCard } from "../../components/SharedReelChatCard";
+import { StoryReplyThumb } from "../../components/StoryReplyThumb";
+import { StoryViewerModal } from "../../components/StoryViewerModal";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
 import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
@@ -47,6 +49,7 @@ import {
   isSocketChatConnected
 } from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
+import { publishActiveStories } from "../../navigation/storyActivityBridge";
 import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
 import { dismissIncomingCallRinging } from "../../push/incomingCallSignal";
 import {
@@ -351,7 +354,16 @@ function parseSharedProfileContent(body: string): { userId?: number; userName: s
 
 function parseStoryReplyContent(
   body: string
-): { storyId: number; text: string; previewUrl?: string | null; userName?: string; kind: "reply" | "like" } | null {
+): {
+  storyId: number;
+  ownerId?: number;
+  text: string;
+  previewUrl?: string | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  userName?: string;
+  kind: "reply" | "like";
+} | null {
   const prefix = "[Cropvibe Story]";
   if (!String(body || "").startsWith(prefix)) return null;
   const jsonText = String(body || "").slice(prefix.length).trim();
@@ -361,16 +373,40 @@ function parseStoryReplyContent(
     const storyId = Number(parsed.storyId);
     const text = String(parsed.text || "").trim();
     if (!Number.isFinite(storyId) || storyId <= 0 || !text) return null;
+    const ownerIdRaw = Number(parsed.ownerId);
     return {
       storyId,
+      ownerId: Number.isFinite(ownerIdRaw) && ownerIdRaw > 0 ? ownerIdRaw : undefined,
       text,
       previewUrl: parsed.previewUrl ? String(parsed.previewUrl).trim() || null : null,
+      imageUrl: parsed.imageUrl ? String(parsed.imageUrl).trim() || null : null,
+      videoUrl: parsed.videoUrl ? String(parsed.videoUrl).trim() || null : null,
       userName: String(parsed.userName || "").trim() || undefined,
       kind: parsed.kind === "like" ? "like" : "reply"
     };
   } catch {
     return null;
   }
+}
+
+function sortStoriesForPlayback(rows: HomeStory[]) {
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(String(a.createdAt || "")) || 0;
+    const tb = Date.parse(String(b.createdAt || "")) || 0;
+    return ta - tb || a.id - b.id;
+  });
+}
+
+const STORY_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isStoryFresh(story: Pick<HomeStory, "createdAt">) {
+  if (!story.createdAt) return false;
+  const created = Date.parse(String(story.createdAt));
+  return Number.isFinite(created) && Date.now() - created <= STORY_TTL_MS;
+}
+
+function hasPlayableStoryMedia(story: HomeStory) {
+  return !!(story.videoUrl || story.imageUrl);
 }
 
 function hasRenderableMedia(post: HomePost) {
@@ -508,6 +544,7 @@ export function DirectChatScreen() {
   );
 
   const [sharedReelViewer, setSharedReelViewer] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+  const [chatStoryViewer, setChatStoryViewer] = useState<{ stories: HomeStory[]; initialIndex: number } | null>(null);
   const [chatMediaViewer, setChatMediaViewer] = useState<{ items: DmMediaItem[]; index: number } | null>(null);
   const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
   const [attachBusy, setAttachBusy] = useState(false);
@@ -1111,6 +1148,41 @@ export function DirectChatScreen() {
     ]);
   };
 
+  const openStoryFromChat = useCallback(
+    async (storyReply: NonNullable<ReturnType<typeof parseStoryReplyContent>>, isSelf: boolean) => {
+      const ownerId =
+        Number(storyReply.ownerId) > 0
+          ? Number(storyReply.ownerId)
+          : isSelf
+            ? Number(peerUserId)
+            : Number(user?.id);
+      const storyId = Number(storyReply.storyId);
+      if (!Number.isFinite(ownerId) || ownerId <= 0 || !Number.isFinite(storyId) || storyId <= 0 || !token) {
+        return;
+      }
+
+      // Only open when the story is still live on the server. Expired/deleted → no action.
+      let stories: HomeStory[] = [];
+      try {
+        const data = await fetchHomeStoriesForUser(token, ownerId);
+        stories = data.stories || [];
+        if (stories.length) publishActiveStories(stories);
+      } catch {
+        // API error / offline — do not open from stale DM preview or cache.
+        return;
+      }
+
+      const playable = sortStoriesForPlayback(
+        stories.filter((s) => hasPlayableStoryMedia(s) && isStoryFresh(s))
+      );
+      const startIndex = playable.findIndex((s) => Number(s.id) === storyId);
+      if (startIndex < 0) return;
+
+      setChatStoryViewer({ stories: playable, initialIndex: startIndex });
+    },
+    [peerUserId, token, user?.id]
+  );
+
   const bottomPad = Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8;
 
   useEffect(() => {
@@ -1400,15 +1472,18 @@ export function DirectChatScreen() {
                 ) : sharedCall ? (
                   <CallHistoryBubble call={sharedCall} isSelf={isSelf} t={t} />
                 ) : storyReply ? (
-                  <View style={styles.storyReplyCard}>
-                    <View style={[styles.storyReplyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}>
-                      {storyReply.previewUrl ? (
-                        <Image source={{ uri: storyReply.previewUrl }} style={styles.replyQuoteThumb} resizeMode="cover" />
-                      ) : (
-                        <View style={[styles.replyQuoteThumb, styles.storyReplyThumbFallback]}>
-                          <Ionicons name="ellipse-outline" size={16} color="rgba(255,255,255,0.55)" />
-                        </View>
-                      )}
+                  <>
+                    <Pressable
+                      style={[styles.replyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}
+                      onPress={() => void openStoryFromChat(storyReply, isSelf)}
+                      onLongPress={() => openMessageActions(messageItem)}
+                      delayLongPress={280}
+                    >
+                      <StoryReplyThumb
+                        imageUrl={storyReply.imageUrl}
+                        videoUrl={storyReply.videoUrl}
+                        previewUrl={storyReply.previewUrl}
+                      />
                       <Text
                         style={[styles.replyQuoteText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}
                         numberOfLines={2}
@@ -1417,7 +1492,7 @@ export function DirectChatScreen() {
                           ? `Liked story${storyReply.userName ? ` · ${storyReply.userName}` : ""}`
                           : `Replied to story${storyReply.userName ? ` · ${storyReply.userName}` : ""}`}
                       </Text>
-                    </View>
+                    </Pressable>
                     {storyReply.kind === "like" ? (
                       <Text style={styles.storyLikeHeart}>❤️</Text>
                     ) : (
@@ -1425,7 +1500,7 @@ export function DirectChatScreen() {
                         {storyReply.text}
                       </Text>
                     )}
-                  </View>
+                  </>
                 ) : sharedReply ? (
                   <>
                     <Pressable
@@ -1691,6 +1766,13 @@ export function DirectChatScreen() {
         onPostsChange={(posts) => {
           setSharedReelViewer((prev) => (prev ? { ...prev, posts } : null));
         }}
+      />
+
+      <StoryViewerModal
+        visible={chatStoryViewer != null}
+        stories={chatStoryViewer?.stories ?? []}
+        initialIndex={chatStoryViewer?.initialIndex ?? 0}
+        onClose={() => setChatStoryViewer(null)}
       />
 
       <Modal
