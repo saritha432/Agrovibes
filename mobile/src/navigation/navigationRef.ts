@@ -45,6 +45,12 @@ export function navigateToJoinLive() {
   }
 }
 
+export function navigateToHome() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("Main", { screen: "Home" });
+  }
+}
+
 export function navigateToMyProfile() {
   if (navigationRef.isReady()) {
     navigationRef.navigate("Main", { screen: "Profile" });

@@ -29,6 +29,7 @@ import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import { UserAvatar } from "./UserAvatar";
+import { StoryRingAvatar } from "./StoryRingAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet, type SharePeer } from "./PostShareSheet";
 import * as Clipboard from "expo-clipboard";
@@ -1237,23 +1238,22 @@ export function PostsReelViewerModal({
                 );
               })()}
               <View style={styles.reelUserFollowRow}>
-                <Pressable
-                  style={styles.reelAuthorTap}
-                  onPress={() => openPostAuthorProfile(post)}
-                  accessibilityRole="button"
-                  accessibilityLabel={reelDisplayName}
-                >
-                  <UserAvatar
+                <View style={styles.reelAuthorTap}>
+                  <StoryRingAvatar
                     uri={postAuthorAvatarUri(post, user)}
                     name={post.userName}
+                    userId={post.userId}
+                    userName={post.userName}
                     size={44}
-                    borderRadius={12}
-                    style={styles.reelAvatarSq}
+                    onPressFallback={() => openPostAuthorProfile(post)}
+                    accessibilityLabel={reelDisplayName}
                   />
-                  <Text style={styles.reelUserName} numberOfLines={1}>
-                    {reelDisplayName}
-                  </Text>
-                </Pressable>
+                  <Pressable onPress={() => openPostAuthorProfile(post)} accessibilityRole="button">
+                    <Text style={styles.reelUserName} numberOfLines={1}>
+                      {reelDisplayName}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
               {showMusicRow ? (
                 <View style={styles.reelMusicRow}>
@@ -1644,7 +1644,7 @@ const styles = StyleSheet.create({
   reelRepostMeta: { color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", marginBottom: 8 },
   reelUserFollowRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "nowrap", minWidth: 0 },
   reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
-  reelAvatarSq: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  reelAvatarCircle: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", borderRadius: 22, overflow: "hidden" },
   reelUserName: { flex: 1, minWidth: 0, color: "#C9FF35", fontWeight: "800", fontSize: 16 },
   reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
   reelMusicText: { color: "rgba(255,255,255,0.95)", fontSize: 13, fontWeight: "600", flex: 1 },

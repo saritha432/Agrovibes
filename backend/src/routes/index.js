@@ -1307,7 +1307,7 @@ async function refreshPostReportCount(postId) {
         WHEN $2::int >= $3::int THEN COALESCE(feed_hidden_at, NOW())
         ELSE NULL
       END
-    WHERE id = $1
+    WHERE id = $1::integer
     `,
     [postId, count, threshold]
   );
@@ -4778,80 +4778,117 @@ router.get("/v1/community/questions", async (_req, res) => {
 
 const STORY_TTL_SQL = "24 hours";
 
+async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, authorUserId = null, limit = 40 } = {}) {
+  await ensureHomeStoriesTable();
+  await ensureSocialFollowsTable();
+  await ensureLearnUsersTable();
+  await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
+
+  const viewer = Number(viewerId);
+  if (!Number.isFinite(viewer) || viewer <= 0) return [];
+
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 40, 80));
+  const params = [viewer];
+  let authorFilter = "";
+  if (Number.isFinite(authorUserId) && authorUserId > 0) {
+    params.push(Number(authorUserId));
+    authorFilter = `AND COALESCE(s.user_id, lu.id) = $${params.length}::integer`;
+  } else if (Array.isArray(authorUserIds) && authorUserIds.length) {
+    const ids = [...new Set(authorUserIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))].slice(0, 80);
+    if (!ids.length) return [];
+    params.push(ids);
+    authorFilter = `AND COALESCE(s.user_id, lu.id) = ANY($${params.length}::integer[])`;
+  }
+
+  const result = await query(
+    `
+    SELECT
+      s.id,
+      s.user_id AS "userId",
+      s.user_name AS "userName",
+      s.district,
+      s.avatar_label AS "avatarLabel",
+      s.has_new AS "hasNew",
+      s.viewed,
+      s.video_url AS "videoUrl",
+      s.image_url AS "imageUrl",
+      s.created_at AS "createdAt",
+      COALESCE(
+        NULLIF(TRIM(lu.avatar_url), ''),
+        NULLIF(TRIM(nm.avatar_url), '')
+      ) AS "avatarUrl"
+    FROM home_stories s
+    LEFT JOIN learn_users lu ON lu.id = s.user_id
+    LEFT JOIN LATERAL (
+      SELECT u2.avatar_url, COALESCE(u2.is_private, false) AS is_private
+      FROM learn_users u2
+      WHERE
+        LOWER(TRIM(u2.full_name)) = LOWER(TRIM(s.user_name))
+        OR LOWER(TRIM(SPLIT_PART(u2.full_name, ' ', 1))) = LOWER(TRIM(s.user_name))
+        OR LOWER(TRIM(u2.full_name)) LIKE LOWER(TRIM(s.user_name)) || ' %'
+        OR LOWER(TRIM(REGEXP_REPLACE(COALESCE(u2.username, ''), '^@+', '', 'g'))) = LOWER(TRIM(s.user_name))
+      ORDER BY
+        CASE
+          WHEN LOWER(TRIM(u2.full_name)) = LOWER(TRIM(s.user_name)) THEN 0
+          WHEN LOWER(TRIM(SPLIT_PART(u2.full_name, ' ', 1))) = LOWER(TRIM(s.user_name)) THEN 1
+          WHEN LOWER(TRIM(u2.full_name)) LIKE LOWER(TRIM(s.user_name)) || ' %' THEN 2
+          ELSE 3
+        END,
+        u2.id ASC
+      LIMIT 1
+    ) nm ON TRUE
+    WHERE s.created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
+      AND COALESCE(s.user_id, lu.id) IS NOT NULL
+      AND COALESCE(lu.account_status, 'active') <> 'deactivated'
+      AND (
+        COALESCE(s.user_id, lu.id) = $1::integer
+        OR EXISTS (
+          SELECT 1
+          FROM social_follows sf
+          WHERE sf.follower_id = $1::integer
+            AND sf.following_id = COALESCE(s.user_id, lu.id)
+            AND sf.status = 'accepted'
+        )
+        OR COALESCE(lu.is_private, nm.is_private, false) = false
+      )
+      ${authorFilter}
+    ORDER BY
+      CASE
+        WHEN COALESCE(s.user_id, lu.id) = $1::integer THEN 0
+        WHEN EXISTS (
+          SELECT 1 FROM social_follows sf
+          WHERE sf.follower_id = $1::integer
+            AND sf.following_id = COALESCE(s.user_id, lu.id)
+            AND sf.status = 'accepted'
+        ) THEN 1
+        ELSE 2
+      END ASC,
+      s.created_at DESC
+    LIMIT ${safeLimit}
+    `,
+    params
+  );
+  return result.rows.map(sanitizeStoryRowMedia);
+}
+
 router.get("/v1/home/stories", authOptional, async (req, res) => {
   try {
     const viewerIdRaw = req.user && req.user.userId != null ? Number(req.user.userId) : null;
     const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:v4:${gen}:${viewerKey}`;
+    const cacheKey = `v1:home:stories:v5:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
       return;
     }
-    await ensureHomeStoriesTable();
-    await ensureSocialFollowsTable();
-    // Stories expire after 24 hours (Instagram-style). Remove expired rows so they no longer appear.
-    await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
-    const result = await query(
-      `
-      SELECT
-        s.id,
-        s.user_id AS "userId",
-        s.user_name AS "userName",
-        s.district,
-        s.avatar_label AS "avatarLabel",
-        s.has_new AS "hasNew",
-        s.viewed,
-        s.video_url AS "videoUrl",
-        s.image_url AS "imageUrl",
-        s.created_at AS "createdAt",
-        COALESCE(
-          NULLIF(TRIM(lu.avatar_url), ''),
-          NULLIF(TRIM(nm.avatar_url), '')
-        ) AS "avatarUrl"
-      FROM home_stories s
-      LEFT JOIN learn_users lu ON lu.id = s.user_id
-      LEFT JOIN LATERAL (
-        SELECT u2.avatar_url
-        FROM learn_users u2
-        WHERE
-          LOWER(TRIM(u2.full_name)) = LOWER(TRIM(s.user_name))
-          OR LOWER(TRIM(SPLIT_PART(u2.full_name, ' ', 1))) = LOWER(TRIM(s.user_name))
-          OR LOWER(TRIM(u2.full_name)) LIKE LOWER(TRIM(s.user_name)) || ' %'
-          OR LOWER(TRIM(REGEXP_REPLACE(COALESCE(u2.username, ''), '^@+', '', 'g'))) = LOWER(TRIM(s.user_name))
-        ORDER BY
-          CASE
-            WHEN LOWER(TRIM(u2.full_name)) = LOWER(TRIM(s.user_name)) THEN 0
-            WHEN LOWER(TRIM(SPLIT_PART(u2.full_name, ' ', 1))) = LOWER(TRIM(s.user_name)) THEN 1
-            WHEN LOWER(TRIM(u2.full_name)) LIKE LOWER(TRIM(s.user_name)) || ' %' THEN 2
-            ELSE 3
-          END,
-          u2.id ASC
-        LIMIT 1
-      ) nm ON TRUE
-      WHERE s.created_at >= NOW() - INTERVAL '${STORY_TTL_SQL}'
-        AND $1::integer IS NOT NULL
-        AND COALESCE(s.user_id, lu.id) IS NOT NULL
-        AND COALESCE(lu.account_status, 'active') <> 'deactivated'
-        AND (
-          COALESCE(s.user_id, lu.id) = $1::integer
-          OR EXISTS (
-            SELECT 1
-            FROM social_follows sf
-            WHERE sf.follower_id = $1::integer
-              AND sf.following_id = COALESCE(s.user_id, lu.id)
-              AND sf.status = 'accepted'
-          )
-        )
-      ORDER BY s.created_at DESC
-      LIMIT 40
-      `,
-      [viewerId]
-    );
-
-    const body = { stories: result.rows.map(sanitizeStoryRowMedia) };
+    if (!viewerId) {
+      res.json({ stories: [] });
+      return;
+    }
+    const stories = await loadVisibleStoriesForViewer(viewerId, { limit: 60 });
+    const body = { stories };
     res.json(body);
     await cacheSetJson(cacheKey, body, 45);
   } catch (error) {
@@ -4860,6 +4897,41 @@ router.get("/v1/home/stories", authOptional, async (req, res) => {
       source: "fallback",
       message: error.message
     });
+  }
+});
+
+router.get("/v1/home/stories/user/:userId", authRequired, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    const authorUserId = Number(req.params.userId);
+    if (!Number.isFinite(authorUserId) || authorUserId <= 0) {
+      res.status(400).json({ message: "Valid userId is required" });
+      return;
+    }
+    const stories = await loadVisibleStoriesForViewer(me, { authorUserId, limit: 40 });
+    res.json({ stories });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load user stories", error: error.message });
+  }
+});
+
+router.get("/v1/home/stories/active", authRequired, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    const raw = String(req.query.userIds || "");
+    const ids = raw
+      .split(",")
+      .map((v) => Number(String(v).trim()))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    const uniqueIds = [...new Set(ids)].slice(0, 80);
+    if (!uniqueIds.length) {
+      res.json({ stories: [] });
+      return;
+    }
+    const stories = await loadVisibleStoriesForViewer(me, { authorUserIds: uniqueIds, limit: 80 });
+    res.json({ stories });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load active stories", error: error.message });
   }
 });
 
@@ -5090,7 +5162,9 @@ router.post("/v1/home/stories/:storyId/reply", authRequired, async (req, res) =>
       ownerId: story.ownerId,
       storyId,
       text,
-      previewUrl: story.previewUrl,
+      previewUrl: story.imageUrl || story.previewUrl,
+      imageUrl: story.imageUrl,
+      videoUrl: story.videoUrl,
       userName: story.userName,
       kind: "reply"
     });
@@ -5132,7 +5206,9 @@ router.post("/v1/home/stories/:storyId/like", authRequired, async (req, res) => 
       ownerId: story.ownerId,
       storyId,
       text: "❤️",
-      previewUrl: story.previewUrl,
+      previewUrl: story.imageUrl || story.previewUrl,
+      imageUrl: story.imageUrl,
+      videoUrl: story.videoUrl,
       userName: story.userName,
       kind: "like"
     });
@@ -5174,15 +5250,23 @@ async function loadStoryForDm(storyId) {
   return {
     ownerId,
     userName: String(storyRes.rows[0].userName || "").trim() || "Story",
-    previewUrl: String(storyRes.rows[0].imageUrl || storyRes.rows[0].videoUrl || "").trim() || null
+    imageUrl: String(storyRes.rows[0].imageUrl || "").trim() || null,
+    videoUrl: String(storyRes.rows[0].videoUrl || "").trim() || null,
+    previewUrl:
+      String(storyRes.rows[0].imageUrl || "").trim() ||
+      String(storyRes.rows[0].videoUrl || "").trim() ||
+      null
   };
 }
 
-async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, userName, kind }) {
+async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, imageUrl, videoUrl, userName, kind }) {
   const payload = {
     storyId,
+    ownerId,
     text,
-    previewUrl,
+    previewUrl: imageUrl || previewUrl || null,
+    imageUrl: imageUrl || null,
+    videoUrl: videoUrl || null,
     userName,
     kind: kind === "like" ? "like" : "reply"
   };
@@ -5201,13 +5285,14 @@ async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, userName,
     [me, ownerId, body]
   );
   const excerpt = kind === "like" ? "Liked your story" : String(text || "").slice(0, 80);
+  const pushImage = String(imageUrl || "").trim() || undefined;
   fireSocialPush({
     userId: ownerId,
     type: "direct_message",
     actorId: me,
     actorName: await actorDisplayName(me),
     commentExcerpt: excerpt,
-    imageUrl: previewUrl || undefined
+    imageUrl: pushImage
   });
   emitDirectMessage({
     senderId: me,
@@ -6642,7 +6727,7 @@ router.post("/v1/users/:userId/report", authRequired, async (req, res) => {
     const existing = await query(
       `
       SELECT id FROM user_reports
-      WHERE reported_user_id = $1 AND reporter_user_id = $2
+      WHERE reported_user_id = $1::integer AND reporter_user_id = $2::integer
       LIMIT 1
       `,
       [reportedUserId, reporterId]
@@ -6654,7 +6739,7 @@ router.post("/v1/users/:userId/report", authRequired, async (req, res) => {
     await query(
       `
       INSERT INTO user_reports (reported_user_id, reporter_user_id, reason)
-      VALUES ($1, $2, $3)
+      VALUES ($1::integer, $2::integer, $3::text)
       `,
       [reportedUserId, reporterId, reason]
     );
