@@ -807,6 +807,55 @@ export async function createHomeStory(
   return (await response.json()) as { story: HomeStory };
 }
 
+export type StoryViewer = {
+  userId: number;
+  fullName: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  viewedAt?: string;
+};
+
+export async function deleteHomeStory(token: string, storyId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean; deleted: boolean; storyId: number };
+}
+
+export async function markHomeStoryViewed(token: string, storyId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/view`, token, {
+    method: "POST"
+  })) as { ok: boolean; viewed?: boolean; own?: boolean };
+}
+
+export async function fetchHomeStoryViewers(token: string, storyId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/viewers`, token)) as {
+    viewers: StoryViewer[];
+    count: number;
+  };
+}
+
+export type StoryDmContext = {
+  peerUserId?: number | null;
+  previewUrl?: string | null;
+  userName?: string | null;
+};
+
+function buildStoryDmBody(payload: {
+  storyId: number;
+  text: string;
+  previewUrl?: string | null;
+  userName?: string | null;
+  kind: "reply" | "like";
+}) {
+  return `[Cropvibe Story] ${JSON.stringify({
+    storyId: payload.storyId,
+    text: payload.text,
+    previewUrl: payload.previewUrl || null,
+    userName: String(payload.userName || "").trim() || "Story",
+    kind: payload.kind
+  })}`;
+}
+
 export const HOME_FEED_PAGE_SIZE = 10;
 
 export type HomeFeedPage = {
@@ -1637,6 +1686,62 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text })
   })) as { message: DirectMessageItem };
+}
+
+async function sendStoryDmViaThread(
+  token: string,
+  storyId: number,
+  text: string,
+  kind: "reply" | "like",
+  ctx?: StoryDmContext
+) {
+  const peerUserId = Number(ctx?.peerUserId);
+  if (!Number.isFinite(peerUserId) || peerUserId <= 0) {
+    const err: Error & { status?: number } = new Error(
+      "Story reply is not available yet. Redeploy the API, or open a story from someone with a valid profile."
+    );
+    err.status = 404;
+    throw err;
+  }
+  const body = buildStoryDmBody({
+    storyId,
+    text,
+    previewUrl: ctx?.previewUrl,
+    userName: ctx?.userName,
+    kind
+  });
+  const data = await sendDirectMessage(token, peerUserId, body);
+  return { ok: true as const, message: data.message, liked: kind === "like" ? true : undefined };
+}
+
+export async function replyToHomeStory(token: string, storyId: number, text: string, ctx?: StoryDmContext) {
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/reply`, token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text })
+    })) as { ok: boolean; message: DirectMessageItem };
+  } catch (error: unknown) {
+    const status = (error as { status?: number })?.status;
+    if (status === 404) {
+      return sendStoryDmViaThread(token, storyId, text, "reply", ctx);
+    }
+    throw error;
+  }
+}
+
+export async function likeHomeStory(token: string, storyId: number, ctx?: StoryDmContext) {
+  try {
+    return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/like`, token, {
+      method: "POST"
+    })) as { ok: boolean; liked: boolean; message: DirectMessageItem };
+  } catch (error: unknown) {
+    const status = (error as { status?: number })?.status;
+    if (status === 404) {
+      return sendStoryDmViaThread(token, storyId, "❤️", "like", ctx);
+    }
+    throw error;
+  }
 }
 
 export async function deleteDirectMessage(token: string, messageId: number) {

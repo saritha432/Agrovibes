@@ -1703,6 +1703,26 @@ async function ensureHomeStoriesTable() {
   homeStoriesTableReady = true;
 }
 
+let homeStoryViewsTableReady = false;
+async function ensureHomeStoryViewsTable() {
+  if (homeStoryViewsTableReady) return;
+  await ensureHomeStoriesTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_story_views (
+      id SERIAL PRIMARY KEY,
+      story_id INT NOT NULL REFERENCES home_stories(id) ON DELETE CASCADE,
+      viewer_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (story_id, viewer_id)
+    )
+    `
+  );
+  await query(`CREATE INDEX IF NOT EXISTS idx_home_story_views_story ON home_story_views(story_id, created_at DESC)`);
+  homeStoryViewsTableReady = true;
+}
+
 async function findLearnUserIdForPostAuthor(displayName) {
   const trimmed = String(displayName || "").trim();
   if (!trimmed) return null;
@@ -4099,9 +4119,12 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
           WHEN p.video_url IS NOT NULL AND TRIM(COALESCE(p.video_url, '')) <> '' THEN true
           ELSE false
         END AS "postIsReel",
-        p.thumbnail_url AS "postThumbnailUrl",
+        COALESCE(
+          NULLIF(TRIM(p.thumbnail_url), ''),
+          NULLIF(TRIM(p.image_url), '')
+        ) AS "postThumbnailUrl",
         p.image_url AS "postImageUrl",
-        NULL::text AS "postVideoUrl",
+        p.video_url AS "postVideoUrl",
         p.live_status AS "postLiveStatus",
         p.live_ended_at AS "postLiveEndedAt"
       FROM social_notifications n
@@ -4875,6 +4898,287 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
     res.status(500).json({ message: "Failed to create story", error: error.message });
   }
 });
+
+router.delete("/v1/home/stories/:storyId", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoriesTable();
+    const storyId = Number(req.params.storyId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    const existing = await query(
+      `SELECT id, user_id AS "userId", user_name AS "userName" FROM home_stories WHERE id = $1 LIMIT 1`,
+      [storyId]
+    );
+    if (!existing.rows[0]) {
+      res.status(404).json({ message: "Story not found" });
+      return;
+    }
+    const ownerId = Number(existing.rows[0].userId);
+    if (!Number.isFinite(ownerId) || ownerId <= 0 || ownerId !== me) {
+      res.status(403).json({ message: "You can only delete your own story" });
+      return;
+    }
+    await query(`DELETE FROM home_stories WHERE id = $1`, [storyId]);
+    await cacheIncr("home:stories:gen");
+    res.json({ ok: true, deleted: true, storyId });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete story", error: error.message });
+  }
+});
+
+router.post("/v1/home/stories/:storyId/view", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoryViewsTable();
+    const storyId = Number(req.params.storyId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    const storyRes = await query(
+      `SELECT id, user_id AS "userId" FROM home_stories WHERE id = $1 LIMIT 1`,
+      [storyId]
+    );
+    if (!storyRes.rows[0]) {
+      res.status(404).json({ message: "Story not found" });
+      return;
+    }
+    const ownerId = Number(storyRes.rows[0].userId);
+    if (Number.isFinite(ownerId) && ownerId === me) {
+      res.json({ ok: true, viewed: false, own: true });
+      return;
+    }
+    await query(
+      `
+      INSERT INTO home_story_views (story_id, viewer_id)
+      VALUES ($1, $2)
+      ON CONFLICT (story_id, viewer_id) DO UPDATE SET created_at = NOW()
+      `,
+      [storyId, me]
+    );
+    res.json({ ok: true, viewed: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to record story view", error: error.message });
+  }
+});
+
+router.get("/v1/home/stories/:storyId/viewers", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoryViewsTable();
+    const storyId = Number(req.params.storyId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    const storyRes = await query(
+      `SELECT id, user_id AS "userId" FROM home_stories WHERE id = $1 LIMIT 1`,
+      [storyId]
+    );
+    if (!storyRes.rows[0]) {
+      res.status(404).json({ message: "Story not found" });
+      return;
+    }
+    const ownerId = Number(storyRes.rows[0].userId);
+    if (!Number.isFinite(ownerId) || ownerId !== me) {
+      res.status(403).json({ message: "Only the story author can see viewers" });
+      return;
+    }
+    const result = await query(
+      `
+      SELECT
+        u.id AS "userId",
+        u.full_name AS "fullName",
+        NULLIF(TRIM(u.username), '') AS "username",
+        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
+        v.created_at AS "viewedAt"
+      FROM home_story_views v
+      JOIN learn_users u ON u.id = v.viewer_id
+      WHERE v.story_id = $1
+      ORDER BY v.created_at DESC
+      LIMIT 200
+      `,
+      [storyId]
+    );
+    const viewers = result.rows.map((row) => ({
+      userId: row.userId,
+      fullName: sanitizePersonDisplayName(row.fullName, row.username),
+      username: row.username || null,
+      avatarUrl: row.avatarUrl || null,
+      viewedAt: row.viewedAt
+    }));
+    res.json({ viewers, count: viewers.length });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load story viewers", error: error.message });
+  }
+});
+
+router.post("/v1/home/stories/:storyId/reply", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoriesTable();
+    await ensureDirectMessagesTable();
+    const storyId = Number(req.params.storyId);
+    const me = Number(req.user.userId);
+    const text = String(req.body?.text || "").trim();
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    if (!text) {
+      res.status(400).json({ message: "Reply text is required" });
+      return;
+    }
+    if (text.length > 500) {
+      res.status(400).json({ message: "Reply is too long" });
+      return;
+    }
+    if (await isUserAccountDeactivated(me)) {
+      res.status(403).json({ message: "Activate your account to reply to stories" });
+      return;
+    }
+    const story = await loadStoryForDm(storyId);
+    if (!story) {
+      res.status(404).json({ message: "Story not found" });
+      return;
+    }
+    if (story.ownerId === me) {
+      res.status(400).json({ message: "You cannot reply to your own story" });
+      return;
+    }
+    const message = await insertStoryDm({
+      me,
+      ownerId: story.ownerId,
+      storyId,
+      text,
+      previewUrl: story.previewUrl,
+      userName: story.userName,
+      kind: "reply"
+    });
+    res.status(201).json({ ok: true, message });
+  } catch (error) {
+    if (error && error.statusCode === 404) {
+      res.status(404).json({ message: error.message || "Story author not found" });
+      return;
+    }
+    res.status(500).json({ message: "Failed to reply to story", error: error.message });
+  }
+});
+
+router.post("/v1/home/stories/:storyId/like", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoriesTable();
+    await ensureDirectMessagesTable();
+    const storyId = Number(req.params.storyId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    if (await isUserAccountDeactivated(me)) {
+      res.status(403).json({ message: "Activate your account to like stories" });
+      return;
+    }
+    const story = await loadStoryForDm(storyId);
+    if (!story) {
+      res.status(404).json({ message: "Story not found" });
+      return;
+    }
+    if (story.ownerId === me) {
+      res.status(400).json({ message: "You cannot like your own story" });
+      return;
+    }
+    const message = await insertStoryDm({
+      me,
+      ownerId: story.ownerId,
+      storyId,
+      text: "❤️",
+      previewUrl: story.previewUrl,
+      userName: story.userName,
+      kind: "like"
+    });
+    res.status(201).json({ ok: true, liked: true, message });
+  } catch (error) {
+    if (error && error.statusCode === 404) {
+      res.status(404).json({ message: error.message || "Story author not found" });
+      return;
+    }
+    res.status(500).json({ message: "Failed to like story", error: error.message });
+  }
+});
+
+async function loadStoryForDm(storyId) {
+  const storyRes = await query(
+    `
+    SELECT
+      id,
+      user_id AS "userId",
+      user_name AS "userName",
+      video_url AS "videoUrl",
+      image_url AS "imageUrl"
+    FROM home_stories
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [storyId]
+  );
+  if (!storyRes.rows[0]) return null;
+  let ownerId = Number(storyRes.rows[0].userId);
+  if (!Number.isFinite(ownerId) || ownerId <= 0) {
+    ownerId = Number(await findLearnUserIdForPostAuthor(storyRes.rows[0].userName)) || 0;
+  }
+  if (!Number.isFinite(ownerId) || ownerId <= 0) {
+    const err = new Error("Story author not found");
+    err.statusCode = 404;
+    throw err;
+  }
+  return {
+    ownerId,
+    userName: String(storyRes.rows[0].userName || "").trim() || "Story",
+    previewUrl: String(storyRes.rows[0].imageUrl || storyRes.rows[0].videoUrl || "").trim() || null
+  };
+}
+
+async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, userName, kind }) {
+  const payload = {
+    storyId,
+    text,
+    previewUrl,
+    userName,
+    kind: kind === "like" ? "like" : "reply"
+  };
+  const body = `[Cropvibe Story] ${JSON.stringify(payload)}`;
+  const ins = await query(
+    `
+    INSERT INTO direct_messages (sender_id, receiver_id, body, is_read)
+    VALUES ($1, $2, $3, false)
+    RETURNING
+      id,
+      sender_id AS "senderId",
+      receiver_id AS "receiverId",
+      body,
+      created_at AS "createdAt"
+    `,
+    [me, ownerId, body]
+  );
+  const excerpt = kind === "like" ? "Liked your story" : String(text || "").slice(0, 80);
+  fireSocialPush({
+    userId: ownerId,
+    type: "direct_message",
+    actorId: me,
+    actorName: await actorDisplayName(me),
+    commentExcerpt: excerpt,
+    imageUrl: previewUrl || undefined
+  });
+  emitDirectMessage({
+    senderId: me,
+    receiverId: ownerId,
+    message: ins.rows[0]
+  });
+  return ins.rows[0];
+}
 
 router.get("/v1/home/posts", authOptional, async (req, res) => {
   try {

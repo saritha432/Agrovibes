@@ -51,6 +51,11 @@ import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeact
 import { useAuth } from "../auth/AuthContext";
 import {
   createHomeStory,
+  deleteHomeStory,
+  markHomeStoryViewed,
+  fetchHomeStoryViewers,
+  replyToHomeStory,
+  likeHomeStory,
   createHomePostComment,
   deleteHomePost,
   deleteHomePostComment,
@@ -69,6 +74,7 @@ import {
   fetchMutualConnections,
   HomePost,
   HomeStory,
+  type StoryViewer,
   type ScheduledLive,
   likeHomePost,
   saveHomePost,
@@ -1310,6 +1316,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
   /** Only this user's stories are shown in the viewer (Instagram-style, not a global merged list). */
   const [storyPlaybackQueue, setStoryPlaybackQueue] = useState<HomeStory[]>([]);
+  const [storyReplyDraft, setStoryReplyDraft] = useState("");
+  const [storyReplyBusy, setStoryReplyBusy] = useState(false);
+  const [storyViewersOpen, setStoryViewersOpen] = useState(false);
+  const [storyViewers, setStoryViewers] = useState<StoryViewer[]>([]);
+  const [storyViewersCount, setStoryViewersCount] = useState(0);
+  const [storyViewersLoading, setStoryViewersLoading] = useState(false);
+  const [storyDeleteBusy, setStoryDeleteBusy] = useState(false);
+  const [storyLikedIds, setStoryLikedIds] = useState<Set<number>>(() => new Set());
+  const [storyLikeBusy, setStoryLikeBusy] = useState(false);
   const [activeHomeTab, setActiveHomeTabRaw] = useState<HomeTopTab>("Feed");
   const tabFadeAnim = useRef(new Animated.Value(1)).current;
   const tabSlideAnim = useRef(new Animated.Value(0)).current;
@@ -2009,6 +2024,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const activeStory = storyPlaybackQueue[activeStoryIndex];
   const activeStoryAvatarUri = activeStory ? storyAuthorAvatarUri(activeStory, user, avatarLookup, posts) : undefined;
+  const isOwnActiveStory = !!activeStory && storyViewerOwns(activeStory, currentUserId, currentUserStoryKeys);
 
   const applyViewedStories = useCallback(
     (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
@@ -2018,12 +2034,78 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const closeStory = () => {
     setStoryOpen(false);
     setStoryPlaybackQueue([]);
+    setStoryReplyDraft("");
+    setStoryReplyBusy(false);
+    setStoryLikeBusy(false);
+    setStoryViewersOpen(false);
+    setStoryViewers([]);
+    setStoryViewersCount(0);
     storyPausedRef.current = false;
     setStoryHoldPaused(false);
     storyAnimRef.current?.stop();
     progress.stopAnimation();
     progress.setValue(0);
   };
+
+  const loadStoryViewers = useCallback(
+    async (storyId: number) => {
+      if (!token || !Number.isFinite(storyId) || storyId <= 0) {
+        setStoryViewers([]);
+        setStoryViewersCount(0);
+        return;
+      }
+      setStoryViewersLoading(true);
+      try {
+        const data = await fetchHomeStoryViewers(token, storyId);
+        setStoryViewers(Array.isArray(data.viewers) ? data.viewers : []);
+        setStoryViewersCount(Number(data.count) || 0);
+      } catch {
+        setStoryViewers([]);
+        setStoryViewersCount(0);
+      } finally {
+        setStoryViewersLoading(false);
+      }
+    },
+    [token]
+  );
+
+  const confirmDeleteActiveStory = useCallback(() => {
+    if (!token || !activeStory?.id || !isOwnActiveStory || storyDeleteBusy) return;
+    const storyId = activeStory.id;
+    const runDelete = async () => {
+      setStoryDeleteBusy(true);
+      try {
+        await deleteHomeStory(token, storyId);
+        setStories((prev) => prev.filter((s) => s.id !== storyId));
+        setOptimisticStories((prev) => prev.filter((s) => s.id !== storyId));
+        setStoryPlaybackQueue((prev) => {
+          const next = prev.filter((s) => s.id !== storyId);
+          if (!next.length) {
+            requestAnimationFrame(() => closeStory());
+            return [];
+          }
+          setActiveStoryIndex((idx) => Math.min(idx, next.length - 1));
+          return next;
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "Could not delete story.";
+        if (Platform.OS === "web" && typeof window !== "undefined") window.alert(msg);
+        else Alert.alert("Delete failed", msg);
+      } finally {
+        setStoryDeleteBusy(false);
+      }
+    };
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      if (!window.confirm("Delete this story?")) return;
+      void runDelete();
+      return;
+    }
+    Alert.alert("Delete story", "Delete this story? This can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => void runDelete() }
+    ]);
+  }, [activeStory?.id, isOwnActiveStory, storyDeleteBusy, token]);
 
   const nextStory = () => {
     if (activeStoryIndex >= storyPlaybackQueue.length - 1) {
@@ -2087,6 +2169,64 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     startStoryProgress(storyProgressAtPauseRef.current);
   }, [startStoryProgress]);
 
+  const sendStoryReply = useCallback(async () => {
+    if (!token || !activeStory?.id || isOwnActiveStory || storyReplyBusy) return;
+    const text = storyReplyDraft.trim();
+    if (!text) return;
+    setStoryReplyBusy(true);
+    try {
+      await replyToHomeStory(token, activeStory.id, text, {
+        peerUserId: activeStory.userId,
+        previewUrl: activeStory.imageUrl || activeStory.videoUrl || null,
+        userName: activeStory.userName
+      });
+      setStoryReplyDraft("");
+      resumeStoryHold();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Could not send reply.";
+      if (Platform.OS === "web" && typeof window !== "undefined") window.alert(msg);
+      else Alert.alert("Reply failed", msg);
+    } finally {
+      setStoryReplyBusy(false);
+    }
+  }, [activeStory, isOwnActiveStory, resumeStoryHold, storyReplyBusy, storyReplyDraft, token]);
+
+  const likeActiveStory = useCallback(async () => {
+    if (!token || !activeStory?.id || isOwnActiveStory || storyLikeBusy) return;
+    if (storyLikedIds.has(activeStory.id)) return;
+    setStoryLikeBusy(true);
+    try {
+      await likeHomeStory(token, activeStory.id, {
+        peerUserId: activeStory.userId,
+        previewUrl: activeStory.imageUrl || activeStory.videoUrl || null,
+        userName: activeStory.userName
+      });
+      setStoryLikedIds((prev) => {
+        const next = new Set(prev);
+        next.add(activeStory.id);
+        return next;
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Could not like story.";
+      if (Platform.OS === "web" && typeof window !== "undefined") window.alert(msg);
+      else Alert.alert("Like failed", msg);
+    } finally {
+      setStoryLikeBusy(false);
+    }
+  }, [activeStory, isOwnActiveStory, storyLikeBusy, storyLikedIds, token]);
+
+  const openStoryViewersSheet = useCallback(() => {
+    if (!activeStory?.id || !isOwnActiveStory) return;
+    pauseStoryHold();
+    setStoryViewersOpen(true);
+    void loadStoryViewers(activeStory.id);
+  }, [activeStory?.id, isOwnActiveStory, loadStoryViewers, pauseStoryHold]);
+
+  const closeStoryViewersSheet = useCallback(() => {
+    setStoryViewersOpen(false);
+    if (isStoryOpen) resumeStoryHold();
+  }, [isStoryOpen, resumeStoryHold]);
+
   useEffect(() => {
     if (!isStoryOpen || storyPlaybackQueue.length === 0) return;
     storyPausedRef.current = false;
@@ -2132,6 +2272,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     });
     setStories((prev) => prev.map((s) => (s.id === activeStory.id ? { ...s, viewed: true } : s)));
   }, [activeStory?.id, isStoryOpen]);
+
+  useEffect(() => {
+    if (!isStoryOpen || !activeStory?.id || !token) return;
+    setStoryReplyDraft("");
+    setStoryViewersOpen(false);
+    if (isOwnActiveStory) {
+      void loadStoryViewers(activeStory.id);
+      return;
+    }
+    void markHomeStoryViewed(token, activeStory.id).catch(() => {});
+  }, [activeStory?.id, isOwnActiveStory, isStoryOpen, loadStoryViewers, token]);
 
   useEffect(() => {
     if (user?.accountStatus === "deactivated") {
@@ -4582,7 +4733,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         statusBarTranslucent
         onRequestClose={closeStory}
       >
-        <View style={styles.storyViewerRoot}>
+        <KeyboardAvoidingView
+          style={styles.storyViewerRoot}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
           <View style={[styles.storyViewerTopChrome, { paddingTop: modalTopInset }]}>
             <View style={styles.storyProgressRow}>
               {storyPlaybackQueue.map((s, idx) => {
@@ -4623,9 +4777,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   </Text>
                 </View>
               </View>
-              <Pressable onPress={closeStory} hitSlop={10}>
-                <Ionicons name="close" size={26} color="#fff" />
-              </Pressable>
+              <View style={styles.storyViewerTopActions}>
+                {isOwnActiveStory ? (
+                  <Pressable
+                    onPress={confirmDeleteActiveStory}
+                    hitSlop={10}
+                    disabled={storyDeleteBusy}
+                    accessibilityLabel="Delete story"
+                  >
+                    {storyDeleteBusy ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="trash-outline" size={22} color="#fff" />
+                    )}
+                  </Pressable>
+                ) : null}
+                <Pressable onPress={closeStory} hitSlop={10}>
+                  <Ionicons name="close" size={26} color="#fff" />
+                </Pressable>
+              </View>
             </View>
           </View>
 
@@ -4641,7 +4811,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             {activeStory?.videoUrl ? (
               <ContainedExpoVideo
                 uri={activeStory.videoUrl}
-                shouldPlay={!storyHoldPaused}
+                shouldPlay={!storyHoldPaused && !storyViewersOpen}
                 containerWidth={storyViewport.width || windowWidth}
                 containerHeight={storyViewport.height || windowHeight}
                 fit="contain"
@@ -4653,7 +4823,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="contain" />
             ) : null}
 
-            <View style={styles.storyTapZones}>
+            <View style={styles.storyTapZones} pointerEvents={storyViewersOpen ? "none" : "box-none"}>
               <Pressable
                 style={styles.storyTapZone}
                 onPress={prevStory}
@@ -4670,7 +4840,110 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               />
             </View>
           </View>
-        </View>
+
+          {isOwnActiveStory ? (
+            <View style={[styles.storyBottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              <Pressable style={styles.storyViewersBtn} onPress={openStoryViewersSheet}>
+                <Ionicons name="eye-outline" size={20} color="#fff" />
+                <Text style={styles.storyViewersBtnText}>
+                  {storyViewersLoading ? "..." : `${storyViewersCount} viewer${storyViewersCount === 1 ? "" : "s"}`}
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={[styles.storyBottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              <TextInput
+                value={storyReplyDraft}
+                onChangeText={(text) => {
+                  if (!storyHoldPaused) pauseStoryHold();
+                  setStoryReplyDraft(text);
+                }}
+                onFocus={pauseStoryHold}
+                onBlur={() => {
+                  if (!storyReplyDraft.trim()) resumeStoryHold();
+                }}
+                placeholder="Send message"
+                placeholderTextColor="rgba(255,255,255,0.55)"
+                style={styles.storyReplyInput}
+                maxLength={500}
+                returnKeyType="send"
+                onSubmitEditing={() => void sendStoryReply()}
+              />
+              <Pressable
+                style={[styles.storyReplySend, !storyReplyDraft.trim() || storyReplyBusy ? styles.storyReplySendDisabled : null]}
+                disabled={!storyReplyDraft.trim() || storyReplyBusy}
+                onPress={() => void sendStoryReply()}
+                accessibilityLabel="Send reply"
+              >
+                {storyReplyBusy ? (
+                  <ActivityIndicator color="#111" size="small" />
+                ) : (
+                  <Ionicons name="paper-plane" size={18} color="#111" />
+                )}
+              </Pressable>
+              <Pressable
+                style={styles.storyLikeBtn}
+                onPress={() => void likeActiveStory()}
+                disabled={storyLikeBusy || (activeStory?.id != null && storyLikedIds.has(activeStory.id))}
+                accessibilityLabel="Like story"
+              >
+                {storyLikeBusy ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons
+                    name={activeStory?.id != null && storyLikedIds.has(activeStory.id) ? "heart" : "heart-outline"}
+                    size={28}
+                    color={activeStory?.id != null && storyLikedIds.has(activeStory.id) ? "#ff2d55" : "#fff"}
+                  />
+                )}
+              </Pressable>
+            </View>
+          )}
+        </KeyboardAvoidingView>
+
+        <Modal visible={storyViewersOpen} transparent animationType="slide" onRequestClose={closeStoryViewersSheet}>
+          <View style={styles.storyViewersModalRoot}>
+            <Pressable style={styles.storyViewersBackdrop} onPress={closeStoryViewersSheet} />
+            <View style={[styles.storyViewersSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              <View style={styles.storyViewersHandle} />
+              <Text style={styles.storyViewersTitle}>
+                Viewers · {storyViewersCount}
+              </Text>
+              {storyViewersLoading ? (
+                <ActivityIndicator color={APP_LIME} style={{ marginTop: 18 }} />
+              ) : (
+                <FlatList
+                  data={storyViewers}
+                  keyExtractor={(item) => String(item.userId)}
+                  style={styles.storyViewersList}
+                  ListEmptyComponent={<Text style={styles.storyViewersEmpty}>No views yet</Text>}
+                  renderItem={({ item }) => (
+                    <View style={styles.storyViewerRow}>
+                      <UserAvatar
+                        uri={item.avatarUrl}
+                        name={item.fullName}
+                        size={40}
+                        borderRadius={20}
+                        fallbackBackgroundColor="#404040"
+                        initialsColor="#fff"
+                      />
+                      <View style={styles.storyViewerRowText}>
+                        <Text style={styles.storyViewerRowName} numberOfLines={1}>
+                          {item.fullName}
+                        </Text>
+                        {item.username ? (
+                          <Text style={styles.storyViewerRowUser} numberOfLines={1}>
+                            @{String(item.username).replace(/^@+/, "")}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
       </Modal>
 
       <Modal
@@ -5713,6 +5986,80 @@ const styles = StyleSheet.create({
   },
   storyTapZones: { ...StyleSheet.absoluteFillObject, flexDirection: "row" },
   storyTapZone: { flex: 1 },
+  storyViewerTopActions: { flexDirection: "row", alignItems: "center", gap: 16 },
+  storyBottomBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    backgroundColor: "transparent"
+  },
+  storyViewersBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4
+  },
+  storyViewersBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  storyReplyInput: {
+    flex: 1,
+    minHeight: 42,
+    maxHeight: 88,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 15
+  },
+  storyReplySend: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyReplySendDisabled: { opacity: 0.45 },
+  storyLikeBtn: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  storyViewersModalRoot: { flex: 1, justifyContent: "flex-end" },
+  storyViewersBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)" },
+  storyViewersSheet: {
+    backgroundColor: "#1a1a1a",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    maxHeight: "55%"
+  },
+  storyViewersHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.28)",
+    marginBottom: 12
+  },
+  storyViewersTitle: { color: "#fff", fontWeight: "800", fontSize: 16, marginBottom: 10 },
+  storyViewersList: { maxHeight: 360 },
+  storyViewersEmpty: { color: "rgba(255,255,255,0.55)", textAlign: "center", paddingVertical: 28 },
+  storyViewerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10
+  },
+  storyViewerRowText: { flex: 1, minWidth: 0 },
+  storyViewerRowName: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  storyViewerRowUser: { color: "rgba(255,255,255,0.55)", fontSize: 13, marginTop: 2 },
   postViewerRoot: { flex: 1, backgroundColor: APP_DARK_BG },
   postViewerTop: {
     position: "absolute",
