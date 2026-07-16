@@ -79,15 +79,22 @@ import { BlockedAccountsScreen } from "../screens/BlockedAccountsScreen";
 import { AboutScreen } from "../screens/AboutScreen";
 import type { RootStackParamList } from "./rootStackTypes";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
+import { useAuth } from "../auth/AuthContext";
 
 export type { MainTabParamList, RootStackParamList } from "./rootStackTypes";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator() {
+  const { token, user } = useAuth();
+  const hasSession = Boolean(token || user);
+
   return (
-    <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Splash" component={SplashScreen} />
+    <Stack.Navigator
+      initialRouteName={hasSession ? "Main" : "InitialSetup"}
+      screenOptions={{ headerShown: false }}
+    >
+      <Stack.Screen name="Splash" component={SplashScreen} options={{ animation: "none" }} />
       <Stack.Screen name="InitialSetup" component={InitialSetupScreen} />
       <Stack.Screen name="AuthChoice" component={AuthChoiceScreen} />
       <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />

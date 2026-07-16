@@ -85,7 +85,7 @@ export const APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -334,7 +334,7 @@ export const APP_STRINGS_HI: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -548,7 +548,7 @@ export const APP_STRINGS_TE: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -762,7 +762,7 @@ export const APP_STRINGS_KN: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -976,7 +976,7 @@ export const APP_STRINGS_ML: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -1190,7 +1190,7 @@ export const APP_STRINGS_TA: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -1404,7 +1404,7 @@ export const APP_STRINGS_MR: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",
@@ -1618,7 +1618,7 @@ export const APP_STRINGS_BN: typeof APP_STRINGS_EN = {
   farmingPolicyTitle: "Farming content only",
   farmingPolicyBody:
     "Cropvibe is for farming and agriculture. Posts, reels, and stories should relate to crops, livestock, farm work, agri market, or the farming community. Off-topic content can be removed.",
-  farmingTopicLabel: "Farming topic",
+  farmingTopicLabel: "Select farming topic",
   farmingTopicCrops: "Crops",
   farmingTopicLivestock: "Livestock",
   farmingTopicMachinery: "Machinery",

@@ -637,6 +637,8 @@ export interface HomePost {
     quoteCaption?: string;
     repostedAt: string;
   };
+  /** Latest people who reshared this post (newest first, up to 4). */
+  recentResharers?: HomePostResharer[];
   /** Stable list key when the same post appears as original and as a repost row. */
   feedEntryKey?: string;
   /** Author profile image when joined from learn_users */
@@ -972,6 +974,12 @@ export type HomePostLiker = {
   createdAt?: string;
 };
 
+export type HomePostResharer = {
+  userId: number;
+  fullName: string;
+  avatarUrl?: string | null;
+};
+
 export async function fetchHomePostLikes(postId: number, token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -1066,13 +1074,13 @@ export async function reshareHomePost(token: string, postId: number, quoteCaptio
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
-  })) as { reshared: boolean; quoteCaption?: string | null; resharesCount?: number };
+  })) as { reshared: boolean; quoteCaption?: string | null; resharesCount?: number; recentResharers?: HomePostResharer[] };
 }
 
 export async function unreshareHomePost(token: string, postId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}/unreshare`, token, {
     method: "POST"
-  })) as { reshared: boolean; resharesCount?: number };
+  })) as { reshared: boolean; resharesCount?: number; recentResharers?: HomePostResharer[] };
 }
 
 export async function deleteHomePost(token: string, postId: number) {
