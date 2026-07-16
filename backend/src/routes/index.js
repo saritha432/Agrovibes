@@ -1957,54 +1957,45 @@ function looksLikeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
-async function deliverAdminAlertEmail({ to, subject, text, replyTo }) {
-  const toEmail = String(to || "").trim() || adminReportsNotifyTo();
-  const cleanSubject = String(subject || "Cropvibe alert").trim().slice(0, 200);
+/** Same inbox delivery as /v1/support/contact (Resend when configured, else FormSubmit). */
+async function deliverToSupportInbox({ subject, text, replyTo, senderName, senderEmail }) {
+  const toEmail = adminReportsNotifyTo();
+  const cleanSubject = String(subject || "Cropvibe notification").trim().slice(0, 200);
   const textBody = String(text || "").trim() || "-";
   const reply = looksLikeEmail(replyTo) ? String(replyTo).trim().toLowerCase() : undefined;
+  const fromName = String(senderName || "Cropvibe").trim() || "Cropvibe";
+  const fromEmail = looksLikeEmail(senderEmail) ? String(senderEmail).trim().toLowerCase() : reply || "noreply@cropvibe.com";
 
   const resendKey = String(process.env.RESEND_API_KEY || "").trim();
   if (resendKey) {
-    try {
-      await sendResendEmail({
-        to: toEmail,
-        subject: cleanSubject,
-        text: textBody,
-        replyTo: reply
-      });
-      console.log(`[reports] email sent via Resend to ${toEmail}: ${cleanSubject}`);
-      return { ok: true, via: "resend" };
-    } catch (error) {
-      console.warn("[reports] Resend failed, trying FormSubmit:", error?.message || error);
-    }
+    await sendResendEmail({
+      to: toEmail,
+      subject: cleanSubject,
+      text: textBody,
+      replyTo: reply
+    });
+    console.log(`[inbox] email sent via Resend to ${toEmail}: ${cleanSubject}`);
+    return { ok: true, via: "resend" };
   }
 
   const formBody = new URLSearchParams({
-    name: "Cropvibe Reports",
-    email: reply || toEmail,
-    _replyto: reply || toEmail,
+    name: fromName,
+    email: fromEmail,
+    _replyto: reply || fromEmail,
     _subject: cleanSubject,
     message: textBody,
     _template: "table",
     _captcha: "false",
     _honey: ""
   });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
-  let formResp;
-  try {
-    formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json"
-      },
-      body: formBody,
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+  const formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json"
+    },
+    body: formBody
+  });
   const formData = await formResp.json().catch(() => ({}));
   const formOk =
     formResp.ok &&
@@ -2014,14 +2005,17 @@ async function deliverAdminAlertEmail({ to, subject, text, replyTo }) {
         .toLowerCase()
         .includes("successfully") ||
       Object.keys(formData || {}).length === 0);
+
   if (!formOk) {
-    throw new Error(String(formData?.message || `FormSubmit failed (${formResp.status})`));
+    const detail = String(formData?.message || `FormSubmit failed (${formResp.status})`);
+    console.warn("[inbox] FormSubmit failed:", detail, formData);
+    throw new Error(detail);
   }
-  console.log(`[reports] email sent via FormSubmit to ${toEmail}: ${cleanSubject}`);
+  console.log(`[inbox] email sent via FormSubmit to ${toEmail}: ${cleanSubject}`);
   return { ok: true, via: "formsubmit" };
 }
 
-/** Email admins when a reel/post is reported. Awaits delivery so Render does not cut off the request. */
+/** Email admins when a reel/post is reported. */
 async function notifyAdminOfPostReport({
   postId,
   reason,
@@ -2033,7 +2027,6 @@ async function notifyAdminOfPostReport({
   uploaderName,
   caption
 }) {
-  const toEmail = adminReportsNotifyTo();
   const reporterRes = await query(
     `SELECT full_name AS "fullName", email, username FROM learn_users WHERE id = $1 LIMIT 1`,
     [reporterId]
@@ -2064,11 +2057,13 @@ async function notifyAdminOfPostReport({
     `Direct post: ${webOrigin}/watch/${postId}`
   ].join("\n");
 
-  return deliverAdminAlertEmail({
-    to: toEmail,
-    subject: `[Cropvibe Report] ${priority === "HIGH PRIORITY" ? "URGENT " : ""}Post #${postId} — ${reason}`,
+  const urgent = priority === "HIGH PRIORITY" ? "URGENT " : "";
+  return deliverToSupportInbox({
+    subject: `[Cropvibe Report] ${urgent}Post #${postId} — ${reason}`,
     text: textBody,
-    replyTo: reporter.email
+    replyTo: reporter.email,
+    senderName: reporterLabel,
+    senderEmail: reporter.email
   });
 }
 
@@ -2099,7 +2094,6 @@ async function sendSupportContactEmail({
   subject,
   message
 }) {
-  const toEmail = String(process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
   const replyTo = String(email || "").trim().toLowerCase();
   const fullName = `${String(firstName || "").trim()} ${String(lastName || "").trim()}`.trim() || "Unknown";
   const cleanSubject = String(subject || "").trim() || "Support request";
@@ -2118,6 +2112,7 @@ async function sendSupportContactEmail({
 
   const resendKey = String(process.env.RESEND_API_KEY || "").trim();
   if (resendKey) {
+    const toEmail = adminReportsNotifyTo();
     await sendResendEmail({
       to: toEmail,
       subject: `[Web Support] ${cleanSubject}`,
@@ -2133,38 +2128,13 @@ async function sendSupportContactEmail({
     return;
   }
 
-  // FormSubmit delivers to support inbox only (no AJAX auto-reply).
-  const formBody = new URLSearchParams({
-    name: fullName,
-    email: replyTo,
-    _replyto: replyTo,
-    _subject: `[Cropvibe Support] ${cleanSubject}`,
-    message: textBody,
-    _template: "table",
-    _captcha: "false",
-    _honey: ""
+  await deliverToSupportInbox({
+    subject: `[Cropvibe Support] ${cleanSubject}`,
+    text: textBody,
+    replyTo,
+    senderName: fullName,
+    senderEmail: replyTo
   });
-  const formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
-    },
-    body: formBody
-  });
-  const formData = await formResp.json().catch(() => ({}));
-  const formOk =
-    formResp.ok &&
-    (formData?.success === true ||
-      formData?.success === "true" ||
-      String(formData?.message || "")
-        .toLowerCase()
-        .includes("successfully") ||
-      Object.keys(formData || {}).length === 0);
-
-  if (!formOk) {
-    throw new Error(String(formData?.message || "Failed to deliver support email"));
-  }
 }
 
 router.post("/v1/support/contact", async (req, res) => {
@@ -6254,27 +6224,33 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
     const autoHidden = reportCount >= POST_REPORT_AUTO_HIDE_THRESHOLD;
     await cacheIncr("home:posts:gen");
 
-    // Never block the reporter on outbound email (FormSubmit/Resend can hang).
-    void notifyAdminOfPostReport({
-      postId,
-      reason: reasonKey,
-      description,
-      reportCount,
-      autoHidden,
-      reporterId: me,
-      uploaderId: postRow.userId,
-      uploaderName: postRow.userName,
-      caption: postRow.caption
-    }).catch((error) => {
+    let mail = { ok: false };
+    try {
+      mail = await notifyAdminOfPostReport({
+        postId,
+        reason: reasonKey,
+        description,
+        reportCount,
+        autoHidden,
+        reporterId: me,
+        uploaderId: postRow.userId,
+        uploaderName: postRow.userName,
+        caption: postRow.caption
+      });
+    } catch (error) {
       console.warn("[reports] admin email notify failed:", error?.message || error);
-    });
+      mail = { ok: false, error: String(error?.message || error) };
+    }
 
     res.json({
       success: true,
       ok: true,
       reportCount,
       autoHidden,
-      alreadyReported: isUpdate
+      alreadyReported: isUpdate,
+      emailSent: Boolean(mail?.ok),
+      ...(mail?.error ? { emailError: mail.error } : {}),
+      ...(mail?.via ? { emailVia: mail.via } : {})
     });
   } catch (error) {
     console.error("[reports] submit failed:", error?.message || error, error?.code || "");
