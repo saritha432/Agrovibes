@@ -18,7 +18,8 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
-  View
+  View,
+  type KeyboardEvent
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -483,6 +484,8 @@ export function DirectChatScreen() {
   const topChromeInset = useTopChromeInset();
   const floatingTopInset = useFloatingTopChromeInset();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  /** Extra bottom space when Android does not resize the window for the keyboard. */
+  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
   const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall, autoStartCall } =
@@ -549,6 +552,8 @@ export function DirectChatScreen() {
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
   const listRef = useRef<FlatList<ThreadListItem>>(null);
   const composerInputRef = useRef<TextInput>(null);
+  const composerAnchorRef = useRef<View>(null);
+  const androidKeyboardInsetRef = useRef(0);
   const threadItemCountRef = useRef(0);
   const voiceRecordingRef = useRef<Audio.Recording | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1180,6 +1185,70 @@ export function DirectChatScreen() {
 
   const bottomPad = Platform.OS === "ios" ? Math.max(insets.bottom, 8) : 8;
 
+  useEffect(() => {
+    androidKeyboardInsetRef.current = androidKeyboardInset;
+  }, [androidKeyboardInset]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const syncComposerAboveKeyboard = (event: KeyboardEvent) => {
+      const keyboardTop = event.endCoordinates?.screenY;
+      const kbHeight = Math.max(0, Math.round(event.endCoordinates?.height || 0));
+
+      const apply = () => {
+        const node = composerAnchorRef.current;
+        if (!node || typeof keyboardTop !== "number" || !Number.isFinite(keyboardTop)) {
+          // Fallback when measure/screenY unavailable: pad by keyboard height.
+          const next = kbHeight > 0 ? Math.max(0, kbHeight - insets.bottom) : 0;
+          androidKeyboardInsetRef.current = next;
+          setAndroidKeyboardInset(next);
+          return;
+        }
+
+        node.measureInWindow((_x, y, _w, h) => {
+          if (!Number.isFinite(y) || !Number.isFinite(h) || h <= 0) {
+            const next = kbHeight > 0 ? Math.max(0, kbHeight - insets.bottom) : 0;
+            androidKeyboardInsetRef.current = next;
+            setAndroidKeyboardInset(next);
+            return;
+          }
+          // Spacer sits below this view; add current inset so remeasures stay stable.
+          const prev = androidKeyboardInsetRef.current;
+          const needed = Math.max(0, Math.ceil(y + h + prev - keyboardTop));
+          if (Math.abs(needed - prev) <= 1) return;
+          androidKeyboardInsetRef.current = needed;
+          setAndroidKeyboardInset(needed);
+        });
+      };
+
+      if (settleTimer) clearTimeout(settleTimer);
+      requestAnimationFrame(() => {
+        apply();
+        // Second pass after adjustResize settles on some OEMs.
+        settleTimer = setTimeout(apply, 64);
+      });
+    };
+
+    const onHide = () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      androidKeyboardInsetRef.current = 0;
+      setAndroidKeyboardInset(0);
+    };
+
+    const showSub = Keyboard.addListener("keyboardDidShow", syncComposerAboveKeyboard);
+    const frameSub = Keyboard.addListener("keyboardDidChangeFrame", syncComposerAboveKeyboard);
+    const hideSub = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => {
+      if (settleTimer) clearTimeout(settleTimer);
+      showSub.remove();
+      frameSub.remove();
+      hideSub.remove();
+    };
+  }, [insets.bottom]);
+
   const openSharedCropvibeCard = useCallback(
     async (body: string) => {
       let post = parseSharedCropvibeContent(body);
@@ -1508,8 +1577,17 @@ export function DirectChatScreen() {
         }
       />
 
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} enabled={Platform.OS === "ios"}>
-        <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+      <KeyboardAvoidingView
+        style={styles.composerKeyboardWrap}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
+        keyboardVerticalOffset={0}
+      >
+        <View
+          ref={composerAnchorRef}
+          collapsable={false}
+          style={[styles.composerWrap, { paddingBottom: bottomPad }]}
+        >
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
             <View style={styles.replyComposerMeta}>
@@ -1612,6 +1690,9 @@ export function DirectChatScreen() {
           )}
         </View>
         </View>
+        {Platform.OS === "android" && androidKeyboardInset > 0 ? (
+          <View style={{ height: androidKeyboardInset, backgroundColor: BG }} />
+        ) : null}
       </KeyboardAvoidingView>
       <ConfirmDialog
         visible={pendingDelete != null}
@@ -1902,6 +1983,10 @@ const styles = StyleSheet.create({
   threadEmpty: { paddingVertical: 48, alignItems: "center" },
   threadEmptyText: { fontSize: 15, color: MUTED },
   threadEmptyBold: { fontWeight: "800", color: TEXT },
+  composerKeyboardWrap: {
+    width: "100%",
+    backgroundColor: BG
+  },
   composerWrap: {
     paddingHorizontal: 16,
     paddingTop: 10,

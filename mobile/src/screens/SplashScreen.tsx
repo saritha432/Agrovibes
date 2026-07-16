@@ -1,46 +1,27 @@
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../auth/AuthContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { runPendingNotificationNavigation } from "../push/notificationNavigation";
-import { APP_LIME } from "../theme/appColors";
 
+/** Legacy route — redirects immediately (boot already handled auth in App.tsx). */
 export function SplashScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { token, user, loading: authLoading } = useAuth();
+  const { token, user } = useAuth();
+
   React.useEffect(() => {
     const hasSession = Boolean(token || user);
-    if (authLoading) return;
-    if (!hasSession) {
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [{ name: "InitialSetup" }]
-        })
-      );
-      return;
-    }
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: "Main" }]
+        routes: [{ name: hasSession ? "Main" : "InitialSetup" }]
       })
     );
-    setTimeout(() => runPendingNotificationNavigation(), 0);
-  }, [authLoading, token, user, navigation]);
+    if (hasSession) {
+      setTimeout(() => runPendingNotificationNavigation(), 0);
+    }
+  }, [token, user, navigation]);
 
-  return (
-    <View style={styles.root}>
-      <Text style={styles.wordmark}>Cropvibes</Text>
-      <ActivityIndicator size="large" color={APP_LIME} style={styles.spinner} />
-    </View>
-  );
+  return null;
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f2f5f4", alignItems: "center", justifyContent: "center" },
-  wordmark: { fontSize: 28, fontWeight: "900", color: APP_LIME, letterSpacing: -0.5 },
-  spinner: { marginTop: 20 }
-});

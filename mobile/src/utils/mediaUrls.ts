@@ -23,7 +23,17 @@ export function sanitizeHomePost(post: HomePost): HomePost {
     recentLikers: post.recentLikers?.map((l) => ({
       ...l,
       avatarUrl: stripLegacyCloudinaryUrl(l.avatarUrl) ?? undefined
-    }))
+    })),
+    recentResharers: post.recentResharers?.map((r) => ({
+      ...r,
+      avatarUrl: stripLegacyCloudinaryUrl(r.avatarUrl) ?? undefined
+    })),
+    repost: post.repost
+      ? {
+          ...post.repost,
+          byAvatarUrl: stripLegacyCloudinaryUrl(post.repost.byAvatarUrl)
+        }
+      : post.repost
   };
 }
 

@@ -38,7 +38,7 @@ import { PostReportSheet } from "./PostReportSheet";
 import { PostRepostSheet } from "./PostRepostSheet";
 import { RepostAttribution } from "./RepostAttribution";
 import { ReelSeekBar } from "./ReelSeekBar";
-import { shownResharesCount } from "../social/homeFeedCache";
+import { shownResharesCount, latestResharersForDisplay } from "../social/homeFeedCache";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
@@ -614,20 +614,33 @@ export function PostsReelViewerModal({
   );
 
   const openReposterProfile = useCallback(
-    (post: HomePost) => {
-      const repost = post.repost;
-      if (!repost) return;
-      const reposterId = Number(repost.byUserId);
-      const isOwn = reposterId > 0 && reposterId === Number(user?.id);
+    (post: HomePost, person?: { userId?: number; fullName: string; avatarUrl?: string | null }) => {
+      const fromPerson = person
+        ? {
+            userId: Number(person.userId) || 0,
+            userName: String(person.fullName || "").trim() || "User",
+            avatarUrl: person.avatarUrl ?? null
+          }
+        : null;
+      const fromRepost = post.repost
+        ? {
+            userId: Number(post.repost.byUserId) || 0,
+            userName: String(post.repost.byUserName || "").trim() || "User",
+            avatarUrl: post.repost.byAvatarUrl ?? null
+          }
+        : null;
+      const target = fromPerson || fromRepost;
+      if (!target) return;
+      const isOwn = target.userId > 0 && target.userId === Number(user?.id);
       onClose();
       if (isOwn) {
         navigateToMyProfile();
         return;
       }
       navigateToPublicProfile({
-        userId: reposterId > 0 ? reposterId : undefined,
-        userName: resolvePersonDisplayName({ fullName: repost.byUserName, fallback: repost.byUserName }),
-        avatarUrl: repost.byAvatarUrl ?? null
+        userId: target.userId > 0 ? target.userId : undefined,
+        userName: resolvePersonDisplayName({ fullName: target.userName, fallback: target.userName }),
+        avatarUrl: target.avatarUrl
       });
     },
     [onClose, user?.id]
@@ -752,7 +765,7 @@ export function PostsReelViewerModal({
   );
 
   const applyRepostState = useCallback(
-    (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number) => {
+    (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number, recentResharers?: HomePost["recentResharers"]) => {
       applyPosts((prev) =>
         prev.map((p) => {
           if (p.id !== postId) return p;
@@ -762,16 +775,36 @@ export function PostsReelViewerModal({
               0,
               (p.resharesCount ?? 0) + (reshared && !p.viewerHasReshared ? 1 : !reshared && p.viewerHasReshared ? -1 : 0)
             );
+          let nextResharers = p.recentResharers;
+          if (recentResharers) {
+            nextResharers = recentResharers;
+          } else if (user) {
+            const meId = Number(user.id);
+            const withoutMe = (p.recentResharers || []).filter((r) => Number(r.userId) !== meId);
+            if (reshared) {
+              nextResharers = [
+                {
+                  userId: meId,
+                  fullName: String(user.fullName || "").trim() || "You",
+                  avatarUrl: user.avatarUrl ?? null
+                },
+                ...withoutMe
+              ].slice(0, 4);
+            } else {
+              nextResharers = withoutMe.slice(0, 4);
+            }
+          }
           return {
             ...p,
             viewerHasReshared: reshared,
             resharesCount: nextResharesCount,
+            recentResharers: nextResharers,
             ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
           };
         })
       );
     },
-    [applyPosts]
+    [applyPosts, user]
   );
 
   const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
@@ -1188,15 +1221,22 @@ export function PostsReelViewerModal({
           <ReelLikeBurst postId={post.id} trigger={reelLikeBurstByPostId[post.id] || 0} seenRef={reelLikeBurstSeenRef} />
           <View style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, reelBottomInset + 14) }]} pointerEvents="box-none">
             <View style={styles.reelLeftMeta} pointerEvents="auto">
-              {post.repost ? (
-                <RepostAttribution
-                  variant="reel"
-                  byUserName={displayPersonName(post.repost.byUserName)}
-                  byAvatarUrl={post.repost.byAvatarUrl}
-                  actionLabel={t("repostedAction")}
-                  onPress={() => openReposterProfile(post)}
-                />
-              ) : null}
+              {(() => {
+                const resharers = latestResharersForDisplay(post).map((r) => ({
+                  ...r,
+                  fullName: displayPersonName(r.fullName)
+                }));
+                if (!resharers.length) return null;
+                return (
+                  <RepostAttribution
+                    variant="reel"
+                    people={resharers}
+                    actionLabel={t("repostedAction")}
+                    onPress={() => openReposterProfile(post, resharers[0])}
+                    onPressPerson={(person) => openReposterProfile(post, person)}
+                  />
+                );
+              })()}
               <View style={styles.reelUserFollowRow}>
                 <View style={styles.reelAuthorTap}>
                   <StoryRingAvatar

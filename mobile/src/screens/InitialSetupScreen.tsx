@@ -1,7 +1,6 @@
 import { Asset } from "expo-asset";
 import React, { createElement } from "react";
 import {
-  FlatList,
   Image,
   Modal,
   Platform,
@@ -12,7 +11,7 @@ import {
   View,
   useWindowDimensions
 } from "react-native";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useLanguage, type AppLanguage } from "../localization/LanguageContext";
 import type { RootStackParamList } from "../navigation/RootNavigator";
@@ -20,13 +19,13 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
 
 const SLIDES = [
-  {
-    titleKey: "onboardingBrandTitle",
-    subtitleKey: "onboardingBrandSubtitle",
-    descriptionKey: "",
-    mode: "brand",
-    inverted: false
-  },
+  // {
+  //   titleKey: "onboardingBrandTitle",
+  //   subtitleKey: "onboardingBrandSubtitle",
+  //   descriptionKey: "",
+  //   mode: "brand",
+  //   inverted: false
+  // },
   {
     titleKey: "onboardingSlide3Title",
     subtitleKey: "onboardingSlide3Subtitle",
@@ -34,48 +33,51 @@ const SLIDES = [
     mode: "feature",
     imageKey: "media",
     inverted: false
-  },
-  {
-    titleKey: "onboardingSlide4Title",
-    subtitleKey: "onboardingSlide4Subtitle",
-    descriptionKey: "onboardingSlide4Tag",
-    mode: "feature",
-    imageKey: "marketplace",
-    inverted: true
-  },
-  {
-    titleKey: "onboardingSlide5Title",
-    subtitleKey: "onboardingSlide5Subtitle",
-    descriptionKey: "onboardingSlide5Tag",
-    mode: "feature",
-    imageKey: "community",
-    inverted: false
-  },
-  {
-    titleKey: "onboardingSlide6Title",
-    subtitleKey: "onboardingSlide6Subtitle",
-    descriptionKey: "onboardingSlide6Tag",
-    mode: "feature",
-    imageKey: "learn",
-    inverted: true
-  },
-  {
-    titleKey: "onboardingSlide7Title",
-    subtitleKey: "onboardingSlide7Subtitle",
-    descriptionKey: "onboardingSlide7Tag",
-    mode: "feature",
-    imageKey: "logistics",
-    inverted: false
-  },
-  {
-    titleKey: "onboardingAllDoneTitle",
-    subtitleKey: "onboardingAllDoneSubtitle",
-    descriptionKey: "onboardingAllDoneTag",
-    mode: "cta",
-    imageKey: "alldone",
-    inverted: true
   }
+  // {
+  //   titleKey: "onboardingSlide4Title",
+  //   subtitleKey: "onboardingSlide4Subtitle",
+  //   descriptionKey: "onboardingSlide4Tag",
+  //   mode: "feature",
+  //   imageKey: "marketplace",
+  //   inverted: true
+  // },
+  // {
+  //   titleKey: "onboardingSlide5Title",
+  //   subtitleKey: "onboardingSlide5Subtitle",
+  //   descriptionKey: "onboardingSlide5Tag",
+  //   mode: "feature",
+  //   imageKey: "community",
+  //   inverted: false
+  // },
+  // {
+  //   titleKey: "onboardingSlide6Title",
+  //   subtitleKey: "onboardingSlide6Subtitle",
+  //   descriptionKey: "onboardingSlide6Tag",
+  //   mode: "feature",
+  //   imageKey: "learn",
+  //   inverted: true
+  // },
+  // {
+  //   titleKey: "onboardingSlide7Title",
+  //   subtitleKey: "onboardingSlide7Subtitle",
+  //   descriptionKey: "onboardingSlide7Tag",
+  //   mode: "feature",
+  //   imageKey: "logistics",
+  //   inverted: false
+  // },
+  // {
+  //   titleKey: "onboardingAllDoneTitle",
+  //   subtitleKey: "onboardingAllDoneSubtitle",
+  //   descriptionKey: "onboardingAllDoneTag",
+  //   mode: "cta",
+  //   imageKey: "alldone",
+  //   inverted: true
+  // }
 ] as const;
+
+/** Single onboarding screen shown on launch (media only). */
+const MEDIA_SLIDE = SLIDES[0];
 
 const CROPVIBE_INTRO_IMAGE = require("../../assets/onboarding/cropvibe_intro.png");
 
@@ -212,15 +214,14 @@ function BrandSplashImage() {
 }
 
 /** Auto-advance between onboarding slides (lower ms = faster). */
-const AUTOPLAY_INTERVAL_MS = 3500;
+// const AUTOPLAY_INTERVAL_MS = 3500;
 
 /** Matches fixed footer: 2 buttons + language row + padding (prevents art clipped under buttons). */
 const ONBOARDING_FOOTER_BASE_HEIGHT = 186;
 
-/** Auto-scroll loops feature slides only; index 0 is the brand intro (manual swipe to view). */
-const ONBOARDING_AUTOPLAY_START_INDEX = 1;
-
-const ONBOARDING_PROGRESS_STEP_COUNT = SLIDES.length - ONBOARDING_AUTOPLAY_START_INDEX;
+// /** Auto-scroll loops feature slides only; index 0 is the brand intro (manual swipe to view). */
+// const ONBOARDING_AUTOPLAY_START_INDEX = 1;
+// const ONBOARDING_PROGRESS_STEP_COUNT = SLIDES.length - ONBOARDING_AUTOPLAY_START_INDEX;
 
 const LANGUAGE_OPTIONS: { value: AppLanguage; label: string; nativeLabel: string; helper: string }[] = [
   { value: "English", label: "English", nativeLabel: "English", helper: "App language" },
@@ -235,26 +236,14 @@ const LANGUAGE_OPTIONS: { value: AppLanguage; label: string; nativeLabel: string
 
 export function InitialSetupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const isFocused = useIsFocused();
   const { language, setLanguage, t } = useLanguage();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const footerReserveHeight = ONBOARDING_FOOTER_BASE_HEIGHT + insets.bottom;
   const languageSheetHeight = Math.min(Math.max(360, Math.round(height * 0.62)), Math.round(height * 0.82));
   const languageListMaxHeight = Math.max(180, languageSheetHeight - 150);
-  const [index, setIndex] = React.useState(0);
   const [isLanguageSheetOpen, setIsLanguageSheetOpen] = React.useState(false);
-  const indexRef = React.useRef(0);
-  const listRef = React.useRef<FlatList<(typeof SLIDES)[number]>>(null);
-  const userDraggingRef = React.useRef(false);
-  const suppressUserCooldownRef = React.useRef(false);
-  const autoplayScrollInFlightRef = React.useRef(false);
-  const pauseAutoplayUntilRef = React.useRef(0);
-  const widthRef = React.useRef(width);
-
-  widthRef.current = width;
-  const currentSlideInverted = SLIDES[index]?.inverted ?? false;
-  const isBrandSlide = index === 0;
+  const item = MEDIA_SLIDE;
   const selectedLanguage = LANGUAGE_OPTIONS.find((option) => option.value === language) ?? LANGUAGE_OPTIONS[0];
 
   const selectLanguage = React.useCallback(
@@ -265,265 +254,69 @@ export function InitialSetupScreen() {
     [setLanguage]
   );
 
-  const requestScrollToIndex = React.useCallback((rawIndex: number, animated: boolean, opts?: { autoplay?: boolean }) => {
-    const w = widthRef.current;
-    const clamped = Math.max(0, Math.min(Math.round(rawIndex), SLIDES.length - 1));
-    const normalizedIndex =
-      opts?.autoplay && clamped < ONBOARDING_AUTOPLAY_START_INDEX
-        ? ONBOARDING_AUTOPLAY_START_INDEX
-        : clamped;
-    if (opts?.autoplay) {
-      suppressUserCooldownRef.current = true;
-      autoplayScrollInFlightRef.current = true;
-      setTimeout(() => {
-        autoplayScrollInFlightRef.current = false;
-      }, 1200);
-    } else {
-      suppressUserCooldownRef.current = false;
-      pauseAutoplayUntilRef.current = Date.now() + AUTOPLAY_INTERVAL_MS;
-    }
-    listRef.current?.scrollToOffset({ offset: normalizedIndex * w, animated });
-  }, []);
-
-  React.useEffect(() => {
-    listRef.current?.scrollToOffset({ offset: indexRef.current * width, animated: false });
-  }, [width]);
-
-  React.useEffect(() => {
-    if (!isFocused) return;
-    const id = setInterval(() => {
-      if (userDraggingRef.current) return;
-      if (Date.now() < pauseAutoplayUntilRef.current) return;
-      if (autoplayScrollInFlightRef.current) return;
-      if (indexRef.current >= SLIDES.length - 1) {
-        requestScrollToIndex(ONBOARDING_AUTOPLAY_START_INDEX, true, { autoplay: true });
-        return;
-      }
-      const next = indexRef.current + 1;
-      requestScrollToIndex(next, true, { autoplay: true });
-    }, AUTOPLAY_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [isFocused, width, requestScrollToIndex]);
-
   return (
-    <SafeAreaView
-      style={[styles.root, currentSlideInverted ? styles.rootLime : null]}
-      edges={isBrandSlide ? [] : ["top"]}
-    >
-      <View style={[styles.carouselShell, currentSlideInverted ? styles.carouselShellLime : null]} pointerEvents="box-none">
-        <FlatList
-          ref={listRef}
-          style={styles.list}
-          data={SLIDES}
-          horizontal
-          pagingEnabled
-          snapToInterval={width}
-          snapToAlignment="start"
-          disableIntervalMomentum
-          bounces={false}
-          decelerationRate="fast"
-          showsHorizontalScrollIndicator={false}
-          scrollEventThrottle={16}
-          getItemLayout={(_, itemIndex) => ({
-            length: width,
-            offset: width * itemIndex,
-            index: itemIndex
-          })}
-          keyExtractor={(_, i) => String(i)}
-          onScrollBeginDrag={() => {
-            userDraggingRef.current = true;
-            suppressUserCooldownRef.current = false;
-            pauseAutoplayUntilRef.current = Date.now() + AUTOPLAY_INTERVAL_MS;
-          }}
-          onScrollEndDrag={() => {
-            userDraggingRef.current = false;
-          }}
-          onScroll={(e) => {
-            const x = e.nativeEvent.contentOffset.x;
-            const w = widthRef.current;
-            if (w <= 0) return;
-            const nextIndex = Math.round(x / w);
-            const clampedIndex = Math.max(0, Math.min(nextIndex, SLIDES.length - 1));
-            if (clampedIndex !== indexRef.current) {
-              indexRef.current = clampedIndex;
-              setIndex(clampedIndex);
-            }
-          }}
-          onMomentumScrollEnd={(e) => {
-            const x = e.nativeEvent.contentOffset.x;
-            const nextIndex = Math.round(x / width);
-            const clampedIndex = Math.max(0, Math.min(nextIndex, SLIDES.length - 1));
-            indexRef.current = clampedIndex;
-            setIndex(clampedIndex);
-            userDraggingRef.current = false;
-            autoplayScrollInFlightRef.current = false;
-            if (!suppressUserCooldownRef.current) {
-              pauseAutoplayUntilRef.current = Date.now() + AUTOPLAY_INTERVAL_MS;
-            }
-            suppressUserCooldownRef.current = false;
-          }}
-          renderItem={({ item, index: slideIndex }) => (
-            <View
-              style={[
-                styles.page,
-                { width, height },
-                item.inverted ? styles.pageInverted : null,
-                item.mode === "brand" ? styles.pageBrand : null
-              ]}
-            >
-              {item.mode !== "brand" ? (
-                <View style={styles.topBarWrap}>
-                  <View style={styles.progressRow}>
-                    {Array.from({ length: ONBOARDING_PROGRESS_STEP_COUNT }, (_, stepIndex) => {
-                      const filledSteps = slideIndex - ONBOARDING_AUTOPLAY_START_INDEX + 1;
-                      const isDone = stepIndex < filledSteps;
-                      return (
-                        <View
-                          key={`progress-${stepIndex}`}
-                          style={[
-                            styles.progressSegment,
-                            item.inverted
-                              ? isDone
-                                ? styles.progressSegmentDoneInverted
-                                : styles.progressSegmentPendingInverted
-                              : isDone
-                                ? styles.progressSegmentDoneDark
-                                : styles.progressSegmentPendingDark
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
+    <SafeAreaView style={styles.root} edges={["top"]}>
+      <View style={styles.carouselShell} pointerEvents="box-none">
+        <View style={[styles.page, { width, height }]}>
+          <View style={styles.content}>
+            <View style={styles.featureWrap}>
+              <View style={styles.copyWrap}>
+                <View style={styles.slideTagRow}>
+                  <Image
+                    source={ONBOARDING_TAG_ICONS[item.imageKey]}
+                    style={styles.slideTagIcon}
+                    resizeMode="contain"
+                  />
+                  <Text style={styles.slideTag}>{t(item.descriptionKey)}</Text>
                 </View>
-              ) : null}
-              <View style={styles.content}>
-                {item.mode === "brand" ? (
-                  <BrandSplashImage />
-                ) : (
-                  <View style={[styles.featureWrap, item.mode === "cta" ? styles.featureWrapCta : null]}>
-                    <View style={[styles.copyWrap, item.mode === "cta" ? styles.copyWrapCta : null]}>
-                      {"imageKey" in item && item.imageKey ? (
-                        <View style={styles.slideTagRow}>
-                          <Image
-                            source={ONBOARDING_TAG_ICONS[item.imageKey]}
-                            style={styles.slideTagIcon}
-                            resizeMode="contain"
-                          />
-                          <Text style={[styles.slideTag, item.inverted ? styles.slideTagInverted : null]}>
-                            {t(item.descriptionKey)}
-                          </Text>
-                        </View>
-                      ) : null}
-                      <Text
-                        style={[
-                          styles.copyText,
-                          item.inverted ? styles.copyTextInverted : null,
-                          item.mode === "cta" ? styles.copyTextCta : null
-                        ]}
-                      >
-                        {t(item.titleKey)}
-                      </Text>
-                      {t(item.subtitleKey) ? (
-                        <Text style={[styles.copySubText, item.inverted ? styles.copySubTextInverted : null]}>
-                          {t(item.subtitleKey)}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {"imageKey" in item && item.imageKey ? (
-                      <View style={[styles.featureArtWrap, item.mode === "cta" ? styles.featureArtWrapCta : null]}>
-                        <OnboardingIllustration imageKey={item.imageKey} />
-                      </View>
-                    ) : null}
-                  </View>
-                )}
+                <Text style={styles.copyText}>{t(item.titleKey)}</Text>
+                {t(item.subtitleKey) ? <Text style={styles.copySubText}>{t(item.subtitleKey)}</Text> : null}
               </View>
-              <View
-                style={
-                  item.mode === "brand"
-                    ? styles.pageFooterSpaceBrand
-                    : { height: footerReserveHeight }
-                }
-              />
+              <View style={styles.featureArtWrap}>
+                <OnboardingIllustration imageKey={item.imageKey} />
+              </View>
             </View>
-          )}
-        />
+          </View>
+          <View style={{ height: footerReserveHeight }} />
+        </View>
       </View>
-      {!isBrandSlide ? (
-        <View
-          style={[
-            styles.stableFooter,
-            { paddingBottom: Math.max(16, insets.bottom + 8) },
-            currentSlideInverted ? styles.stableFooterLime : styles.stableFooterDark
-          ]}
-        >
+      <View
+        style={[
+          styles.stableFooter,
+          { paddingBottom: Math.max(16, insets.bottom + 8) },
+          styles.stableFooterDark
+        ]}
+      >
           <View style={styles.authActionsWrap}>
             <Pressable
-              style={[
-                styles.getStartedBtn,
-                currentSlideInverted ? styles.getStartedBtnOnLime : null
-              ]}
+              style={styles.getStartedBtn}
               onPress={() => navigation.navigate("AuthChoice", { initialMode: "register" })}
             >
-              <Text
-                style={[
-                  styles.getStartedBtnText,
-                  currentSlideInverted ? styles.getStartedBtnTextOnLime : null
-                ]}
-              >
-                {t("getStarted")}
-              </Text>
+              <Text style={styles.getStartedBtnText}>{t("getStarted")}</Text>
             </Pressable>
-            <Pressable
-              style={[styles.signInBtn, currentSlideInverted ? styles.signInBtnOnLime : null]}
-              onPress={() => navigation.navigate("AuthChoice", { initialMode: "login" })}
-            >
-              <Text
-                style={[styles.signInBtnText, currentSlideInverted ? styles.signInBtnTextOnLime : null]}
-              >
-                {t("signIn")}
-              </Text>
+            <Pressable style={styles.signInBtn} onPress={() => navigation.navigate("AuthChoice", { initialMode: "login" })}>
+              <Text style={styles.signInBtnText}>{t("signIn")}</Text>
             </Pressable>
           </View>
           <View style={styles.langRow}>
             <Pressable
               accessibilityRole="button"
-              style={[
-                styles.languageSelector,
-                currentSlideInverted ? styles.languageSelectorOnLime : styles.languageSelectorOnDark
-              ]}
+              style={[styles.languageSelector, styles.languageSelectorOnDark]}
               onPress={() => setIsLanguageSheetOpen(true)}
             >
               <Text style={styles.languageGlobe}>◎</Text>
               <View style={styles.languageSelectorCopy}>
-                <Text
-                  style={[
-                    styles.languageSelectorLabel,
-                    currentSlideInverted ? styles.languageSelectorLabelOnLime : styles.languageSelectorLabelOnDark
-                  ]}
-                >
+                <Text style={[styles.languageSelectorLabel, styles.languageSelectorLabelOnDark]}>
                   {t("selectLanguage")}
                 </Text>
-                <Text
-                  style={[
-                    styles.languageSelectorValue,
-                    currentSlideInverted ? styles.languageSelectorValueOnLime : styles.languageSelectorValueOnDark
-                  ]}
-                >
+                <Text style={[styles.languageSelectorValue, styles.languageSelectorValueOnDark]}>
                   {selectedLanguage.label}
                 </Text>
               </View>
-              <Text
-                style={[
-                  styles.languageChevron,
-                  currentSlideInverted ? styles.languageChevronOnLime : styles.languageChevronOnDark
-                ]}
-              >
-                ˅
-              </Text>
+              <Text style={[styles.languageChevron, styles.languageChevronOnDark]}>˅</Text>
             </Pressable>
           </View>
         </View>
-      ) : null}
       <Modal
         animationType="slide"
         transparent

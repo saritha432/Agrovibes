@@ -1276,9 +1276,14 @@ async function ensurePostReportsTable() {
   await query(`CREATE INDEX IF NOT EXISTS post_reports_post_idx ON post_reports (post_id)`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_created_idx ON post_reports (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS post_reports_status_idx ON post_reports (status)`);
-  await query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS post_reports_post_reporter_uidx ON post_reports (post_id, reporter_user_id)`
-  );
+  try {
+    await query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS post_reports_post_reporter_uidx ON post_reports (post_id, reporter_user_id)`
+    );
+  } catch (error) {
+    // Duplicates from older builds shouldn't block new reports.
+    console.warn("[reports] unique index ensure skipped:", error?.message || error);
+  }
   postReportsTableReady = true;
 }
 
@@ -1292,21 +1297,19 @@ async function refreshPostReportCount(postId) {
     [postId]
   );
   const count = Number(countRes.rows[0]?.c || 0);
-  const threshold = Number(POST_REPORT_AUTO_HIDE_THRESHOLD) || 10;
-  // Use distinct typed params — reusing $2 as both int assignment and CASE compare
-  // triggers Postgres "inconsistent types deduced for parameter $2".
+  const threshold = Number(POST_REPORT_AUTO_HIDE_THRESHOLD);
   await query(
     `
     UPDATE home_posts
     SET
-      report_count = $2::integer,
+      report_count = $2::int,
       feed_hidden_at = CASE
-        WHEN $3::integer >= $4::integer THEN COALESCE(feed_hidden_at, NOW())
+        WHEN $2::int >= $3::int THEN COALESCE(feed_hidden_at, NOW())
         ELSE NULL
       END
     WHERE id = $1::integer
     `,
-    [postId, count, count, threshold]
+    [postId, count, threshold]
   );
   return count;
 }
@@ -1419,6 +1422,27 @@ function normalizeHomePostRow(row) {
   } else if (!Array.isArray(rawLikers)) {
     base.recentLikers = [];
   }
+  const rawResharers = base.recentResharers;
+  if (typeof rawResharers === "string" && rawResharers.trim()) {
+    try {
+      const parsed = JSON.parse(rawResharers);
+      base.recentResharers = Array.isArray(parsed) ? parsed : [];
+    } catch (_e) {
+      base.recentResharers = [];
+    }
+  } else if (!Array.isArray(rawResharers)) {
+    base.recentResharers = [];
+  }
+  if (Array.isArray(base.recentResharers)) {
+    base.recentResharers = base.recentResharers
+      .map((row) => ({
+        userId: Number(row?.userId) || 0,
+        fullName: String(row?.fullName || "").trim() || "User",
+        avatarUrl: row?.avatarUrl ?? null
+      }))
+      .filter((row) => row.userId > 0)
+      .slice(0, 4);
+  }
   if (/^\[LIVE\]/i.test(String(base.caption || "").trim())) {
     base.liveRoomName = `agrovibes-live-${base.id}`;
     const hasLiveMedia = !!(
@@ -1488,10 +1512,54 @@ function paginateHomeFeedRows(rows, limit) {
 }
 
 const HOME_POST_RESHARES_COUNT_SQL = `(SELECT COUNT(*)::int FROM home_post_reshares hpr_count WHERE hpr_count.post_id = p.id) AS "resharesCount"`;
+/** Latest up to 4 people who reshared (Instagram-style stacked attribution). */
+const HOME_POST_RECENT_RESHARERS_SQL = `(
+  SELECT COALESCE(
+    json_agg(
+      json_build_object(
+        'userId', rr."userId",
+        'fullName', rr."fullName",
+        'avatarUrl', rr."avatarUrl"
+      )
+      ORDER BY rr."resharedAt" DESC
+    ),
+    '[]'::json
+  )
+  FROM (
+    SELECT
+      u.id AS "userId",
+      COALESCE(NULLIF(TRIM(u.full_name), ''), 'User') AS "fullName",
+      u.avatar_url AS "avatarUrl",
+      hpr.created_at AS "resharedAt"
+    FROM home_post_reshares hpr
+    JOIN learn_users u ON u.id = hpr.user_id
+    WHERE hpr.post_id = p.id
+    ORDER BY hpr.created_at DESC
+    LIMIT 4
+  ) rr
+) AS "recentResharers"`;
 
 async function getHomePostResharesCount(postId) {
   const result = await query(`SELECT COUNT(*)::int AS c FROM home_post_reshares WHERE post_id = $1`, [postId]);
   return Number(result.rows[0]?.c || 0);
+}
+
+async function getHomePostRecentResharers(postId, limit = 4) {
+  const result = await query(
+    `
+    SELECT
+      u.id AS "userId",
+      COALESCE(NULLIF(TRIM(u.full_name), ''), 'User') AS "fullName",
+      u.avatar_url AS "avatarUrl"
+    FROM home_post_reshares hpr
+    JOIN learn_users u ON u.id = hpr.user_id
+    WHERE hpr.post_id = $1
+    ORDER BY hpr.created_at DESC
+    LIMIT $2
+    `,
+    [postId, limit]
+  );
+  return result.rows || [];
 }
 
 function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
@@ -1511,6 +1579,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       p.likes_count AS "likesCount",
       p.comments_count AS "commentsCount",
       ${HOME_POST_RESHARES_COUNT_SQL},
+      ${HOME_POST_RECENT_RESHARERS_SQL},
       p.video_url AS "videoUrl",
       p.image_url AS "imageUrl",
       p.image_urls AS "image_urls",
@@ -1954,32 +2023,31 @@ function looksLikeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
-async function deliverAdminAlertEmail({ to, subject, text, replyTo }) {
-  const toEmail = String(to || "").trim() || adminReportsNotifyTo();
-  const cleanSubject = String(subject || "Cropvibe alert").trim().slice(0, 200);
+/** Same inbox delivery as /v1/support/contact (Resend when configured, else FormSubmit). */
+async function deliverToSupportInbox({ subject, text, replyTo, senderName, senderEmail }) {
+  const toEmail = adminReportsNotifyTo();
+  const cleanSubject = String(subject || "Cropvibe notification").trim().slice(0, 200);
   const textBody = String(text || "").trim() || "-";
   const reply = looksLikeEmail(replyTo) ? String(replyTo).trim().toLowerCase() : undefined;
+  const fromName = String(senderName || "Cropvibe").trim() || "Cropvibe";
+  const fromEmail = looksLikeEmail(senderEmail) ? String(senderEmail).trim().toLowerCase() : reply || "noreply@cropvibe.com";
 
   const resendKey = String(process.env.RESEND_API_KEY || "").trim();
   if (resendKey) {
-    try {
-      await sendResendEmail({
-        to: toEmail,
-        subject: cleanSubject,
-        text: textBody,
-        replyTo: reply
-      });
-      console.log(`[reports] email sent via Resend to ${toEmail}: ${cleanSubject}`);
-      return { ok: true, via: "resend" };
-    } catch (error) {
-      console.warn("[reports] Resend failed, trying FormSubmit:", error?.message || error);
-    }
+    await sendResendEmail({
+      to: toEmail,
+      subject: cleanSubject,
+      text: textBody,
+      replyTo: reply
+    });
+    console.log(`[inbox] email sent via Resend to ${toEmail}: ${cleanSubject}`);
+    return { ok: true, via: "resend" };
   }
 
   const formBody = new URLSearchParams({
-    name: "Cropvibe Reports",
-    email: reply || toEmail,
-    _replyto: reply || toEmail,
+    name: fromName,
+    email: fromEmail,
+    _replyto: reply || fromEmail,
     _subject: cleanSubject,
     message: textBody,
     _template: "table",
@@ -2003,14 +2071,17 @@ async function deliverAdminAlertEmail({ to, subject, text, replyTo }) {
         .toLowerCase()
         .includes("successfully") ||
       Object.keys(formData || {}).length === 0);
+
   if (!formOk) {
-    throw new Error(String(formData?.message || `FormSubmit failed (${formResp.status})`));
+    const detail = String(formData?.message || `FormSubmit failed (${formResp.status})`);
+    console.warn("[inbox] FormSubmit failed:", detail, formData);
+    throw new Error(detail);
   }
-  console.log(`[reports] email sent via FormSubmit to ${toEmail}: ${cleanSubject}`);
+  console.log(`[inbox] email sent via FormSubmit to ${toEmail}: ${cleanSubject}`);
   return { ok: true, via: "formsubmit" };
 }
 
-/** Email admins when a reel/post is reported. Awaits delivery so Render does not cut off the request. */
+/** Email admins when a reel/post is reported. */
 async function notifyAdminOfPostReport({
   postId,
   reason,
@@ -2022,7 +2093,6 @@ async function notifyAdminOfPostReport({
   uploaderName,
   caption
 }) {
-  const toEmail = adminReportsNotifyTo();
   const reporterRes = await query(
     `SELECT full_name AS "fullName", email, username FROM learn_users WHERE id = $1 LIMIT 1`,
     [reporterId]
@@ -2053,11 +2123,13 @@ async function notifyAdminOfPostReport({
     `Direct post: ${webOrigin}/watch/${postId}`
   ].join("\n");
 
-  return deliverAdminAlertEmail({
-    to: toEmail,
-    subject: `[Cropvibe Report] ${priority === "HIGH PRIORITY" ? "URGENT " : ""}Post #${postId} — ${reason}`,
+  const urgent = priority === "HIGH PRIORITY" ? "URGENT " : "";
+  return deliverToSupportInbox({
+    subject: `[Cropvibe Report] ${urgent}Post #${postId} — ${reason}`,
     text: textBody,
-    replyTo: reporter.email
+    replyTo: reporter.email,
+    senderName: reporterLabel,
+    senderEmail: reporter.email
   });
 }
 
@@ -2088,7 +2160,6 @@ async function sendSupportContactEmail({
   subject,
   message
 }) {
-  const toEmail = String(process.env.SUPPORT_CONTACT_TO || "info@cropvibe.com").trim() || "info@cropvibe.com";
   const replyTo = String(email || "").trim().toLowerCase();
   const fullName = `${String(firstName || "").trim()} ${String(lastName || "").trim()}`.trim() || "Unknown";
   const cleanSubject = String(subject || "").trim() || "Support request";
@@ -2107,6 +2178,7 @@ async function sendSupportContactEmail({
 
   const resendKey = String(process.env.RESEND_API_KEY || "").trim();
   if (resendKey) {
+    const toEmail = adminReportsNotifyTo();
     await sendResendEmail({
       to: toEmail,
       subject: `[Web Support] ${cleanSubject}`,
@@ -2122,38 +2194,13 @@ async function sendSupportContactEmail({
     return;
   }
 
-  // FormSubmit delivers to support inbox only (no AJAX auto-reply).
-  const formBody = new URLSearchParams({
-    name: fullName,
-    email: replyTo,
-    _replyto: replyTo,
-    _subject: `[Cropvibe Support] ${cleanSubject}`,
-    message: textBody,
-    _template: "table",
-    _captcha: "false",
-    _honey: ""
+  await deliverToSupportInbox({
+    subject: `[Cropvibe Support] ${cleanSubject}`,
+    text: textBody,
+    replyTo,
+    senderName: fullName,
+    senderEmail: replyTo
   });
-  const formResp = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(toEmail)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
-    },
-    body: formBody
-  });
-  const formData = await formResp.json().catch(() => ({}));
-  const formOk =
-    formResp.ok &&
-    (formData?.success === true ||
-      formData?.success === "true" ||
-      String(formData?.message || "")
-        .toLowerCase()
-        .includes("successfully") ||
-      Object.keys(formData || {}).length === 0);
-
-  if (!formOk) {
-    throw new Error(String(formData?.message || "Failed to deliver support email"));
-  }
 }
 
 router.post("/v1/support/contact", async (req, res) => {
@@ -6084,6 +6131,7 @@ router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => 
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6287,7 +6335,7 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
       `,
       [postId, me]
     );
-    const isUpdate = Boolean(existing.rows.length && existing.rows[0].status === "pending");
+    const isUpdate = Boolean(existing.rows.length);
 
     if (existing.rows.length) {
       await query(
@@ -6299,23 +6347,38 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
         [existing.rows[0].id, reasonKey, description || null]
       );
     } else {
-      await query(
-        `
-        INSERT INTO post_reports (post_id, reporter_user_id, reason, description, status)
-        VALUES ($1, $2, $3, $4, 'pending')
-        `,
-        [postId, me, reasonKey, description || null]
-      );
+      try {
+        await query(
+          `
+          INSERT INTO post_reports (post_id, reporter_user_id, reason, description, status)
+          VALUES ($1, $2, $3, $4, 'pending')
+          `,
+          [postId, me, reasonKey, description || null]
+        );
+      } catch (error) {
+        // Race / unique index: treat as update so submit still succeeds.
+        if (String(error?.code || "") === "23505") {
+          await query(
+            `
+            UPDATE post_reports
+            SET reason = $3, description = $4, status = 'pending', updated_at = NOW(), created_at = NOW()
+            WHERE post_id = $1 AND reporter_user_id = $2
+            `,
+            [postId, me, reasonKey, description || null]
+          );
+        } else {
+          throw error;
+        }
+      }
     }
 
     const reportCount = await refreshPostReportCount(postId);
     const autoHidden = reportCount >= POST_REPORT_AUTO_HIDE_THRESHOLD;
     await cacheIncr("home:posts:gen");
 
-    let emailSent = false;
-    let emailError = null;
+    let mail = { ok: false };
     try {
-      const mail = await notifyAdminOfPostReport({
+      mail = await notifyAdminOfPostReport({
         postId,
         reason: reasonKey,
         description,
@@ -6326,10 +6389,9 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
         uploaderName: postRow.userName,
         caption: postRow.caption
       });
-      emailSent = Boolean(mail?.ok);
     } catch (error) {
-      emailError = String(error?.message || error || "email_failed");
-      console.warn("[reports] admin email notify failed:", emailError);
+      console.warn("[reports] admin email notify failed:", error?.message || error);
+      mail = { ok: false, error: String(error?.message || error) };
     }
 
     res.json({
@@ -6338,10 +6400,12 @@ async function handleSubmitHomePostReport(req, res, postIdOverride) {
       reportCount,
       autoHidden,
       alreadyReported: isUpdate,
-      emailSent,
-      ...(emailError ? { emailError } : {})
+      emailSent: Boolean(mail?.ok),
+      ...(mail?.error ? { emailError: mail.error } : {}),
+      ...(mail?.via ? { emailVia: mail.via } : {})
     });
   } catch (error) {
+    console.error("[reports] submit failed:", error?.message || error, error?.code || "");
     res.status(500).json({ message: "Failed to submit report", error: error.message });
   }
 }
@@ -6762,6 +6826,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6837,6 +6902,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6897,6 +6963,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6954,6 +7021,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7056,6 +7124,7 @@ router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7126,8 +7195,11 @@ router.post("/v1/home/posts/:postId/reshare", authRequired, async (req, res) => 
       [postId, userId, quoteCaption]
     );
     await cacheIncr("home:posts:gen");
-    const resharesCount = await getHomePostResharesCount(postId);
-    res.json({ reshared: true, quoteCaption, resharesCount });
+    const [resharesCount, recentResharers] = await Promise.all([
+      getHomePostResharesCount(postId),
+      getHomePostRecentResharers(postId, 4)
+    ]);
+    res.json({ reshared: true, quoteCaption, resharesCount, recentResharers });
   } catch (error) {
     res.status(500).json({ message: "Failed to reshare post", error: error.message });
   }
@@ -7144,8 +7216,11 @@ router.post("/v1/home/posts/:postId/unreshare", authRequired, async (req, res) =
     }
     await query(`DELETE FROM home_post_reshares WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
     await cacheIncr("home:posts:gen");
-    const resharesCount = await getHomePostResharesCount(postId);
-    res.json({ reshared: false, resharesCount });
+    const [resharesCount, recentResharers] = await Promise.all([
+      getHomePostResharesCount(postId),
+      getHomePostRecentResharers(postId, 4)
+    ]);
+    res.json({ reshared: false, resharesCount, recentResharers });
   } catch (error) {
     res.status(500).json({ message: "Failed to unreshare post", error: error.message });
   }
@@ -7175,6 +7250,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7343,6 +7419,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7435,6 +7512,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",

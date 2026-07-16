@@ -71,13 +71,22 @@ export function UserReportSheet({ visible, userId, userName, onClose, onBlockUse
       setAlreadyReported(false);
       setStep("done");
     } catch (e: unknown) {
-      const err = e as { status?: number; payload?: { alreadyReported?: boolean } };
+      const err = e as { status?: number; payload?: { alreadyReported?: boolean; error?: string; message?: string }; message?: string };
       if (err?.status === 409 || err?.payload?.alreadyReported) {
         setAlreadyReported(true);
         setStep("done");
         return;
       }
-      const msg = e instanceof Error ? e.message : t("reportFailed");
+      console.warn("[reportUser] failed", {
+        userId,
+        reason: selectedReason,
+        status: err?.status,
+        message: err?.message,
+        payload: err?.payload
+      });
+      const msg =
+        (typeof err?.payload?.error === "string" && err.payload.error) ||
+        (e instanceof Error ? e.message : t("reportFailed"));
       Alert.alert(t("reportFailed"), msg);
     } finally {
       setBusy(false);
