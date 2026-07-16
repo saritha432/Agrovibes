@@ -12,9 +12,9 @@
     ],
     "scheme": "agrovibes",
     "splash": {
-      "image": "./assets/logo-adaptive-foreground.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#262626"
+      "image": "./assets/onboarding/cropvibe_intro.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#000000"
     },
     "androidStatusBar": {
       "backgroundColor": "#262626",

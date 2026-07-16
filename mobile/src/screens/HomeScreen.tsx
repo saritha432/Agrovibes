@@ -109,6 +109,7 @@ import {
   mergeHomeFeedPosts,
   mergeRepostFeedItems,
   shownResharesCount,
+  latestResharersForDisplay,
   readHomeFeedCache,
   writeHomeFeedCache
 } from "../social/homeFeedCache";
@@ -1273,20 +1274,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const openReposterProfile = React.useCallback(
-    (post: HomePost) => {
-      const repost = post.repost;
-      if (!repost) return;
-      const reposterId = Number(repost.byUserId);
-      const isOwn = reposterId > 0 && reposterId === Number(user?.id);
+    (post: HomePost, person?: { userId?: number; fullName: string; avatarUrl?: string | null }) => {
+      const fromPerson = person
+        ? {
+            userId: Number(person.userId) || 0,
+            userName: String(person.fullName || "").trim() || "User",
+            avatarUrl: person.avatarUrl ?? null
+          }
+        : null;
+      const fromRepost = post.repost
+        ? {
+            userId: Number(post.repost.byUserId) || 0,
+            userName: String(post.repost.byUserName || "").trim() || "User",
+            avatarUrl: post.repost.byAvatarUrl ?? null
+          }
+        : null;
+      const target = fromPerson || fromRepost;
+      if (!target) return;
+      const isOwn = target.userId > 0 && target.userId === Number(user?.id);
       setReelViewerOpen(null);
       if (isOwn) {
         navigateToMyProfile();
         return;
       }
       navigateToPublicProfile({
-        userId: reposterId > 0 ? reposterId : undefined,
-        userName: resolvePersonDisplayName({ fullName: repost.byUserName, fallback: repost.byUserName }),
-        avatarUrl: repost.byAvatarUrl ?? null
+        userId: target.userId > 0 ? target.userId : undefined,
+        userName: resolvePersonDisplayName({ fullName: target.userName, fallback: target.userName }),
+        avatarUrl: target.avatarUrl
       });
     },
     [user?.id]
@@ -3167,7 +3181,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const applyRepostState = useCallback(
-    (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number) => {
+    (postId: number, reshared: boolean, quoteCaption?: string, resharesCount?: number, recentResharers?: HomePost["recentResharers"]) => {
       const patch = (p: HomePost): HomePost => {
         if (p.id !== postId) return p;
         const nextResharesCount =
@@ -3176,10 +3190,30 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             0,
             (p.resharesCount ?? 0) + (reshared && !p.viewerHasReshared ? 1 : !reshared && p.viewerHasReshared ? -1 : 0)
           );
+        let nextResharers = p.recentResharers;
+        if (recentResharers) {
+          nextResharers = recentResharers;
+        } else if (user) {
+          const meId = Number(user.id);
+          const withoutMe = (p.recentResharers || []).filter((r) => Number(r.userId) !== meId);
+          if (reshared) {
+            nextResharers = [
+              {
+                userId: meId,
+                fullName: String(user.fullName || "").trim() || "You",
+                avatarUrl: user.avatarUrl ?? null
+              },
+              ...withoutMe
+            ].slice(0, 4);
+          } else {
+            nextResharers = withoutMe.slice(0, 4);
+          }
+        }
         return {
           ...p,
           viewerHasReshared: reshared,
           resharesCount: nextResharesCount,
+          recentResharers: nextResharers,
           ...(quoteCaption !== undefined ? { reshareQuoteCaption: quoteCaption } : {})
         };
       };
@@ -3196,7 +3230,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           .catch(() => {});
       }
     },
-    [token]
+    [token, user]
   );
 
   const onNotInterestedInPost = useCallback((post: HomePost) => {
@@ -4028,15 +4062,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               pointerEvents="box-none"
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
-              {post.repost ? (
-                <RepostAttribution
-                  variant="reel"
-                  byUserName={displayPersonName(post.repost.byUserName)}
-                  byAvatarUrl={post.repost.byAvatarUrl}
-                  actionLabel={t("repostedAction")}
-                  onPress={() => openReposterProfile(post)}
-                />
-              ) : null}
+              {(() => {
+                const resharers = latestResharersForDisplay(post).map((r) => ({
+                  ...r,
+                  fullName: displayPersonName(r.fullName)
+                }));
+                if (!resharers.length) return null;
+                return (
+                  <RepostAttribution
+                    variant="reel"
+                    people={resharers}
+                    actionLabel={t("repostedAction")}
+                    onPress={() => openReposterProfile(post, resharers[0])}
+                    onPressPerson={(person) => openReposterProfile(post, person)}
+                  />
+                );
+              })()}
               <View style={styles.reelUserFollowRow}>
                 <Pressable
                   style={styles.reelAuthorTap}
@@ -4321,15 +4362,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       return (
         <>
         <View style={styles.postCard}>
-          {post.repost ? (
-            <RepostAttribution
-              variant="feed"
-              byUserName={displayPersonName(post.repost.byUserName)}
-              byAvatarUrl={post.repost.byAvatarUrl}
-              actionLabel={t("repostedAction")}
-              onPress={() => openReposterProfile(post)}
-            />
-          ) : null}
+          {(() => {
+            const resharers = latestResharersForDisplay(post).map((r) => ({
+              ...r,
+              fullName: displayPersonName(r.fullName)
+            }));
+            if (!resharers.length) return null;
+            return (
+              <RepostAttribution
+                variant="feed"
+                people={resharers}
+                actionLabel={t("repostedAction")}
+                onPress={() => openReposterProfile(post, resharers[0])}
+                onPressPerson={(person) => openReposterProfile(post, person)}
+              />
+            );
+          })()}
           {post.repost?.quoteCaption ? (
             <Text style={styles.repostQuote}>{displayFeedCopy(post.repost.quoteCaption)}</Text>
           ) : null}

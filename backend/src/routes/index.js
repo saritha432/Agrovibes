@@ -1422,6 +1422,27 @@ function normalizeHomePostRow(row) {
   } else if (!Array.isArray(rawLikers)) {
     base.recentLikers = [];
   }
+  const rawResharers = base.recentResharers;
+  if (typeof rawResharers === "string" && rawResharers.trim()) {
+    try {
+      const parsed = JSON.parse(rawResharers);
+      base.recentResharers = Array.isArray(parsed) ? parsed : [];
+    } catch (_e) {
+      base.recentResharers = [];
+    }
+  } else if (!Array.isArray(rawResharers)) {
+    base.recentResharers = [];
+  }
+  if (Array.isArray(base.recentResharers)) {
+    base.recentResharers = base.recentResharers
+      .map((row) => ({
+        userId: Number(row?.userId) || 0,
+        fullName: String(row?.fullName || "").trim() || "User",
+        avatarUrl: row?.avatarUrl ?? null
+      }))
+      .filter((row) => row.userId > 0)
+      .slice(0, 4);
+  }
   if (/^\[LIVE\]/i.test(String(base.caption || "").trim())) {
     base.liveRoomName = `agrovibes-live-${base.id}`;
     const hasLiveMedia = !!(
@@ -1491,10 +1512,54 @@ function paginateHomeFeedRows(rows, limit) {
 }
 
 const HOME_POST_RESHARES_COUNT_SQL = `(SELECT COUNT(*)::int FROM home_post_reshares hpr_count WHERE hpr_count.post_id = p.id) AS "resharesCount"`;
+/** Latest up to 4 people who reshared (Instagram-style stacked attribution). */
+const HOME_POST_RECENT_RESHARERS_SQL = `(
+  SELECT COALESCE(
+    json_agg(
+      json_build_object(
+        'userId', rr."userId",
+        'fullName', rr."fullName",
+        'avatarUrl', rr."avatarUrl"
+      )
+      ORDER BY rr."resharedAt" DESC
+    ),
+    '[]'::json
+  )
+  FROM (
+    SELECT
+      u.id AS "userId",
+      COALESCE(NULLIF(TRIM(u.full_name), ''), 'User') AS "fullName",
+      u.avatar_url AS "avatarUrl",
+      hpr.created_at AS "resharedAt"
+    FROM home_post_reshares hpr
+    JOIN learn_users u ON u.id = hpr.user_id
+    WHERE hpr.post_id = p.id
+    ORDER BY hpr.created_at DESC
+    LIMIT 4
+  ) rr
+) AS "recentResharers"`;
 
 async function getHomePostResharesCount(postId) {
   const result = await query(`SELECT COUNT(*)::int AS c FROM home_post_reshares WHERE post_id = $1`, [postId]);
   return Number(result.rows[0]?.c || 0);
+}
+
+async function getHomePostRecentResharers(postId, limit = 4) {
+  const result = await query(
+    `
+    SELECT
+      u.id AS "userId",
+      COALESCE(NULLIF(TRIM(u.full_name), ''), 'User') AS "fullName",
+      u.avatar_url AS "avatarUrl"
+    FROM home_post_reshares hpr
+    JOIN learn_users u ON u.id = hpr.user_id
+    WHERE hpr.post_id = $1
+    ORDER BY hpr.created_at DESC
+    LIMIT $2
+    `,
+    [postId, limit]
+  );
+  return result.rows || [];
 }
 
 function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
@@ -1514,6 +1579,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       p.likes_count AS "likesCount",
       p.comments_count AS "commentsCount",
       ${HOME_POST_RESHARES_COUNT_SQL},
+      ${HOME_POST_RECENT_RESHARERS_SQL},
       p.video_url AS "videoUrl",
       p.image_url AS "imageUrl",
       p.image_urls AS "image_urls",
@@ -5980,6 +6046,7 @@ router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => 
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6674,6 +6741,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6749,6 +6817,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6809,6 +6878,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6866,6 +6936,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -6968,6 +7039,7 @@ router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7038,8 +7110,11 @@ router.post("/v1/home/posts/:postId/reshare", authRequired, async (req, res) => 
       [postId, userId, quoteCaption]
     );
     await cacheIncr("home:posts:gen");
-    const resharesCount = await getHomePostResharesCount(postId);
-    res.json({ reshared: true, quoteCaption, resharesCount });
+    const [resharesCount, recentResharers] = await Promise.all([
+      getHomePostResharesCount(postId),
+      getHomePostRecentResharers(postId, 4)
+    ]);
+    res.json({ reshared: true, quoteCaption, resharesCount, recentResharers });
   } catch (error) {
     res.status(500).json({ message: "Failed to reshare post", error: error.message });
   }
@@ -7056,8 +7131,11 @@ router.post("/v1/home/posts/:postId/unreshare", authRequired, async (req, res) =
     }
     await query(`DELETE FROM home_post_reshares WHERE post_id = $1 AND user_id = $2`, [postId, userId]);
     await cacheIncr("home:posts:gen");
-    const resharesCount = await getHomePostResharesCount(postId);
-    res.json({ reshared: false, resharesCount });
+    const [resharesCount, recentResharers] = await Promise.all([
+      getHomePostResharesCount(postId),
+      getHomePostRecentResharers(postId, 4)
+    ]);
+    res.json({ reshared: false, resharesCount, recentResharers });
   } catch (error) {
     res.status(500).json({ message: "Failed to unreshare post", error: error.message });
   }
@@ -7087,6 +7165,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         p.likes_count AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7255,6 +7334,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
@@ -7347,6 +7427,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         (SELECT COUNT(*)::int FROM home_post_likes hpl_count WHERE hpl_count.post_id = p.id) AS "likesCount",
         p.comments_count AS "commentsCount",
         ${HOME_POST_RESHARES_COUNT_SQL},
+        ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",

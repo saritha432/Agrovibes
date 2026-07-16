@@ -2208,12 +2208,26 @@ export function CreateModal({
                 </Pressable>
                 <View style={styles.igCamTopCenterGroup} pointerEvents="box-none">
                   <Pressable
-                    style={[styles.igCamTopSquareBtn, entryFacing === "front" ? styles.igCamControlDisabled : null]}
+                    style={[
+                      styles.igCamTopSquareBtn,
+                      entryFacing === "front" ? styles.igCamControlDisabled : null,
+                      entryFlashOn && entryFacing === "back" ? styles.igCamTopSquareBtnOn : null
+                    ]}
                     disabled={entryFacing === "front"}
-                    onPress={() => setEntryFlashOn((v) => !v)}
+                    onPress={() => {
+                      if (entryFacing === "front") return;
+                      setEntryFlashOn((v) => !v);
+                    }}
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={entryFlashOn ? "Turn torch off" : "Turn torch on"}
+                    accessibilityState={{ checked: entryFlashOn, disabled: entryFacing === "front" }}
                   >
-                    <CreateCameraSvgIcon module={CREATE_CAMERA_ASSETS.torch} size={22} fallbackName="flash-outline" />
+                    <Ionicons
+                      name={entryFlashOn && entryFacing === "back" ? "flash" : "flash-outline"}
+                      size={22}
+                      color={entryFlashOn && entryFacing === "back" ? "#C9FF35" : "#fff"}
+                    />
                   </Pressable>
                   <Pressable
                     style={styles.igCamTopSquareBtn}
@@ -2773,7 +2787,7 @@ export function CreateModal({
             </Pressable>
           </View>
       ) : (
-      <View style={styles.igFullScreen}>
+      <View style={[styles.igFullScreen, { paddingTop: Math.max(insets.top, 4) }]}>
         {createStep === "preview" ? (
           <>
             {createType === "story" ? (
@@ -4050,19 +4064,17 @@ const styles = StyleSheet.create({
   },
   farmingTopicLabel: {
     color: "rgba(255,255,255,0.7)",
-    fontSize: 11,
-    fontWeight: "800",
+    fontSize: 12,
+    fontWeight: "700",
     marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 0.4
+    letterSpacing: 0.2
   },
   farmingTopicLabelDark: {
     color: "#5f6b52",
-    fontSize: 11,
-    fontWeight: "800",
+    fontSize: 12,
+    fontWeight: "700",
     marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 0.4
+    letterSpacing: 0.2
   },
   farmingTopicWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
   farmingTopicChip: {
@@ -4083,11 +4095,11 @@ const styles = StyleSheet.create({
   },
   farmingTopicChipOn: {
     borderColor: "#C9FF35",
-    backgroundColor: "rgba(201,255,53,0.28)"
+    backgroundColor: "#C9FF35"
   },
   farmingTopicChipText: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "700" },
   farmingTopicChipTextDark: { color: "#2f3a12", fontSize: 12, fontWeight: "700" },
-  farmingTopicChipTextOn: { color: "#111", fontWeight: "900" },
+  farmingTopicChipTextOn: { color: "#262626", fontWeight: "900" },
   farmingConfirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   farmingConfirmText: {
     flex: 1,
@@ -4830,7 +4842,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     letterSpacing: 0.8
   },
-  igFullScreen: { flex: 1, backgroundColor: "#1f1f1f", justifyContent: "space-between", paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16 },
+  igFullScreen: { flex: 1, backgroundColor: "#1f1f1f", justifyContent: "space-between", paddingBottom: 14, paddingHorizontal: 16 },
   igTopControls: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   igTopRightControls: { flexDirection: "row", alignItems: "center", gap: 16 },
   igLeftTools: { position: "absolute", left: 16, top: 140, gap: 24, alignItems: "center" },

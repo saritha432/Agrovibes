@@ -109,6 +109,32 @@ export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePos
 export function shownResharesCount(post: HomePost): number {
   const fromApi = Number(post.resharesCount ?? 0);
   if (fromApi > 0) return fromApi;
+  if (post.recentResharers?.length) return post.recentResharers.length;
   if (post.repost || post.viewerHasReshared) return 1;
   return 0;
+}
+
+/** Latest resharers for stacked avatar UI (max 4). */
+export function latestResharersForDisplay(post: HomePost): Array<{
+  userId?: number;
+  fullName: string;
+  avatarUrl?: string | null;
+}> {
+  if (Array.isArray(post.recentResharers) && post.recentResharers.length) {
+    return post.recentResharers.slice(0, 4).map((r) => ({
+      userId: r.userId,
+      fullName: String(r.fullName || "").trim() || "User",
+      avatarUrl: r.avatarUrl
+    }));
+  }
+  if (post.repost) {
+    return [
+      {
+        userId: post.repost.byUserId,
+        fullName: String(post.repost.byUserName || "").trim() || "User",
+        avatarUrl: post.repost.byAvatarUrl
+      }
+    ];
+  }
+  return [];
 }
