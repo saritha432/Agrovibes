@@ -7,7 +7,7 @@ const PLAY_STORE_URL =
 
 const APP_STORE_URL =
   (import.meta.env.VITE_APP_STORE_URL as string | undefined)?.trim() ||
-  "https://apps.apple.com/search?term=cropvibe";
+  "https://apps.apple.com/app/id6784965103";
 
 function encodeIntentFallback(url: string) {
   return encodeURIComponent(url);
