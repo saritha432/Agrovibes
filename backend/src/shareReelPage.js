@@ -83,7 +83,10 @@ function isLinkPreviewBot(userAgent) {
   );
 }
 
-function buildOpenAppScript(urls) {
+function buildOpenAppScript(urls, icons) {
+  const iconUrl = icons?.iconUrl || "";
+  const iconFallbackUrl = icons?.iconFallbackUrl || "";
+  const iconFallback2Url = icons?.iconFallback2Url || "";
   return `
     <script>
       (function () {
@@ -93,6 +96,9 @@ function buildOpenAppScript(urls) {
         var watchUrl = ${JSON.stringify(urls.httpsWatchUrl)};
         var playStoreUrl = ${JSON.stringify(urls.playStoreUrl)};
         var appStoreUrl = ${JSON.stringify(urls.appStoreUrl)};
+        var iconUrl = ${JSON.stringify(iconUrl)};
+        var iconFallbackUrl = ${JSON.stringify(iconFallbackUrl)};
+        var iconFallback2Url = ${JSON.stringify(iconFallback2Url)};
         var ua = navigator.userAgent || "";
         var isAndroid = /android/i.test(ua);
         var isIos = /iphone|ipad|ipod/i.test(ua);
@@ -106,8 +112,19 @@ function buildOpenAppScript(urls) {
         function showInstall() {
           var loading = document.getElementById("cv-loading");
           var install = document.getElementById("cv-install");
+          var icon = document.getElementById("cv-app-icon");
           if (loading) loading.hidden = true;
           if (install) install.hidden = false;
+          if (icon && !icon.getAttribute("src")) {
+            icon.setAttribute("src", iconUrl);
+            icon.onerror = function () {
+              icon.onerror = function () {
+                icon.onerror = null;
+                icon.src = iconFallback2Url;
+              };
+              icon.src = iconFallbackUrl;
+            };
+          }
         }
 
         function storeUrl() {
@@ -196,7 +213,12 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   <meta name="twitter:image" content="${escapeHtml(image)}" />`
     : "";
   const previewBot = isLinkPreviewBot(userAgent);
-  const redirectScript = previewBot ? "" : buildOpenAppScript(urls);
+  const iconUrl = `${getApiOrigin()}/api/share/assets/icons-ios.png`;
+  const iconFallbackUrl = `${webOrigin}/icons-ios.png`;
+  const iconFallback2Url = `${webOrigin}/cropvibe.png`;
+  const redirectScript = previewBot
+    ? ""
+    : buildOpenAppScript(urls, { iconUrl, iconFallbackUrl, iconFallback2Url });
   const appLinksTags = `
   <meta property="al:android:url" content="${escapeHtml(urls.customSchemeUrl)}" />
   <meta property="al:android:package" content="com.cropvibe.app" />
@@ -204,7 +226,6 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   <meta property="al:ios:url" content="${escapeHtml(urls.customSchemeUrl)}" />
   <meta property="al:ios:app_name" content="Cropvibe" />
   <meta property="al:web:url" content="${escapeHtml(canonicalPath)}" />`;
-  const iconUrl = `${webOrigin}/icons-ios.png`;
   const estimatedSize = escapeHtml(getEstimatedAppSizeLabel());
 
   return `<!DOCTYPE html>
@@ -226,6 +247,7 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   <meta name="twitter:description" content="${caption}" />
   <style>
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -233,18 +255,18 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       color: #111;
     }
     .page {
-      min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
       flex-direction: column;
       max-width: 480px;
       margin: 0 auto;
-      padding: 8px 24px 24px;
+      padding: 0 24px calc(20px + env(safe-area-inset-bottom, 0px));
     }
     .topbar {
+      flex-shrink: 0;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      min-height: 44px;
+      min-height: 48px;
     }
     .back {
       width: 40px;
@@ -256,28 +278,45 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       color: #111;
       cursor: pointer;
       padding: 0;
+      margin-left: -8px;
     }
-    .hero {
+    .loading {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #737373;
+      font-size: 15px;
+      padding-bottom: 18vh;
+    }
+    .install-shell {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .install-main {
       flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       text-align: center;
-      padding: 12px 0 20px;
+      justify-content: flex-start;
+      padding-top: 36px;
     }
     .app-icon {
-      width: 118px;
-      height: 118px;
-      border-radius: 26px;
+      width: 112px;
+      height: 112px;
+      border-radius: 24px;
       object-fit: cover;
-      margin-bottom: 18px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      margin-bottom: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      background: #111;
     }
     h1 {
-      margin: 0 0 10px;
-      font-size: 30px;
-      line-height: 1.12;
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.15;
       font-weight: 800;
       letter-spacing: -0.02em;
     }
@@ -290,7 +329,7 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       font-weight: 400;
     }
     .estimated {
-      margin: 12px 0 0;
+      margin: 10px 0 0;
       color: #737373;
       font-size: 13px;
       font-weight: 400;
@@ -306,13 +345,13 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       cursor: pointer;
       padding: 0;
     }
-    .actions {
-      margin-top: auto;
+    .install-footer {
+      flex-shrink: 0;
       width: 100%;
       padding-top: 8px;
     }
     .mobile-note {
-      margin: 0 0 16px;
+      margin: 0 0 14px;
       color: #111;
       font-size: 13px;
       line-height: 1.35;
@@ -353,13 +392,6 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       text-decoration: none;
       cursor: pointer;
     }
-    .loading {
-      min-height: 70vh;
-      display: grid;
-      place-items: center;
-      color: #737373;
-      font-size: 15px;
-    }
     .preview-only {
       padding: 24px;
       text-align: center;
@@ -382,13 +414,15 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       <button class="back" type="button" aria-label="Back" onclick="history.length>1?history.back():window.location.href='${escapeHtml(webOrigin)}'">&#8592;</button>
     </div>
     <div id="cv-loading" class="loading">Opening Cropvibe…</div>
-    <div id="cv-install" class="hero" hidden>
-      <img class="app-icon" src="${escapeHtml(iconUrl)}" alt="Cropvibe" onerror="this.onerror=null;this.src='${escapeHtml(`${webOrigin}/cropvibe.png`)}';" />
-      <h1>Install Cropvibe</h1>
-      <p class="tagline">Bringing you closer to the people and things you love in farming.</p>
-      <p class="estimated">Estimated size: ${estimatedSize}</p>
-      <button id="cv-details-btn" class="details-link" type="button">View details</button>
-      <div class="actions">
+    <div id="cv-install" class="install-shell" hidden>
+      <div class="install-main">
+        <img class="app-icon" id="cv-app-icon" alt="" />
+        <h1>Install Cropvibe</h1>
+        <p class="tagline">Bringing you closer to the people and things you love in farming.</p>
+        <p class="estimated">Estimated size: ${estimatedSize}</p>
+        <button id="cv-details-btn" class="details-link" type="button">View details</button>
+      </div>
+      <div class="install-footer">
         <p class="mobile-note"><span class="checkbox"></span>Use mobile data if Wi-Fi isn't available. Data charges may apply. You can change this in Settings for future updates.</p>
         <a id="cv-install-btn" class="btn-install" href="${escapeHtml(urls.playStoreUrl)}">Install</a>
       </div>
