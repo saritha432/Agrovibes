@@ -1,4 +1,4 @@
-const { buildReelDeepLinkUrls } = require("./appDeepLinkUrls");
+const { buildReelDeepLinkUrls, getEstimatedAppSizeLabel } = require("./appDeepLinkUrls");
 
 function escapeHtml(value) {
   return String(value || "")
@@ -101,6 +101,7 @@ function buildOpenAppScript(urls) {
         var forceWeb = params.get("web") === "1";
         var started = Date.now();
         var opened = false;
+        var triedApp = false;
 
         function showInstall() {
           var loading = document.getElementById("cv-loading");
@@ -118,12 +119,13 @@ function buildOpenAppScript(urls) {
         function tryOpen(url) {
           if (!url || opened) return;
           opened = true;
+          triedApp = true;
           try { window.location.href = url; } catch (e) {}
         }
 
         function wireInstall() {
           var installBtn = document.getElementById("cv-install-btn");
-          var watchBtn = document.getElementById("cv-watch-btn");
+          var detailsBtn = document.getElementById("cv-details-btn");
           if (installBtn) {
             installBtn.href = storeUrl();
             installBtn.addEventListener("click", function (e) {
@@ -131,14 +133,21 @@ function buildOpenAppScript(urls) {
               window.location.href = storeUrl();
             });
           }
-          if (watchBtn) {
-            watchBtn.href = watchUrl;
-            watchBtn.addEventListener("click", function (e) {
+          if (detailsBtn) {
+            detailsBtn.href = watchUrl + "?web=1";
+            detailsBtn.addEventListener("click", function (e) {
               e.preventDefault();
-              window.location.href = watchUrl;
+              window.location.href = watchUrl + "?web=1";
             });
           }
         }
+
+        document.addEventListener("visibilitychange", function () {
+          if (!triedApp) return;
+          if (document.visibilityState === "visible" && Date.now() - started > 400) {
+            showInstall();
+          }
+        });
 
         if (forceWeb) {
           window.location.replace(watchUrl);
@@ -154,18 +163,18 @@ function buildOpenAppScript(urls) {
 
         if (isAndroid) {
           tryOpen(androidIntent);
-          setTimeout(function () { tryOpen(androidCustom); }, 120);
-          setTimeout(function () { tryOpen(appUrl); }, 280);
-        } else {
+          setTimeout(function () { tryOpen(androidCustom); }, 100);
+          setTimeout(function () { tryOpen(appUrl); }, 240);
+        } else if (isIos) {
           tryOpen(appUrl);
         }
 
         setTimeout(function () {
           if (document.hidden || document.visibilityState === "hidden") return;
-          if (Date.now() - started < 2200) {
+          if (Date.now() - started < 1400) {
             showInstall();
           }
-        }, 1800);
+        }, 1200);
       })();
     </script>`;
 }
@@ -195,7 +204,8 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
   <meta property="al:ios:url" content="${escapeHtml(urls.customSchemeUrl)}" />
   <meta property="al:ios:app_name" content="Cropvibe" />
   <meta property="al:web:url" content="${escapeHtml(canonicalPath)}" />`;
-  const logoUrl = `${webOrigin}/logo-wordmark.png`;
+  const iconUrl = `${webOrigin}/icons-ios.png`;
+  const estimatedSize = escapeHtml(getEstimatedAppSizeLabel());
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -228,7 +238,13 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       flex-direction: column;
       max-width: 480px;
       margin: 0 auto;
-      padding: 20px 20px 28px;
+      padding: 8px 24px 24px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 44px;
     }
     .back {
       width: 40px;
@@ -240,7 +256,6 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       color: #111;
       cursor: pointer;
       padding: 0;
-      margin-left: -6px;
     }
     .hero {
       flex: 1;
@@ -249,87 +264,77 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 4px 0 12px;
+      padding: 12px 0 20px;
     }
-    .logo {
-      width: 94px;
-      height: 94px;
-      border-radius: 24px;
-      object-fit: contain;
-      margin-bottom: 14px;
-      background: #262626;
-      padding: 10px;
+    .app-icon {
+      width: 118px;
+      height: 118px;
+      border-radius: 26px;
+      object-fit: cover;
+      margin-bottom: 18px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     }
     h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
-      line-height: 1.15;
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.12;
       font-weight: 800;
+      letter-spacing: -0.02em;
     }
     .tagline {
       margin: 0;
-      color: #666;
-      font-size: 15px;
+      color: #111;
+      font-size: 16px;
       line-height: 1.45;
-      max-width: 320px;
+      max-width: 340px;
+      font-weight: 400;
     }
     .estimated {
-      margin: 10px 0 0;
-      color: #a1a1a1;
-      font-size: 12px;
-      font-weight: 600;
-    }
-    .author {
-      margin: 14px 0 0;
-      color: #888;
-      font-size: 14px;
-    }
-    .caption {
-      margin: 6px 0 0;
-      color: #444;
-      font-size: 14px;
-      line-height: 1.4;
-      max-width: 340px;
-    }
-    .meta {
-      margin-top: 12px;
-      color: #999;
+      margin: 12px 0 0;
+      color: #737373;
       font-size: 13px;
+      font-weight: 400;
     }
-    .meta a {
+    .details-link {
+      margin: 10px 0 0;
       color: #1877f2;
-      text-decoration: none;
+      font-size: 15px;
       font-weight: 600;
+      text-decoration: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
     }
     .actions {
       margin-top: auto;
-      padding-top: 26px;
       width: 100%;
+      padding-top: 8px;
     }
     .mobile-note {
-      margin: 0 0 14px;
-      color: #4b4b4b;
+      margin: 0 0 16px;
+      color: #111;
       font-size: 13px;
       line-height: 1.35;
       text-align: left;
     }
     .mobile-note .checkbox {
       display: inline-block;
-      width: 13px;
-      height: 13px;
+      width: 14px;
+      height: 14px;
       border: 1.6px solid #111;
       border-radius: 2px;
       margin-right: 8px;
-      vertical-align: -1px;
+      vertical-align: -2px;
       position: relative;
     }
     .mobile-note .checkbox:after {
       content: "";
       position: absolute;
-      left: 2px;
+      left: 3px;
       top: 0px;
-      width: 6px;
-      height: 10px;
+      width: 5px;
+      height: 9px;
       border: solid #111;
       border-width: 0 1.8px 1.8px 0;
       transform: rotate(45deg);
@@ -337,10 +342,10 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
     .btn-install {
       display: block;
       width: 100%;
-      padding: 14px 20px;
+      padding: 15px 20px;
       border: none;
       border-radius: 999px;
-      background: #3f5efb;
+      background: #1877f2;
       color: #fff;
       font-size: 17px;
       font-weight: 700;
@@ -348,25 +353,11 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       text-decoration: none;
       cursor: pointer;
     }
-    .btn-secondary {
-      display: block;
-      width: 100%;
-      margin-top: 12px;
-      padding: 12px 20px;
-      border-radius: 999px;
-      background: transparent;
-      color: #1877f2;
-      font-size: 16px;
-      font-weight: 700;
-      text-align: center;
-      text-decoration: none;
-      cursor: pointer;
-    }
     .loading {
-      min-height: 60vh;
+      min-height: 70vh;
       display: grid;
       place-items: center;
-      color: #666;
+      color: #737373;
       font-size: 15px;
     }
     .preview-only {
@@ -387,20 +378,19 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       <p><strong>${author}</strong></p>
       <p>${caption}</p>
     </div>`
-        : `<button class="back" type="button" onclick="history.length>1?history.back():window.location.href='${escapeHtml(webOrigin)}'">&#8592;</button>
+        : `<div class="topbar">
+      <button class="back" type="button" aria-label="Back" onclick="history.length>1?history.back():window.location.href='${escapeHtml(webOrigin)}'">&#8592;</button>
+    </div>
     <div id="cv-loading" class="loading">Opening Cropvibe…</div>
     <div id="cv-install" class="hero" hidden>
-      <img class="logo" src="${escapeHtml(logoUrl)}" alt="Cropvibe" onerror="this.style.display='none'" />
+      <img class="app-icon" src="${escapeHtml(iconUrl)}" alt="Cropvibe" onerror="this.onerror=null;this.src='${escapeHtml(`${webOrigin}/cropvibe.png`)}';" />
       <h1>Install Cropvibe</h1>
       <p class="tagline">Bringing you closer to the people and things you love in farming.</p>
-      <p class="estimated">Estimated size: 12MB</p>
-      <p class="author">${author}</p>
-      <p class="caption">${caption}</p>
-      <p class="meta"><a href="${escapeHtml(canonicalPath)}">View details</a></p>
+      <p class="estimated">Estimated size: ${estimatedSize}</p>
+      <button id="cv-details-btn" class="details-link" type="button">View details</button>
       <div class="actions">
-        <p class="mobile-note"><span class="checkbox"></span>Use mobile data if Wi-Fi is not available. Data charges may apply.</p>
+        <p class="mobile-note"><span class="checkbox"></span>Use mobile data if Wi-Fi isn't available. Data charges may apply. You can change this in Settings for future updates.</p>
         <a id="cv-install-btn" class="btn-install" href="${escapeHtml(urls.playStoreUrl)}">Install</a>
-        <a id="cv-watch-btn" class="btn-secondary" href="${escapeHtml(urls.httpsWatchUrl)}">Watch in browser</a>
       </div>
     </div>`
     }

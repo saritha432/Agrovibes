@@ -44,7 +44,7 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-android-v1.0.12-call-expo-fallback"
+        "key": "production-ios-v1.0.13-notif-swipe-chat-kb"
       },
       "env": {
         "NODE_ENV": "production",

@@ -29,7 +29,13 @@ function getPlayStoreUrl() {
 function getAppStoreUrl() {
   const explicit = stripEnv(process.env.APP_STORE_URL || process.env.IOS_APP_STORE_URL);
   if (explicit) return explicit;
-  return "https://apps.apple.com/search?term=cropvibe";
+  return "https://apps.apple.com/app/id6784965103";
+}
+
+function getEstimatedAppSizeLabel() {
+  const raw = stripEnv(process.env.APP_ESTIMATED_SIZE_MB);
+  if (raw) return raw.includes("MB") ? raw : `${raw}MB`;
+  return "121MB";
 }
 
 function getStoreUrls() {
@@ -73,5 +79,6 @@ module.exports = {
   buildReelDeepLinkUrls,
   getPlayStoreUrl,
   getAppStoreUrl,
-  getStoreUrls
+  getStoreUrls,
+  getEstimatedAppSizeLabel
 };

@@ -29,6 +29,9 @@ void setupMissedCallNotificationCategory();
 
 const CROPVIBE_INTRO_IMAGE = require("./assets/onboarding/cropvibe_intro.png");
 
+/** Keep intro visible long enough to read, even when fonts/auth finish instantly. */
+const INTRO_MIN_MS = 1600;
+
 function IntroBootScreen() {
   return (
     <View style={styles.bootRoot}>
@@ -41,8 +44,14 @@ function IntroBootScreen() {
 function AppShell() {
   const { ready: fontsReady } = useAppFonts();
   const { loading: authLoading } = useAuth();
+  const [introMinElapsed, setIntroMinElapsed] = React.useState(false);
 
-  if (!fontsReady || authLoading) {
+  React.useEffect(() => {
+    const timer = setTimeout(() => setIntroMinElapsed(true), INTRO_MIN_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!fontsReady || authLoading || !introMinElapsed) {
     return <IntroBootScreen />;
   }
 
