@@ -8506,6 +8506,8 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
   }
 }
 
+router.use("/share/assets", express.static(path.join(__dirname, "..", "assets", "share")));
+
 router.get("/share/reel/:postId", (req, res) => void handleSharePostPage(req, res, "reel"));
 router.get("/share/watch/:postId", (req, res) => void handleSharePostPage(req, res, "watch"));
 
