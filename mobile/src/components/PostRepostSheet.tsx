@@ -139,22 +139,24 @@ export function PostRepostSheet({ visible, post, onClose, onRepostChange }: Post
               />
             ) : null}
 
-            <Pressable
-              style={[styles.primaryBtn, busy ? styles.btnDisabled : null]}
-              onPress={() => void runRepost(quoteMode)}
-              disabled={busy}
-            >
-              {busy ? (
-                <ActivityIndicator color="#111" />
-              ) : (
-                <>
-                  <Ionicons name="repeat" size={20} color="#111" />
-                  <Text style={styles.primaryBtnText}>
-                    {quoteMode ? t("repostWithThoughts") : t("repost")}
-                  </Text>
-                </>
-              )}
-            </Pressable>
+            {(!alreadyReposted || quoteMode) ? (
+              <Pressable
+                style={[styles.primaryBtn, busy ? styles.btnDisabled : null]}
+                onPress={() => void runRepost(quoteMode)}
+                disabled={busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color="#111" />
+                ) : (
+                  <>
+                    <Ionicons name="repeat" size={20} color="#111" />
+                    <Text style={styles.primaryBtnText}>
+                      {quoteMode ? t("repostWithThoughts") : t("repost")}
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            ) : null}
 
             {!quoteMode ? (
               <Pressable style={styles.secondaryBtn} onPress={() => setQuoteMode(true)} disabled={busy}>

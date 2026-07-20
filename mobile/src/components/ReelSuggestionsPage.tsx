@@ -244,7 +244,9 @@ export function ReelSuggestionsPage({
           disableIntervalMomentum
           getItemLayout={(_data, index) => ({ length: width, offset: width * index, index })}
         />
+      </View>
 
+      <View style={styles.bottomSection}>
         {slides.length > 1 ? (
           <View style={styles.dotsRow}>
             {slides.map((_, index) => (
@@ -273,9 +275,12 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#0f0f0f",
-    justifyContent: "center"
+    justifyContent: "space-between"
   },
   contentWrap: {
+    width: "100%"
+  },
+  bottomSection: {
     width: "100%"
   },
   carousel: {
@@ -368,8 +373,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingTop: 12,
-    paddingBottom: 14
+    paddingTop: 8,
+    paddingBottom: 10
   },
   dot: {
     width: 6,

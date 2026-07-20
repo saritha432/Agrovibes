@@ -4309,21 +4309,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Pressable style={styles.reelActionItem} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
-              <Pressable
-                style={styles.reelActionItem}
-                onPress={() => setRepostPost(post)}
-                accessibilityRole="button"
-                accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
-              >
-                <Ionicons
-                  name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
-                  size={REEL_ACTION_ICON + 3}
-                  color={post.viewerHasReshared ? APP_LIME : "#fff"}
-                />
-                <Text style={[styles.reelActionCount, post.viewerHasReshared ? styles.reelActionCountLiked : null]}>
-                  {shownRepostsCount}
-                </Text>
-              </Pressable>
+              {!isOwnPost ? (
+                <Pressable
+                  style={styles.reelActionItem}
+                  onPress={() => setRepostPost(post)}
+                  accessibilityRole="button"
+                  accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
+                >
+                  <Ionicons
+                    name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
+                    size={REEL_ACTION_ICON + 3}
+                    color={post.viewerHasReshared ? APP_LIME : "#fff"}
+                  />
+                  <Text style={[styles.reelActionCount, post.viewerHasReshared ? styles.reelActionCountLiked : null]}>
+                    {shownRepostsCount}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Pressable style={styles.reelActionItem} onPress={() => setActiveReelOptionsPost(post)}>
                 <Ionicons name="ellipsis-horizontal" size={REEL_ACTION_ICON} color="#fff" />
               </Pressable>
@@ -4662,18 +4664,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <Pressable style={styles.postActionIconBtn} onPress={() => setSharePost(post)}>
                 <Ionicons name="paper-plane-outline" size={22} color="#111" />
               </Pressable>
-              <Pressable
-                style={styles.postActionIconBtn}
-                onPress={() => setRepostPost(post)}
-                accessibilityRole="button"
-                accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
-              >
-                <Ionicons
-                  name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
-                  size={25}
-                  color={post.viewerHasReshared ? likeActiveColor : "#111"}
-                />
-              </Pressable>
+              {!isOwnPost ? (
+                <Pressable
+                  style={styles.postActionIconBtn}
+                  onPress={() => setRepostPost(post)}
+                  accessibilityRole="button"
+                  accessibilityLabel={post.viewerHasReshared ? t("removeRepost") : t("repost")}
+                >
+                  <Ionicons
+                    name={post.viewerHasReshared ? "repeat" : "repeat-outline"}
+                    size={25}
+                    color={post.viewerHasReshared ? likeActiveColor : "#111"}
+                  />
+                </Pressable>
+              ) : null}
             </View>
             <Pressable style={styles.postActionIconBtn} onPress={() => void togglePostSave(post)}>
               <Ionicons
