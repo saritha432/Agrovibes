@@ -3,7 +3,7 @@
     "apps": [],
     "details": [
       {
-        "appID": "REPLACE_WITH_APPLE_TEAM_ID.com.cropvibe.app",
+        "appID": "9X68N2WNS7.com.cropvibe.app",
         "paths": ["/reel/*", "/watch/*", "/profile/*"]
       }
     ]
