@@ -28,7 +28,7 @@ import { useLanguage } from "../localization/LanguageContext";
 import type { AppLanguage } from "../localization/LanguageContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import {
-  fetchHomeReelsExplore,
+  fetchHomePostsPage,
   fetchUsers,
   sendFollowRequest,
   type FollowStatus,
@@ -39,7 +39,7 @@ import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
 
-const EXPLORE_REELS_LIMIT = 60;
+const EXPLORE_POSTS_LIMIT = 60;
 const BG = "#121212";
 const SEARCH_BG = "#303132";
 const ROW_BORDER = "#2a2a2a";
@@ -62,6 +62,15 @@ type SearchUser = {
   viewerStatus?: FollowStatus;
   reverseStatus?: FollowStatus;
 };
+
+function hasExploreMedia(post: HomePost) {
+  return !!(
+    String(post.videoUrl || "").trim() ||
+    String(post.imageUrl || "").trim() ||
+    String(post.thumbnailUrl || "").trim() ||
+    (Array.isArray(post.imageUrls) && post.imageUrls.some((u) => String(u || "").trim()))
+  );
+}
 
 function normalizeName(value: string) {
   return String(value || "")
@@ -349,8 +358,8 @@ export function UserSearchScreen() {
   const loadExplorePosts = useCallback(async () => {
     setLoadingExplore(true);
     try {
-      const { posts } = await fetchHomeReelsExplore(token, { limit: EXPLORE_REELS_LIMIT });
-      setExplorePosts(posts);
+      const { posts } = await fetchHomePostsPage(token, { limit: EXPLORE_POSTS_LIMIT });
+      setExplorePosts(posts.filter(hasExploreMedia));
     } catch {
       setExplorePosts([]);
     } finally {
@@ -746,7 +755,7 @@ export function UserSearchScreen() {
               !loadingExplore ? (
                 <View style={styles.exploreEmpty}>
                   <Ionicons name="film-outline" size={40} color={MUTED} />
-                  <Text style={styles.emptyTitle}>No reels yet</Text>
+                  <Text style={styles.emptyTitle}>No posts yet</Text>
                 </View>
               ) : null
             }

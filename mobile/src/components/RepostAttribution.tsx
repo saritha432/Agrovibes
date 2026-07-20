@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useMemo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { APP_BLACK, APP_LIME } from "../theme/appColors";
 import { UserAvatar } from "./UserAvatar";
@@ -11,7 +11,7 @@ export type ResharerPerson = {
 };
 
 type RepostAttributionProps = {
-  /** Latest resharers (newest first). Shows up to 4 overlapping circles. */
+  /** Latest resharers (newest first). Shows up to 4 avatars. */
   people?: ResharerPerson[];
   /** Fallback single person when `people` is empty. */
   byUserName?: string;
@@ -26,9 +26,44 @@ type RepostAttributionProps = {
 
 const MAX_SHOWN = 4;
 
+type AvatarLayout = {
+  left: number;
+  top: number;
+};
+
+/** Straight row for 1–2; upward arch for 3–4 (edges lower, center higher). */
+function layoutAvatars(count: number, size: number, gap: number, isReel: boolean): { positions: AvatarLayout[]; width: number; height: number } {
+  const span = size + gap;
+  if (count < 3) {
+    const width = count * size + Math.max(0, count - 1) * gap;
+    return {
+      positions: Array.from({ length: count }, (_, i) => ({ left: i * span, top: 0 })),
+      width,
+      height: size
+    };
+  }
+
+  const archLift = isReel ? 14 : 11;
+  const width = count * size + (count - 1) * gap;
+  const positions: AvatarLayout[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const t = i / (count - 1);
+    const left = i * span;
+    // Parabola: edges sit lower, center rises on the arch.
+    const top = Math.round(archLift * (1 - 4 * t * (1 - t)));
+    positions.push({ left, top });
+  }
+
+  return {
+    positions,
+    width,
+    height: size + archLift
+  };
+}
+
 /**
- * Instagram-style reshare mark: overlapping small circular avatars (latest sharers)
- * with lime ↻ badge — no “Name reposted” text.
+ * Reshare mark: resharer avatars (arch when 3+) with lime ↻ badge on each.
  */
 export function RepostAttribution({
   people,
@@ -49,15 +84,23 @@ export function RepostAttribution({
     .filter((p) => String(p.fullName || "").trim())
     .slice(0, MAX_SHOWN);
 
-  if (!list.length) return null;
-
   const size = isReel ? 34 : 28;
   const badge = isReel ? 14 : 12;
   const icon = isReel ? 8 : 7;
-  const overlap = Math.round(size * 0.38);
-  const stackWidth = size + (list.length - 1) * (size - overlap);
+  const borderW = isReel ? 2 : 2;
+  const gap = isReel ? 8 : 6;
+  const ringColor = isReel ? "#000" : "#fff";
+
+  const layout = useMemo(
+    () => layoutAvatars(list.length, size, gap, isReel),
+    [gap, isReel, list.length, size]
+  );
+
+  if (!list.length) return null;
+
   const action = String(actionLabel || "reposted").trim() || "reposted";
   const a11y = `${list.map((p) => p.fullName).join(", ")} ${action}`;
+  const useArch = list.length >= 3;
 
   return (
     <Pressable
@@ -68,20 +111,31 @@ export function RepostAttribution({
       accessibilityRole={onPress || onPressPerson ? "button" : undefined}
       accessibilityLabel={a11y}
     >
-      <View style={[styles.stack, { width: stackWidth, height: size }]}>
+      <View
+        style={[
+          useArch ? styles.stackArch : styles.stackRow,
+          useArch
+            ? { width: layout.width, height: layout.height }
+            : { gap }
+        ]}
+      >
         {list.map((person, index) => {
           const name = String(person.fullName || "").trim() || "Someone";
+          const pos = layout.positions[index];
           return (
             <Pressable
               key={`${person.userId || name}-${index}`}
               style={[
                 styles.avatarShell,
+                useArch ? styles.avatarArch : null,
                 {
                   width: size,
                   height: size,
                   borderRadius: size / 2,
-                  left: index * (size - overlap),
-                  zIndex: list.length - index
+                  borderWidth: borderW,
+                  borderColor: ringColor,
+                  backgroundColor: ringColor,
+                  ...(useArch ? { left: pos.left, top: pos.top } : null)
                 }
               ]}
               onPress={() => {
@@ -94,8 +148,8 @@ export function RepostAttribution({
               <UserAvatar
                 uri={person.avatarUrl}
                 name={name}
-                size={size}
-                borderRadius={size / 2}
+                size={size - borderW * 2}
+                borderRadius={(size - borderW * 2) / 2}
                 fallbackBackgroundColor={isReel ? "rgba(255,255,255,0.22)" : "#d1d5db"}
                 initialsColor={isReel ? "#fff" : "#374151"}
               />
@@ -107,7 +161,7 @@ export function RepostAttribution({
                     height: badge,
                     borderRadius: badge / 2,
                     borderWidth: isReel ? 2 : 1.5,
-                    borderColor: isReel ? "#000" : "#fff"
+                    borderColor: ringColor
                   }
                 ]}
               >
@@ -126,19 +180,26 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start"
   },
   wrapReel: {
-    marginBottom: 10
+    marginBottom: 12
   },
   wrapFeed: {
     paddingHorizontal: 12,
     paddingTop: 10,
     paddingBottom: 4
   },
-  stack: {
+  stackRow: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  stackArch: {
     position: "relative"
   },
   avatarShell: {
-    position: "absolute",
-    top: 0
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  avatarArch: {
+    position: "absolute"
   },
   badge: {
     position: "absolute",
