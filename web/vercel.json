@@ -1,4 +1,12 @@
 {
+  "redirects": [
+    {
+      "source": "/:path((?!\\.well-known).*)",
+      "has": [{ "type": "host", "value": "cropvibe.com" }],
+      "destination": "https://www.cropvibe.com/:path",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/reel/:id",

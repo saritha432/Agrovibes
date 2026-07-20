@@ -260,34 +260,34 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       flex-direction: column;
       max-width: 480px;
       margin: 0 auto;
-      padding: 0 24px calc(20px + env(safe-area-inset-bottom, 0px));
+      padding: 0 20px calc(16px + env(safe-area-inset-bottom, 0px));
     }
     .topbar {
       flex-shrink: 0;
       display: flex;
       align-items: center;
-      min-height: 48px;
+      height: 44px;
     }
     .back {
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       border: none;
       background: transparent;
-      font-size: 28px;
+      font-size: 24px;
       line-height: 1;
       color: #111;
       cursor: pointer;
       padding: 0;
-      margin-left: -8px;
+      margin-left: -4px;
     }
     .loading {
       flex: 1;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       color: #737373;
       font-size: 15px;
-      padding-bottom: 18vh;
+      padding-top: 42vh;
     }
     .install-shell {
       flex: 1;
@@ -296,27 +296,26 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
       min-height: 0;
     }
     .install-main {
-      flex: 1;
+      flex: 0 0 auto;
       display: flex;
       flex-direction: column;
       align-items: center;
       text-align: center;
-      justify-content: flex-start;
-      padding-top: 36px;
+      padding-top: 2px;
     }
     .app-icon {
-      width: 112px;
-      height: 112px;
-      border-radius: 24px;
+      width: 108px;
+      height: 108px;
+      border-radius: 22px;
       object-fit: cover;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.08);
       background: #111;
     }
     h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
-      line-height: 1.15;
+      margin: 0 0 6px;
+      font-size: 27px;
+      line-height: 1.12;
       font-weight: 800;
       letter-spacing: -0.02em;
     }
@@ -348,7 +347,8 @@ function buildShareReelHtml(post, { postId, userAgent, sharePath = "reel" }) {
     .install-footer {
       flex-shrink: 0;
       width: 100%;
-      padding-top: 8px;
+      margin-top: auto;
+      padding-top: 0;
     }
     .mobile-note {
       margin: 0 0 14px;
