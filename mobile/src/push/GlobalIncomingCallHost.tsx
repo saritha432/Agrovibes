@@ -7,6 +7,7 @@ import { sendDirectMessage } from "../services/api";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
+import { getLocalCallSession, setLocalCallSession } from "./localCallSession";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 
 export function GlobalIncomingCallHost() {
@@ -19,7 +20,12 @@ export function GlobalIncomingCallHost() {
     return subscribeIncomingCall((next) => {
       setCall(next);
       setConnectEnabled(!!next?.autoAccept);
-      if (next) historySentRef.current = false;
+      if (next) {
+        historySentRef.current = false;
+        setLocalCallSession({ roomName: next.roomName, peerUserId: next.callerId });
+      } else {
+        setLocalCallSession(null);
+      }
     });
   }, []);
 
@@ -34,6 +40,7 @@ export function GlobalIncomingCallHost() {
       clearIncomingCall();
       setCall(null);
       setConnectEnabled(false);
+      setLocalCallSession(null);
 
       if (!token || !active || historySentRef.current) return;
       historySentRef.current = true;
@@ -65,6 +72,7 @@ export function GlobalIncomingCallHost() {
       direction="incoming"
       peerName={call.callerName}
       peerAvatarUrl={call.callerAvatarUrl}
+      peerUserId={call.callerId}
       connectEnabled={connectEnabled}
       statusLabel={call.mode === "video" ? "Incoming video call" : "Incoming voice call"}
       onAccept={() => {
@@ -112,6 +120,20 @@ export function presentIncomingCallFromPush(input: {
   autoAccept?: boolean;
 }) {
   if (!input.callerId || !input.roomName) return;
+
+  const active = getLocalCallSession();
+  if (active && active.roomName !== input.roomName) {
+    void completeIncomingCallDecline({
+      callerId: input.callerId,
+      callerName: input.callerName || "Someone",
+      mode: input.mode,
+      roomName: input.roomName,
+      callerAvatarUrl: input.callerAvatarUrl,
+      status: "declined"
+    });
+    return;
+  }
+
   queueIncomingCall({
     callerId: input.callerId,
     callerName: input.callerName || "Someone",

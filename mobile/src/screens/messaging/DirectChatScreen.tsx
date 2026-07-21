@@ -38,7 +38,7 @@ import { StoryViewerModal } from "../../components/StoryViewerModal";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
 import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
@@ -51,6 +51,7 @@ import {
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import { publishActiveStories } from "../../navigation/storyActivityBridge";
 import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
+import { setLocalCallSession } from "../../push/localCallSession";
 import { dismissIncomingCallRinging } from "../../push/incomingCallSignal";
 import {
   hydrateLiveShareFromFeed,
@@ -520,9 +521,18 @@ export function DirectChatScreen() {
   callSessionRef.current = callSession;
 
   const closeCall = useCallback(() => {
+    const session = callSessionRef.current;
+    if (token && session?.roomName) {
+      void reportDirectCallSession(token, {
+        peerUserId,
+        roomName: session.roomName,
+        state: "ended"
+      }).catch(() => undefined);
+    }
+    setLocalCallSession(null);
     setCallSession(null);
     navigation.setParams({ incomingCall: undefined });
-  }, [navigation]);
+  }, [navigation, peerUserId, token]);
 
   const endCallForPeerSignal = useCallback(() => {
     if (!callSessionRef.current || callSessionRef.current.direction !== "outgoing") return;
@@ -1049,6 +1059,7 @@ export function DirectChatScreen() {
     try {
       callHistorySentRef.current = false;
       const result = await ringDirectCall(token, { peerUserId, mode });
+      setLocalCallSession({ roomName: result.roomName, peerUserId });
       setCallSession({
         roomName: result.roomName,
         mode: result.mode,
@@ -1058,6 +1069,16 @@ export function DirectChatScreen() {
         startedAt: Date.now()
       });
     } catch (error) {
+      const err = error as { status?: number; payload?: { code?: string }; message?: string };
+      if (err.status === 409 && (err.payload?.code === "busy" || err.payload?.code === "busy_self")) {
+        Alert.alert(
+          "User busy",
+          err.payload?.code === "busy_self"
+            ? "End your current call before starting another."
+            : "This person is on another call. Try again in a moment."
+        );
+        return;
+      }
       Alert.alert("Call failed", error instanceof Error ? error.message : "Could not start call.");
     }
   };
@@ -1742,6 +1763,7 @@ export function DirectChatScreen() {
         direction={callSession?.direction || "outgoing"}
         peerName={peerName}
         peerAvatarUrl={peerAvatar}
+        peerUserId={peerUserId}
         connectEnabled={callSession?.connectEnabled ?? false}
         statusLabel={callSession?.statusLabel}
         onAccept={() => {
