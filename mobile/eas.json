@@ -44,7 +44,7 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-ios-v1.0.13-notif-swipe-chat-kb"
+        "key": "production-android-v1.0.14-call-crash-fix"
       },
       "env": {
         "NODE_ENV": "production",

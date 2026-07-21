@@ -233,10 +233,13 @@ export async function handleNotificationResponse(
   response: Notifications.NotificationResponse,
   options?: { authToken?: string | null }
 ) {
+  if (!response?.notification?.request?.content) return;
+
   const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
   const title = String(response.notification.request.content.title || "").trim() || "Someone";
   const type = String(data.type || "");
-  const actionId = response.actionIdentifier;
+  const actionId = String(response.actionIdentifier || "").trim();
+  if (!actionId) return;
 
   if (isReplyAction(actionId)) {
     await handleInlineReply(response, options);
