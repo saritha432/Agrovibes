@@ -47,7 +47,7 @@ const {
   sendSocialPushToFollowers,
   directMessagePushPayload
 } = require("../pushNotifications");
-const { setCallSession, clearCallSession, isUserBusy } = require("../activeCallSessions");
+const { setCallSession, clearCallSession, isUserBusy, isRoomRinging } = require("../activeCallSessions");
 const { buildShareReelHtml } = require("../shareReelPage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
 const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, getSocketIo } = require("../socketChat");
@@ -4579,6 +4579,7 @@ router.post("/v1/calls/cancel", authRequired, async (req, res) => {
       res.status(404).json({ message: "Peer user not found" });
       return;
     }
+    clearCallSession(me, roomName);
     const pushResult = await sendCallCancelledPush({
       userId: peerUserId,
       roomName,
@@ -4587,10 +4588,22 @@ router.post("/v1/calls/cancel", authRequired, async (req, res) => {
       console.warn("[push] call cancel:", error?.message || error);
       return { sent: 0, failed: 0, skipped: "error" };
     });
-    clearCallSession(me, roomName);
     res.status(200).json({ ok: true, peerUserId, roomName, push: pushResult });
   } catch (error) {
     res.status(500).json({ message: "Failed to cancel call", error: error.message });
+  }
+});
+
+router.get("/v1/calls/ringing", authRequired, async (req, res) => {
+  try {
+    const roomName = String(req.query?.roomName || "").trim();
+    if (!roomName) {
+      res.status(400).json({ message: "roomName is required" });
+      return;
+    }
+    res.status(200).json({ roomName, ringing: isRoomRinging(roomName) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to check call status", error: error.message });
   }
 });
 

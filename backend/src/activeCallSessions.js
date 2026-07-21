@@ -51,8 +51,21 @@ function isUserBusy(userId) {
   return entry.state === "ringing" || entry.state === "active";
 }
 
+function isRoomRinging(roomName) {
+  const room = String(roomName || "").trim();
+  if (!room) return false;
+  for (const entry of sessions.values()) {
+    if (entry.roomName !== room) continue;
+    if (entry.state !== "ringing") continue;
+    if (isStale(entry)) continue;
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   setCallSession,
   clearCallSession: clearPair,
-  isUserBusy
+  isUserBusy,
+  isRoomRinging
 };

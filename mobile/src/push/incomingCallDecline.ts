@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { cancelDirectCall, sendDirectMessage } from "../services/api";
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
+import { markCallRoomEnded } from "./cancelledCallRooms";
 import { clearIncomingCall } from "./incomingCallBridge";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { displayMissedCallNotification } from "./missedCallNotifications";
@@ -53,10 +54,13 @@ export async function completeIncomingCallDecline(input: {
   const status = input.status === "missed" ? "missed" : "declined";
   const dedupeKey = `${callerId}:${roomName || "_"}:${status}`;
   if (shouldSkipDuplicateDecline(dedupeKey)) {
+    if (roomName) markCallRoomEnded(roomName);
     await clearIncomingCallNotifications(roomName || undefined);
     clearIncomingCall();
     return;
   }
+
+  if (roomName) markCallRoomEnded(roomName);
 
   // Dismiss shade + native full-screen UI and close in-app incoming modal.
   await clearIncomingCallNotifications(roomName || undefined);
