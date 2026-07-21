@@ -107,6 +107,11 @@ export function PushNotificationBootstrap() {
   }, []);
 
   React.useEffect(() => {
+    if (Platform.OS === "web" || !token) return;
+    void handleColdStartNotificationResponse({ authToken: token });
+  }, [token]);
+
+  React.useEffect(() => {
     if (token) return;
     const previousAuth = authTokenRef.current;
     const previousPush = registeredTokenRef.current;

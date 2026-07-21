@@ -25,7 +25,7 @@ import { ActivityIndicator, Modal, Platform, Pressable, StyleSheet, Text, View }
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTopChromeInset } from "../../theme/topChromeInset";
 import { useAuth } from "../../auth/AuthContext";
-import { createLiveKitToken, formatLiveStreamError } from "../../services/api";
+import { createLiveKitToken, formatLiveStreamError, reportDirectCallSession } from "../../services/api";
 import { ensureLiveKitGlobals } from "../../setupLiveKit.native";
 import { LIVEKIT_CALL_ROOM_OPTIONS } from "../../utils/liveKitMobileOptions";
 import { APP_LIME } from "../../theme/appColors";
@@ -56,6 +56,7 @@ type DirectCallViewProps = {
   direction: CallDirection;
   peerName: string;
   peerAvatarUrl?: string | null;
+  peerUserId?: number;
   connectEnabled: boolean;
   statusLabel?: string;
   onAccept?: () => void;
@@ -483,6 +484,7 @@ export function DirectCallView({
   direction,
   peerName,
   peerAvatarUrl,
+  peerUserId,
   connectEnabled,
   statusLabel,
   onAccept,
@@ -496,7 +498,24 @@ export function DirectCallView({
   const [connection, setConnection] = React.useState<{ url: string; token: string } | null>(null);
   const [errorText, setErrorText] = React.useState("");
   const endedRef = React.useRef(false);
+  const activeReportedRef = React.useRef(false);
   const [ringSilenced, setRingSilenced] = React.useState(false);
+
+  const reportSessionEnded = React.useCallback(() => {
+    const peerId = Number(peerUserId);
+    const room = String(roomName || "").trim();
+    if (!token || !room || !Number.isFinite(peerId) || peerId <= 0) return;
+    void reportDirectCallSession(token, { peerUserId: peerId, roomName: room, state: "ended" }).catch(() => undefined);
+  }, [peerUserId, roomName, token]);
+
+  const reportSessionActive = React.useCallback(() => {
+    if (activeReportedRef.current) return;
+    const peerId = Number(peerUserId);
+    const room = String(roomName || "").trim();
+    if (!token || !room || !Number.isFinite(peerId) || peerId <= 0) return;
+    activeReportedRef.current = true;
+    void reportDirectCallSession(token, { peerUserId: peerId, roomName: room, state: "active" }).catch(() => undefined);
+  }, [peerUserId, roomName, token]);
 
   const silenceRingtone = React.useCallback(() => {
     setRingSilenced(true);
@@ -512,18 +531,20 @@ export function DirectCallView({
     async (status: DmCallStatus) => {
       if (endedRef.current) return;
       endedRef.current = true;
+      reportSessionEnded();
       setRingSilenced(true);
       await stopCallSounds();
       await AudioSession.stopAudioSession().catch(() => undefined);
       onCallEnded?.({ status, durationSec: 0 });
       onClose();
     },
-    [onCallEnded, onClose]
+    [onCallEnded, onClose, reportSessionEnded]
   );
 
   React.useEffect(() => {
     if (!visible) {
       endedRef.current = false;
+      activeReportedRef.current = false;
       setRingSilenced(false);
       setConnection(null);
       setErrorText("");
@@ -701,7 +722,10 @@ export function DirectCallView({
             peerAvatarUrl={peerAvatarUrl}
             statusLabel={statusLabel}
             onCallEnded={onCallEnded}
-            onCallAnswered={silenceRingtone}
+            onCallAnswered={() => {
+              silenceRingtone();
+              reportSessionActive();
+            }}
             endedRef={endedRef}
             onClose={() => {
               silenceRingtone();

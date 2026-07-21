@@ -636,18 +636,6 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       key,
       [
         {
-          key: "more",
-          label: "More",
-          icon: "ellipsis-horizontal",
-          backgroundColor: "#525252",
-          onPress: () => {
-            Alert.alert("More", undefined, [
-              { text: t("deleteConfirm") || "Delete", style: "destructive", onPress: onDelete },
-              { text: t("cancel") || "Cancel", style: "cancel" }
-            ]);
-          }
-        },
-        {
           key: "delete",
           label: t("deleteConfirm") || "Delete",
           icon: "trash",
@@ -689,11 +677,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     dismissibleRow(
       itemKey,
       () => onDismissNotification(entry),
-      <View style={styles.activityRow}>
-        <Pressable style={styles.activityMain} onPress={() => onOpenPostFromNotification(entry)}>
+      <Pressable style={styles.activityRow} onPress={() => onOpenPostFromNotification(entry)}>
+        <View style={styles.activityMain}>
           <Ionicons name={icon} size={16} color={iconColor} />
           <Text style={styles.rowText}>{postActivityLabel(entry)}</Text>
-        </Pressable>
+        </View>
         <NotificationPostThumb
           postId={entry.postId}
           postThumbnailUrl={entry.postThumbnailUrl}
@@ -701,9 +689,8 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
           postVideoUrl={entry.postVideoUrl}
           postIsReel={entry.postIsReel}
           token={token}
-          onPress={() => onOpenPostFromNotification(entry)}
         />
-      </View>
+      </Pressable>
     );
 
   const onJoinLive = async (entry: any) => {
@@ -1009,7 +996,12 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                       item.kind === "declined" ||
                       ((item.kind === "follow_back" || item.kind === "new_follow") && followStatus === "accepted");
 
-                    const rowCore = (
+                    const openPostFromRow =
+                      item.kind === "post_like" || item.kind === "post_comment" || item.kind === "comment_reply"
+                        ? () => onOpenPostFromNotification(n)
+                        : null;
+
+                    const rowInner = (
                       <View style={[styles.figRow, !isLastRow ? styles.figRowDivider : null]}>
                         <View style={styles.figAvatarWrap}>
                           <StoryRingAvatar
@@ -1112,7 +1104,6 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                 postVideoUrl={n.postVideoUrl}
                                 postIsReel={n.postIsReel}
                                 token={token}
-                                onPress={() => onOpenPostFromNotification(n)}
                               />
                             ) : (
                               <View style={styles.figPostPlaceholder} />
@@ -1120,6 +1111,14 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                           </View>
                         ) : null}
                       </View>
+                    );
+
+                    const rowCore = openPostFromRow ? (
+                      <Pressable onPress={openPostFromRow} accessibilityRole="button">
+                        {rowInner}
+                      </Pressable>
+                    ) : (
+                      rowInner
                     );
 
                     if (item.kind === "pending") {
