@@ -7,6 +7,8 @@ import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge"
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
+import { isCallRoomEnded, markCallRoomEnded } from "./cancelledCallRooms";
+import { verifyCallStillRinging } from "./verifyCallRinging";
 import { presentDirectMessageNotification } from "./dmNotificationThread";
 import { dismissMissedCallNotification } from "./missedCallNotifications";
 
@@ -41,11 +43,21 @@ function isReplyAction(actionId: string) {
 }
 
 function isDeclineCallAction(actionId: string) {
-  return actionId === "DECLINE" || actionId.endsWith(":DECLINE") || actionId.endsWith(".DECLINE");
+  const id = String(actionId || "").trim().toUpperCase();
+  if (!id || id === Notifications.DEFAULT_ACTION_IDENTIFIER.toUpperCase()) return false;
+  return id === "DECLINE" || id.endsWith(":DECLINE") || id.endsWith(".DECLINE") || id.includes("DECLINE");
 }
 
 function isAcceptCallAction(actionId: string) {
-  return actionId === "ACCEPT" || actionId.endsWith(":ACCEPT") || actionId.endsWith(".ACCEPT");
+  const id = String(actionId || "").trim().toUpperCase();
+  if (!id || id === Notifications.DEFAULT_ACTION_IDENTIFIER.toUpperCase()) return false;
+  return (
+    id === "ACCEPT" ||
+    id.endsWith(":ACCEPT") ||
+    id.endsWith(".ACCEPT") ||
+    id.includes("ANSWER") ||
+    id.includes("VIDEO")
+  );
 }
 
 function isCallBackAction(actionId: string) {
@@ -158,21 +170,36 @@ async function handleIncomingCallDecline(
 function presentIncomingCallFromNotificationData(
   data: Record<string, unknown>,
   title: string,
-  autoAccept: boolean
+  autoAccept: boolean,
+  options?: { authToken?: string | null }
 ) {
   const callerId = peerIdFromData(data);
   const roomName = String(data.roomName || "").trim();
   const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
   const callerAvatarUrl = String(data.callerAvatarUrl || "").trim() || null;
   if (!callerId || !roomName) return false;
-  presentIncomingCallFromPush({
-    callerId,
-    callerName: title,
-    roomName,
-    mode,
-    callerAvatarUrl,
-    autoAccept
-  });
+
+  void (async () => {
+    if (isCallRoomEnded(roomName)) {
+      await clearIncomingCallNotifications(roomName);
+      return;
+    }
+    const stillRinging = await verifyCallStillRinging(roomName, options?.authToken);
+    if (!stillRinging) {
+      markCallRoomEnded(roomName);
+      await clearIncomingCallNotifications(roomName);
+      return;
+    }
+    presentIncomingCallFromPush({
+      callerId,
+      callerName: title,
+      roomName,
+      mode,
+      callerAvatarUrl,
+      autoAccept
+    });
+  })();
+
   return true;
 }
 
@@ -297,10 +324,10 @@ export async function handleNotificationResponse(
     const autoAccept = isAcceptCallAction(actionId);
     if (autoAccept) {
       await dismissIncomingCallUi(String(data.roomName || ""));
-      presentIncomingCallFromNotificationData(data, title, true);
+      presentIncomingCallFromNotificationData(data, title, true, options);
     } else if (!isDeclineCallAction(actionId)) {
       // Tap notification body: show incoming call UI without jumping into chat.
-      presentIncomingCallFromNotificationData(data, title, false);
+      presentIncomingCallFromNotificationData(data, title, false, options);
     }
     return;
   } else if (type === "live_share") {

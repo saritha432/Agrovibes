@@ -1,5 +1,6 @@
 import type { FirebaseMessagingTypes } from "@react-native-firebase/messaging";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
+import { markCallRoomEnded } from "./cancelledCallRooms";
 import { clearIncomingCall, getPendingIncomingCall } from "./incomingCallBridge";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { isCalleeRingCancelledSignal } from "../screens/messaging/dmMessageFormats";
@@ -32,6 +33,7 @@ export async function dismissIncomingCallRinging(input?: CallCancelledPush) {
   if (pending && callerId && pending.callerId !== callerId) return;
 
   if (roomName) {
+    markCallRoomEnded(roomName);
     await clearIncomingCallNotifications(roomName);
   } else {
     await clearIncomingCallNotifications(null);
