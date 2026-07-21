@@ -28,11 +28,17 @@ async function clearLastResponseSafe() {
   }
 }
 
+function isUsableNotificationResponse(response: Notifications.NotificationResponse | null | undefined) {
+  if (!response?.notification?.request?.content) return false;
+  return Boolean(String(response.actionIdentifier || "").trim());
+}
+
 /** Register early so inline notification replies work while app is backgrounded. */
 export function registerNotificationResponseHandler() {
   if (registered) return;
   registered = true;
   Notifications.addNotificationResponseReceivedListener((response) => {
+    if (!isUsableNotificationResponse(response)) return;
     if (!claimNotificationResponse(response)) return;
     void (async () => {
       await handleNotificationResponse(response);
@@ -42,11 +48,16 @@ export function registerNotificationResponseHandler() {
   });
 }
 
-/** Cold-start: process last notification action if the early listener did not. */
+/**
+ * Cold-start: process the last notification action if the background listener did not.
+ */
 export async function handleColdStartNotificationResponse(options?: { authToken?: string | null }) {
   const response = await Notifications.getLastNotificationResponseAsync();
-  if (!response) return;
-  if (!claimNotificationResponse(response)) return;
+  if (!isUsableNotificationResponse(response)) return;
+  if (!claimNotificationResponse(response)) {
+    await clearLastResponseSafe();
+    return;
+  }
   await handleNotificationResponse(response, options);
   await clearLastResponseSafe();
 }

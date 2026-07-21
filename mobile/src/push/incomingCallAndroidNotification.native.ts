@@ -78,14 +78,13 @@ export function parseIncomingCallRemoteMessage(
 }
 
 export async function displayIncomingCallAndroidNotification(payload: ParsedIncomingCallPush) {
-  const isForeground = AppState.currentState === "active";
+  if (AppState.currentState === "active") return;
+
+  // Expo notification actions (Answer/Decline) are reliable when the app is killed or backgrounded.
+  await displayIncomingCallNotification(payload);
+
   const isVideo = payload.mode === "video";
   const avatar = String(payload.callerAvatarUrl || "").trim();
-
-  if (isForeground) return;
-
-  // Native module calls getMap("payload") — must be an object, never a JSON string
-  // (String crashes: UnexpectedNativeTypeException ReadableNativeMap).
   const nativeOptions = {
     channelId: CALL_CHANNEL_ID,
     channelName: "Calls",
@@ -94,17 +93,11 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
     notificationBody: isVideo ? "Incoming video call" : "Incoming voice call",
     answerText: "Answer",
     declineText: "Decline",
-    // Native module expects an Android color resource name, not a hex literal.
     notificationColor: "cropvibe_call_accent",
-    // Raw resource name (no extension) — bundled via expo-notifications sounds plugin.
     notificationSound: "incoming_ring",
     isVideo,
     payload: callPayloadMap(payload)
   };
-
-  // Same Expo path as direct messages — reliable on closed-test / Play builds.
-  // Native full-screen call UI is best-effort only; many OEMs block it without throwing.
-  await displayIncomingCallNotification(payload);
 
   const module = getCallNotificationModule();
   if (!module) return;
@@ -112,7 +105,7 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
   try {
     module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, nativeOptions);
   } catch {
-    // Expo notification already shown above.
+    // Expo notification above still handles answer/decline.
   }
 }
 
