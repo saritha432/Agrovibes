@@ -13,6 +13,8 @@ import {
 } from "./pushNotifications";
 import { handleColdStartNotificationResponse, registerNotificationResponseHandler } from "./registerNotificationHandlers";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
+import { registerBackgroundNotificationTask } from "./notificationBackgroundTask";
+import { dismissStaleIncomingCallNotifications } from "./syncStaleIncomingCalls";
 
 export function PushNotificationBootstrap() {
   const { token, user } = useAuth();
@@ -60,6 +62,7 @@ export function PushNotificationBootstrap() {
       void registerPushNotifications(token).then((pushToken) => {
         if (pushToken) registeredTokenRef.current = pushToken;
       });
+      void dismissStaleIncomingCallNotifications(token);
     });
     return () => sub.remove();
   }, [token, user?.id]);
@@ -71,8 +74,10 @@ export function PushNotificationBootstrap() {
     void ensureIncomingCallCategoriesReady();
     void setupMissedCallNotificationCategory();
     registerNotificationResponseHandler();
+    void registerBackgroundNotificationTask();
 
     void handleColdStartNotificationResponse({ authToken: authTokenRef.current });
+    void dismissStaleIncomingCallNotifications(authTokenRef.current);
 
     const receivedSub = addNotificationReceivedListener((event) => {
       const data = event.request.content.data || {};
@@ -105,6 +110,12 @@ export function PushNotificationBootstrap() {
       receivedSub.remove();
     };
   }, []);
+
+  React.useEffect(() => {
+    if (Platform.OS === "web" || !token) return;
+    void handleColdStartNotificationResponse({ authToken: token });
+    void dismissStaleIncomingCallNotifications(token);
+  }, [token]);
 
   React.useEffect(() => {
     if (token) return;

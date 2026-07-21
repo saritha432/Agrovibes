@@ -1,4 +1,6 @@
 import "fast-text-encoding";
+import "./src/push/notificationBackgroundTask";
+import { registerBackgroundNotificationTask } from "./src/push/notificationBackgroundTask";
 import { registerIncomingCallMessagingBackground } from "./src/push/incomingCallMessagingBackground";
 import { registerIncomingCallNativeActionHandlers } from "./src/push/incomingCallNativeActionHandlers";
 import { registerNotificationResponseHandler } from "./src/push/registerNotificationHandlers";
@@ -7,6 +9,7 @@ import { registerNotificationResponseHandler } from "./src/push/registerNotifica
 registerIncomingCallMessagingBackground();
 registerIncomingCallNativeActionHandlers();
 registerNotificationResponseHandler();
+void registerBackgroundNotificationTask();
 
 import { registerRootComponent } from "expo";
 import App from "./App";

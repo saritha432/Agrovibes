@@ -9,6 +9,7 @@ type DirectCallViewProps = {
   direction: CallDirection;
   peerName: string;
   peerAvatarUrl?: string | null;
+  peerUserId?: number;
   connectEnabled: boolean;
   statusLabel?: string;
   onAccept?: () => void;

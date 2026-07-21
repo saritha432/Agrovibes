@@ -1717,6 +1717,25 @@ export async function cancelDirectCall(
   })) as { ok: boolean; peerUserId: number; roomName: string };
 }
 
+export async function reportDirectCallSession(
+  token: string,
+  payload: { peerUserId: number; roomName: string; state: "active" | "ended" }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/calls/session`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { ok: boolean; state: string };
+}
+
+export async function fetchCallRingingStatus(token: string, roomName: string) {
+  const query = encodeURIComponent(String(roomName || "").trim());
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/calls/ringing?roomName=${query}`, token)) as {
+    roomName: string;
+    ringing: boolean;
+  };
+}
+
 export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
     method: "POST",

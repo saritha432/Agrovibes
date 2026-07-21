@@ -35,8 +35,8 @@ type SwipeActionsRowProps = {
 function isHorizontalSwipe(dx: number, dy: number, open: boolean) {
   const absDx = Math.abs(dx);
   const absDy = Math.abs(dy);
-  if (absDx < 6) return false;
-  if (absDx <= absDy * 1.1) return false;
+  if (absDx < 4) return false;
+  if (absDx <= absDy * 0.85) return false;
   if (!open && dx > 0) return false;
   return true;
 }
@@ -174,7 +174,7 @@ export function SwipeActionsRow({ children, actions, style, onSwipeActiveChange 
   });
 
   return (
-    <View style={[styles.shell, style]} collapsable={false}>
+    <View style={[styles.shell, style]} collapsable={false} {...panResponder.panHandlers}>
       <View style={styles.actionsTrack} pointerEvents="box-none">
         <Animated.View style={[styles.actionsRow, { width: openWidth, opacity: actionsOpacity }]}>
           {actions.map((action) => (
@@ -199,11 +199,7 @@ export function SwipeActionsRow({ children, actions, style, onSwipeActiveChange 
         </Animated.View>
       </View>
 
-      <Animated.View
-        style={[styles.content, { transform: [{ translateX }] }]}
-        collapsable={false}
-        {...panResponder.panHandlers}
-      >
+      <Animated.View style={[styles.content, { transform: [{ translateX }] }]} collapsable={false} pointerEvents="box-none">
         {children}
         {isOpen ? (
           <Pressable

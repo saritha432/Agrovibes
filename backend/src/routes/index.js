@@ -47,6 +47,7 @@ const {
   sendSocialPushToFollowers,
   directMessagePushPayload
 } = require("../pushNotifications");
+const { setCallSession, clearCallSession, isUserBusy, isRoomRinging } = require("../activeCallSessions");
 const { buildShareReelHtml } = require("../shareReelPage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
 const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, getSocketIo } = require("../socketChat");
@@ -4518,6 +4519,14 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
       res.status(404).json({ message: "Peer user not found" });
       return;
     }
+    if (isUserBusy(peerUserId)) {
+      res.status(409).json({ message: "User is busy on another call", code: "busy" });
+      return;
+    }
+    if (isUserBusy(me)) {
+      res.status(409).json({ message: "You are already on a call", code: "busy_self" });
+      return;
+    }
     const low = Math.min(me, peerUserId);
     const high = Math.max(me, peerUserId);
     const roomName = `dmcall-${low}-${high}-${Date.now()}`;
@@ -4545,6 +4554,7 @@ router.post("/v1/calls/ring", authRequired, async (req, res) => {
       console.warn("[push] incoming call:", error?.message || error);
       return { sent: 0, failed: 0, skipped: "error" };
     });
+    setCallSession(me, peerUserId, roomName, "ringing");
     res.status(201).json({ roomName, mode, peerUserId, push: pushResult });
   } catch (error) {
     res.status(500).json({ message: "Failed to start call", error: error.message });
@@ -4569,6 +4579,7 @@ router.post("/v1/calls/cancel", authRequired, async (req, res) => {
       res.status(404).json({ message: "Peer user not found" });
       return;
     }
+    clearCallSession(me, roomName);
     const pushResult = await sendCallCancelledPush({
       userId: peerUserId,
       roomName,
@@ -4580,6 +4591,49 @@ router.post("/v1/calls/cancel", authRequired, async (req, res) => {
     res.status(200).json({ ok: true, peerUserId, roomName, push: pushResult });
   } catch (error) {
     res.status(500).json({ message: "Failed to cancel call", error: error.message });
+  }
+});
+
+router.get("/v1/calls/ringing", authRequired, async (req, res) => {
+  try {
+    const roomName = String(req.query?.roomName || "").trim();
+    if (!roomName) {
+      res.status(400).json({ message: "roomName is required" });
+      return;
+    }
+    res.status(200).json({ roomName, ringing: isRoomRinging(roomName) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to check call status", error: error.message });
+  }
+});
+
+router.post("/v1/calls/session", authRequired, async (req, res) => {
+  try {
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.body?.peerUserId);
+    const roomName = String(req.body?.roomName || "").trim();
+    const state = String(req.body?.state || "").trim().toLowerCase();
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    if (!roomName) {
+      res.status(400).json({ message: "roomName is required" });
+      return;
+    }
+    if (state === "ended") {
+      clearCallSession(me, roomName);
+      res.status(200).json({ ok: true, state });
+      return;
+    }
+    if (state === "active") {
+      setCallSession(me, peerUserId, roomName, "active");
+      res.status(200).json({ ok: true, state });
+      return;
+    }
+    res.status(400).json({ message: "state must be active or ended" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update call session", error: error.message });
   }
 });
 

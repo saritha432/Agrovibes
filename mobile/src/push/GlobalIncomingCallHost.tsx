@@ -5,9 +5,12 @@ import { DirectCallView, type CallEndResult } from "../screens/messaging/DirectC
 import { buildDmCallMessage } from "../screens/messaging/dmMessageFormats";
 import { sendDirectMessage } from "../services/api";
 import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
+import { isCallRoomEnded, markCallRoomEnded } from "./cancelledCallRooms";
 import { clearIncomingCall, queueIncomingCall, subscribeIncomingCall, type QueuedIncomingCall } from "./incomingCallBridge";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
+import { getLocalCallSession, setLocalCallSession } from "./localCallSession";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
+import { verifyCallStillRinging } from "./verifyCallRinging";
 
 export function GlobalIncomingCallHost() {
   const { token } = useAuth();
@@ -19,7 +22,12 @@ export function GlobalIncomingCallHost() {
     return subscribeIncomingCall((next) => {
       setCall(next);
       setConnectEnabled(!!next?.autoAccept);
-      if (next) historySentRef.current = false;
+      if (next) {
+        historySentRef.current = false;
+        setLocalCallSession({ roomName: next.roomName, peerUserId: next.callerId });
+      } else {
+        setLocalCallSession(null);
+      }
     });
   }, []);
 
@@ -34,6 +42,7 @@ export function GlobalIncomingCallHost() {
       clearIncomingCall();
       setCall(null);
       setConnectEnabled(false);
+      setLocalCallSession(null);
 
       if (!token || !active || historySentRef.current) return;
       historySentRef.current = true;
@@ -65,19 +74,32 @@ export function GlobalIncomingCallHost() {
       direction="incoming"
       peerName={call.callerName}
       peerAvatarUrl={call.callerAvatarUrl}
+      peerUserId={call.callerId}
       connectEnabled={connectEnabled}
       statusLabel={call.mode === "video" ? "Incoming video call" : "Incoming voice call"}
       onAccept={() => {
-        void clearIncomingCallNotifications(call.roomName);
-        setConnectEnabled(true);
+        void (async () => {
+          const stillRinging = await verifyCallStillRinging(call.roomName, token);
+          if (!stillRinging) {
+            markCallRoomEnded(call.roomName);
+            await clearIncomingCallNotifications(call.roomName);
+            clearIncomingCall();
+            setCall(null);
+            setConnectEnabled(false);
+            setLocalCallSession(null);
+            return;
+          }
+          await clearIncomingCallNotifications(call.roomName);
+          setConnectEnabled(true);
+        })();
       }}
       onDecline={() => {
         const active = call;
-        // Close UI immediately; shared decline path cancels caller ring + writes history.
         historySentRef.current = true;
         setConnectEnabled(false);
         setCall(null);
         clearIncomingCall();
+        setLocalCallSession(null);
         if (!active) return;
         void completeIncomingCallDecline({
           callerId: active.callerId,
@@ -97,6 +119,7 @@ export function GlobalIncomingCallHost() {
         clearIncomingCall();
         setCall(null);
         setConnectEnabled(false);
+        setLocalCallSession(null);
       }}
     />
   );
@@ -110,17 +133,47 @@ export function presentIncomingCallFromPush(input: {
   mode: "voice" | "video";
   callerAvatarUrl?: string | null;
   autoAccept?: boolean;
+  authToken?: string | null;
 }) {
   if (!input.callerId || !input.roomName) return;
-  queueIncomingCall({
-    callerId: input.callerId,
-    callerName: input.callerName || "Someone",
-    callerAvatarUrl: input.callerAvatarUrl,
-    roomName: input.roomName,
-    mode: input.mode,
-    autoAccept: input.autoAccept
-  });
-  if (input.autoAccept) {
-    void clearIncomingCallNotifications(input.roomName);
-  }
+
+  void (async () => {
+    if (isCallRoomEnded(input.roomName)) {
+      await clearIncomingCallNotifications(input.roomName);
+      return;
+    }
+
+    const stillRinging = await verifyCallStillRinging(input.roomName, input.authToken);
+    if (!stillRinging) {
+      markCallRoomEnded(input.roomName);
+      await clearIncomingCallNotifications(input.roomName);
+      return;
+    }
+
+    const active = getLocalCallSession();
+    if (active && active.roomName !== input.roomName) {
+      void completeIncomingCallDecline({
+        callerId: input.callerId,
+        callerName: input.callerName || "Someone",
+        mode: input.mode,
+        roomName: input.roomName,
+        callerAvatarUrl: input.callerAvatarUrl,
+        authToken: input.authToken,
+        status: "declined"
+      });
+      return;
+    }
+
+    queueIncomingCall({
+      callerId: input.callerId,
+      callerName: input.callerName || "Someone",
+      callerAvatarUrl: input.callerAvatarUrl,
+      roomName: input.roomName,
+      mode: input.mode,
+      autoAccept: input.autoAccept
+    });
+    if (input.autoAccept) {
+      await clearIncomingCallNotifications(input.roomName);
+    }
+  })();
 }
