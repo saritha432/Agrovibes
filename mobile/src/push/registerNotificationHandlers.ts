@@ -11,10 +11,6 @@ function responseDedupeKey(response: Notifications.NotificationResponse) {
   return `${id}|${action}|${date}`;
 }
 
-function isDeclineAction(actionId: string) {
-  return actionId === "DECLINE" || actionId.endsWith(":DECLINE") || actionId.endsWith(".DECLINE");
-}
-
 /** Returns true once per unique notification response; false if already handled. */
 export function claimNotificationResponse(response: Notifications.NotificationResponse) {
   const key = responseDedupeKey(response);
@@ -53,18 +49,15 @@ export function registerNotificationResponseHandler() {
 }
 
 /**
- * Cold-start only: process last response if the early listener did not.
- * Skip Decline — that path is handled by the early listener (opensAppToForeground: false).
+ * Cold-start: process the last notification action if the background listener did not.
  */
 export async function handleColdStartNotificationResponse(options?: { authToken?: string | null }) {
   const response = await Notifications.getLastNotificationResponseAsync();
   if (!isUsableNotificationResponse(response)) return;
-  if (isDeclineAction(String(response.actionIdentifier || ""))) {
-    claimNotificationResponse(response);
+  if (!claimNotificationResponse(response)) {
     await clearLastResponseSafe();
     return;
   }
-  if (!claimNotificationResponse(response)) return;
   await handleNotificationResponse(response, options);
   await clearLastResponseSafe();
 }

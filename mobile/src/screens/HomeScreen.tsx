@@ -2011,7 +2011,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const otherStories = useMemo(() => {
     if (!token) return [];
-    // Server already scopes: own + followed + public accounts.
+    // Server scopes: own stories + accepted follows only.
     return stories.filter((s) => !storyViewerOwns(s, currentUserId, currentUserStoryKeys));
   }, [currentUserId, currentUserStoryKeys, stories, token]);
 
@@ -2066,7 +2066,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const isOwnActiveStory = !!activeStory && storyViewerOwns(activeStory, currentUserId, currentUserStoryKeys);
 
   const applyViewedStories = useCallback(
-    (incoming: HomeStory[]) => incoming.map((story) => (viewedStoryIds.has(story.id) ? { ...story, viewed: true } : story)),
+    (incoming: HomeStory[]) =>
+      incoming.map((story) => ({
+        ...story,
+        viewed: story.viewed || viewedStoryIds.has(story.id)
+      })),
     [viewedStoryIds]
   );
 

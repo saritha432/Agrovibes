@@ -5,6 +5,7 @@ import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJ
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
+import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
 import { presentDirectMessageNotification } from "./dmNotificationThread";
@@ -145,6 +146,9 @@ async function handleIncomingCallDecline(
   const callerId = peerIdFromData(data);
   if (!callerId) return;
   const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
+  const roomName = String(data.roomName || "").trim();
+  hideIncomingCallAndroidNotification();
+  await dismissIncomingCallUi(roomName);
   await completeIncomingCallDecline({
     callerId,
     callerName: title,

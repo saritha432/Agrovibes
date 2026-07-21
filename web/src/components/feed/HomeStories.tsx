@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { HomeStory } from "../../api/types";
+import { markHomeStoryViewed } from "../../api/home";
 import { UserAvatar } from "../messages/UserAvatar";
 import { groupHomeStories } from "../../utils/storyUtils";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
@@ -10,9 +11,10 @@ type Props = {
   viewerName: string;
   viewerAvatarUrl?: string | null;
   viewerId?: number | null;
+  token?: string | null;
 };
 
-export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId }: Props) {
+export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, token }: Props) {
   const [viewedIds, setViewedIds] = useState<Set<number>>(() => new Set());
   const [queue, setQueue] = useState<HomeStory[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
@@ -38,18 +40,26 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId }: 
     setQueueIndex(0);
   };
 
-  const markViewed = (id: number) => {
+  const markViewed = (story: HomeStory) => {
     setViewedIds((prev) => {
-      if (prev.has(id)) return prev;
+      if (prev.has(story.id)) return prev;
       const next = new Set(prev);
-      next.add(id);
+      next.add(story.id);
       return next;
     });
+    const ownerId = Number(story.userId);
+    const viewer = Number(viewerId);
+    const isOwn = Number.isFinite(ownerId) && Number.isFinite(viewer) && ownerId === viewer;
+    if (token && !isOwn && !story.viewed) {
+      void markHomeStoryViewed(token, story.id).catch(() => {});
+    }
   };
+
+  const storySeen = (story: HomeStory) => story.viewed || viewedIds.has(story.id);
 
   const goNext = () => {
     if (!active) return;
-    markViewed(active.id);
+    markViewed(active);
     if (queueIndex >= queue.length - 1) {
       closeViewer();
       return;
@@ -64,7 +74,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId }: 
 
   useEffect(() => {
     if (!active) return;
-    markViewed(active.id);
+    markViewed(active);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeViewer();
       if (e.key === "ArrowRight") goNext();
@@ -75,7 +85,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id, queueIndex, queue.length]);
 
-  const ownHasNew = ownStories.some((s) => !s.viewed && !viewedIds.has(s.id));
+  const ownHasNew = ownStories.some((s) => !storySeen(s));
 
   return (
     <>
@@ -85,7 +95,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId }: 
         otherGroups={otherGroups}
         viewerName={viewerName}
         viewerAvatarUrl={viewerAvatarUrl}
-        viewedIds={viewedIds}
+        storySeen={storySeen}
         onOpenQueue={openQueue}
       />
 
@@ -111,7 +121,7 @@ function StoriesRow({
   otherGroups,
   viewerName,
   viewerAvatarUrl,
-  viewedIds,
+  storySeen,
   onOpenQueue
 }: {
   ownHasNew: boolean;
@@ -119,7 +129,7 @@ function StoriesRow({
   otherGroups: ReturnType<typeof groupHomeStories>["otherGroups"];
   viewerName: string;
   viewerAvatarUrl?: string | null;
-  viewedIds: Set<number>;
+  storySeen: (story: HomeStory) => boolean;
   onOpenQueue: (list: HomeStory[]) => void;
 }) {
   return (
@@ -149,7 +159,7 @@ function StoriesRow({
         </button>
 
         {otherGroups.map((group) => {
-          const hasNew = group.stories.some((s) => !s.viewed && !viewedIds.has(s.id));
+          const hasNew = group.stories.some((s) => !storySeen(s));
           return (
             <button
               key={group.key}

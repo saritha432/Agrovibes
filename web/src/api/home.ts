@@ -20,6 +20,14 @@ export async function fetchHomeStories(token?: string | null) {
   return (await parseJsonOrThrow(response)) as { stories: HomeStory[] };
 }
 
+export async function markHomeStoryViewed(token: string, storyId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/view`,
+    token,
+    { method: "POST" }
+  )) as { ok: boolean; viewed?: boolean; own?: boolean };
+}
+
 export async function fetchHomePosts(token?: string | null) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

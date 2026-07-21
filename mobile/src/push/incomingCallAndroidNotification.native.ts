@@ -78,13 +78,13 @@ export function parseIncomingCallRemoteMessage(
 }
 
 export async function displayIncomingCallAndroidNotification(payload: ParsedIncomingCallPush) {
-  const isForeground = AppState.currentState === "active";
-  if (isForeground) return;
+  if (AppState.currentState === "active") return;
+
+  // Expo notification actions (Answer/Decline) are reliable when the app is killed or backgrounded.
+  await displayIncomingCallNotification(payload);
 
   const isVideo = payload.mode === "video";
   const avatar = String(payload.callerAvatarUrl || "").trim();
-
-  // Native module calls getMap("payload") — must be an object, never a JSON string.
   const nativeOptions = {
     channelId: CALL_CHANNEL_ID,
     channelName: "Calls",
@@ -100,16 +100,13 @@ export async function displayIncomingCallAndroidNotification(payload: ParsedInco
   };
 
   const module = getCallNotificationModule();
-  if (module) {
-    try {
-      module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, nativeOptions);
-      return;
-    } catch {
-      // Fall back to Expo notification below.
-    }
-  }
+  if (!module) return;
 
-  await displayIncomingCallNotification(payload);
+  try {
+    module.displayNotification(payload.roomName, avatar || null, CALL_TIMEOUT_MS, nativeOptions);
+  } catch {
+    // Expo notification above still handles answer/decline.
+  }
 }
 
 export function hideIncomingCallAndroidNotification() {

@@ -50,6 +50,7 @@ export function HomePage() {
         viewerName={user?.fullName || "You"}
         viewerAvatarUrl={user?.avatarUrl}
         viewerId={user?.id ?? null}
+        token={token}
       />
 
       {loading ? <p className="home-page__status">Loading feed…</p> : null}

@@ -1,20 +1,6 @@
 import React from "react";
-import { useAuth } from "../auth/AuthContext";
-import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
 import { handleFcmRemoteMessage } from "./handleFcmRemoteMessage";
-import { completeIncomingCallDecline } from "./incomingCallDecline";
-import {
-  addIncomingCallAnswerListener,
-  addIncomingCallEndListener,
-  hideIncomingCallAndroidNotification,
-  isIncomingCallNotificationModuleReady,
-  openIncomingCallApp,
-  parseIncomingCallActionPayload,
-  parseIncomingCallRemoteMessage,
-  removeIncomingCallAnswerListener,
-  removeIncomingCallEndListener
-} from "./incomingCallAndroidNotification";
-import { clearIncomingCallNotifications } from "./incomingCallNotifications";
+import { parseIncomingCallRemoteMessage } from "./incomingCallAndroidNotification";
 
 function getFirebaseMessaging() {
   try {
@@ -26,112 +12,23 @@ function getFirebaseMessaging() {
   }
 }
 
-async function declineIncomingCall(
-  parsed: {
-    callerId: number;
-    callerName: string;
-    mode: "voice" | "video";
-    roomName: string;
-    callerAvatarUrl?: string | null;
-  },
-  authToken?: string | null
-) {
-  await completeIncomingCallDecline({
-    callerId: parsed.callerId,
-    callerName: parsed.callerName,
-    mode: parsed.mode,
-    roomName: parsed.roomName,
-    callerAvatarUrl: parsed.callerAvatarUrl,
-    authToken
-  });
-}
-
+/** Foreground FCM listener only — native answer/decline handlers register in index.js. */
 export function IncomingCallNotificationBootstrap() {
-  const { token } = useAuth();
-  const tokenRef = React.useRef<string | null>(null);
-
   React.useEffect(() => {
-    tokenRef.current = token;
-  }, [token]);
-
-  React.useEffect(() => {
-    const showFromMessage = async (remoteMessage: Parameters<typeof parseIncomingCallRemoteMessage>[0]) => {
-      await handleFcmRemoteMessage(remoteMessage);
-    };
+    const messagingFactory = getFirebaseMessaging();
+    if (!messagingFactory) return;
 
     let foregroundSub: (() => void) | null = null;
-    const messagingFactory = getFirebaseMessaging();
-    if (messagingFactory) {
-      try {
-        foregroundSub = messagingFactory().onMessage(async (remoteMessage) => {
-          await showFromMessage(remoteMessage);
-        });
-      } catch {
-        // Firebase Messaging unavailable until native rebuild.
-      }
-    }
-
-    if (!isIncomingCallNotificationModuleReady()) {
-      return () => {
-        foregroundSub?.();
-      };
-    }
-
-    const onAnswer = (data: { payload?: string }) => {
-      const parsed = parseIncomingCallActionPayload(data.payload);
-      if (parsed?.roomName) {
-        void clearIncomingCallNotifications(parsed.roomName);
-      } else {
-        hideIncomingCallAndroidNotification();
-      }
-      if (!parsed?.callerId) {
-        openIncomingCallApp();
-        return;
-      }
-
-      presentIncomingCallFromPush({
-        callerId: parsed.callerId,
-        callerName: parsed.callerName,
-        roomName: parsed.roomName,
-        mode: parsed.mode,
-        callerAvatarUrl: parsed.callerAvatarUrl,
-        autoAccept: true
+    try {
+      foregroundSub = messagingFactory().onMessage(async (remoteMessage) => {
+        await handleFcmRemoteMessage(remoteMessage);
       });
-      openIncomingCallApp();
-    };
-
-    const onEndCall = (data: { endAction?: string; payload?: string }) => {
-      hideIncomingCallAndroidNotification();
-      const parsed = parseIncomingCallActionPayload(data.payload);
-      if (!parsed?.callerId) return;
-
-      // User tapped Decline
-      if (data.endAction === "ACTION_REJECTED_CALL") {
-        void declineIncomingCall(parsed, tokenRef.current);
-        return;
-      }
-
-      // Auto-timeout / hide — treat as missed, not declined
-      if (data.endAction === "ACTION_HIDE_CALL") {
-        void completeIncomingCallDecline({
-          callerId: parsed.callerId,
-          callerName: parsed.callerName,
-          mode: parsed.mode,
-          roomName: parsed.roomName,
-          callerAvatarUrl: parsed.callerAvatarUrl,
-          authToken: tokenRef.current,
-          status: "missed"
-        });
-      }
-    };
-
-    addIncomingCallAnswerListener(onAnswer);
-    addIncomingCallEndListener(onEndCall);
+    } catch {
+      // Firebase Messaging unavailable until native rebuild.
+    }
 
     return () => {
       foregroundSub?.();
-      removeIncomingCallAnswerListener();
-      removeIncomingCallEndListener();
     };
   }, []);
 
