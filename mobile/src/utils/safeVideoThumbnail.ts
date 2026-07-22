@@ -66,9 +66,9 @@ export async function uploadVideoThumbnailFromUri(
   uploadImage: (fileUri: string) => Promise<{ url?: string | null }>
 ): Promise<string | undefined> {
   const attempts: ThumbnailOptions[] = [
-    { time: 0, quality: 0.72 },
-    { time: 400, quality: 0.72 },
-    { time: 1000, quality: 0.65 },
+    { time: 0, quality: 0.62 },
+    { time: 400, quality: 0.62 },
+    { time: 1000, quality: 0.55 },
     { time: 2000, quality: 0.5 }
   ];
 

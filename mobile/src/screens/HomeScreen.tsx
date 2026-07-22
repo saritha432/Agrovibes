@@ -947,6 +947,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   }, [fit, natural]);
   const isCover = effectiveFit === "cover";
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
+  const [firstFrameReady, setFirstFrameReady] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
   const activeUri = useMemo(() => videoPlaybackUrl(uri), [uri]);
@@ -954,6 +955,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   useEffect(() => {
     setNatural(null);
     setPlaybackBlocked(false);
+    setFirstFrameReady(false);
   }, [uri]);
 
   const fitted = useMemo(() => {
@@ -1028,18 +1030,25 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           <View style={[videoOuterStyle, { backgroundColor: "#111" }]} />
         )
       ) : (
+      <>
+      {posterUri && !firstFrameReady ? (
+        <Image
+          source={{ uri: posterUri }}
+          style={[videoOuterStyle as ImageStyle, StyleSheet.absoluteFillObject, { zIndex: 1 }]}
+          resizeMode={isCover ? "cover" : "contain"}
+        />
+      ) : null}
       <Video
         key={activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
         source={{ uri: activeUri }}
-        shouldPlay={shouldPlay}
+        shouldPlay={shouldPlay && !preloadOnly}
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
         useNativeControls={useNativeControls}
-        usePoster={!!posterUri}
-        posterSource={posterUri ? { uri: posterUri } : undefined}
+        usePoster={false}
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
@@ -1057,22 +1066,30 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
               void videoRef.current?.unloadAsync().catch(() => {});
               return;
             }
+            if (
+              !firstFrameReady &&
+              (status.isPlaying || Number(status.positionMillis || 0) > 0 || status.isBuffering === false)
+            ) {
+              // Mark ready once we have decoded dimensions / progress — poster can drop.
+              if (w > 0 || Number(status.positionMillis || 0) > 40) {
+                setFirstFrameReady(true);
+              }
+            }
           } else if ("error" in status && status.error) {
             console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
             setPlaybackBlocked(true);
             void videoRef.current?.unloadAsync().catch(() => {});
           }
         }}
-        onReadyForDisplay={
-          isCover && fit !== "auto"
-            ? undefined
-            : (ev) => {
-                const dim = readVideoNaturalSize(ev);
-                if (dim) setNatural(dim);
-              }
-        }
-        progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
+        onReadyForDisplay={(ev) => {
+          setFirstFrameReady(true);
+          if (isCover && fit !== "auto") return;
+          const dim = readVideoNaturalSize(ev);
+          if (dim) setNatural(dim);
+        }}
+        progressUpdateIntervalMillis={preloadOnly ? 4000 : 500}
       />
+      </>
       )}
     </View>
   );
@@ -1503,7 +1520,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const primary = ordered[ordered.length - 1];
       setPlayingPostId(primary.post.id);
       prefetchPostMedia(primary.post);
-      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 2);
+      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 3);
     },
     []
   );
@@ -4083,6 +4100,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 </View>
               ) : null}
             </Pressable>
+          ) : post.videoUrl && isNearActive ? (
+            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
+              <ContainedExpoVideo
+                uri={post.videoUrl}
+                posterUri={reelPoster || undefined}
+                shouldPlay={false}
+                preloadOnly
+                containerWidth={reelContentWidth}
+                containerHeight={mediaContentH}
+                fit="auto"
+                isLooping
+                isMuted
+                useNativeControls={false}
+              />
+            </Pressable>
           ) : post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {reelPoster ? (
@@ -4090,11 +4122,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               ) : (
                 <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
               )}
-              {isActiveVideo || isNearActive ? (
-                <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
-                  <Ionicons name="play" size={28} color="#fff" />
-                </View>
-              ) : null}
+              <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
+                <Ionicons name="play" size={28} color="#fff" />
+              </View>
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -4775,7 +4805,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [feedLoadingMore]);
 
   useEffect(() => {
-    for (const post of tabPosts.slice(0, 4)) prefetchPostMedia(post);
+    for (const post of tabPosts.slice(0, 6)) prefetchPostMedia(post, { warmVideo: true });
   }, [tabPosts]);
 
   const isAccountDeactivated = useIsAccountDeactivated();

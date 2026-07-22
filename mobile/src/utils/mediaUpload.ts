@@ -1,11 +1,11 @@
 import * as ImageManipulator from "expo-image-manipulator";
 import { Image } from "react-native";
 
-/** Max long edge for post/story images uploaded to the server. */
-export const MAX_POST_IMAGE_EDGE_PX = 1920;
+/** Max long edge for post/story images uploaded to the server (feed-friendly). */
+export const MAX_POST_IMAGE_EDGE_PX = 1440;
 /** Max long edge for profile avatars. */
-export const MAX_PROFILE_IMAGE_EDGE_PX = 1080;
-const WEBP_QUALITY = 0.82;
+export const MAX_PROFILE_IMAGE_EDGE_PX = 720;
+const WEBP_QUALITY = 0.72;
 
 type PreparedImage = { uri: string; mime: string; filename: string };
 
