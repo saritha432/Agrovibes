@@ -103,6 +103,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "UIStatusBarHidden": false,
+        "UIViewControllerBasedStatusBarAppearance": true,
         "NSCameraUsageDescription": "Cropvibe uses your camera to capture photos and videos for posts, reels, stories and live sessions.",
         "NSMicrophoneUsageDescription": "Cropvibe uses your microphone for recording videos and participating in live sessions.",
         "NSPhotoLibraryUsageDescription": "Cropvibe allows you to select photos and videos from your library to share with the farming community.",

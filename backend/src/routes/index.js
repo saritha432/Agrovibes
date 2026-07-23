@@ -4834,7 +4834,6 @@ const STORY_TTL_SQL = "24 hours";
 
 async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, authorUserId = null, limit = 40 } = {}) {
   await ensureHomeStoriesTable();
-  await ensureHomeStoryViewsTable();
   await ensureSocialFollowsTable();
   await ensureLearnUsersTable();
   await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
@@ -4864,7 +4863,7 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
       s.district,
       s.avatar_label AS "avatarLabel",
       s.has_new AS "hasNew",
-      (hsv.viewer_id IS NOT NULL) AS "viewed",
+      s.viewed,
       s.video_url AS "videoUrl",
       s.image_url AS "imageUrl",
       s.created_at AS "createdAt",
@@ -4874,7 +4873,6 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
       ) AS "avatarUrl"
     FROM home_stories s
     LEFT JOIN learn_users lu ON lu.id = s.user_id
-    LEFT JOIN home_story_views hsv ON hsv.story_id = s.id AND hsv.viewer_id = $1::integer
     LEFT JOIN LATERAL (
       SELECT u2.avatar_url, COALESCE(u2.is_private, false) AS is_private
       FROM learn_users u2
@@ -4905,6 +4903,7 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
             AND sf.following_id = COALESCE(s.user_id, lu.id)
             AND sf.status = 'accepted'
         )
+        OR COALESCE(lu.is_private, nm.is_private, false) = false
       )
       ${authorFilter}
     ORDER BY
@@ -4932,7 +4931,7 @@ router.get("/v1/home/stories", authOptional, async (req, res) => {
     const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:v6:${gen}:${viewerKey}`;
+    const cacheKey = `v1:home:stories:v5:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
@@ -5123,7 +5122,6 @@ router.post("/v1/home/stories/:storyId/view", authRequired, async (req, res) => 
       `,
       [storyId, me]
     );
-    await cacheIncr("home:stories:gen");
     res.json({ ok: true, viewed: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to record story view", error: error.message });
