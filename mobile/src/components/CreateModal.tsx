@@ -37,7 +37,6 @@ import {
   uploadPickedMedia,
   type HomePost
 } from "../services/api";
-import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
 import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
@@ -1135,7 +1134,6 @@ export function CreateModal({
     setSubmitting(true);
     setErrorText("");
     try {
-      await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
       derivedThumb = await uploadVideoThumbnailFromUri(asset.uri, uploadImageFile);
       const { url: mediaUrl } = await uploadPickedMedia(asset.uri, asset);
