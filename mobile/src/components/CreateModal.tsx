@@ -37,7 +37,6 @@ import {
   uploadPickedMedia,
   type HomePost
 } from "../services/api";
-import { assertVideoUnderUploadLimit } from "../utils/mediaUploadSize";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
 import { InAppCameraCapture, isInAppCameraSupported, type InAppCameraCaptureMode } from "./InAppCameraCapture";
@@ -956,7 +955,7 @@ export function CreateModal({
       await new Promise((r) => setTimeout(r, Platform.OS === "web" ? 120 : 80));
       const uri = await captureRef(previewCaptureRef, {
         format: "jpg",
-        quality: 0.9,
+        quality: 0.8,
         result: "tmpfile"
       });
       return uri || null;
@@ -1028,7 +1027,7 @@ export function CreateModal({
     });
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: mediaTypeForEntry(),
-      quality: 0.9,
+      quality: 0.8,
       cameraType: entryCameraFacing,
       ...(Platform.OS === "ios"
         ? { presentationStyle: ImagePicker.UIImagePickerPresentationStyle.OVER_FULL_SCREEN }
@@ -1135,7 +1134,6 @@ export function CreateModal({
     setSubmitting(true);
     setErrorText("");
     try {
-      await assertVideoUnderUploadLimit(asset.uri);
       let derivedThumb: string | undefined;
       derivedThumb = await uploadVideoThumbnailFromUri(asset.uri, uploadImageFile);
       const { url: mediaUrl } = await uploadPickedMedia(asset.uri, asset);
@@ -1265,7 +1263,7 @@ export function CreateModal({
       return;
     }
     try {
-      const photo = await entryCameraRef.current?.takePictureAsync({ quality: 0.9 });
+      const photo = await entryCameraRef.current?.takePictureAsync({ quality: 0.8 });
       if (!photo?.uri) {
         setErrorText(t("createErrCapturePhoto"));
         return;

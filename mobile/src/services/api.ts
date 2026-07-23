@@ -4,6 +4,7 @@ import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from ".
 import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
 import { ensureLocalFileUri } from "../utils/mediaLocalUri";
 import { prepareImageForUpload, prepareProfileImageForUpload } from "../utils/mediaUpload";
+import { prepareVideoForUpload } from "../utils/prepareVideoForUpload";
 import { resolveWebAppOrigin } from "../utils/webAppOrigin";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
@@ -1966,11 +1967,20 @@ export async function uploadVideoFile(fileUri: string, asset?: PickerAssetMeta |
   const nameFromUri = fileUri.split("?")[0].match(/\.(mp4|mov|webm|m4v)$/i);
   const ext = nameFromUri ? nameFromUri[0].toLowerCase() : ".mp4";
   const localUri = await ensureLocalFileUri(fileUri, ext);
-  await assertVideoUnderUploadLimit(localUri);
-  assertVideoResolutionWithinLimit(asset?.width ?? undefined, asset?.height ?? undefined);
-  const mime =
-    ext === ".webm" ? "video/webm" : ext === ".mov" ? "video/quicktime" : ext === ".m4v" ? "video/x-m4v" : "video/mp4";
-  return uploadToSupabaseServer(localUri, `video-${Date.now()}${ext}`, mime);
+  // Soft-check source resolution; compression will downscale when the native module is available.
+  try {
+    assertVideoResolutionWithinLimit(asset?.width ?? undefined, asset?.height ?? undefined);
+  } catch (error) {
+    // Allow oversized sources through when we can compress on-device; still reject if compress fails later via size limit.
+    const longEdge = Math.max(Number(asset?.width) || 0, Number(asset?.height) || 0);
+    if (longEdge <= 0 || longEdge > 4096) throw error;
+  }
+  const prepared = await prepareVideoForUpload(localUri, {
+    width: asset?.width ?? undefined,
+    height: asset?.height ?? undefined
+  });
+  await assertVideoUnderUploadLimit(prepared.uri);
+  return uploadToSupabaseServer(prepared.uri, prepared.filename, prepared.mime);
 }
 
 export async function uploadImageFile(fileUri: string, options?: { profile?: boolean }) {
