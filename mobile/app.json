@@ -189,6 +189,7 @@
       ],
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc",
+      "react-native-compressor",
       "./scripts/withAndroidLargeHeap.js",
       "./plugins/withFcmManifestMergeFix.js"
     ],
