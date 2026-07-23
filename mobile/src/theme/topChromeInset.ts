@@ -13,16 +13,29 @@ const COMPACT_SCREEN_HEIGHT = 700;
 const COMPACT_TOP_INSET_MAX = 26;
 
 /**
+ * Minimum iOS status-bar clearance when safe-area reports 0
+ * (common briefly at boot, or on some builds). Classic = 20, notch/Island ≈ 47–59.
+ */
+const IOS_TOP_INSET_FALLBACK = 47;
+const IOS_TOP_INSET_MIN = 20;
+
+/**
  * Instagram-style top inset: one status-bar offset for headers on every device/build.
  *
  * Android: prefer the smaller of StatusBar.currentHeight and safe-area top when both
  * exist — avoids double top gap on dev clients / compact devices. Cap inflated OEM values.
  *
- * iOS: use safe-area (notch / Dynamic Island).
+ * iOS: use safe-area (notch / Dynamic Island). Never return 0 — that draws under the
+ * system status bar (time / battery / signal).
  */
 export function resolveTopChromeInset(insetsTop: number, windowHeight = 0): number {
   if (Platform.OS === "web") return 0;
-  if (Platform.OS === "ios") return insetsTop;
+
+  if (Platform.OS === "ios") {
+    const top = Number(insetsTop) || 0;
+    if (top >= IOS_TOP_INSET_MIN) return top;
+    return IOS_TOP_INSET_FALLBACK;
+  }
 
   const statusBar = Number(StatusBar.currentHeight ?? 0);
 

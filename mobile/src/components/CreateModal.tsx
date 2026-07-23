@@ -956,7 +956,7 @@ export function CreateModal({
       await new Promise((r) => setTimeout(r, Platform.OS === "web" ? 120 : 80));
       const uri = await captureRef(previewCaptureRef, {
         format: "jpg",
-        quality: 0.8,
+        quality: 0.9,
         result: "tmpfile"
       });
       return uri || null;
@@ -1028,7 +1028,7 @@ export function CreateModal({
     });
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: mediaTypeForEntry(),
-      quality: 0.8,
+      quality: 0.9,
       cameraType: entryCameraFacing,
       ...(Platform.OS === "ios"
         ? { presentationStyle: ImagePicker.UIImagePickerPresentationStyle.OVER_FULL_SCREEN }
@@ -1265,7 +1265,7 @@ export function CreateModal({
       return;
     }
     try {
-      const photo = await entryCameraRef.current?.takePictureAsync({ quality: 0.8 });
+      const photo = await entryCameraRef.current?.takePictureAsync({ quality: 0.9 });
       if (!photo?.uri) {
         setErrorText(t("createErrCapturePhoto"));
         return;

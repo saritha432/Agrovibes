@@ -14,7 +14,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -1214,43 +1213,48 @@ export function DirectChatScreen() {
   useEffect(() => {
     if (Platform.OS !== "android") return;
 
-    const settleTimers: ReturnType<typeof setTimeout>[] = [];
-
-    const applyKeyboardInset = (needed: number) => {
-      const next = Math.max(0, Math.round(needed));
-      if (Math.abs(next - androidKeyboardInsetRef.current) <= 1) return;
-      androidKeyboardInsetRef.current = next;
-      setAndroidKeyboardInset(next);
-    };
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
 
     const syncComposerAboveKeyboard = (event: KeyboardEvent) => {
-      const keyboardTopScreen = event.endCoordinates?.screenY;
-      if (typeof keyboardTopScreen !== "number" || !Number.isFinite(keyboardTopScreen)) return;
+      const keyboardTop = event.endCoordinates?.screenY;
+      const kbHeight = Math.max(0, Math.round(event.endCoordinates?.height || 0));
 
-      const statusBar = StatusBar.currentHeight ?? 0;
-      const keyboardTopWindow = keyboardTopScreen - statusBar;
-
-      const measure = () => {
+      const apply = () => {
         const node = composerAnchorRef.current;
-        if (!node) return;
+        if (!node || typeof keyboardTop !== "number" || !Number.isFinite(keyboardTop)) {
+          // Fallback when measure/screenY unavailable: pad by keyboard height.
+          const next = kbHeight > 0 ? Math.max(0, kbHeight - insets.bottom) : 0;
+          androidKeyboardInsetRef.current = next;
+          setAndroidKeyboardInset(next);
+          return;
+        }
 
         node.measureInWindow((_x, y, _w, h) => {
-          if (!Number.isFinite(y) || !Number.isFinite(h) || h <= 0) return;
-          const composerBottom = y + h;
-          const overlap = Math.max(0, Math.ceil(composerBottom - keyboardTopWindow));
-          applyKeyboardInset(overlap > 0 ? overlap + 2 : 0);
+          if (!Number.isFinite(y) || !Number.isFinite(h) || h <= 0) {
+            const next = kbHeight > 0 ? Math.max(0, kbHeight - insets.bottom) : 0;
+            androidKeyboardInsetRef.current = next;
+            setAndroidKeyboardInset(next);
+            return;
+          }
+          // Spacer sits below this view; add current inset so remeasures stay stable.
+          const prev = androidKeyboardInsetRef.current;
+          const needed = Math.max(0, Math.ceil(y + h + prev - keyboardTop));
+          if (Math.abs(needed - prev) <= 1) return;
+          androidKeyboardInsetRef.current = needed;
+          setAndroidKeyboardInset(needed);
         });
       };
 
-      requestAnimationFrame(measure);
-      for (const delay of [80, 200]) {
-        settleTimers.push(setTimeout(measure, delay));
-      }
+      if (settleTimer) clearTimeout(settleTimer);
+      requestAnimationFrame(() => {
+        apply();
+        // Second pass after adjustResize settles on some OEMs.
+        settleTimer = setTimeout(apply, 64);
+      });
     };
 
     const onHide = () => {
-      for (const timer of settleTimers) clearTimeout(timer);
-      settleTimers.length = 0;
+      if (settleTimer) clearTimeout(settleTimer);
       androidKeyboardInsetRef.current = 0;
       setAndroidKeyboardInset(0);
     };
@@ -1259,12 +1263,12 @@ export function DirectChatScreen() {
     const frameSub = Keyboard.addListener("keyboardDidChangeFrame", syncComposerAboveKeyboard);
     const hideSub = Keyboard.addListener("keyboardDidHide", onHide);
     return () => {
-      for (const timer of settleTimers) clearTimeout(timer);
+      if (settleTimer) clearTimeout(settleTimer);
       showSub.remove();
       frameSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [insets.bottom]);
 
   const openSharedCropvibeCard = useCallback(
     async (body: string) => {
@@ -1603,13 +1607,7 @@ export function DirectChatScreen() {
         <View
           ref={composerAnchorRef}
           collapsable={false}
-          style={[
-            styles.composerWrap,
-            { paddingBottom: bottomPad },
-            Platform.OS === "android" && androidKeyboardInset > 0
-              ? { marginBottom: androidKeyboardInset }
-              : null
-          ]}
+          style={[styles.composerWrap, { paddingBottom: bottomPad }]}
         >
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
@@ -1713,6 +1711,9 @@ export function DirectChatScreen() {
           )}
         </View>
         </View>
+        {Platform.OS === "android" && androidKeyboardInset > 0 ? (
+          <View style={{ height: androidKeyboardInset, backgroundColor: BG }} />
+        ) : null}
       </KeyboardAvoidingView>
       <ConfirmDialog
         visible={pendingDelete != null}

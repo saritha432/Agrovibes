@@ -1,8 +1,8 @@
 import "fast-text-encoding";
 import React from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { Image, Platform, StatusBar, StyleSheet, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
-import { initialWindowMetrics, SafeAreaProvider } from "react-native-safe-area-context";
+import { initialWindowMetrics, SafeAreaProvider, type Metrics } from "react-native-safe-area-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 import { navigationRef } from "./src/navigation/navigationRef";
 import { AuthProvider, useAuth } from "./src/auth/AuthContext";
@@ -32,6 +32,25 @@ const CROPVIBE_INTRO_IMAGE = require("./assets/onboarding/cropvibe_intro.png");
 /** Keep intro visible long enough to read, even when fonts/auth finish instantly. */
 const INTRO_MIN_MS = 1600;
 
+/** Avoid drawing under the iOS status bar when native safe-area top is missing/0. */
+function resolveInitialSafeAreaMetrics(): Metrics | undefined {
+  const base = initialWindowMetrics;
+  if (Platform.OS !== "ios") return base ?? undefined;
+  if (!base) {
+    return {
+      frame: { x: 0, y: 0, width: 390, height: 844 },
+      insets: { top: 47, left: 0, right: 0, bottom: 34 }
+    };
+  }
+  if ((base.insets?.top ?? 0) < 20) {
+    return {
+      ...base,
+      insets: { ...base.insets, top: 47 }
+    };
+  }
+  return base;
+}
+
 function IntroBootScreen() {
   return (
     <View style={styles.bootRoot}>
@@ -49,6 +68,14 @@ function AppShell() {
   React.useEffect(() => {
     const timer = setTimeout(() => setIntroMinElapsed(true), INTRO_MIN_MS);
     return () => clearTimeout(timer);
+  }, []);
+
+  React.useEffect(() => {
+    StatusBar.setBarStyle("light-content");
+    if (Platform.OS === "android") {
+      StatusBar.setTranslucent(true);
+      StatusBar.setBackgroundColor("transparent");
+    }
   }, []);
 
   if (!fontsReady || authLoading || !introMinElapsed) {
@@ -84,7 +111,8 @@ function AppShell() {
 
 export default function App() {
   return (
-    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+    <SafeAreaProvider initialMetrics={resolveInitialSafeAreaMetrics()}>
+      <StatusBar barStyle="light-content" translucent={Platform.OS === "android"} backgroundColor="transparent" />
       <LanguageProvider>
         <AuthProvider>
           <OnboardingProvider>
