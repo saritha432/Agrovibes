@@ -1,14 +1,11 @@
 import "fast-text-encoding";
+import "./src/push/notificationBackgroundTask";
 import { registerBackgroundNotificationTask } from "./src/push/notificationBackgroundTask";
-import {
-  registerIncomingCallMessagingBackground,
-  registerIncomingCallNativeActionHandlers
-} from "./src/push/incomingCallMessagingBackground";
+import { registerIncomingCallMessagingBackground } from "./src/push/incomingCallMessagingBackground";
 import { registerNotificationResponseHandler } from "./src/push/registerNotificationHandlers";
 
-// Must register before the app root so FCM + notification actions work when backgrounded/killed.
+// Must register before the app root so FCM data messages work when backgrounded/killed.
 registerIncomingCallMessagingBackground();
-registerIncomingCallNativeActionHandlers();
 registerNotificationResponseHandler();
 void registerBackgroundNotificationTask();
 

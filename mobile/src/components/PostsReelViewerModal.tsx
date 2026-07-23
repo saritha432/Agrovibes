@@ -28,7 +28,6 @@ import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navi
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
-import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import { UserAvatar } from "./UserAvatar";
 import { StoryRingAvatar } from "./StoryRingAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
@@ -571,14 +570,6 @@ export function PostsReelViewerModal({
   }, [viewerPosts]);
 
   useEffect(() => {
-    if (!visible || !viewerPosts.length) return;
-    const start = Math.max(0, Math.min(initialIndex, viewerPosts.length - 1));
-    for (let i = start; i < Math.min(viewerPosts.length, start + 4); i += 1) {
-      prefetchPostMedia(viewerPosts[i], { warmVideo: true });
-    }
-  }, [visible, viewerPosts, initialIndex]);
-
-  useEffect(() => {
     const keepOn = visible && playingPostId != null && !reelUserPaused;
     if (!keepOn) {
       deactivateKeepAwake("reel-viewer");
@@ -1073,11 +1064,8 @@ export function PostsReelViewerModal({
       .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
       .sort((a, b) => a.index - b.index);
     if (!ordered.length) return;
-    const primary = ordered[ordered.length - 1];
-    setPlayingPostId(primary.post.id);
-    prefetchPostMedia(primary.post, { warmVideo: true });
-    prefetchUpcomingPosts(viewerPosts, primary.index, 3);
-  }, [viewerPosts]);
+    setPlayingPostId(ordered[ordered.length - 1].post.id);
+  }, []);
 
   const viewabilityCallbackRef = useRef(onViewableItemsChanged);
   viewabilityCallbackRef.current = onViewableItemsChanged;
@@ -1094,10 +1082,6 @@ export function PostsReelViewerModal({
       const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / windowHeight)));
       const post = viewerPosts[index];
       setPlayingPostId(post?.id ?? null);
-      if (post) {
-        prefetchPostMedia(post, { warmVideo: true });
-        prefetchUpcomingPosts(viewerPosts, index, 3);
-      }
     },
     [visible, viewerPosts, windowHeight]
   );

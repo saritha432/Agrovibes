@@ -5,7 +5,6 @@ import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJ
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
-import { hideIncomingCallAndroidNotification } from "./incomingCallAndroidNotification";
 import { clearIncomingCallNotifications } from "./incomingCallNotifications";
 import { completeIncomingCallDecline } from "./incomingCallDecline";
 import { isCallRoomEnded, markCallRoomEnded } from "./cancelledCallRooms";
@@ -158,9 +157,6 @@ async function handleIncomingCallDecline(
   const callerId = peerIdFromData(data);
   if (!callerId) return;
   const mode = String(data.mode || "voice") === "video" ? "video" : "voice";
-  const roomName = String(data.roomName || "").trim();
-  hideIncomingCallAndroidNotification();
-  await dismissIncomingCallUi(roomName);
   await completeIncomingCallDecline({
     callerId,
     callerName: title,
@@ -264,13 +260,10 @@ export async function handleNotificationResponse(
   response: Notifications.NotificationResponse,
   options?: { authToken?: string | null }
 ) {
-  if (!response?.notification?.request?.content) return;
-
   const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
   const title = String(response.notification.request.content.title || "").trim() || "Someone";
   const type = String(data.type || "");
-  const actionId = String(response.actionIdentifier || "").trim();
-  if (!actionId) return;
+  const actionId = response.actionIdentifier;
 
   if (isReplyAction(actionId)) {
     await handleInlineReply(response, options);
