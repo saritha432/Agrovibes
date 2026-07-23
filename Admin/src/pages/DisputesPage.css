@@ -1,0 +1,327 @@
+.disputes-page {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 620px;
+}
+
+.disputes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.disputes-card {
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1a1a1a;
+  border-radius: 12px;
+  padding: 14px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.disputes-card.is-active {
+  border-color: rgba(198, 255, 0, 0.45);
+  background: #1f1f1f;
+}
+
+.disputes-card__code {
+  color: #9a9a9a;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.disputes-card strong {
+  font-size: 0.92rem;
+}
+
+.disputes-card em {
+  font-style: normal;
+  color: #8a8a8a;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.disputes-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.disputes-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.disputes-badge--evidence {
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.1);
+  border-color: rgba(255, 176, 32, 0.4);
+}
+
+.disputes-badge--status-open {
+  color: #5eb1ff;
+  background: rgba(94, 177, 255, 0.1);
+  border-color: rgba(94, 177, 255, 0.4);
+}
+
+.disputes-badge--status-reviewed {
+  color: #c6ff00;
+  background: rgba(198, 255, 0, 0.1);
+  border-color: rgba(198, 255, 0, 0.4);
+}
+
+.disputes-badge--status-pending {
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.1);
+  border-color: rgba(255, 176, 32, 0.4);
+}
+
+.disputes-badge--priority-high {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.4);
+}
+
+.disputes-badge--priority-medium {
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.1);
+  border-color: rgba(255, 176, 32, 0.4);
+}
+
+.disputes-badge--priority-low {
+  color: #c6ff00;
+  background: rgba(198, 255, 0, 0.1);
+  border-color: rgba(198, 255, 0, 0.4);
+}
+
+.disputes-detail {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: #151515;
+  padding: 18px;
+  min-height: 620px;
+}
+
+.disputes-empty {
+  color: #8a8a8a;
+  font-size: 0.9rem;
+  padding: 24px 12px;
+  text-align: center;
+}
+
+.disputes-empty--detail {
+  display: grid;
+  place-items: center;
+  min-height: 520px;
+}
+
+.disputes-detail__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.disputes-detail__code {
+  margin: 0 0 4px;
+  color: #9a9a9a;
+  font-size: 0.78rem;
+}
+
+.disputes-detail__header h2 {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+}
+
+.disputes-detail__summary {
+  margin: 0;
+  color: #8a8a8a;
+  font-size: 0.86rem;
+}
+
+.disputes-parties {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.disputes-party {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.disputes-party__avatar,
+.disputes-party__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: #2a2a2a;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: #c6ff00;
+  font-weight: 700;
+}
+
+.disputes-party__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.disputes-party__label {
+  margin: 0;
+  color: #8a8a8a;
+  font-size: 0.72rem;
+}
+
+.disputes-party strong {
+  font-size: 0.9rem;
+}
+
+.disputes-section {
+  margin-top: 8px;
+  margin-bottom: 18px;
+}
+
+.disputes-section h3 {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: #9a9a9a;
+}
+
+.disputes-section__empty {
+  margin: 0;
+  color: #8a8a8a;
+  font-size: 0.86rem;
+}
+
+.disputes-evidence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.disputes-evidence__card {
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.disputes-evidence__card p {
+  margin: 0 0 8px;
+  color: #9a9a9a;
+  font-size: 0.75rem;
+}
+
+.disputes-evidence__preview {
+  height: 110px;
+  border-radius: 8px;
+  background: #2a2a2a;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.disputes-evidence__preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.disputes-evidence__download {
+  width: 100%;
+  border: 1px solid rgba(198, 255, 0, 0.4);
+  background: transparent;
+  color: #c6ff00;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.disputes-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.disputes-msg {
+  max-width: 85%;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.disputes-msg--admin {
+  align-self: flex-end;
+  border-color: rgba(198, 255, 0, 0.35);
+}
+
+.disputes-msg__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+}
+
+.disputes-msg__meta span {
+  color: #9a9a9a;
+}
+
+.disputes-msg__meta em {
+  font-style: normal;
+  color: #6f6f6f;
+  margin-left: auto;
+}
+
+.disputes-msg p {
+  margin: 0;
+  color: #ddd;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 1100px) {
+  .disputes-parties,
+  .disputes-evidence {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .disputes-page {
+    grid-template-columns: 1fr;
+  }
+
+  .disputes-list {
+    max-height: 280px;
+  }
+}
