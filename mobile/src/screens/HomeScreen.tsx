@@ -1394,7 +1394,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [followerUserIds, setFollowerUserIds] = useState<Set<number>>(new Set());
   const [socialNetworkHydrated, setSocialNetworkHydrated] = useState(false);
   /** Accepted following (name + id) for share sheet — not only users who appear as post authors. */
-  const [followingSharePeers, setFollowingSharePeers] = useState<Array<{ id: number; name: string }>>([]);
+  const [followingSharePeers, setFollowingSharePeers] = useState<
+    Array<{ id: number; name: string; avatarUrl?: string | null }>
+  >([]);
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -2549,7 +2551,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (!mounted) return;
         const followingIds = new Set<number>();
         const followerIds = new Set<number>();
-        const peers: Array<{ id: number; name: string }> = [];
+        const peers: Array<{ id: number; name: string; avatarUrl?: string | null }> = [];
         const avatarMap = new Map<number, string>();
         const rememberAvatar = (person: { key?: string; avatarUrl?: string | null }) => {
           const raw = String(person.key || "").trim();
@@ -2567,7 +2569,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             seenFollowing.add(uid);
             followingIds.add(uid);
             const name = String(person.name || "").trim();
-            if (name) peers.push({ id: uid, name });
+            if (name) {
+              peers.push({
+                id: uid,
+                name,
+                avatarUrl: avatarMap.get(uid) || (typeof person.avatarUrl === "string" ? person.avatarUrl : null)
+              });
+            }
           }
         }
         for (const person of mergedFollowers) {

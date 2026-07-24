@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +8,7 @@ import {
   FlatList,
   Image,
   InteractionManager,
+  Keyboard,
   Linking,
   Modal,
   Platform,
@@ -17,6 +18,7 @@ import {
   Text,
   TextInput,
   TextStyle,
+  useWindowDimensions,
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
@@ -467,6 +469,20 @@ export function CreateModal({
     [t]
   );
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const [liveCameraLayoutKey, setLiveCameraLayoutKey] = useState(0);
+  const bumpLiveCameraLayout = React.useCallback(() => {
+    setLiveCameraLayoutKey((n) => n + 1);
+  }, []);
+
+  React.useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const onHide = () => {
+      InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
+    };
+    const sub = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => sub.remove();
+  }, [bumpLiveCameraLayout]);
   const { user, token } = useAuth();
   const [createType, setCreateType] = useState<CreateType | null>(null);
   const [entryCameraFacing, setEntryCameraFacing] = useState(ImagePicker.CameraType.back);
@@ -1408,7 +1424,8 @@ export function CreateModal({
   const handleEntryShutterPress = () => {
     setErrorText("");
     if (entryType === "live") {
-      setLiveMode(null);
+      setLiveMode((prev) => prev || "now");
+      setShowLiveTitleSheet(false);
       setShowLiveSetupSheet(true);
       return;
     }
@@ -2004,7 +2021,7 @@ export function CreateModal({
     <>
     <Modal
       visible={visible}
-      transparent={Platform.OS === "web" ? false : !createType || createType === "live"}
+      transparent={false}
       animationType={createType && createType !== "live" ? "fade" : "slide"}
       onRequestClose={handleClose}
     >
@@ -2181,7 +2198,14 @@ export function CreateModal({
             </View>
           </View>
         ) : (
-          <View style={[styles.igCaptureCameraRoot, Platform.OS === "web" ? styles.igCameraEntryRootWeb : null]}>
+          <View
+            key={`live-cam-root-${liveCameraLayoutKey}`}
+            style={[
+              styles.igCaptureCameraRoot,
+              Platform.OS === "web" ? styles.igCameraEntryRootWeb : null,
+              Platform.OS === "android" ? { height: windowHeight, minHeight: windowHeight } : null
+            ]}
+          >
             <StoryCameraPreview
               ref={entryCameraRef}
               active={entryCameraActive}
@@ -2196,7 +2220,7 @@ export function CreateModal({
             <View
               style={[
                 styles.igCaptureOverlay,
-                { paddingTop: insets.top + 6, paddingBottom: Math.max(insets.bottom, 12) }
+                { paddingTop: insets.top + 6 }
               ]}
               pointerEvents="box-none"
             >
@@ -2302,16 +2326,16 @@ export function CreateModal({
                         ))}
                   </View>
                 ) : null}
-                {entryType === "live" && !showLiveSetupSheet ? (
+                {entryType === "live" ? (
                   <Pressable
-                    style={styles.liveTitleFab}
+                    style={[styles.liveTitleFab, liveScheduleTopic.trim() ? styles.liveTitleFabWithText : null]}
                     onPress={() => {
                       setLiveTitleDraft(liveScheduleTopic);
                       setShowLiveTitleSheet(true);
                     }}
                     hitSlop={10}
                     accessibilityRole="button"
-                    accessibilityLabel="Add live title"
+                    accessibilityLabel={liveScheduleTopic.trim() ? "Edit live title" : "Add live title"}
                   >
                     <Ionicons name="reorder-three-outline" size={22} color="#fff" />
                     {liveScheduleTopic.trim() ? (
@@ -2329,6 +2353,10 @@ export function CreateModal({
                 </Text>
               ) : null}
 
+              <View
+                style={[styles.igCamBottomChrome, { paddingBottom: Math.max(insets.bottom, 12) }]}
+                pointerEvents="box-none"
+              >
               <View style={styles.igCamCaptureRow} pointerEvents="box-none">
                 <View style={styles.igCamCaptureSideSlot}>
                   {entryType === "live" ? (
@@ -2380,6 +2408,22 @@ export function CreateModal({
                   ) : null}
                 </View>
               </View>
+
+              {entryType === "live" && !entryIsRecording ? (
+                <Pressable
+                  style={styles.liveBottomGoBtn}
+                  onPress={() => {
+                    setErrorText("");
+                    setLiveMode((prev) => prev || "now");
+                    setShowLiveTitleSheet(false);
+                    setShowLiveSetupSheet(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go Live"
+                >
+                  <Text style={styles.liveBottomGoBtnText}>Go Live</Text>
+                </Pressable>
+              ) : null}
 
               <View style={styles.igCamBottomNav} pointerEvents="box-none">
                 {entryType === "live" ? (
@@ -2434,57 +2478,96 @@ export function CreateModal({
                   <Ionicons name="camera-reverse-outline" size={28} color="#C9FF35" />
                 </Pressable>
               </View>
+              </View>
+            </View>
 
               {showLiveTitleSheet ? (
-                <View style={styles.liveInlineSheetRoot} pointerEvents="box-none">
-                  <Pressable style={styles.liveInlineSheetBackdrop} onPress={() => setShowLiveTitleSheet(false)} />
-                  <View style={[styles.liveTitleSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-                    <View style={styles.liveInlineSheetHandle} />
-                    <View style={styles.liveTitleSheetRow}>
-                      <UserAvatar
-                        uri={user?.avatarUrl}
-                        name={user?.fullName || "You"}
-                        size={44}
-                        borderRadius={22}
-                        fallbackBackgroundColor="#3f3f46"
-                        initialsColor="#fafafa"
-                      />
-                      <TextInput
-                        value={liveTitleDraft}
-                        onChangeText={setLiveTitleDraft}
-                        style={styles.liveTitleSheetInput}
-                        placeholder="Add a title..."
-                        placeholderTextColor="rgba(255,255,255,0.45)"
-                        maxLength={120}
-                        autoFocus
-                      />
-                    </View>
-                    <Text style={styles.liveTitleSheetHint}>
-                      Your followers and anyone watching will see this title.
-                    </Text>
+                <Modal
+                  visible
+                  transparent
+                  animationType="slide"
+                  onRequestClose={() => {
+                    Keyboard.dismiss();
+                    setShowLiveTitleSheet(false);
+                    InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
+                  }}
+                >
+                  <View style={styles.liveInlineSheetRoot} pointerEvents="box-none">
                     <Pressable
-                      style={[styles.liveTitleSheetBtn, !liveTitleDraft.trim() ? styles.liveTitleSheetBtnDisabled : null]}
-                      disabled={!liveTitleDraft.trim()}
+                      style={styles.liveInlineSheetBackdrop}
                       onPress={() => {
-                        setLiveScheduleTopic(liveTitleDraft.trim());
+                        Keyboard.dismiss();
                         setShowLiveTitleSheet(false);
+                        InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
                       }}
-                    >
-                      <Text style={styles.liveTitleSheetBtnText}>Add title</Text>
-                    </Pressable>
+                    />
+                    <View style={[styles.liveTitleSheet, { paddingBottom: insets.bottom + 16 }]}>
+                      <View style={styles.liveInlineSheetHandle} />
+                      <View style={styles.liveTitleSheetRow}>
+                        <UserAvatar
+                          uri={user?.avatarUrl}
+                          name={user?.fullName || "You"}
+                          size={44}
+                          borderRadius={22}
+                          fallbackBackgroundColor="#3f3f46"
+                          initialsColor="#fafafa"
+                        />
+                        <TextInput
+                          value={liveTitleDraft}
+                          onChangeText={setLiveTitleDraft}
+                          style={styles.liveTitleSheetInput}
+                          placeholder="Add a title..."
+                          placeholderTextColor="rgba(255,255,255,0.45)"
+                          maxLength={120}
+                          autoFocus
+                        />
+                      </View>
+                      <Text style={styles.liveTitleSheetHint}>
+                        Your followers and anyone watching will see this title.
+                      </Text>
+                      <Pressable
+                        style={[styles.liveTitleSheetBtn, !liveTitleDraft.trim() ? styles.liveTitleSheetBtnDisabled : null]}
+                        disabled={!liveTitleDraft.trim()}
+                        onPress={() => {
+                          const nextTitle = liveTitleDraft.trim();
+                          Keyboard.dismiss();
+                          setLiveScheduleTopic(nextTitle);
+                          setShowLiveTitleSheet(false);
+                          InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
+                        }}
+                      >
+                        <Text style={styles.liveTitleSheetBtnText}>Add title</Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
+                </Modal>
               ) : null}
 
               {showLiveSetupSheet ? (
+                <Modal
+                  visible
+                  transparent
+                  animationType="slide"
+                  onRequestClose={() => {
+                    if (!isSubmitting) {
+                      Keyboard.dismiss();
+                      setShowLiveSetupSheet(false);
+                      InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
+                    }
+                  }}
+                >
                 <View style={styles.liveInlineSheetRoot} pointerEvents="box-none">
                   <Pressable
                     style={styles.liveInlineSheetBackdrop}
                     onPress={() => {
-                      if (!isSubmitting) setShowLiveSetupSheet(false);
+                      if (!isSubmitting) {
+                        Keyboard.dismiss();
+                        setShowLiveSetupSheet(false);
+                        InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
+                      }
                     }}
                   />
-                  <View style={[styles.liveSetupSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                  <View style={[styles.liveSetupSheet, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
                     <View style={styles.liveInlineSheetHandle} />
                     <Text style={styles.liveSetupSheetTitle}>Go live</Text>
                     {liveScheduleTopic.trim() ? (
@@ -2566,22 +2649,26 @@ export function CreateModal({
                           Followers get a schedule notification now and a reminder 10 minutes before.
                         </Text>
                       </View>
-                    ) : liveMode === "now" ? (
+                    ) : (
                       <Text style={styles.liveScheduleHintDark}>Tap Go Live to start broadcasting and notify followers.</Text>
-                    ) : null}
+                    )}
                     {errorText ? <Text style={styles.liveSetupError}>{errorText}</Text> : null}
                     <View style={styles.liveSetupFooterRow}>
                       <Pressable
                         style={styles.liveSetupCancelBtn}
-                        onPress={() => setShowLiveSetupSheet(false)}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setShowLiveSetupSheet(false);
+                          InteractionManager.runAfterInteractions(() => bumpLiveCameraLayout());
+                        }}
                         disabled={isSubmitting}
                       >
                         <Text style={styles.liveSetupCancelText}>Cancel</Text>
                       </Pressable>
                       <Pressable
-                        style={[styles.liveSetupGoBtn, !liveMode || isSubmitting ? styles.liveSetupGoBtnDisabled : null]}
+                        style={[styles.liveSetupGoBtn, isSubmitting ? styles.liveSetupGoBtnDisabled : null]}
                         onPress={() => void submitLiveSetup()}
-                        disabled={!liveMode || isSubmitting}
+                        disabled={isSubmitting}
                       >
                         {isSubmitting ? (
                           <ActivityIndicator color="#111" size="small" />
@@ -2592,8 +2679,8 @@ export function CreateModal({
                     </View>
                   </View>
                 </View>
+                </Modal>
               ) : null}
-            </View>
           </View>
         )
       ) : (
@@ -4249,8 +4336,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#000"
   },
   igCaptureOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "space-between"
+    ...StyleSheet.absoluteFillObject
+  },
+  igCamBottomChrome: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 4,
+    zIndex: 40,
+    elevation: 40
   },
   igCaptureTopRow: {
     flexDirection: "row",
@@ -4405,8 +4500,9 @@ const styles = StyleSheet.create({
     minHeight: 280
   },
   igCamMiddleArea: {
-    flex: 1,
-    position: "relative"
+    ...StyleSheet.absoluteFillObject,
+    top: 56,
+    bottom: 210
   },
   igCamLeftRail: {
     position: "absolute",
@@ -4589,7 +4685,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 14,
     top: "38%",
-    maxWidth: 120,
+    maxWidth: 148,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -4600,11 +4696,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.18)"
   },
+  liveTitleFabWithText: {
+    maxWidth: 168,
+    paddingRight: 12
+  },
   liveTitleFabText: { color: "#fff", fontSize: 12, fontWeight: "700", flexShrink: 1 },
+  liveBottomGoBtn: {
+    alignSelf: "center",
+    minWidth: 160,
+    marginTop: 4,
+    marginBottom: 8,
+    backgroundColor: "#C9FF35",
+    borderRadius: 22,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  liveBottomGoBtnText: {
+    color: "#111827",
+    fontSize: 15,
+    fontWeight: "900",
+    letterSpacing: 0.2
+  },
   liveInlineSheetRoot: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
     justifyContent: "flex-end",
-    zIndex: 30
+    backgroundColor: "transparent"
   },
   liveInlineSheetBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -4644,8 +4762,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
-    marginBottom: 4
+    paddingVertical: 14
   },
   liveTitleSheetBtnDisabled: { opacity: 0.45 },
   liveTitleSheetBtnText: { color: "#111827", fontWeight: "900", fontSize: 15 },
@@ -4695,7 +4812,7 @@ const styles = StyleSheet.create({
     marginTop: 4
   },
   liveSetupError: { color: "#fca5a5", fontSize: 12, fontWeight: "700", marginTop: 10, textAlign: "center" },
-  liveSetupFooterRow: { flexDirection: "row", gap: 10, marginTop: 14, marginBottom: 4 },
+  liveSetupFooterRow: { flexDirection: "row", gap: 10, marginTop: 14 },
   liveSetupCancelBtn: {
     flex: 1,
     borderRadius: 12,
@@ -4703,7 +4820,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12
+    paddingVertical: 14
   },
   liveSetupCancelText: { color: "#fff", fontWeight: "800" },
   liveSetupGoBtn: {
@@ -4712,7 +4829,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#C9FF35",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12
+    paddingVertical: 14
   },
   liveSetupGoBtnDisabled: { opacity: 0.45 },
   liveSetupGoText: { color: "#111827", fontWeight: "900", fontSize: 15 },
