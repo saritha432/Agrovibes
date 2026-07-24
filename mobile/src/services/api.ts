@@ -981,8 +981,13 @@ export async function fetchUserHomePosts(
   if (!response.ok) {
     throw new Error("Failed to load user posts");
   }
-  const data = (await response.json()) as { posts: HomePost[] };
-  return { posts: data.posts.map(sanitizeHomePost) };
+  const data = (await response.json()) as { posts: HomePost[]; restricted?: boolean; postsCount?: number; reelsCount?: number };
+  return {
+    posts: (data.posts || []).map(sanitizeHomePost),
+    restricted: Boolean(data.restricted),
+    postsCount: Number.isFinite(Number(data.postsCount)) ? Number(data.postsCount) : undefined,
+    reelsCount: Number.isFinite(Number(data.reelsCount)) ? Number(data.reelsCount) : undefined
+  };
 }
 
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
@@ -1523,6 +1528,7 @@ export async function fetchProfileStats(token: string, userId: number) {
     website?: string | null;
     locationLabel?: string | null;
     createdAt?: string;
+    isPrivate?: boolean;
     postsCount: number;
     reelsCount: number;
     followersCount: number;
@@ -1693,6 +1699,7 @@ export async function fetchPublicSocialLists(token: string, userId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/public-lists/${encodeURIComponent(String(userId))}`, token)) as {
     followers: Array<{ name: string; key?: string; username?: string; avatarUrl?: string | null }>;
     following: Array<{ name: string; key?: string; username?: string; avatarUrl?: string | null }>;
+    restricted?: boolean;
   };
 }
 
