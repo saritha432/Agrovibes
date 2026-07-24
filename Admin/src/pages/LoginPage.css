@@ -1,27 +1,36 @@
 .admin-login {
-  min-height: 100vh;
+  --login-footer-height: 48px;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #1a1a1a;
   color: #fff;
+  padding-bottom: var(--login-footer-height);
 }
 
 .admin-login__main {
   flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
-  gap: clamp(32px, 6vw, 96px);
+  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+  gap: clamp(20px, 4vw, 72px);
   align-items: center;
-  width: min(1120px, 100%);
-  margin: 0 auto;
-  padding: clamp(32px, 5vh, 64px) clamp(20px, 4vw, 48px) 40px;
+  /* width: min(1120px, 100%); */
+  /* margin: 0 auto; */
+  padding: clamp(16px, 3vh, 40px) clamp(20px, 4vw, 48px);
+  overflow: hidden;
 }
 
 .admin-login__brand {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: clamp(12px, 2.5vh, 28px);
   max-width: 520px;
+  min-height: 0;
 }
 
 .admin-login__brand-logo {
@@ -30,27 +39,29 @@
   max-width: 180px;
   object-fit: contain;
   object-position: left center;
+  flex-shrink: 0;
 }
 
 .admin-login__headline {
   margin: 0;
-  font-size: clamp(2rem, 3.6vw, 3.25rem);
+  font-size: 32px;
   line-height: 1.12;
   font-weight: 700;
   letter-spacing: -0.03em;
-  max-width: 14ch;
+  flex-shrink: 0;
 }
 
 .admin-login__art {
   display: flex;
   align-items: flex-end;
-  margin-top: 8px;
-  max-width: 460px;
+  margin-top: 4px;
+  flex: 1;
 }
 
 .admin-login__art-img {
   width: 100%;
   height: auto;
+  max-height: min(280px, 32vh);
   display: block;
   object-fit: contain;
   user-select: none;
@@ -59,13 +70,14 @@
 
 .admin-login__panel {
   width: 100%;
-  max-width: 420px;
-  justify-self: end;
+  /* max-width: 420px; */
+  /* justify-self: end; */
+  min-height: 0;
 }
 
 .admin-login__title {
-  margin: 0 0 28px;
-  font-size: clamp(1.6rem, 2.4vw, 2rem);
+  margin: 0 0 clamp(14px, 2.5vh, 28px);
+  font-size: clamp(1.35rem, 2.2vw, 2rem);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -83,13 +95,13 @@
 
 .admin-login__input {
   width: 100%;
-  height: 48px;
+  height: 44px;
   padding: 0 14px;
   border: none;
   border-radius: 4px;
   background: #fff;
   color: #111;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .admin-login__input::placeholder {
@@ -107,13 +119,13 @@
 
 .admin-login__password-wrap .admin-login__input {
   padding-right: 48px;
-  margin-bottom: 22px;
+  margin-bottom: 16px;
 }
 
 .admin-login__eye {
   position: absolute;
   right: 10px;
-  top: 14px;
+  top: 12px;
   width: 32px;
   height: 32px;
   border: none;
@@ -127,7 +139,7 @@
 
 .admin-login__submit {
   width: 100%;
-  height: 48px;
+  height: 44px;
   border: none;
   border-radius: 4px;
   background: #c6ff00;
@@ -152,8 +164,8 @@
 }
 
 .admin-login__error {
-  margin: 0 0 14px;
-  padding: 10px 12px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
   border-radius: 6px;
   background: rgba(255, 77, 79, 0.12);
   border: 1px solid rgba(255, 77, 79, 0.45);
@@ -165,7 +177,7 @@
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .admin-login__text-link {
@@ -187,7 +199,7 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 14px;
-  margin: 28px 0 20px;
+  margin: clamp(14px, 2.5vh, 28px) 0 clamp(12px, 2vh, 20px);
 }
 
 .admin-login__divider span {
@@ -208,7 +220,7 @@
 }
 
 .admin-login__social-btn {
-  height: 48px;
+  height: 44px;
   border: none;
   border-radius: 4px;
   display: grid;
@@ -230,16 +242,25 @@
 }
 
 .admin-login__footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  height: var(--login-footer-height);
+  display: flex;
+  align-items: center;
   border-top: 2px solid #c6ff00;
-  padding: 14px clamp(20px, 4vw, 48px) 18px;
+  padding: 0 clamp(20px, 4vw, 48px);
+  background: #1a1a1a;
 }
 
 .admin-login__footer-inner {
-  width: min(1120px, 100%);
-  margin: 0 auto;
+  width: 100%;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  justify-content: space-between;
   gap: 12px 24px;
 }
 
@@ -247,43 +268,68 @@
   color: #c6ff00;
   font-weight: 800;
   letter-spacing: 0.08em;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
 }
 
-.admin-login__footer-nav {
+.admin-login__footer-right {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 16px;
   color: #cfcfcf;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  margin-left: auto;
 }
 
-.admin-login__footer-nav a:hover {
+.admin-login__footer-right a:hover {
   color: #fff;
 }
 
 .admin-login__footer-craft {
-  margin: 0 0 0 auto;
-  color: #cfcfcf;
-  font-size: 0.85rem;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #c6ff00;
+  white-space: nowrap;
 }
 
 .admin-login__footer-craft span {
   color: #ff4d4f;
 }
 
+.admin-login__footer-craft em {
+  font-style: normal;
+  color: #c6ff00;
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
+  .admin-login {
+    --login-footer-height: 64px;
+  }
+
   .admin-login__main {
     grid-template-columns: 1fr;
-    padding-top: 28px;
+    align-content: center;
+    gap: 16px;
+    padding-top: 16px;
+    padding-bottom: 16px;
   }
 
   .admin-login__brand {
     max-width: none;
+    gap: 10px;
   }
 
   .admin-login__headline {
     max-width: 18ch;
+    font-size: clamp(1.35rem, 5vw, 1.85rem);
+  }
+
+  .admin-login__art-img {
+    max-height: min(140px, 18vh);
   }
 
   .admin-login__panel {
@@ -291,8 +337,19 @@
     max-width: none;
   }
 
-  .admin-login__footer-craft {
+  .admin-login__footer-inner {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .admin-login__footer-right {
+    flex-wrap: wrap;
     margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .admin-login__footer-craft {
     width: 100%;
   }
 }
@@ -301,5 +358,10 @@
   .admin-login__links {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .admin-login__footer-right {
+    flex-wrap: wrap;
+    gap: 8px 12px;
   }
 }
