@@ -104,15 +104,23 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
       const seen = new Set<number>();
       const rows: SharePeer[] = [];
       const add = (peer: SharePeer) => {
-        if (!peer.id || peer.id === Number(user.id) || seen.has(peer.id)) return;
+        if (!peer.id || peer.id === Number(user.id)) return;
+        if (seen.has(peer.id)) {
+          const existing = rows.find((row) => row.id === peer.id);
+          if (existing && !existing.avatarUrl && peer.avatarUrl) {
+            existing.avatarUrl = peer.avatarUrl;
+          }
+          return;
+        }
         seen.add(peer.id);
-        rows.push(peer);
+        rows.push({
+          id: peer.id,
+          name: peer.name,
+          avatarUrl: peer.avatarUrl || null
+        });
       };
 
-      for (const peer of followingPeers || []) {
-        add(peer);
-      }
-
+      // Prefer network/thread rows (with avatars). Seed followingPeers only as fallback names.
       try {
         const network = await fetchSocialNetwork(token, Number(user.id));
         if (cancelled) return;
@@ -146,6 +154,10 @@ export function PostShareSheet({ visible, post, onClose, onAddToStory, following
         }
       } catch {
         // no-op
+      }
+
+      for (const peer of followingPeers || []) {
+        add(peer);
       }
 
       if (!cancelled) {

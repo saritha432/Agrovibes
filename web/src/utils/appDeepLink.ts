@@ -47,6 +47,35 @@ export function buildReelDeepLinkUrls(postId: number, webOrigin: string) {
   };
 }
 
+export function buildProfileDeepLinkUrls(userKey: string | number, webOrigin: string) {
+  const origin = webOrigin.replace(/\/$/, "");
+  const key = encodeURIComponent(String(userKey));
+  const customSchemeUrl = `${CUSTOM_SCHEME}://profile/${key}`;
+  const httpsProfilePath = `/profile/${key}`;
+  const httpsProfileUrl = `${origin}${httpsProfilePath}`;
+  const httpsWatchUrl = `${origin}/view/profile/${key}`;
+  const installFallbackUrl = `${httpsProfileUrl}?install=1`;
+  const androidIntentUrl =
+    `intent://${origin.replace(/^https?:\/\//, "")}${httpsProfilePath}` +
+    `#Intent;scheme=https;package=${ANDROID_PACKAGE};` +
+    `S.browser_fallback_url=${encodeIntentFallback(installFallbackUrl)};end`;
+  const androidCustomIntentUrl =
+    `intent://profile/${key}` +
+    `#Intent;scheme=${CUSTOM_SCHEME};package=${ANDROID_PACKAGE};` +
+    `S.browser_fallback_url=${encodeIntentFallback(installFallbackUrl)};end`;
+
+  return {
+    customSchemeUrl,
+    httpsProfileUrl,
+    httpsWatchUrl,
+    installFallbackUrl,
+    androidIntentUrl,
+    androidCustomIntentUrl,
+    playStoreUrl: PLAY_STORE_URL,
+    appStoreUrl: APP_STORE_URL
+  };
+}
+
 export function isAndroidBrowser() {
   if (typeof navigator === "undefined") return false;
   return /android/i.test(navigator.userAgent);
@@ -68,6 +97,12 @@ export function pickReelAppOpenUrl(postId: number, webOrigin: string) {
 
 export function openReelInApp(postId: number, webOrigin: string) {
   const urls = buildReelDeepLinkUrls(postId, webOrigin);
+  const primary = isAndroidBrowser() ? urls.androidIntentUrl : urls.customSchemeUrl;
+  window.location.href = primary;
+}
+
+export function openProfileInApp(userKey: string | number, webOrigin: string) {
+  const urls = buildProfileDeepLinkUrls(userKey, webOrigin);
   const primary = isAndroidBrowser() ? urls.androidIntentUrl : urls.customSchemeUrl;
   window.location.href = primary;
 }

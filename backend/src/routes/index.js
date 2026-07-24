@@ -49,6 +49,7 @@ const {
 } = require("../pushNotifications");
 const { setCallSession, clearCallSession, isUserBusy, isRoomRinging } = require("../activeCallSessions");
 const { buildShareReelHtml } = require("../shareReelPage");
+const { buildShareProfileHtml } = require("../shareProfilePage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
 const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, getSocketIo } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
@@ -8564,5 +8565,68 @@ router.use("/share/assets", express.static(path.join(__dirname, "..", "assets", 
 
 router.get("/share/reel/:postId", (req, res) => void handleSharePostPage(req, res, "reel"));
 router.get("/share/watch/:postId", (req, res) => void handleSharePostPage(req, res, "watch"));
+
+async function handleShareProfilePage(req, res) {
+  try {
+    await ensureLearnUsersTable();
+    const raw = String(req.params.userIdOrHandle || "").trim();
+    if (!raw) {
+      res.status(400).send("Invalid link");
+      return;
+    }
+    const asId = Number(raw);
+    let result;
+    if (Number.isFinite(asId) && asId > 0) {
+      result = await query(
+        `
+        SELECT
+          id,
+          full_name AS "fullName",
+          NULLIF(TRIM(username), '') AS "username",
+          NULLIF(TRIM(avatar_url), '') AS "avatarUrl",
+          NULLIF(TRIM(bio), '') AS "bio"
+        FROM learn_users
+        WHERE id = $1
+        LIMIT 1
+        `,
+        [asId]
+      );
+    } else {
+      result = await query(
+        `
+        SELECT
+          id,
+          full_name AS "fullName",
+          NULLIF(TRIM(username), '') AS "username",
+          NULLIF(TRIM(avatar_url), '') AS "avatarUrl",
+          NULLIF(TRIM(bio), '') AS "bio"
+        FROM learn_users
+        WHERE LOWER(TRIM(username)) = LOWER(TRIM($1))
+           OR LOWER(TRIM(full_name)) = LOWER(TRIM($1))
+        LIMIT 1
+        `,
+        [raw]
+      );
+    }
+    if (!result.rows[0]) {
+      res.status(404).send("Profile not found");
+      return;
+    }
+    const profile = result.rows[0];
+    const userKey = Number.isFinite(asId) && asId > 0 ? asId : profile.id;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.send(
+      buildShareProfileHtml(profile, {
+        userKey,
+        userAgent: req.headers["user-agent"] || ""
+      })
+    );
+  } catch (error) {
+    res.status(500).send("Failed to load profile");
+  }
+}
+
+router.get("/share/profile/:userIdOrHandle", (req, res) => void handleShareProfilePage(req, res));
 
 module.exports = router;

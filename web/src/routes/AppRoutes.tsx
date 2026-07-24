@@ -50,6 +50,7 @@ export function AppRoutes() {
       <Route path="/admin/reports" element={<AdminReportsPage />} />
       <Route path="/watch/:postId" element={<ReelWatchPage />} />
       <Route path="/profile/:userIdOrHandle" element={<PublicProfilePage />} />
+      <Route path="/view/profile/:userIdOrHandle" element={<PublicProfilePage />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<HomePage />} />
         <Route path="search" element={<SearchPage />} />

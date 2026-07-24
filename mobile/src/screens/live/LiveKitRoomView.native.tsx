@@ -22,7 +22,6 @@ import {
   RoomEvent,
   Track,
   VideoPresets,
-  createLocalAudioTrack,
   createLocalVideoTrack,
   type Participant,
   type RemoteTrackPublication
@@ -124,22 +123,40 @@ async function publishHostCameraAndMic(room: Room, facing: LiveCameraFacing) {
   lockHostPublishToVp8(room);
   await releaseHostCameraAndMic(room);
 
-  const videoTrack = await createLocalVideoTrack({
+  // Match DirectCall: setCameraEnabled uses room publishDefaults (VP8) and is stable on Android RN.
+  await room.localParticipant.setMicrophoneEnabled(true);
+  await room.localParticipant.setCameraEnabled(true, {
     facingMode: facing === "back" ? "environment" : "user",
     resolution: VideoPresets.h360.resolution
   });
-  const videoPub = await room.localParticipant.publishTrack(videoTrack, LIVE_PUBLISH_OPTIONS);
-  const audioTrack = await createLocalAudioTrack();
-  await room.localParticipant.publishTrack(audioTrack, { source: Track.Source.Microphone });
 
+  const videoPub = room.localParticipant.getTrackPublication(Track.Source.Camera);
   const mime = String(videoPub?.mimeType || "");
   console.log("[live-host] published camera", {
     mime,
     sid: videoPub?.trackSid,
-    vp8: /vp8/i.test(mime)
+    vp8: /vp8/i.test(mime) || !mime
   });
   if (mime && /h264/i.test(mime)) {
     console.warn("[live-host] server still selected H264 — remote Android viewers may see black video");
+    // Retry once with explicit VP8 publish options.
+    try {
+      await room.localParticipant.setCameraEnabled(false);
+      lockHostPublishToVp8(room);
+      const videoTrack = await createLocalVideoTrack({
+        facingMode: facing === "back" ? "environment" : "user",
+        resolution: VideoPresets.h360.resolution
+      });
+      const republished = await room.localParticipant.publishTrack(videoTrack, LIVE_PUBLISH_OPTIONS);
+      console.log("[live-host] republished camera", {
+        mime: String(republished?.mimeType || ""),
+        sid: republished?.trackSid,
+        vp8: /vp8/i.test(String(republished?.mimeType || ""))
+      });
+      return republished;
+    } catch {
+      // keep first publish
+    }
   }
   return videoPub;
 }
@@ -605,7 +622,7 @@ function LiveRoomContent({
       {showCameraVideo && cameraTrack ? (
         <View style={styles.videoHost} collapsable={false} pointerEvents="none">
           <VideoTrack
-            key={`live-cam-${cameraTrackSid}-${mediaTick > 0 ? "ready" : "boot"}`}
+            key={`live-cam-${cameraTrackSid}`}
             trackRef={cameraTrack}
             style={styles.videoSurface}
             objectFit="cover"
@@ -636,7 +653,7 @@ function LiveRoomContent({
           <Text style={styles.endedSub}>{statusText}</Text>
         </View>
       ) : null}
-      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+      <View style={[styles.topBar, { top: Math.max(insets.top, 4) }]}>
         <View style={styles.livePill}>
           <View style={styles.liveDot} />
           <Text style={styles.liveText}>{liveEnded ? "ENDED" : "LIVE"}</Text>
@@ -658,7 +675,7 @@ function LiveRoomContent({
           </Pressable>
         ) : null}
       </View>
-      <Pressable style={[styles.viewerPill, { top: insets.top + 52 }]} onPress={() => setShowViewerList(true)}>
+      <Pressable style={[styles.viewerPill, { top: Math.max(insets.top, 4) + 40 }]} onPress={() => setShowViewerList(true)}>
         <Ionicons name="eye-outline" size={14} color="#fff" />
         <Text style={styles.viewerText}>{watchingCount} watching</Text>
       </Pressable>
