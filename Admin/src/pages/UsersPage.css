@@ -1,0 +1,186 @@
+.users-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.users-page__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.users-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.users-filters__btn {
+  border: none;
+  background: transparent;
+  color: #bdbdbd;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.users-filters__btn.is-active {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.users-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: #151515;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.users-table th,
+.users-table td {
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.users-table th {
+  color: #9a9a9a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: #121212;
+}
+
+.users-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.users-row {
+  cursor: pointer;
+}
+
+.users-error {
+  margin: 0;
+  color: #ff8f8f;
+  font-size: 0.86rem;
+}
+
+.users-empty {
+  text-align: center;
+  color: #8a8a8a;
+  padding: 48px 16px !important;
+  white-space: normal !important;
+}
+
+.users-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.users-name__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #2a2a2a;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: block;
+}
+
+.users-name__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.users-name__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.users-name__text strong {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.users-name__text em {
+  font-style: normal;
+  color: #8a8a8a;
+  font-size: 0.78rem;
+}
+
+.users-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.users-pill--kyc-verified,
+.users-pill--account-active {
+  color: #c6ff00;
+  background: rgba(198, 255, 0, 0.1);
+  border: 1px solid rgba(198, 255, 0, 0.45);
+}
+
+.users-pill--kyc-pending,
+.users-pill--account-pending {
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.1);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+}
+
+.users-pill--kyc-rejected,
+.users-pill--account-banned {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.45);
+}
+
+.users-status-text {
+  color: #b0b0b0;
+  font-size: 0.86rem;
+}
+
+.users-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.users-flag-empty {
+  color: #666;
+}

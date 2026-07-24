@@ -6,8 +6,8 @@ import "./LoginPage.css";
 
 export function LoginPage() {
   const { token, signIn, loading } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("info@cropvibe.com");
+  const [password, setPassword] = useState("Cropvibe@2026");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +32,14 @@ export function LoginPage() {
       const res = await adminLogin({ email: email.trim(), password: password.trim() });
       signIn({ token: res.token, user: res.user });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      if (/invalid credentials/i.test(msg)) {
+        setError(
+          "Invalid credentials — this admin user is missing on the server DB. Run Admin/scripts/create-admin.sql in Supabase, then try again."
+        );
+      } else {
+        setError(msg);
+      }
     } finally {
       setSubmitting(false);
     }

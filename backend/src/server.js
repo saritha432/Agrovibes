@@ -63,4 +63,18 @@ initSocketChat(server, { corsOrigins: allowedOrigins });
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Cropvibe backend running on port ${PORT} (PostgreSQL + Socket.IO)`);
+
+  // Ensure default admin login exists (info@cropvibe.com) unless disabled.
+  if (String(process.env.ADMIN_ENSURE_DEFAULT || "true").toLowerCase() !== "false") {
+    const { ensureAdminUser } = require("../scripts/ensure-admin");
+    void ensureAdminUser()
+      .then((user) => {
+        // eslint-disable-next-line no-console
+        console.log(`[admin] ensured ${user?.email} (role=${user?.role})`);
+      })
+      .catch((error) => {
+        // eslint-disable-next-line no-console
+        console.warn("[admin] ensure failed:", error?.message || error);
+      });
+  }
 });
