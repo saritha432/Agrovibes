@@ -85,7 +85,9 @@ export function PrivacyScreen() {
           <View style={styles.row}>
             <View style={styles.rowContent}>
               <Text style={styles.rowTitle}>Private Account</Text>
-              <Text style={styles.rowSub}>Only approved followers can see your posts and reels</Text>
+              <Text style={styles.rowSub}>
+                Only approved followers can see your posts, reels, and stories
+              </Text>
             </View>
             {loading ? (
               <ActivityIndicator color={LIME} />

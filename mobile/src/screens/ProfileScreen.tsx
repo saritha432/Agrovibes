@@ -39,10 +39,12 @@ import {
   fetchUserHomePosts,
   fetchProfileStats,
   fetchPublicSocialLists,
+  fetchMutualConnections,
   fetchSocialNetwork,
   fetchTaggedHomePosts,
   getWebAppOrigin,
   HomePost,
+  type MutualConnectionInfo,
   deleteHomePost,
   removeFollower,
   respondToFollowRequest,
@@ -79,6 +81,7 @@ import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { UserReportSheet } from "../components/UserReportSheet";
 import { ReelGridTile } from "../components/ReelGridTile";
 import { useReelGridAutoplay } from "../hooks/useReelGridAutoplay";
+import { formatMutualConnectionLabel } from "../social/formatMutualConnection";
 import { APP_LIME } from "../theme/appColors";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { isReelPost, reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
@@ -172,6 +175,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [publicFollowStatus, setPublicFollowStatus] = useState<FollowStatus>("none");
   const [publicReverseStatus, setPublicReverseStatus] = useState<FollowStatus>("none");
   const [publicCanFollowBack, setPublicCanFollowBack] = useState(false);
+  const [publicIsPrivate, setPublicIsPrivate] = useState(false);
+  const [profileContentRestricted, setProfileContentRestricted] = useState(false);
+  const [publicPostsCount, setPublicPostsCount] = useState(0);
+  const [mutualConnection, setMutualConnection] = useState<MutualConnectionInfo | null>(null);
   const [incomingFollowId, setIncomingFollowId] = useState<number | null>(null);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
   const [publicBio, setPublicBio] = useState("");
@@ -258,17 +265,23 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           username: publicUsername ?? undefined
         };
         let posts: HomePost[] = [];
+        let restricted = false;
 
         if (publicUserId) {
           try {
             const data = await fetchUserHomePosts(token ?? undefined, publicUserId, publicUserName);
             posts = data.posts || [];
+            restricted = Boolean(data.restricted);
+            if (typeof data.postsCount === "number" && Number.isFinite(data.postsCount)) {
+              setPublicPostsCount(data.postsCount);
+            }
           } catch {
             // Dedicated endpoint may be unavailable on older backends; fall back below.
           }
         }
 
-        if (!posts.length) {
+        // Private account + non-follower: never fall back to home feed (could leak content).
+        if (!restricted && !posts.length) {
           try {
             const home = await fetchHomePosts(token ?? undefined);
             posts = (home.posts || []).filter((post) => postBelongsToProfileUser(post, profileUser));
@@ -278,7 +291,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         }
 
         if (!isMountedRef.current) return;
-        setUserPosts(posts);
+        setProfileContentRestricted(restricted);
+        setUserPosts(restricted ? [] : posts);
+        if (!restricted && posts.length > 0) {
+          setPublicPostsCount((prev) => Math.max(prev, posts.length));
+        }
       } catch {
         if (!isMountedRef.current) return;
         setUserPosts([]);
@@ -309,6 +326,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         }
       }
       if (!isMountedRef.current) return;
+      setProfileContentRestricted(false);
       setUserPosts(posts);
       writeProfilePostsCache({ userId: Number(user.id), userPosts: posts, fetchedAt: Date.now() });
     } catch {
@@ -551,6 +569,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (!token) return;
     const targetId = isPublicProfileView ? Number(publicUserId) : Number(user?.id);
     if (!Number.isFinite(targetId) || targetId <= 0) return;
+    // Don't surface private-account stories to non-followers on profile.
+    if (isPublicProfileView && profileContentRestricted) {
+      publishActiveStories([]);
+      return;
+    }
     let cancelled = false;
     void fetchHomeStoriesForUser(token, targetId)
       .then((data) => {
@@ -561,7 +584,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     return () => {
       cancelled = true;
     };
-  }, [isPublicProfileView, publicUserId, token, user?.id]);
+  }, [isPublicProfileView, profileContentRestricted, publicUserId, token, user?.id]);
 
   const loadPublicProfileStats = useCallback(async () => {
     if (!isPublicProfileView || !token || !publicUserId) {
@@ -575,28 +598,39 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       const stats = await fetchProfileStats(token, publicUserId);
       setFollowersCount(Number(stats.followersCount || 0));
       setFollowingCount(Number(stats.followingCount || 0));
-      setFollowersList(
-        (stats.followers || []).map((person) => ({
-          name: person.name,
-          key: person.key,
-          avatarUrl: person.avatarUrl,
-          viewerStatus: "none" as const,
-          canFollowBack: false
-        }))
-      );
-      setFollowingList(
-        (stats.following || []).map((person) => ({
-          name: person.name,
-          key: person.key,
-          avatarUrl: person.avatarUrl,
-          viewerStatus: "accepted" as const,
-          canFollowBack: false as const
-        }))
-      );
+      setPublicPostsCount(Number(stats.postsCount || 0));
+      // Prefer explicit API count; never fall back to empty gallery length for public profiles.
+      const isPrivate = Boolean(stats.isPrivate);
       const viewerStatusRaw = stats.viewerStatus === "self" ? "accepted" : stats.viewerStatus || "none";
       const reverseStatusRaw = stats.reverseStatus === "self" ? "accepted" : stats.reverseStatus || "none";
       const viewerStatus = viewerStatusRaw === "declined" ? "none" : viewerStatusRaw;
       const reverseStatus = reverseStatusRaw === "declined" ? "none" : reverseStatusRaw;
+      const canSeeContent = !isPrivate || viewerStatus === "accepted" || stats.viewerStatus === "self";
+      setPublicIsPrivate(isPrivate);
+      setProfileContentRestricted(isPrivate && !canSeeContent);
+      if (canSeeContent) {
+        setFollowersList(
+          (stats.followers || []).map((person) => ({
+            name: person.name,
+            key: person.key,
+            avatarUrl: person.avatarUrl,
+            viewerStatus: "none" as const,
+            canFollowBack: false
+          }))
+        );
+        setFollowingList(
+          (stats.following || []).map((person) => ({
+            name: person.name,
+            key: person.key,
+            avatarUrl: person.avatarUrl,
+            viewerStatus: "accepted" as const,
+            canFollowBack: false as const
+          }))
+        );
+      } else {
+        setFollowersList([]);
+        setFollowingList([]);
+      }
       setPublicFollowStatus(viewerStatus);
       setPublicReverseStatus(reverseStatus);
       setPublicCanFollowBack(!!stats.canFollowBack);
@@ -630,6 +664,25 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   useEffect(() => {
     void loadPublicProfileStats();
   }, [loadPublicProfileStats]);
+
+  useEffect(() => {
+    if (!isPublicProfileView || !token || !publicUserId) {
+      setMutualConnection(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchMutualConnections(token, [publicUserId])
+      .then((res) => {
+        if (cancelled) return;
+        setMutualConnection(res.connections?.[publicUserId] || null);
+      })
+      .catch(() => {
+        if (!cancelled) setMutualConnection(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPublicProfileView, publicUserId, token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -860,12 +913,28 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const openFollowList = useCallback(
     async (type: "followers" | "following") => {
+      if (isPublicProfileView && profileContentRestricted) {
+        Alert.alert(
+          "This account is private",
+          "Follow this account to see their followers and following."
+        );
+        return;
+      }
       setActiveListType(type);
       if (!isPublicProfileView || !token || !publicUserId) return;
       if ((type === "followers" ? followersList : followingList).length > 0) return;
       setPublicListLoading(true);
       try {
         const lists = await fetchPublicSocialLists(token, publicUserId);
+        if ((lists as { restricted?: boolean }).restricted) {
+          setFollowersList([]);
+          setFollowingList([]);
+          Alert.alert(
+            "This account is private",
+            "Follow this account to see their followers and following."
+          );
+          return;
+        }
         setFollowersList(
           (lists.followers || []).map((person) => ({
             ...person,
@@ -886,7 +955,12 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         setPublicListLoading(false);
       }
     },
-    [followersList, followingList, isPublicProfileView, publicUserId, token]
+    [followersList, followingList, isPublicProfileView, profileContentRestricted, publicUserId, token]
+  );
+
+  const mutualFollowLabel = useMemo(
+    () => formatMutualConnectionLabel(mutualConnection || undefined, t),
+    [mutualConnection, t]
   );
 
   const profileSubject = useMemo(() => {
@@ -935,8 +1009,24 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       .slice(0, 2)
       .map((p) => p[0]?.toUpperCase())
       .join("");
-    return { posts: userPosts.length, followers: followersCount, following: followingCount, handle, profileHandle, initials: initials || "U" };
-  }, [followersCount, followingCount, isPublicProfileView, profileSubject, user?.email, user?.phone, userPosts.length]);
+    return {
+      posts: isPublicProfileView ? publicPostsCount : userPosts.length,
+      followers: followersCount,
+      following: followingCount,
+      handle,
+      profileHandle,
+      initials: initials || "U"
+    };
+  }, [
+    followersCount,
+    followingCount,
+    isPublicProfileView,
+    profileSubject,
+    publicPostsCount,
+    user?.email,
+    user?.phone,
+    userPosts.length
+  ]);
 
   const isInstructor = Boolean(user && (user.role === "instructor" || user.role === "admin"));
 
@@ -1253,6 +1343,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         setPublicFollowStatus(nextStatus);
         if (nextStatus === "accepted") {
           setFollowersCount((v) => v + 1);
+          setProfileContentRestricted(false);
+          void loadUserPosts();
+        } else if (publicIsPrivate) {
+          setProfileContentRestricted(true);
+          setUserPosts([]);
         }
       } else {
         await sendLocalFollowRequestByIdentity(
@@ -1296,6 +1391,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         await unfollowUser(token, publicUserId);
         setPublicFollowStatus("none");
         setPublicCanFollowBack(publicReverseStatus === "accepted");
+        if (publicIsPrivate) {
+          setProfileContentRestricted(true);
+          setUserPosts([]);
+          publishActiveStories([]);
+        }
       } catch {
         Alert.alert(t("followFailed"), t("tryAgainMoment"));
       } finally {
@@ -1388,6 +1488,35 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
           {profileSubject?.bio?.trim() ? <Text style={styles.bio}>{profileSubject.bio.trim()}</Text> : null}
 
+          {isPublicProfileView && (mutualFollowLabel || (mutualConnection?.mutual?.length ?? 0) > 0) ? (
+            <View style={styles.mutualRow}>
+              {(mutualConnection?.mutual || []).slice(0, 3).length ? (
+                <View style={styles.mutualAvatars}>
+                  {(mutualConnection?.mutual || []).slice(0, 3).map((person, idx) => (
+                    <View
+                      key={person.userId}
+                      style={[styles.mutualAvatarWrap, { marginLeft: idx === 0 ? 0 : -8, zIndex: 3 - idx }]}
+                    >
+                      <UserAvatar
+                        uri={person.avatarUrl}
+                        name={person.fullName}
+                        size={22}
+                        borderRadius={11}
+                        fallbackBackgroundColor={SURFACE_ALT}
+                        initialsColor={TEXT}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {mutualFollowLabel ? (
+                <Text style={styles.mutualText} numberOfLines={2}>
+                  {mutualFollowLabel}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
           {isPublicProfileView ? (
             <View style={styles.profileActionsRow}>
               <Pressable
@@ -1479,6 +1608,18 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         </View>
       );
     }
+    if (isPublicProfileView && profileContentRestricted) {
+      return (
+        <View style={styles.galleryEmptyWrap}>
+          <Ionicons name="lock-closed" size={36} color="#a8a8a8" style={{ marginBottom: 10 }} />
+          <Text style={styles.galleryEmptyTitle}>This account is private</Text>
+          <Text style={styles.galleryEmptySub}>
+            Follow this account to see their posts, reels, and stories.
+            {publicFollowStatus === "pending" ? " Your follow request is pending." : ""}
+          </Text>
+        </View>
+      );
+    }
     let title = isReelTab ? t("emptyReelsTitle") : t("emptyNothingTitle");
     let sub = isReelTab ? t("emptyReelsSub") : t("emptyDefaultSub");
     if (activeGalleryTab === "Reshared") {
@@ -1494,7 +1635,16 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         <Text style={styles.galleryEmptySub}>{sub}</Text>
       </View>
     );
-  }, [activeGalleryTab, galleryLoading, isReelTab, t]);
+  }, [
+    activeGalleryTab,
+    galleryLoading,
+    isPublicProfileView,
+    isReelTab,
+    profileContentRestricted,
+    publicFollowStatus,
+    showDeactivatedGallery,
+    t
+  ]);
 
   return (
     <>
@@ -2041,6 +2191,30 @@ const styles = StyleSheet.create({
   },
 
   bio: { marginTop: 14, color: TEXT, fontWeight: "500", fontSize: 13, lineHeight: 19 },
+  mutualRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingRight: 8
+  },
+  mutualAvatars: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  mutualAvatarWrap: {
+    borderWidth: 1.5,
+    borderColor: PAGE_BG,
+    borderRadius: 12,
+    overflow: "hidden"
+  },
+  mutualText: {
+    flex: 1,
+    color: "#c8cdd2",
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 16
+  },
   profileDisplayName: {
     marginTop: 12,
     color: TEXT,

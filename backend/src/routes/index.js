@@ -1866,6 +1866,45 @@ async function socialCountsForUser(userId) {
   };
 }
 
+/** Count posts/reels for a profile — matches ownership rules used by /posts/mine and /posts/user. */
+async function countHomePostsForUser(userId) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid) || uid <= 0) return { postsCount: 0, reelsCount: 0 };
+  const userRes = await query(`SELECT full_name, username, email FROM learn_users WHERE id = $1 LIMIT 1`, [uid]);
+  if (!userRes.rows[0]) return { postsCount: 0, reelsCount: 0 };
+  const fullName = String(userRes.rows[0].full_name || "").trim();
+  const username = String(userRes.rows[0].username || "").trim();
+  const emailLocal = String(userRes.rows[0].email || "")
+    .split("@")[0]
+    .trim();
+  const firstName = fullName.split(/\s+/)[0] || "";
+  const result = await query(
+    `
+    SELECT
+      COUNT(*)::INT AS "postsCount",
+      COUNT(*) FILTER (WHERE video_url IS NOT NULL AND TRIM(video_url) <> '')::INT AS "reelsCount"
+    FROM home_posts p
+    WHERE
+      p.deleted_at IS NULL
+      AND (
+        p.user_id = $1
+        OR ($2::text <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($2)))
+        OR ($3::text <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($3)))
+        OR ($4::text <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($4)))
+        OR (
+          $5::text <> ''
+          AND LOWER(TRIM(SPLIT_PART(p.user_name, ' ', 1))) = LOWER(TRIM($5))
+        )
+      )
+    `,
+    [uid, fullName, username || "", emailLocal || "", firstName]
+  );
+  return {
+    postsCount: Number(result.rows[0]?.postsCount || 0),
+    reelsCount: Number(result.rows[0]?.reelsCount || 0)
+  };
+}
+
 async function socialListsForUser(userId) {
   const targetUserId = Number(userId);
   const [followersRes, followingRes] = await Promise.all([
@@ -3458,56 +3497,12 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
         u.location_label AS "locationLabel",
         u.created_at AS "createdAt",
         u.account_status AS "accountStatus",
-        COALESCE(u.is_private, false) AS "isPrivate",
-        CASE
-          WHEN COALESCE(u.is_private, false) = false
-            OR u.id = $2::integer
-            OR EXISTS (
-              SELECT 1 FROM social_follows sf
-              WHERE sf.follower_id = $2::integer
-                AND sf.following_id = u.id
-                AND sf.status = 'accepted'
-            )
-          THEN COALESCE(posts.posts_count, 0)::INT
-          ELSE 0
-        END AS "postsCount",
-        CASE
-          WHEN COALESCE(u.is_private, false) = false
-            OR u.id = $2::integer
-            OR EXISTS (
-              SELECT 1 FROM social_follows sf
-              WHERE sf.follower_id = $2::integer
-                AND sf.following_id = u.id
-                AND sf.status = 'accepted'
-            )
-          THEN COALESCE(posts.reels_count, 0)::INT
-          ELSE 0
-        END AS "reelsCount"
+        COALESCE(u.is_private, false) AS "isPrivate"
       FROM learn_users u
-      LEFT JOIN LATERAL (
-        SELECT
-          COUNT(*)::INT AS posts_count,
-          COUNT(*) FILTER (WHERE video_url IS NOT NULL AND TRIM(video_url) <> '')::INT AS reels_count
-        FROM home_posts p
-        WHERE
-          p.deleted_at IS NULL
-          AND (
-            p.user_id = u.id
-            OR LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.full_name))
-            OR (
-              u.username IS NOT NULL AND TRIM(u.username) <> ''
-              AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(u.username))
-            )
-            OR (
-              u.email IS NOT NULL AND TRIM(u.email) <> ''
-              AND LOWER(TRIM(p.user_name)) = LOWER(TRIM(SPLIT_PART(u.email, '@', 1)))
-            )
-          )
-      ) posts ON TRUE
       WHERE u.id = $1
       LIMIT 1
       `,
-      [targetUserId, viewerId]
+      [targetUserId]
     );
     if (!userRes.rows[0]) {
       res.status(404).json({ message: "User not found" });
@@ -3520,13 +3515,30 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
     }
     const profile = userRes.rows[0];
     profile.fullName = sanitizePersonDisplayName(profile.fullName, profile.username);
-    const counts = await socialCountsForUser(targetUserId);
-    const lists = await socialListsForUser(targetUserId);
+    const [counts, postCounts] = await Promise.all([
+      socialCountsForUser(targetUserId),
+      countHomePostsForUser(targetUserId)
+    ]);
     const relation =
       Number(req.user.userId) === targetUserId
         ? { viewerStatus: "self", reverseStatus: "self", canFollowBack: false }
         : await relationshipForUsers(req.user.userId, targetUserId);
-    res.json({ ...profile, ...counts, ...lists, ...relation });
+    const canSeePrivateContent =
+      !Boolean(profile.isPrivate) ||
+      relation.viewerStatus === "self" ||
+      relation.viewerStatus === "accepted";
+    const lists = canSeePrivateContent
+      ? await socialListsForUser(targetUserId)
+      : { followers: [], following: [] };
+    res.json({
+      ...profile,
+      ...counts,
+      ...lists,
+      ...relation,
+      postsCount: postCounts.postsCount,
+      reelsCount: postCounts.reelsCount,
+      ...(canSeePrivateContent ? {} : { followers: [], following: [] })
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to load profile stats", error: error.message });
   }
@@ -3608,10 +3620,33 @@ router.get("/v1/social/network/:userId", authRequired, async (req, res) => {
 router.get("/v1/social/public-lists/:userId", authRequired, async (req, res) => {
   try {
     await ensureSocialFollowsTable();
+    await ensureLearnUsersTable();
     const targetUserId = Number(req.params.userId);
+    const viewerId = Number(req.user.userId);
     if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
       res.status(400).json({ message: "Valid userId is required" });
       return;
+    }
+
+    const privacyRes = await query(
+      `SELECT COALESCE(is_private, false) AS "isPrivate" FROM learn_users WHERE id = $1 LIMIT 1`,
+      [targetUserId]
+    );
+    const targetIsPrivate = Boolean(privacyRes.rows[0]?.isPrivate);
+    if (targetIsPrivate && viewerId !== targetUserId) {
+      const followRes = await query(
+        `
+        SELECT 1
+        FROM social_follows
+        WHERE follower_id = $1 AND following_id = $2 AND status = 'accepted'
+        LIMIT 1
+        `,
+        [viewerId, targetUserId]
+      );
+      if (!followRes.rows[0]) {
+        res.json({ followers: [], following: [], restricted: true });
+        return;
+      }
     }
 
     const lists = await socialListsForUser(targetUserId);
@@ -7470,7 +7505,8 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         [viewerId, targetUserId]
       );
       if (blockRes.rows[0]) {
-        res.json({ posts: [], restricted: true });
+        const postCounts = await countHomePostsForUser(targetUserId);
+        res.json({ posts: [], restricted: true, postsCount: postCounts.postsCount, reelsCount: postCounts.reelsCount });
         return;
       }
     }
@@ -7481,8 +7517,9 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
     );
     const targetIsPrivate = Boolean(privacyRes.rows[0]?.isPrivate);
     if (targetIsPrivate && viewerId !== targetUserId) {
+      const postCounts = await countHomePostsForUser(targetUserId);
       if (viewerId == null) {
-        res.json({ posts: [], restricted: true });
+        res.json({ posts: [], restricted: true, postsCount: postCounts.postsCount, reelsCount: postCounts.reelsCount });
         return;
       }
       const followRes = await query(
@@ -7495,7 +7532,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         [viewerId, targetUserId]
       );
       if (!followRes.rows[0]) {
-        res.json({ posts: [], restricted: true });
+        res.json({ posts: [], restricted: true, postsCount: postCounts.postsCount, reelsCount: postCounts.reelsCount });
         return;
       }
     }
@@ -8574,12 +8611,14 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
       `
       SELECT
         p.id,
+        COALESCE(p.user_id, owner.id) AS "userId",
         COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
         p.caption,
         p.video_url AS "videoUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
-        p.thumbnail_url AS "thumbnailUrl"
+        p.thumbnail_url AS "thumbnailUrl",
+        COALESCE(owner.is_private, false) AS "ownerIsPrivate"
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       WHERE p.id = $1
@@ -8591,7 +8630,18 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
       res.status(404).send("Post not found");
       return;
     }
-    const post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
+    let post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
+    // Private accounts: don't leak caption/media on public OG / install landing pages.
+    if (Boolean(result.rows[0].ownerIsPrivate)) {
+      post = {
+        ...post,
+        caption: "Shared on Cropvibe",
+        videoUrl: null,
+        imageUrl: null,
+        imageUrls: [],
+        thumbnailUrl: null
+      };
+    }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=300");
     res.send(
