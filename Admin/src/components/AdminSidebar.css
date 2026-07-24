@@ -1,0 +1,227 @@
+.admin-sidebar {
+  --sidebar-bg: #1c1c1c;
+  --sidebar-accent: #c6ff00;
+  --sidebar-text: #f5f5f5;
+  --sidebar-muted: #9a9a9a;
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 72px;
+
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: calc(100vh - var(--admin-footer-height, 48px));
+  max-height: calc(100vh - var(--admin-footer-height, 48px));
+  background: var(--sidebar-bg);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 12px 24px;
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+
+.admin-sidebar--collapsed {
+  width: var(--sidebar-width-collapsed);
+  padding-left: 10px;
+  padding-right: 10px;
+  align-items: center;
+}
+
+.admin-sidebar__top {
+  margin-bottom: 18px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.admin-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  padding: 4px;
+  text-align: left;
+}
+
+.admin-sidebar--collapsed .admin-sidebar__brand {
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.admin-sidebar__logo-mark {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.admin-sidebar__brand-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-sidebar__brand-text img {
+  height: 22px;
+  width: auto;
+  max-width: 160px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.admin-sidebar__brand-text span {
+  font-size: 0.78rem;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.admin-sidebar__section-title {
+  margin: 14px 8px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--sidebar-muted);
+}
+
+.admin-sidebar__section .admin-sidebar__search {
+  margin: 0 0 6px;
+}
+
+.admin-sidebar__search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: rgba(198, 255, 0, 0.08);
+  border: 1px solid rgba(198, 255, 0, 0.35);
+}
+
+.admin-sidebar--collapsed .admin-sidebar__section .admin-sidebar__search {
+  margin: 0 auto 6px;
+}
+
+.admin-sidebar__search--icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.admin-sidebar__search img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.admin-sidebar__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--sidebar-text);
+  outline: none;
+  font-size: 0.9rem;
+}
+
+.admin-sidebar__search input::placeholder {
+  color: #b8d96a;
+}
+
+.admin-sidebar__nav {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.admin-sidebar__section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: var(--sidebar-text);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 500;
+  position: relative;
+}
+
+.admin-sidebar--collapsed .admin-sidebar__link {
+  justify-content: center;
+  padding: 0;
+  width: 40px;
+  margin: 0 auto;
+}
+
+.admin-sidebar__link img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+
+.admin-sidebar__link span {
+  white-space: nowrap;
+}
+
+.admin-sidebar__link:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.admin-sidebar__link--active {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.admin-sidebar__link--active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--sidebar-accent);
+}
+
+.admin-sidebar--collapsed .admin-sidebar__link--active::before {
+  display: none;
+}
+
+.admin-sidebar__divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 10px 8px;
+}
+
+@media (max-width: 800px) {
+  .admin-sidebar {
+    z-index: 20;
+  }
+}

@@ -2325,6 +2325,51 @@ router.post("/v1/auth/register", async (req, res) => {
   }
 });
 
+/** One-time / ops: create or reset admin login. Requires ADMIN_BOOTSTRAP_SECRET. */
+router.post("/v1/auth/ensure-admin", async (req, res) => {
+  try {
+    const expected = String(process.env.ADMIN_BOOTSTRAP_SECRET || "").trim();
+    if (!expected) {
+      res.status(503).json({ message: "ADMIN_BOOTSTRAP_SECRET is not configured on the server" });
+      return;
+    }
+    const provided = String(req.headers["x-admin-bootstrap-secret"] || req.body?.secret || "").trim();
+    if (!provided || provided !== expected) {
+      res.status(403).json({ message: "Invalid bootstrap secret" });
+      return;
+    }
+
+    const email = String(req.body?.email || process.env.ADMIN_EMAIL || "info@cropvibe.com")
+      .trim()
+      .toLowerCase();
+    const password = String(req.body?.password || process.env.ADMIN_PASSWORD || "Cropvibe@2026");
+    const fullName = String(req.body?.fullName || process.env.ADMIN_FULL_NAME || "Cropvibe Admin").trim();
+    if (!email || password.length < 6) {
+      res.status(400).json({ message: "email and password (min 6 chars) are required" });
+      return;
+    }
+
+    await ensureLearnUsersTable();
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `
+      INSERT INTO learn_users (email, password_hash, full_name, role)
+      VALUES ($1, $2, $3, 'admin')
+      ON CONFLICT (email) DO UPDATE
+        SET password_hash = EXCLUDED.password_hash,
+            full_name = EXCLUDED.full_name,
+            role = 'admin'
+      RETURNING ${authUserSelect}
+      `,
+      [email, passwordHash, fullName]
+    );
+
+    res.status(200).json({ ok: true, user: authUserFromRow(result.rows[0]) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to ensure admin", error: error.message });
+  }
+});
+
 router.post("/v1/auth/login", async (req, res) => {
   try {
     await ensureLearnUsersTable();

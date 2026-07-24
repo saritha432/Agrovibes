@@ -1,0 +1,180 @@
+.settlements-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settlements-page__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settlements-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.settlements-tabs__btn {
+  border: none;
+  background: transparent;
+  color: #bdbdbd;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settlements-tabs__btn.is-active {
+  background: #111;
+  color: #fff;
+}
+
+.settlements-tabs__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ffb020;
+  color: #111;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.settlements-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: #151515;
+}
+
+.settlements-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.settlements-table th,
+.settlements-table td {
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.settlements-table th {
+  color: #9a9a9a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: #121212;
+}
+
+.settlements-check {
+  width: 44px;
+}
+
+.settlements-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #c6ff00;
+  cursor: pointer;
+}
+
+.settlements-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settlements-empty {
+  text-align: center;
+  color: #8a8a8a;
+  padding: 48px 16px !important;
+  white-space: normal !important;
+}
+
+.settlements-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.settlements-status--approved,
+.settlements-status--completed {
+  color: #c6ff00;
+  background: rgba(198, 255, 0, 0.1);
+  border: 1px solid rgba(198, 255, 0, 0.45);
+}
+
+.settlements-status--pending {
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.1);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+}
+
+.settlements-status--processing {
+  color: #5eb1ff;
+  background: rgba(94, 177, 255, 0.1);
+  border: 1px solid rgba(94, 177, 255, 0.45);
+}
+
+.settlements-process {
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 176, 32, 0.55);
+  color: #ffb020;
+}
+
+.settlements-process:hover {
+  background: rgba(255, 176, 32, 0.08);
+}
+
+.settlements-action-empty {
+  color: #666;
+}
+
+.settlements-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.settlements-pager button {
+  min-width: 84px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: #cfcfcf;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.settlements-pager button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

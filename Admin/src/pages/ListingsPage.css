@@ -1,0 +1,253 @@
+.listings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.listings-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: #151515;
+}
+
+.listings-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.listings-table th,
+.listings-table td {
+  padding: 14px 16px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.9rem;
+  vertical-align: middle;
+}
+
+.listings-table th {
+  color: #9a9a9a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: #121212;
+  white-space: nowrap;
+}
+
+.listings-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.listings-empty {
+  text-align: center;
+  color: #8a8a8a;
+  padding: 48px 16px !important;
+}
+
+.listings-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.listings-content strong {
+  color: #fff;
+  font-size: 0.92rem;
+}
+
+.listings-content em {
+  font-style: normal;
+  color: #8a8a8a;
+  font-size: 0.78rem;
+}
+
+.listings-cat {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.listings-cat--products {
+  color: #c6ff00;
+  background: rgba(198, 255, 0, 0.12);
+  border: 1px solid rgba(198, 255, 0, 0.35);
+}
+
+.listings-cat--services {
+  color: #5eb1ff;
+  background: rgba(94, 177, 255, 0.12);
+  border: 1px solid rgba(94, 177, 255, 0.35);
+}
+
+.listings-cat--education {
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.12);
+  border: 1px solid rgba(192, 132, 252, 0.35);
+}
+
+.listings-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 160px;
+}
+
+.listings-user__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #2a2a2a;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.listings-user__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.listings-user__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.listings-user__text strong {
+  color: #fff;
+  font-size: 0.86rem;
+}
+
+.listings-user__text em {
+  font-style: normal;
+  color: #8a8a8a;
+  font-size: 0.75rem;
+}
+
+.listings-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 77, 79, 0.7);
+  background: rgba(255, 77, 79, 0.08);
+  color: #ff6b6b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.listings-flag-empty {
+  color: #666;
+}
+
+.listings-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.listings-status--pending {
+  color: #ffb020;
+  background: rgba(255, 176, 32, 0.1);
+  border: 1px solid rgba(255, 176, 32, 0.45);
+}
+
+.listings-status--approved {
+  color: #c6ff00;
+  background: rgba(198, 255, 0, 0.1);
+  border: 1px solid rgba(198, 255, 0, 0.45);
+}
+
+.listings-status--unpublished {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.45);
+}
+
+.listings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.listings-btn {
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: #1a1a1a;
+}
+
+.listings-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.listings-btn--approve {
+  border: 1px solid rgba(198, 255, 0, 0.55);
+  color: #c6ff00;
+}
+
+.listings-btn--unpublish {
+  border: 1px solid rgba(255, 107, 107, 0.55);
+  color: #ff6b6b;
+}
+
+.listings-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.listings-pager > button,
+.listings-pager__pages button {
+  min-width: 36px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: #cfcfcf;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.listings-pager > button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.listings-pager__pages {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.listings-pager__pages button.is-active {
+  background: #c6ff00;
+  border-color: #c6ff00;
+  color: #111;
+  font-weight: 700;
+}
+
+.listings-pager__ellipsis {
+  color: #777;
+}
