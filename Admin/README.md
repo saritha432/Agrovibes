@@ -19,5 +19,5 @@ Uses the main API (`/v1/auth/login`). Only accounts with `role: "admin"` can sig
 Optional env:
 
 ```env
-VITE_API_BASE_URL=https://agrovibes.onrender.com/api
+VITE_API_BASE_URL=https://cropvibe-api-production.up.railway.app/api
 ```

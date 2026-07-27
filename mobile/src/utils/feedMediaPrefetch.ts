@@ -1,7 +1,13 @@
-import { Image } from "expo-image";
 import type { HomePost } from "../services/api";
 import { reelGridStillUri } from "./reelGrid";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
+
+let ExpoImageModule: typeof import("expo-image").Image | null = null;
+try {
+  ExpoImageModule = require("expo-image").Image;
+} catch {
+  ExpoImageModule = null;
+}
 
 const prefetchedImages = new Set<string>();
 const warmedVideos = new Set<string>();
@@ -13,9 +19,11 @@ function prefetchUri(uri: string | null | undefined) {
   const clean = typeof uri === "string" ? uri.trim() : "";
   if (!clean || prefetchedImages.has(clean)) return;
   prefetchedImages.add(clean);
-  void Image.prefetch(clean).catch(() => {
-    prefetchedImages.delete(clean);
-  });
+  if (ExpoImageModule) {
+    void ExpoImageModule.prefetch(clean).catch(() => {
+      prefetchedImages.delete(clean);
+    });
+  }
 }
 
 /**

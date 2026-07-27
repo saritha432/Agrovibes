@@ -8,10 +8,15 @@ import { prepareVideoForUpload } from "../utils/prepareVideoForUpload";
 import { resolveWebAppOrigin } from "../utils/webAppOrigin";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
-const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
+const PRODUCTION_API_BASE_URL = "https://cropvibe-api-production.up.railway.app/api";
 
 const API_FETCH_TIMEOUT_MS = 45_000;
 const API_FETCH_RETRIES = 2;
+
+/** Fire-and-forget ping to warm the API before the user taps Login/Register. */
+export function warmUpServer(): void {
+  void fetch(`${PRODUCTION_API_BASE_URL}/v1/ping`, { method: "GET" }).catch(() => {});
+}
 
 function isPrivateOrLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
