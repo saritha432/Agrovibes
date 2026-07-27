@@ -15,6 +15,7 @@ export function sanitizeHomePost(post: HomePost): HomePost {
   return {
     ...post,
     videoUrl: stripLegacyCloudinaryUrl(post.videoUrl) ?? undefined,
+    hlsUrl: stripLegacyCloudinaryUrl(post.hlsUrl) ?? undefined,
     imageUrl: stripLegacyCloudinaryUrl(post.imageUrl) ?? undefined,
     thumbnailUrl: stripLegacyCloudinaryUrl(post.thumbnailUrl) ?? undefined,
     authorAvatarUrl: stripLegacyCloudinaryUrl(post.authorAvatarUrl),

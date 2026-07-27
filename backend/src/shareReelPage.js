@@ -31,7 +31,7 @@ function getApiOrigin() {
     process.env.API_PUBLIC_ORIGIN || process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_API_URL
   );
   if (explicit) return explicit.replace(/\/$/, "");
-  return "https://agrovibes.onrender.com";
+  return "https://cropvibe-api-production.up.railway.app";
 }
 
 function absolutizeMediaUrl(url) {

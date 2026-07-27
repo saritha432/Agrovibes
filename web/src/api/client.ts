@@ -1,6 +1,6 @@
 import type { AuthUser } from "./types";
 
-const PRODUCTION_API_BASE_URL = "https://agrovibes.onrender.com/api";
+const PRODUCTION_API_BASE_URL = "https://cropvibe-api-production.up.railway.app/api";
 const API_FETCH_TIMEOUT_MS = 45_000;
 const API_FETCH_RETRIES = 2;
 

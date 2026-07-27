@@ -193,6 +193,7 @@ module.exports = {
   getPublicCdnBaseUrl,
   isCloudFrontConfigured,
   buildS3PublicUrl,
+  extractS3ObjectKeyFromUrl,
   rewriteS3ObjectUrlToPublicCdn,
   uploadBufferToS3,
   checkS3StorageHealth
