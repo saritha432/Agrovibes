@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { HomePost } from "../services/api";
 
-const STORAGE_KEY_PREFIX = "agrovibes.homeFeed.v2";
+const STORAGE_KEY_PREFIX = "agrovibes.homeFeed.v3";
 const MAX_CACHED = 40;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -49,27 +49,52 @@ export async function writeHomeFeedCache(posts: HomePost[], viewerKey?: string |
   }
 }
 
-/** Merge fresh page(s) with existing feed — newer API data wins per id. */
-export function mergeHomeFeedPosts(fresh: HomePost[], existing: HomePost[]): HomePost[] {
-  const byId = new Map<number, HomePost>();
-  for (const post of existing) byId.set(post.id, post);
-  for (const post of fresh) {
-    const prev = byId.get(post.id);
-    if (!prev) {
-      byId.set(post.id, post);
-      continue;
-    }
-    byId.set(post.id, {
-      ...prev,
-      ...post,
-      resharesCount: Math.max(Number(prev.resharesCount ?? 0), Number(post.resharesCount ?? 0))
-    });
-  }
-  return Array.from(byId.values()).sort((a, b) => {
+function sortHomeFeedPosts(posts: HomePost[]): HomePost[] {
+  return posts.sort((a, b) => {
     const bTime = Date.parse(String(b.createdAt || "")) || 0;
     const aTime = Date.parse(String(a.createdAt || "")) || 0;
     return bTime - aTime || b.id - a.id;
   });
+}
+
+function mergePostRow(prev: HomePost | undefined, post: HomePost): HomePost {
+  if (!prev) return post;
+  return {
+    ...prev,
+    ...post,
+    resharesCount: Math.max(Number(prev.resharesCount ?? 0), Number(post.resharesCount ?? 0))
+  };
+}
+
+/** Merge fresh page(s) with existing feed — newer API data wins per id. Does not remove stale rows. */
+export function mergeHomeFeedPosts(fresh: HomePost[], existing: HomePost[]): HomePost[] {
+  const byId = new Map<number, HomePost>();
+  for (const post of existing) byId.set(post.id, post);
+  for (const post of fresh) {
+    byId.set(post.id, mergePostRow(byId.get(post.id), post));
+  }
+  return sortHomeFeedPosts(Array.from(byId.values()));
+}
+
+/**
+ * Reconcile the home feed with a fresh first page from the API.
+ * Drops posts in the first-page id range that the API no longer returns
+ * (private accounts, deletes, blocks, etc.) while keeping older load-more rows.
+ */
+export function reconcileHomeFeedWithFirstPage(fresh: HomePost[], existing: HomePost[]): HomePost[] {
+  if (!fresh.length) return [];
+  const minFreshId = Math.min(...fresh.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0));
+  if (!Number.isFinite(minFreshId)) return mergeHomeFeedPosts(fresh, existing);
+
+  const byId = new Map<number, HomePost>();
+  for (const post of existing) {
+    const id = Number(post.id);
+    if (Number.isFinite(id) && id < minFreshId) byId.set(id, post);
+  }
+  for (const post of fresh) {
+    byId.set(post.id, mergePostRow(byId.get(post.id), post));
+  }
+  return sortHomeFeedPosts(Array.from(byId.values()));
 }
 
 function feedSortTime(post: HomePost): number {
