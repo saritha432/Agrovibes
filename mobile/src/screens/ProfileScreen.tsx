@@ -984,7 +984,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const onShareProfileSystem = useCallback(async () => {
     if (!user) return;
     const shareHandle = profileModel?.handle || safeHandle(user.fullName || user.username || "user");
-    const text = [`${user.fullName}'s profile on Agrovibes`, shareHandle, profileShareLink].filter(Boolean).join("\n");
+    const text = [`${user.fullName}'s profile on Cropvibe`, shareHandle, profileShareLink].filter(Boolean).join("\n");
     try {
       await Share.share({ title: `${user.fullName} - Agrovibes Profile`, message: text });
     } catch {
@@ -1000,7 +1000,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const onShareProfileToWhatsApp = useCallback(async () => {
     if (!profileShareLink) return;
-    const text = encodeURIComponent(`Check out this profile on Agrovibes\n${profileShareLink}`);
+    const text = encodeURIComponent(`Check out this profile on Cropvibe\n${profileShareLink}`);
     const appUrl = `whatsapp://send?text=${text}`;
     const webUrl = `https://wa.me/?text=${text}`;
     try {

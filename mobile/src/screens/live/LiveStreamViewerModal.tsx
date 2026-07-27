@@ -1,19 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
-import React from "react";
-import { Image, Modal, Pressable, StyleSheet, Text, TextStyle, View } from "react-native";
+import React, { Suspense } from "react";
+import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, TextStyle, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import type { HomePost } from "../../services/api";
-import { APP_BLACK } from "../../theme/appColors";
+import { APP_BLACK, APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { formatFeedText } from "../../localization/feedDisplay";
 import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { isActiveLiveStream, isLivePost, liveRoomName } from "./livePostUtils";
 import { isAlreadyHostingRoom } from "./liveSessionState";
-import { LiveKitRoomView } from "./LiveKitRoomView";
+
+/** LiveKit/WebRTC — only load when joining/watching an active live. */
+const LiveKitRoomView = React.lazy(() =>
+  import("./LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView }))
+);
 
 const BG = APP_BLACK;
 
@@ -77,16 +81,24 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
           </View>
         ) : (
           <View style={styles.viewerRoot} collapsable={false}>
-            <LiveKitRoomView
-              visible
-              roomName={liveRoomName(post)}
-              isHost={isHost}
-              sharePost={post}
-              title={liveTitle(post, language, t)}
-              postId={post.id}
-              onLiveEnded={onLiveEnded}
-              onClose={onClose}
-            />
+            <Suspense
+              fallback={
+                <View style={[styles.viewerRoot, { alignItems: "center", justifyContent: "center" }]}>
+                  <ActivityIndicator color={APP_LIME} size="large" />
+                </View>
+              }
+            >
+              <LiveKitRoomView
+                visible
+                roomName={liveRoomName(post)}
+                isHost={isHost}
+                sharePost={post}
+                title={liveTitle(post, language, t)}
+                postId={post.id}
+                onLiveEnded={onLiveEnded}
+                onClose={onClose}
+              />
+            </Suspense>
           </View>
         )}
       </Modal>
@@ -114,7 +126,7 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
           ) : null}
           {post.videoUrl ? (
             <Video
-              source={{ uri: videoPlaybackUrl(post.videoUrl) }}
+              source={{ uri: videoPlaybackUrl(post.videoUrl, post.hlsUrl) }}
               style={styles.viewerVideo}
               resizeMode={ResizeMode.CONTAIN}
               shouldPlay

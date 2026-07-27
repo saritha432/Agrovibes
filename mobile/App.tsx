@@ -29,8 +29,8 @@ void setupMissedCallNotificationCategory();
 
 const CROPVIBE_INTRO_IMAGE = require("./assets/onboarding/cropvibe_intro.png");
 
-/** Keep intro visible long enough to read, even when fonts/auth finish instantly. */
-const INTRO_MIN_MS = 1600;
+/** Brief brand flash — keep short so cold start feels snappy. */
+const INTRO_MIN_MS = 500;
 
 /** Avoid drawing under the iOS status bar when native safe-area top is missing/0. */
 function resolveInitialSafeAreaMetrics(): Metrics | undefined {

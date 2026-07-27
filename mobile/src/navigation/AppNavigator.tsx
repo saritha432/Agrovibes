@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { StyleSheet, View } from "react-native";
-import { CreateModal } from "../components/CreateModal";
-import { HomeScreen } from "../screens/HomeScreen";
 import type { HomePost } from "../services/api";
+import { HomeScreen } from "../screens/HomeScreen";
 import { MarketStackNavigator } from "./MarketStackNavigator";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { ServicesScreen } from "../screens/ServicesScreen";
@@ -21,8 +20,22 @@ import { takePersistedReelDeepLink } from "./pendingReelDeepLink";
 import { fetchHomePost } from "../services/api";
 import { queueOpenSharedPostViewer } from "./sharedPostViewerBridge";
 import { useAuth } from "../auth/AuthContext";
+import { APP_LIME } from "../theme/appColors";
 
 const Tab = createBottomTabNavigator();
+
+/** Heavy create/live UI — only parse when the create sheet opens. */
+const CreateModal = React.lazy(() =>
+  import("../components/CreateModal").then((m) => ({ default: m.CreateModal }))
+);
+
+function CreateModalFallback() {
+  return (
+    <View style={styles.createFallback} pointerEvents="none">
+      <ActivityIndicator color={APP_LIME} size="large" />
+    </View>
+  );
+}
 
 export function AppNavigator() {
   const { token, user } = useAuth();
@@ -81,66 +94,81 @@ export function AppNavigator() {
 
   return (
     <NotificationPanelProvider>
-    <View style={styles.root}>
-      <Tab.Navigator
-        screenOptions={{ headerShown: false, tabBarShowLabel: false }}
-        tabBar={(props) => (
-          <MainTabBar
-            {...props}
-            createFocused={isCreateOpen}
-            onCreatePress={() => {
-              if (isAccountDeactivated) return;
-              setCreatePresetType(null);
-              setCreateOpen(true);
-            }}
-          />
-        )}
-      >
-        <Tab.Screen
-          name="Home"
-          children={() => (
-            <HomeScreen
-              refreshToken={homeRefreshToken}
-              takePendingFeedPost={takePendingFeedPost}
-              onOpenCreate={(type, options) => {
+      <View style={styles.root}>
+        <Tab.Navigator
+          screenOptions={{
+            headerShown: false,
+            tabBarShowLabel: false,
+            lazy: true,
+            freezeOnBlur: true
+          }}
+          detachInactiveScreens
+          tabBar={(props) => (
+            <MainTabBar
+              {...props}
+              createFocused={isCreateOpen}
+              onCreatePress={() => {
                 if (isAccountDeactivated) return;
-                setCreatePresetType(type ?? null);
-                setCreateLiveOptions(options ?? null);
+                setCreatePresetType(null);
                 setCreateOpen(true);
               }}
             />
           )}
-        />
-        <Tab.Screen name="Search" component={UserSearchScreen} />
-        <Tab.Screen name="Market" component={MarketStackNavigator} />
-        <Tab.Screen name="Learn" component={LearnStackNavigator} />
-        <Tab.Screen name="Services" component={ServicesScreen} />
-        <Tab.Screen name="Messages" component={DirectInboxScreen} />
-        <Tab.Screen name="Profile" component={ProfileScreen} />
-      </Tab.Navigator>
-      {isCreateOpen ? (
-        <CreateModal
-          visible
-          initialType={createPresetType}
-          initialLiveTopic={createLiveOptions?.liveTopic}
-          scheduledLiveId={createLiveOptions?.scheduledLiveId}
-          autoStartLive={!!createLiveOptions?.autoStartLive}
-          onClose={() => {
-            setCreatePresetType(null);
-            setCreateLiveOptions(null);
-            setCreateOpen(false);
-          }}
-          onVideoPosted={(post) => {
-            if (post) pendingFeedPostRef.current = post;
-            setHomeRefreshToken((v) => v + 1);
-          }}
-        />
-      ) : null}
-    </View>
+        >
+          <Tab.Screen
+            name="Home"
+            children={() => (
+              <HomeScreen
+                refreshToken={homeRefreshToken}
+                takePendingFeedPost={takePendingFeedPost}
+                onOpenCreate={(type, options) => {
+                  if (isAccountDeactivated) return;
+                  setCreatePresetType(type ?? null);
+                  setCreateLiveOptions(options ?? null);
+                  setCreateOpen(true);
+                }}
+              />
+            )}
+          />
+          <Tab.Screen name="Search" component={UserSearchScreen} />
+          <Tab.Screen name="Market" component={MarketStackNavigator} />
+          <Tab.Screen name="Learn" component={LearnStackNavigator} />
+          <Tab.Screen name="Services" component={ServicesScreen} />
+          <Tab.Screen name="Messages" component={DirectInboxScreen} />
+          <Tab.Screen name="Profile" component={ProfileScreen} />
+        </Tab.Navigator>
+        {isCreateOpen ? (
+          <Suspense fallback={<CreateModalFallback />}>
+            <CreateModal
+              visible
+              initialType={createPresetType}
+              initialLiveTopic={createLiveOptions?.liveTopic}
+              scheduledLiveId={createLiveOptions?.scheduledLiveId}
+              autoStartLive={!!createLiveOptions?.autoStartLive}
+              onClose={() => {
+                setCreatePresetType(null);
+                setCreateLiveOptions(null);
+                setCreateOpen(false);
+              }}
+              onVideoPosted={(post) => {
+                if (post) pendingFeedPostRef.current = post;
+                setHomeRefreshToken((v) => v + 1);
+              }}
+            />
+          </Suspense>
+        ) : null}
+      </View>
     </NotificationPanelProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#262626" }
+  root: { flex: 1, backgroundColor: "#262626" },
+  createFallback: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 50
+  }
 });

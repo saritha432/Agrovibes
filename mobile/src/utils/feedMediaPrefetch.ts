@@ -1,4 +1,4 @@
-import { Image, Platform } from "react-native";
+import { Image } from "expo-image";
 import type { HomePost } from "../services/api";
 import { reelGridStillUri } from "./reelGrid";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
@@ -6,8 +6,8 @@ import { videoPlaybackUrl } from "./videoPlaybackUrl";
 const prefetchedImages = new Set<string>();
 const warmedVideos = new Set<string>();
 
-/** First ~1.25MB of each upcoming video — warms CDN/device cache without full download. */
-const VIDEO_WARM_BYTES = 1_250_000;
+/** Warm ~512KB of each upcoming video — enough for moov + early frames, less bandwidth fight. */
+const VIDEO_WARM_BYTES = 512_000;
 
 function prefetchUri(uri: string | null | undefined) {
   const clean = typeof uri === "string" ? uri.trim() : "";
@@ -22,10 +22,10 @@ function prefetchUri(uri: string | null | undefined) {
  * Warm the start of a remote video so swipe-to-next starts faster (Instagram-style).
  * Uses HTTP Range so we only pull the moov/header + early segments.
  */
-export function warmVideoUri(uri: string | null | undefined) {
+export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | null) {
   const raw = typeof uri === "string" ? uri.trim() : "";
-  if (!raw) return;
-  const clean = videoPlaybackUrl(raw);
+  if (!raw && !hlsUrl) return;
+  const clean = videoPlaybackUrl(raw || hlsUrl, hlsUrl);
   if (!clean || warmedVideos.has(clean)) return;
   if (clean.startsWith("file:") || clean.startsWith("content:") || clean.startsWith("ph:")) return;
   warmedVideos.add(clean);
@@ -39,19 +39,25 @@ export function warmVideoUri(uri: string | null | undefined) {
           } catch {
             // ignore
           }
-        }, 12_000)
+        }, 8_000)
       : null;
 
+  const isHls = /\.m3u8(\?|#|$)/i.test(clean);
   void fetch(clean, {
     method: "GET",
-    headers: {
-      Range: `bytes=0-${VIDEO_WARM_BYTES - 1}`,
-      Accept: "video/*,*/*"
-    },
+    headers: isHls
+      ? { Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*" }
+      : {
+          Range: `bytes=0-${VIDEO_WARM_BYTES - 1}`,
+          Accept: "video/*,*/*"
+        },
     signal: controller?.signal
   })
     .then(async (res) => {
-      // Drain a limited body so the connection actually transfers bytes (CDN warm).
+      if (isHls) {
+        await res.text().catch(() => "");
+        return;
+      }
       if (!res.body || typeof res.arrayBuffer !== "function") {
         await res.text().catch(() => "");
         return;
@@ -72,21 +78,24 @@ export function prefetchPostMedia(post: HomePost | null | undefined, options?: {
   prefetchUri(post.thumbnailUrl);
   prefetchUri(post.imageUrl);
   if (Array.isArray(post.imageUrls)) {
-    for (const url of post.imageUrls.slice(0, 3)) prefetchUri(url);
+    for (const url of post.imageUrls.slice(0, 2)) prefetchUri(url);
   }
   prefetchUri(post.authorAvatarUrl);
   if (options?.warmVideo !== false) {
-    warmVideoUri(post.videoUrl);
+    warmVideoUri(post.videoUrl, post.hlsUrl);
   }
 }
 
-/** Prefetch stills + warm video bytes for the next N posts after the visible anchor. */
-export function prefetchUpcomingPosts(posts: HomePost[], anchorIndex: number, count = 3) {
+/**
+ * Warm only the single next post's video — no more, no less.
+ * The current post is already playing so its bytes are flowing; loading more
+ * ahead wastes bandwidth and makes the current video buffer slower.
+ */
+export function prefetchUpcomingPosts(posts: HomePost[], anchorIndex: number, _count = 1) {
   if (!posts.length || anchorIndex < 0) return;
-  const ahead = Platform.OS === "web" ? Math.min(count, 2) : count;
-  for (let i = 1; i <= ahead; i += 1) {
-    prefetchPostMedia(posts[anchorIndex + i], { warmVideo: true });
-  }
-  // Also warm the current item's video if somehow missed.
-  prefetchPostMedia(posts[anchorIndex], { warmVideo: true });
+  // Still-image prefetch for the current post (cheap).
+  prefetchPostMedia(posts[anchorIndex], { warmVideo: false });
+  // Video warm only for the immediate next post.
+  const next = posts[anchorIndex + 1];
+  if (next) prefetchPostMedia(next, { warmVideo: true });
 }

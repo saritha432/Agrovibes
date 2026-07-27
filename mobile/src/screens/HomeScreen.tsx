@@ -7,6 +7,7 @@ import {
   Animated,
   FlatList,
   Image,
+  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -44,7 +45,7 @@ import {
   type OpenUserStoriesRequest
 } from "../navigation/storyActivityBridge";
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
@@ -136,6 +137,7 @@ import {
 import type { BlockedUser } from "../services/api";
 import { confirmAction } from "../utils/confirmAction";
 import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
+import { FeedImage } from "../components/FeedImage";
 import type { CreateType } from "../components/CreateModal";
 import { LiveHomeSection, buildLiveFeed, findJoinableLivePost, isLivePost } from "./live/LiveHomeSection";
 import { LiveStoryRing, LiveStreamViewerModal } from "./live/LiveStreamViewerModal";
@@ -848,14 +850,27 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
       } as ViewStyle)
     : ({} as ViewStyle);
 
-function FeedPostVideo({ uri, style, posterUri }: { uri: string; style: ViewStyle; posterUri?: string }) {
-  const activeUri = videoPlaybackUrl(uri);
+function FeedPostVideo({
+  uri,
+  hlsUrl,
+  style,
+  posterUri
+}: {
+  uri: string;
+  hlsUrl?: string | null;
+  style: ViewStyle;
+  posterUri?: string;
+}) {
+  const sources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = videoPlaybackUrl(sources[sourceIndex] ?? uri);
   const videoRef = useRef<Video | null>(null);
   const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     setBlocked(false);
-  }, [activeUri]);
+    setSourceIndex(0);
+  }, [uri, hlsUrl]);
 
   useEffect(() => {
     return () => {
@@ -875,14 +890,18 @@ function FeedPostVideo({ uri, style, posterUri }: { uri: string; style: ViewStyl
     }
     if ("error" in status && status.error) {
       console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+      if (sourceIndex + 1 < sources.length) {
+        setSourceIndex((i) => i + 1);
+        return;
+      }
       setBlocked(true);
       void videoRef.current?.unloadAsync().catch(() => {});
     }
-  }, [activeUri]);
+  }, [activeUri, sourceIndex, sources.length]);
 
   if (blocked) {
     return posterUri ? (
-      <Image source={{ uri: posterUri }} style={style as ImageStyle} resizeMode="cover" />
+      <FeedImage source={{ uri: posterUri }} style={style as ImageStyle} contentFit="cover" recyclingKey={posterUri} />
     ) : (
       <View style={[style, { backgroundColor: "#111" }]} />
     );
@@ -908,6 +927,7 @@ function FeedPostVideo({ uri, style, posterUri }: { uri: string; style: ViewStyl
 
 type ContainedExpoVideoProps = {
   uri: string;
+  hlsUrl?: string | null;
   shouldPlay: boolean;
   preloadOnly?: boolean;
   containerWidth: number;
@@ -927,6 +947,7 @@ type ContainedExpoVideoHandle = {
 
 const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo({
   uri,
+  hlsUrl,
   shouldPlay,
   preloadOnly = false,
   containerWidth,
@@ -949,12 +970,18 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
-  const activeUri = useMemo(() => videoPlaybackUrl(uri), [uri]);
+  const playbackSources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const activeUri = useMemo(
+    () => videoPlaybackUrl(playbackSources[sourceIndex] ?? uri),
+    [playbackSources, sourceIndex, uri]
+  );
 
   useEffect(() => {
     setNatural(null);
     setPlaybackBlocked(false);
-  }, [uri]);
+    setSourceIndex(0);
+  }, [uri, hlsUrl]);
 
   const fitted = useMemo(() => {
     if (isCover || isWeb || !natural) return null;
@@ -1023,7 +1050,12 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     >
       {playbackBlocked ? (
         posterUri ? (
-          <Image source={{ uri: posterUri }} style={videoOuterStyle as ImageStyle} resizeMode={isCover ? "cover" : "contain"} />
+          <FeedImage
+            source={{ uri: posterUri }}
+            style={videoOuterStyle as ImageStyle}
+            contentFit={isCover ? "cover" : "contain"}
+            recyclingKey={posterUri}
+          />
         ) : (
           <View style={[videoOuterStyle, { backgroundColor: "#111" }]} />
         )
@@ -1059,6 +1091,10 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
             }
           } else if ("error" in status && status.error) {
             console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+            if (sourceIndex + 1 < playbackSources.length) {
+              setSourceIndex((i) => i + 1);
+              return;
+            }
             setPlaybackBlocked(true);
             void videoRef.current?.unloadAsync().catch(() => {});
           }
@@ -1263,7 +1299,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [manualRefreshToken, setManualRefreshToken] = useState(0);
   const refreshPendingRef = useRef(0);
   const onPullRefresh = useCallback(() => {
-    refreshPendingRef.current = 2;
+    refreshPendingRef.current = 1;
     setIsPullRefreshing(true);
     setManualRefreshToken((v) => v + 1);
   }, []);
@@ -1343,6 +1379,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [activeReelOptionsPost, setActiveReelOptionsPost] = useState<HomePost | null>(null);
   const [optimisticStories, setOptimisticStories] = useState<HomeStory[]>([]);
+  const optimisticStoriesRef = useRef(optimisticStories);
+  optimisticStoriesRef.current = optimisticStories;
+  const suggestionsLoadStartedRef = useRef(false);
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [likesSheetPost, setLikesSheetPost] = useState<HomePost | null>(null);
   const [likesSheetUsers, setLikesSheetUsers] = useState<PostLiker[]>([]);
@@ -1394,7 +1433,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [followerUserIds, setFollowerUserIds] = useState<Set<number>>(new Set());
   const [socialNetworkHydrated, setSocialNetworkHydrated] = useState(false);
   /** Accepted following (name + id) for share sheet — not only users who appear as post authors. */
-  const [followingSharePeers, setFollowingSharePeers] = useState<Array<{ id: number; name: string }>>([]);
+  const [followingSharePeers, setFollowingSharePeers] = useState<
+    Array<{ id: number; name: string; avatarUrl?: string | null }>
+  >([]);
   const [relationships, setRelationships] = useState<Record<number, { viewerStatus: string; reverseStatus: string; canFollowBack: boolean }>>({});
   const [followBusyByUserId, setFollowBusyByUserId] = useState<Record<number, boolean>>({});
   const [legacyFollowStateByName, setLegacyFollowStateByName] = useState<Record<string, "none" | "pending" | "accepted">>({});
@@ -1503,7 +1544,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const primary = ordered[ordered.length - 1];
       setPlayingPostId(primary.post.id);
       prefetchPostMedia(primary.post);
-      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 2);
+      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 1);
     },
     []
   );
@@ -1821,9 +1862,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     useCallback(() => {
       if (!token || !appIsActive || user?.accountStatus === "deactivated") return;
       const mediaBusy = !!(reelViewerOpen || watchingLivePost || playingPostId != null);
-      const pollMs = mediaBusy ? 30000 : 20000;
+      // While a reel/live is playing, poll far less often so playback isn't fighting the network.
+      const pollMs = mediaBusy ? 90_000 : 45_000;
       const poll = () => {
         if (feedPollInFlightRef.current) return;
+        // Skip background refresh while the user is actively watching media.
+        if (reelViewerOpen || watchingLivePost || playingPostId != null) return;
         feedPollInFlightRef.current = true;
         void fetchHomePostsPage(token, { limit: HOME_FEED_PAGE_SIZE })
           .then(async (page) => {
@@ -1835,9 +1879,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             feedPollInFlightRef.current = false;
           });
       };
-      poll();
+      // First poll only when idle — avoid stacking with initial feed fetch + video warm.
+      const startDelay = mediaBusy ? pollMs : 8_000;
+      const startTimer = setTimeout(poll, startDelay);
       const timer = setInterval(poll, pollMs);
-      return () => clearInterval(timer);
+      return () => {
+        clearTimeout(startTimer);
+        clearInterval(timer);
+      };
     }, [appIsActive, applyLocalLikesToPosts, playingPostId, reelViewerOpen, token, user?.accountStatus, watchingLivePost])
   );
 
@@ -2281,29 +2330,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [isStoryOpen, activeStoryIndex, storyPlaybackQueue.length, startStoryProgress]);
 
   useEffect(() => {
-    let mounted = true;
-    const finishPullRefreshTask = () => {
-      if (refreshPendingRef.current <= 0) return;
-      refreshPendingRef.current -= 1;
-      if (refreshPendingRef.current <= 0) setIsPullRefreshing(false);
-    };
-    fetchHomeStories(token)
-      .then((data) => {
-        if (!mounted) return;
-        const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
-        setStories(applyViewedStories(mergeStories(remoteRows, optimisticStories)));
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setStories(applyViewedStories(mergeStories([], optimisticStories)));
-      })
-      .finally(() => {
-        if (mounted) finishPullRefreshTask();
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [applyViewedStories, manualRefreshToken, optimisticStories, refreshToken, token]);
+    if (!optimisticStories.length) return;
+    setStories((prev) => applyViewedStories(mergeStories(prev, optimisticStories)));
+  }, [applyViewedStories, optimisticStories]);
+
+  useEffect(() => {
+    suggestionsLoadStartedRef.current = false;
+    setSuggestedUsers([]);
+    setSuggestedMutualByUserId({});
+  }, [user?.id]);
 
   useEffect(() => {
     if (!activeStory?.id || !isStoryOpen) return;
@@ -2325,30 +2360,40 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setStoryViewedIds(viewedStoryIds);
   }, [viewedStoryIds]);
 
-  useEffect(() => {
-    if (!token || !posts.length) return;
-    const ids = [
+  const postAuthorIdsKey = useMemo(() => {
+    return [
       ...new Set(
         posts
           .map((p) => Number(p.userId))
           .filter((id) => Number.isFinite(id) && id > 0 && id !== currentUserId)
       )
-    ].slice(0, 80);
+    ]
+      .slice(0, 80)
+      .sort((a, b) => a - b)
+      .join(",");
+  }, [currentUserId, posts]);
+
+  useEffect(() => {
+    if (!token || !postAuthorIdsKey) return;
+    const ids = postAuthorIdsKey.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0);
     if (!ids.length) return;
     let cancelled = false;
-    void fetchActiveHomeStories(token, ids)
-      .then((data) => {
-        if (cancelled) return;
-        const rows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
-        if (!rows.length) return;
-        publishActiveStories(rows);
-        setStories((prev) => applyViewedStories(mergeStories(prev, rows)));
-      })
-      .catch(() => {});
+    const task = InteractionManager.runAfterInteractions(() => {
+      void fetchActiveHomeStories(token, ids)
+        .then((data) => {
+          if (cancelled) return;
+          const rows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
+          if (!rows.length) return;
+          publishActiveStories(rows);
+          setStories((prev) => applyViewedStories(mergeStories(prev, rows)));
+        })
+        .catch(() => {});
+    });
     return () => {
       cancelled = true;
+      task.cancel?.();
     };
-  }, [applyViewedStories, currentUserId, posts, token]);
+  }, [applyViewedStories, postAuthorIdsKey, token]);
 
   const openUserStoriesRequest = useCallback(
     async (req: OpenUserStoriesRequest) => {
@@ -2442,7 +2487,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       refreshPendingRef.current -= 1;
       if (refreshPendingRef.current <= 0) setIsPullRefreshing(false);
     };
-    (async () => {
+    const loadPosts = async () => {
       const pending = takePendingFeedPost?.();
       if (pending && isLivePost(pending) && (pending.liveStatus === "ended" || pending.videoUrl)) {
         setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending, liveStatus: "ended" as const } : p)));
@@ -2460,20 +2505,40 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setFeedShuffleSeed(Date.now());
         setPosts(nextPosts);
         void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
-        if (token) {
-          void fetchRepostFeed(token)
-            .then((repostData) => {
-              if (mounted) setRepostFeedItems(repostData.posts || []);
-            })
-            .catch(() => {
-              if (mounted) setRepostFeedItems([]);
-            });
-        } else if (mounted) {
-          setRepostFeedItems([]);
-        }
       } catch {
         if (!mounted) return;
         if (!postsRef.current.length) setPosts([]);
+      }
+    };
+
+    const loadStories = async () => {
+      try {
+        const data = await fetchHomeStories(token);
+        if (!mounted) return;
+        const remoteRows = (data.stories || []).map((s) => normalizeStoryRow(s as HomeStory & Record<string, unknown>));
+        setStories(applyViewedStories(mergeStories(remoteRows, optimisticStoriesRef.current)));
+      } catch {
+        if (!mounted) return;
+        setStories(applyViewedStories(mergeStories([], optimisticStoriesRef.current)));
+      }
+    };
+
+    const loadReposts = async () => {
+      if (!token) {
+        if (mounted) setRepostFeedItems([]);
+        return;
+      }
+      try {
+        const repostData = await fetchRepostFeed(token);
+        if (mounted) setRepostFeedItems(repostData.posts || []);
+      } catch {
+        if (mounted) setRepostFeedItems([]);
+      }
+    };
+
+    void (async () => {
+      try {
+        await Promise.all([loadPosts(), loadStories(), loadReposts()]);
       } finally {
         if (mounted) finishPullRefreshTask();
       }
@@ -2498,46 +2563,51 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      if (!token || !user?.id) {
-        if (mounted) setRelationships({});
-        return;
-      }
-      const targetIds = relationshipAuthorKey
-        ? relationshipAuthorKey.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
-        : [];
-      if (!targetIds.length) {
-        if (mounted) setRelationships({});
-        return;
-      }
-      try {
-        const data = await fetchRelationships(token, targetIds);
-        if (!mounted) return;
-        setRelationships(data.relationships || {});
-      } catch {
-        if (!mounted) return;
-        setRelationships({});
-      }
-    })();
+    if (!token || !user?.id) {
+      setRelationships({});
+      return;
+    }
+    const targetIds = relationshipAuthorKey
+      ? relationshipAuthorKey.split(",").map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+      : [];
+    if (!targetIds.length) {
+      setRelationships({});
+      return;
+    }
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        try {
+          const data = await fetchRelationships(token, targetIds);
+          if (!mounted) return;
+          setRelationships(data.relationships || {});
+        } catch {
+          if (!mounted) return;
+          setRelationships({});
+        }
+      })();
+    });
     return () => {
       mounted = false;
+      task.cancel?.();
     };
   }, [relationshipAuthorKey, token, user?.id]);
 
   /** Populates the set of user ids the current user follows — used by the Friends tab to show reels from those users. */
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      if (!token || !user?.id) {
-        if (mounted) {
-          setFollowingUserIds(new Set());
-          setFollowerUserIds(new Set());
-          setFollowingSharePeers([]);
-          setSocialAvatarsByUserId(new Map());
-          setSocialNetworkHydrated(true);
-        }
-        return;
-      }
+    const resetSocialNetwork = () => {
+      setFollowingUserIds(new Set());
+      setFollowerUserIds(new Set());
+      setFollowingSharePeers([]);
+      setSocialAvatarsByUserId(new Map());
+      setSocialNetworkHydrated(true);
+    };
+    if (!token || !user?.id) {
+      resetSocialNetwork();
+      return;
+    }
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
       try {
         const [network, localNetwork] = await Promise.all([
           fetchSocialNetwork(token, Number(user.id)),
@@ -2549,7 +2619,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         if (!mounted) return;
         const followingIds = new Set<number>();
         const followerIds = new Set<number>();
-        const peers: Array<{ id: number; name: string }> = [];
+        const peers: Array<{ id: number; name: string; avatarUrl?: string | null }> = [];
         const avatarMap = new Map<number, string>();
         const rememberAvatar = (person: { key?: string; avatarUrl?: string | null }) => {
           const raw = String(person.key || "").trim();
@@ -2567,7 +2637,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             seenFollowing.add(uid);
             followingIds.add(uid);
             const name = String(person.name || "").trim();
-            if (name) peers.push({ id: uid, name });
+            if (name) {
+              peers.push({
+                id: uid,
+                name,
+                avatarUrl: avatarMap.get(uid) || (typeof person.avatarUrl === "string" ? person.avatarUrl : null)
+              });
+            }
           }
         }
         for (const person of mergedFollowers) {
@@ -2581,22 +2657,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setSocialNetworkHydrated(true);
       } catch {
         if (!mounted) return;
-        setFollowingUserIds(new Set());
-        setFollowerUserIds(new Set());
-        setFollowingSharePeers([]);
-        setSocialAvatarsByUserId(new Map());
-        setSocialNetworkHydrated(true);
+        resetSocialNetwork();
       }
-    })();
+      })();
+    });
     return () => {
       mounted = false;
+      task.cancel?.();
     };
   }, [token, user?.id, refreshToken]);
 
   useEffect(() => {
-    if (!token || !socialNetworkHydrated) return;
+    if (!reelViewerOpen || !token || suggestionsLoadStartedRef.current) return;
+    if (!socialNetworkHydrated) return;
+    suggestionsLoadStartedRef.current = true;
     let mounted = true;
-    (async () => {
+    void (async () => {
       try {
         const data = await fetchUsers(token, { limit: 30 });
         if (!mounted) return;
@@ -2621,8 +2697,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const sorted = [...slice].sort((a, b) => {
           const aConn = connections[a.id];
           const bConn = connections[b.id];
-          const aScore = (aConn?.mutualCount ?? 0) * 10 + (aConn?.followsYou ? 5 : 0) + (followerUserIds.has(a.id) ? 1 : 0);
-          const bScore = (bConn?.mutualCount ?? 0) * 10 + (bConn?.followsYou ? 5 : 0) + (followerUserIds.has(b.id) ? 1 : 0);
+          const aScore =
+            (aConn?.mutualCount ?? 0) * 10 + (aConn?.followsYou ? 5 : 0) + (followerUserIds.has(a.id) ? 1 : 0);
+          const bScore =
+            (bConn?.mutualCount ?? 0) * 10 + (bConn?.followsYou ? 5 : 0) + (followerUserIds.has(b.id) ? 1 : 0);
           return bScore - aScore;
         });
         if (!mounted) return;
@@ -2635,8 +2713,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         }
       }
     })();
-    return () => { mounted = false; };
-  }, [token, socialNetworkHydrated, followingUserIds, followerUserIds, user?.id]);
+    return () => {
+      mounted = false;
+    };
+  }, [reelViewerOpen, token, socialNetworkHydrated, followingUserIds, followerUserIds, user?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -4062,6 +4142,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
+                hlsUrl={post.hlsUrl}
                 posterUri={reelPoster || undefined}
                 shouldPlay={shouldPlayReel}
                 containerWidth={reelContentWidth}
@@ -4082,7 +4163,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           ) : post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {reelPoster ? (
-                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
+                <FeedImage source={{ uri: reelPoster }} style={styles.reelVideoFull} contentFit="contain" recyclingKey={reelPoster} />
               ) : (
                 <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
               )}
@@ -4133,17 +4214,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   }}
                   onPress={() => onReelSurfaceTap(post)}
                 >
-                  <Image
+                  <FeedImage
                     source={{ uri }}
                     style={{ width: reelContentWidth, height: mediaContentH }}
-                    resizeMode="contain"
+                    contentFit="contain"
+                    recyclingKey={uri}
                   />
                 </Pressable>
               ))}
             </ScrollView>
           ) : reelPoster ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode={post.videoUrl ? "contain" : "contain"} />
+              <FeedImage
+                source={{ uri: reelPoster }}
+                style={styles.reelVideoFull}
+                contentFit="contain"
+                recyclingKey={reelPoster}
+              />
             </Pressable>
           ) : (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
@@ -4557,6 +4644,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 {shouldPlayReel ? (
                   <FeedPostVideo
                     uri={post.videoUrl}
+                    hlsUrl={post.hlsUrl}
                     style={styles.video}
                     posterUri={post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined}
                   />
@@ -4771,7 +4859,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [feedLoadingMore]);
 
   useEffect(() => {
-    for (const post of tabPosts.slice(0, 4)) prefetchPostMedia(post);
+    // Stills only for the first couple items — video warm happens via viewability.
+    for (const post of tabPosts.slice(0, 2)) prefetchPostMedia(post, { warmVideo: false });
   }, [tabPosts]);
 
   const isAccountDeactivated = useIsAccountDeactivated();
@@ -5153,6 +5242,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           {activePost?.videoUrl ? (
             <ContainedExpoVideo
               uri={activePost.videoUrl}
+              hlsUrl={activePost.hlsUrl}
               shouldPlay
               containerWidth={windowWidth}
               containerHeight={windowHeight}
@@ -5257,9 +5347,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${visibleSuggestedUsers.length}-${suggestedFollowDone.size}-${reelViewerFeed.length}-${reelViewerOpen.posts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
-              initialNumToRender={Math.min(3, reelViewerFeed.length || 1)}
-              maxToRenderPerBatch={2}
-              windowSize={3}
+              initialNumToRender={1}
+              maxToRenderPerBatch={1}
+              windowSize={2}
               removeClippedSubviews={false}
             />
           ) : null}
