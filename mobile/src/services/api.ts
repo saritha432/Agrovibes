@@ -627,6 +627,8 @@ export interface HomePost {
   savedAt?: string;
   /** Present when posts are loaded with an auth token (server-tracked reshare). */
   viewerHasReshared?: boolean;
+  /** True when the author account is private (server-provided). */
+  authorIsPrivate?: boolean;
   resharedAt?: string;
   /** Viewer's quote when this post appears in their reshared tab. */
   reshareQuoteCaption?: string;

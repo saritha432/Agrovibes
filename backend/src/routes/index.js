@@ -528,7 +528,39 @@ const hideBlockedUsersPostsClause = `
   )
 `;
 
-/** Hide private-account posts unless viewer is the owner or an accepted follower. $1 = viewerId */
+/**
+ * Match a learn_users row to a home_posts author (user_id and/or display name).
+ * Keep in sync with profile post ownership / countHomePostsForUser.
+ */
+const homePostAuthorUserMatchSql = (userAlias) => `
+  (
+    ${userAlias}.id = p.user_id
+    OR LOWER(TRIM(${userAlias}.full_name)) = LOWER(TRIM(p.user_name))
+    OR (
+      ${userAlias}.username IS NOT NULL AND TRIM(${userAlias}.username) <> ''
+      AND LOWER(TRIM(REGEXP_REPLACE(${userAlias}.username, '^@+', '', 'g')))
+        = LOWER(TRIM(REGEXP_REPLACE(COALESCE(p.user_name, ''), '^@+', '', 'g')))
+    )
+    OR (
+      ${userAlias}.email IS NOT NULL AND TRIM(${userAlias}.email) <> ''
+      AND LOWER(TRIM(SPLIT_PART(${userAlias}.email, '@', 1))) = LOWER(TRIM(p.user_name))
+    )
+    OR (
+      TRIM(COALESCE(p.user_name, '')) <> ''
+      AND LOWER(TRIM(SPLIT_PART(${userAlias}.full_name, ' ', 1))) = LOWER(TRIM(p.user_name))
+    )
+    OR (
+      TRIM(COALESCE(p.user_name, '')) <> ''
+      AND LOWER(TRIM(${userAlias}.full_name)) LIKE LOWER(TRIM(p.user_name)) || ' %'
+    )
+  )
+`;
+
+/**
+ * Hide private-account posts unless viewer is the owner or an accepted follower.
+ * Prefer owner.is_private when p.user_id is set; fuzzy-match only for orphan rows.
+ * $1 = viewerId. Requires LEFT JOIN learn_users owner ON owner.id = p.user_id.
+ */
 const hidePrivateAccountPostsClause = `
   AND (
     (
@@ -543,27 +575,45 @@ const hidePrivateAccountPostsClause = `
               LOWER(TRIM(self_u.full_name)) = LOWER(TRIM(p.user_name))
               OR (
                 self_u.username IS NOT NULL AND TRIM(self_u.username) <> ''
-                AND LOWER(TRIM(self_u.username)) = LOWER(TRIM(p.user_name))
+                AND LOWER(TRIM(REGEXP_REPLACE(self_u.username, '^@+', '', 'g')))
+                  = LOWER(TRIM(REGEXP_REPLACE(COALESCE(p.user_name, ''), '^@+', '', 'g')))
+              )
+              OR (
+                self_u.email IS NOT NULL AND TRIM(self_u.email) <> ''
+                AND LOWER(TRIM(SPLIT_PART(self_u.email, '@', 1))) = LOWER(TRIM(p.user_name))
               )
             )
         )
       )
     )
-    OR NOT EXISTS (
-      SELECT 1
-      FROM learn_users priv_owner
-      WHERE COALESCE(priv_owner.is_private, false) = true
-        AND (
-          priv_owner.id = p.user_id
-          OR LOWER(TRIM(priv_owner.full_name)) = LOWER(TRIM(p.user_name))
-          OR (
-            priv_owner.username IS NOT NULL AND TRIM(priv_owner.username) <> ''
-            AND LOWER(TRIM(priv_owner.username)) = LOWER(TRIM(p.user_name))
-          )
-        )
+    OR (
+      p.user_id IS NOT NULL
+      AND COALESCE(owner.is_private, false) = false
     )
     OR (
-      $1::integer IS NOT NULL
+      p.user_id IS NOT NULL
+      AND COALESCE(owner.is_private, false) = true
+      AND $1::integer IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM social_follows sf
+        WHERE sf.follower_id = $1::integer
+          AND sf.following_id = p.user_id
+          AND sf.status = 'accepted'
+      )
+    )
+    OR (
+      p.user_id IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM learn_users priv_owner
+        WHERE COALESCE(priv_owner.is_private, false) = true
+          AND ${homePostAuthorUserMatchSql("priv_owner")}
+      )
+    )
+    OR (
+      p.user_id IS NULL
+      AND $1::integer IS NOT NULL
       AND EXISTS (
         SELECT 1
         FROM social_follows sf
@@ -571,18 +621,112 @@ const hidePrivateAccountPostsClause = `
         WHERE sf.follower_id = $1::integer
           AND sf.status = 'accepted'
           AND COALESCE(priv_owner.is_private, false) = true
-          AND (
-            priv_owner.id = p.user_id
-            OR LOWER(TRIM(priv_owner.full_name)) = LOWER(TRIM(p.user_name))
-            OR (
-              priv_owner.username IS NOT NULL AND TRIM(priv_owner.username) <> ''
-              AND LOWER(TRIM(priv_owner.username)) = LOWER(TRIM(p.user_name))
-            )
-          )
+          AND ${homePostAuthorUserMatchSql("priv_owner")}
       )
     )
   )
 `;
+
+/**
+ * Final safety net after SQL: drop private-author posts the viewer cannot see.
+ * Uses resolved post.userId (and display name) so fuzzy SQL misses cannot leak into Drops.
+ */
+async function redactPrivateAccountPostsForViewer(posts, viewerId) {
+  if (!Array.isArray(posts) || !posts.length) return posts;
+  await ensureLearnUsersTable();
+  await ensureSocialFollowsTable();
+
+  const authorIds = [
+    ...new Set(posts.map((p) => Number(p.userId)).filter((id) => Number.isFinite(id) && id > 0))
+  ];
+  const authorNames = [
+    ...new Set(
+      posts
+        .flatMap((p) => [
+          String(p.userName || "").trim().toLowerCase(),
+          String(p.username || "")
+            .trim()
+            .toLowerCase()
+            .replace(/^@+/, "")
+        ])
+        .filter((name) => name.length > 0)
+    )
+  ];
+
+  const privRes = await query(
+    `
+    SELECT
+      id,
+      LOWER(TRIM(full_name)) AS full_name,
+      LOWER(TRIM(COALESCE(username, ''))) AS username,
+      LOWER(TRIM(SPLIT_PART(COALESCE(full_name, ''), ' ', 1))) AS first_name
+    FROM learn_users
+    WHERE COALESCE(is_private, false) = true
+      AND (
+        (CARDINALITY($1::int[]) > 0 AND id = ANY($1::int[]))
+        OR (
+          CARDINALITY($2::text[]) > 0
+          AND (
+            LOWER(TRIM(full_name)) = ANY($2::text[])
+            OR LOWER(TRIM(COALESCE(username, ''))) = ANY($2::text[])
+            OR LOWER(TRIM(SPLIT_PART(COALESCE(full_name, ''), ' ', 1))) = ANY($2::text[])
+          )
+        )
+      )
+    `,
+    [authorIds, authorNames]
+  );
+  if (!privRes.rows.length) return posts;
+
+  const privateById = new Map();
+  for (const row of privRes.rows) {
+    privateById.set(Number(row.id), row);
+  }
+
+  const vid = Number(viewerId);
+  const allowedPrivateIds = new Set();
+  if (Number.isFinite(vid) && vid > 0) {
+    allowedPrivateIds.add(vid);
+    const followRes = await query(
+      `
+      SELECT following_id
+      FROM social_follows
+      WHERE follower_id = $1
+        AND status = 'accepted'
+        AND following_id = ANY($2::int[])
+      `,
+      [vid, [...privateById.keys()]]
+    );
+    for (const row of followRes.rows) {
+      const id = Number(row.following_id);
+      if (Number.isFinite(id) && id > 0) allowedPrivateIds.add(id);
+    }
+  }
+
+  const postTouchesPrivateAuthor = (post) => {
+    const uid = Number(post.userId);
+    if (Number.isFinite(uid) && uid > 0 && privateById.has(uid)) return uid;
+    const name = String(post.userName || "")
+      .trim()
+      .toLowerCase();
+    const handle = String(post.username || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^@+/, "");
+    if (!name && !handle) return null;
+    for (const [id, row] of privateById) {
+      if (name && (row.full_name === name || row.username === name || row.first_name === name)) return id;
+      if (handle && (row.username === handle || row.full_name === handle)) return id;
+    }
+    return null;
+  };
+
+  return posts.filter((post) => {
+    const privateAuthorId = postTouchesPrivateAuthor(post);
+    if (privateAuthorId == null) return true;
+    return allowedPrivateIds.has(privateAuthorId);
+  });
+}
 
 const hideDeactivatedPostOwnersClause = `
   AND COALESCE(owner.account_status, 'active') <> 'deactivated'
@@ -1594,6 +1738,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       p.live_status AS "liveStatus",
       p.live_ended_at AS "liveEndedAt",
       COALESCE(NULLIF(TRIM(owner.avatar_url), ''), NULLIF(TRIM(u.avatar_url), '')) AS "authorAvatarUrl",
+      COALESCE(owner.is_private, u.is_private, false) AS "authorIsPrivate",
       CASE
         WHEN $1::integer IS NULL THEN false
         ELSE EXISTS (
@@ -1618,10 +1763,30 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
     FROM home_posts p
     LEFT JOIN learn_users owner ON owner.id = p.user_id
     LEFT JOIN LATERAL (
-      SELECT id, avatar_url
+      SELECT id, avatar_url, COALESCE(is_private, false) AS is_private
       FROM learn_users
-      WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
-      ORDER BY id ASC
+      WHERE
+        LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+        OR LOWER(TRIM(SPLIT_PART(full_name, ' ', 1))) = LOWER(TRIM(p.user_name))
+        OR LOWER(TRIM(full_name)) LIKE LOWER(TRIM(p.user_name)) || ' %'
+        OR (
+          username IS NOT NULL AND TRIM(username) <> ''
+          AND LOWER(TRIM(REGEXP_REPLACE(username, '^@+', '', 'g')))
+            = LOWER(TRIM(REGEXP_REPLACE(COALESCE(p.user_name, ''), '^@+', '', 'g')))
+        )
+        OR (
+          email IS NOT NULL AND TRIM(email) <> ''
+          AND LOWER(TRIM(SPLIT_PART(email, '@', 1))) = LOWER(TRIM(p.user_name))
+        )
+      ORDER BY
+        CASE
+          WHEN LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name)) THEN 0
+          WHEN username IS NOT NULL AND LOWER(TRIM(REGEXP_REPLACE(username, '^@+', '', 'g')))
+            = LOWER(TRIM(REGEXP_REPLACE(COALESCE(p.user_name, ''), '^@+', '', 'g'))) THEN 1
+          WHEN LOWER(TRIM(SPLIT_PART(full_name, ' ', 1))) = LOWER(TRIM(p.user_name)) THEN 2
+          ELSE 3
+        END,
+        id ASC
       LIMIT 1
     ) u ON TRUE
     WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${hideSoftDeletedPostsClause} ${hideHighReportFeedPostsClause} ${hidePrivateAccountPostsClause} ${hideBlockedUsersPostsClause} ${videoClause} ${cursorClause}
@@ -5444,7 +5609,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const { limit, cursor } = parseHomeFeedPagination(req);
     const gen = await cacheGenString("home:posts:gen");
-    const cacheKey = `v1:home:posts:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
+    const cacheKey = `v2:home:posts:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.posts)) {
       res.json(cached);
@@ -5471,8 +5636,10 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     );
 
     const { page, nextCursor, hasMore } = paginateHomeFeedRows(result.rows, limit);
+    const enriched = await enrichHomePostsLiveState(dedupeHomePostRows(page));
+    const posts = await redactPrivateAccountPostsForViewer(enriched, viewerId);
     const body = {
-      posts: await enrichHomePostsLiveState(dedupeHomePostRows(page)),
+      posts,
       nextCursor: hasMore ? nextCursor : null,
       hasMore
     };
@@ -5499,7 +5666,7 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
     const cursorRaw = Number(req.query.cursor);
     const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
     const gen = await cacheGenString("home:posts:gen");
-    const cacheKey = `v1:home:posts:reels:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
+    const cacheKey = `v2:home:posts:reels:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.posts)) {
       res.json(cached);
@@ -5526,8 +5693,10 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
     );
 
     const { page, nextCursor, hasMore } = paginateHomeFeedRows(result.rows, limit);
+    const enriched = await enrichHomePostsLiveState(dedupeHomePostRows(page));
+    const posts = await redactPrivateAccountPostsForViewer(enriched, viewerId);
     const body = {
-      posts: await enrichHomePostsLiveState(dedupeHomePostRows(page)),
+      posts,
       nextCursor: hasMore ? nextCursor : null,
       hasMore
     };
@@ -7446,12 +7615,13 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
             )
           )
       )
+      ${hidePrivateAccountPostsClause}
       ORDER BY hpr.created_at DESC
       LIMIT $2
       `,
       [viewerId, limit]
     );
-    res.json({ posts: result.rows.map(normalizeHomePostRow) });
+    res.json({ posts: await redactPrivateAccountPostsForViewer(result.rows.map(normalizeHomePostRow), viewerId) });
   } catch (error) {
     res.status(500).json({ message: "Failed to load repost feed", error: error.message });
   }
@@ -7686,10 +7856,30 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       LEFT JOIN LATERAL (
-        SELECT id, avatar_url
+        SELECT id, avatar_url, COALESCE(is_private, false) AS is_private
         FROM learn_users
-        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
-        ORDER BY id ASC
+        WHERE
+          LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
+          OR LOWER(TRIM(SPLIT_PART(full_name, ' ', 1))) = LOWER(TRIM(p.user_name))
+          OR LOWER(TRIM(full_name)) LIKE LOWER(TRIM(p.user_name)) || ' %'
+          OR (
+            username IS NOT NULL AND TRIM(username) <> ''
+            AND LOWER(TRIM(REGEXP_REPLACE(username, '^@+', '', 'g')))
+              = LOWER(TRIM(REGEXP_REPLACE(COALESCE(p.user_name, ''), '^@+', '', 'g')))
+          )
+          OR (
+            email IS NOT NULL AND TRIM(email) <> ''
+            AND LOWER(TRIM(SPLIT_PART(email, '@', 1))) = LOWER(TRIM(p.user_name))
+          )
+        ORDER BY
+          CASE
+            WHEN LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name)) THEN 0
+            WHEN username IS NOT NULL AND LOWER(TRIM(REGEXP_REPLACE(username, '^@+', '', 'g')))
+              = LOWER(TRIM(REGEXP_REPLACE(COALESCE(p.user_name, ''), '^@+', '', 'g'))) THEN 1
+            WHEN LOWER(TRIM(SPLIT_PART(full_name, ' ', 1))) = LOWER(TRIM(p.user_name)) THEN 2
+            ELSE 3
+          END,
+          id ASC
         LIMIT 1
       ) u ON TRUE
       WHERE p.id = $2

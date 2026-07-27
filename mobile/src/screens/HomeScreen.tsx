@@ -123,6 +123,7 @@ import {
   shownResharesCount,
   latestResharersForDisplay,
   readHomeFeedCache,
+  reconcileHomeFeedWithFirstPage,
   writeHomeFeedCache
 } from "../social/homeFeedCache";
 import {
@@ -1547,14 +1548,32 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return unsubscribe;
   }, [reloadBlockedUsers]);
 
-  const visiblePosts = useMemo(
-    () => filterPostsByBlockedUsers(posts, blockedUsers),
-    [posts, blockedUsers]
-  );
-  const visibleRepostFeedItems = useMemo(
-    () => filterPostsByBlockedUsers(repostFeedItems, blockedUsers),
-    [repostFeedItems, blockedUsers]
-  );
+  const visiblePosts = useMemo(() => {
+    const blockedFiltered = filterPostsByBlockedUsers(posts, blockedUsers);
+    const me = Number(viewerUserId);
+    return blockedFiltered.filter((p) => {
+      if (!p.authorIsPrivate) return true;
+      const uid = Number(p.userId);
+      if (Number.isFinite(me) && me > 0 && uid === me) return true;
+      if (Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid)) return true;
+      const rel = Number.isFinite(uid) && uid > 0 ? relationships[uid] : null;
+      if (rel?.viewerStatus === "accepted") return true;
+      return false;
+    });
+  }, [posts, blockedUsers, followingUserIds, relationships, viewerUserId]);
+  const visibleRepostFeedItems = useMemo(() => {
+    const blockedFiltered = filterPostsByBlockedUsers(repostFeedItems, blockedUsers);
+    const me = Number(viewerUserId);
+    return blockedFiltered.filter((p) => {
+      if (!p.authorIsPrivate) return true;
+      const uid = Number(p.userId);
+      if (Number.isFinite(me) && me > 0 && uid === me) return true;
+      if (Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid)) return true;
+      const rel = Number.isFinite(uid) && uid > 0 ? relationships[uid] : null;
+      if (rel?.viewerStatus === "accepted") return true;
+      return false;
+    });
+  }, [repostFeedItems, blockedUsers, followingUserIds, relationships, viewerUserId]);
 
   const tabPosts = useMemo(() => {
     const nowMs = Date.now();
@@ -1830,7 +1849,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         void fetchHomePostsPage(token, { limit: HOME_FEED_PAGE_SIZE })
           .then(async (page) => {
             const withLikes = await applyLocalLikesToPosts(page.posts);
-            setPosts((prev) => mergeHomeFeedPosts(withLikes, prev));
+            setPosts((prev) => {
+              // Replace first-page window from API; drop any leftover private authors not followed.
+              const next = reconcileHomeFeedWithFirstPage(withLikes, prev).filter((p) => {
+                if (!p.authorIsPrivate) return true;
+                const uid = Number(p.userId);
+                const me = Number(user?.id);
+                if (Number.isFinite(me) && me > 0 && uid === me) return true;
+                if (Number.isFinite(uid) && uid > 0 && followingUserIds.has(uid)) return true;
+                return false;
+              });
+              void writeHomeFeedCache(next, user?.id ?? "anon");
+              return next;
+            });
           })
           .catch(() => {})
           .finally(() => {
@@ -1840,7 +1871,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       poll();
       const timer = setInterval(poll, pollMs);
       return () => clearInterval(timer);
-    }, [appIsActive, applyLocalLikesToPosts, playingPostId, reelViewerOpen, token, user?.accountStatus, watchingLivePost])
+    }, [
+      appIsActive,
+      applyLocalLikesToPosts,
+      followingUserIds,
+      playingPostId,
+      reelViewerOpen,
+      token,
+      user?.accountStatus,
+      user?.id,
+      watchingLivePost
+    ])
   );
 
   /** Open post/reel in the same fullscreen viewer when user taps a share card in chat. */
@@ -2457,8 +2498,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const merged = applyPendingHomePost(data.posts, pending);
         const withLikes = await applyLocalLikesToPosts(merged);
         if (!mounted) return;
-        const replaceFeed = refreshPendingRef.current > 0;
-        const nextPosts = replaceFeed ? withLikes : mergeHomeFeedPosts(withLikes, postsRef.current);
+        // Always replace first page so private/deleted posts cannot linger from cache.
+        const nextPosts = withLikes;
         setFeedShuffleSeed(Date.now());
         setPosts(nextPosts);
         void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
