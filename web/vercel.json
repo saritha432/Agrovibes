@@ -10,11 +10,11 @@
   "rewrites": [
     {
       "source": "/reel/:id",
-      "destination": "https://agrovibes.onrender.com/api/share/reel/:id"
+      "destination": "https://cropvibe-api-production.up.railway.app/api/share/reel/:id"
     },
     {
       "source": "/profile/:id",
-      "destination": "https://agrovibes.onrender.com/api/share/profile/:id"
+      "destination": "https://cropvibe-api-production.up.railway.app/api/share/profile/:id"
     },
     {
       "source": "/((?!\\.well-known).*)",

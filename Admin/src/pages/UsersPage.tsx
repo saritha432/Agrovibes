@@ -9,7 +9,7 @@ type AccountFilter = "all" | "active" | "suspended" | "pending" | "banned";
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "https://agrovibes.onrender.com/api";
+  "https://cropvibe-api-production.up.railway.app/api";
 
 const FILTERS: { id: AccountFilter; label: string }[] = [
   { id: "all", label: "All" },

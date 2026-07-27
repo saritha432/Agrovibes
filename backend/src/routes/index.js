@@ -82,6 +82,9 @@ let directMessagesTableReady = false;
 let scheduledLivesTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
+let homeFeedMaintenanceRunning = false;
+let homeFeedMaintenanceLastRunAt = 0;
+const HOME_FEED_MAINTENANCE_INTERVAL_MS = 10 * 60 * 1000;
 
 function fireSocialPush(payload) {
   void sendSocialPushToUser(payload).catch((error) => {
@@ -1881,6 +1884,28 @@ async function backfillHomePostUserIds() {
   }
 }
 
+/**
+ * Expensive feed maintenance should not run on every request.
+ * Run at most once per interval in the background.
+ */
+function scheduleHomeFeedMaintenance() {
+  const now = Date.now();
+  if (homeFeedMaintenanceRunning) return;
+  if (now - homeFeedMaintenanceLastRunAt < HOME_FEED_MAINTENANCE_INTERVAL_MS) return;
+  homeFeedMaintenanceRunning = true;
+  homeFeedMaintenanceLastRunAt = now;
+  void (async () => {
+    try {
+      await purgeExpiredDeletedHomePosts();
+      await backfillHomePostUserIds();
+    } catch (error) {
+      console.warn("[home-feed] maintenance:", error?.message || error);
+    } finally {
+      homeFeedMaintenanceRunning = false;
+    }
+  })();
+}
+
 async function socialCountsForUser(userId) {
   const uid = Number(userId);
   const [followersRes, followingRes] = await Promise.all([
@@ -2022,6 +2047,10 @@ router.get("/health", async (_req, res) => {
   } catch (error) {
     res.status(500).json({ status: "error", db: "disconnected", message: error.message });
   }
+});
+
+router.get("/v1/ping", (_req, res) => {
+  res.json({ ok: true });
 });
 
 router.get("/v1/bootstrap", (_req, res) => {
@@ -5478,9 +5507,8 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       return;
     }
 
-    await backfillHomePostUserIds();
+    scheduleHomeFeedMaintenance();
     await ensureHomePostsTable();
-    await purgeExpiredDeletedHomePosts();
     await ensureLearnUsersTable();
     await ensureSocialFollowsTable();
     await ensureSocialBlocksTable();
@@ -5533,9 +5561,8 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
       return;
     }
 
+    scheduleHomeFeedMaintenance();
     await ensureHomePostsTable();
-    await purgeExpiredDeletedHomePosts();
-    await backfillHomePostUserIds();
     await ensureLearnUsersTable();
     await ensureSocialFollowsTable();
     await ensureSocialBlocksTable();

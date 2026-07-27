@@ -1,6 +1,6 @@
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
-  "https://agrovibes.onrender.com/api";
+  "https://cropvibe-api-production.up.railway.app/api";
 
 /** Default Cropvibe admin credentials (must also exist in DB for production API calls). */
 export const DEFAULT_ADMIN_EMAIL = "info@cropvibe.com";

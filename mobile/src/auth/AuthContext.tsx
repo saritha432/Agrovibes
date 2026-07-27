@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React from "react";
-import { fetchMyAccount } from "../services/api";
+import { fetchMyAccount, warmUpServer } from "../services/api";
 import { clearReelPreviewCache } from "../utils/reelPreviewThumb";
 import { upsertSavedLogin } from "../utils/savedLogins";
 
@@ -44,6 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
+    warmUpServer();
     let mounted = true;
     (async () => {
       try {

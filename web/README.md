@@ -22,7 +22,7 @@ Open [http://localhost:5173](http://localhost:5173).
 ## API
 
 - **Development:** Vite proxies `/api` → `http://localhost:5000` (start the backend in `../backend`).
-- **Production:** set `VITE_API_BASE_URL=https://agrovibes.onrender.com/api` or your API host.
+- **Production:** set `VITE_API_BASE_URL=https://cropvibe-api-production.up.railway.app/api` or your API host.
 
 ## Layout
 
