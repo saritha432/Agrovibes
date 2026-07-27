@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Image, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { FeedImage } from "./FeedImage";
 import { APP_LIME } from "../theme/appColors";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 
@@ -52,10 +53,11 @@ export function UserAvatar({
       ]}
     >
       {showImage ? (
-        <Image
+        <FeedImage
           source={{ uri: trimmed }}
           style={{ width: size, height: size, borderRadius: r }}
-          resizeMode="cover"
+          contentFit="cover"
+          recyclingKey={trimmed}
           onError={() => setImageFailed(true)}
         />
       ) : (

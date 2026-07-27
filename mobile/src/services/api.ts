@@ -601,6 +601,8 @@ export interface HomePost {
   /** Total reposts/reshares of this post. */
   resharesCount?: number;
   videoUrl?: string | null;
+  /** Adaptive HLS master playlist (CloudFront .m3u8). Prefer over videoUrl when present. */
+  hlsUrl?: string | null;
   imageUrl?: string | null;
   /** Present when the post is a multi-image carousel (2+ photos). */
   imageUrls?: string[];

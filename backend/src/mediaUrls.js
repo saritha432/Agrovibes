@@ -17,6 +17,7 @@ function preferCdnMediaUrl(url) {
 function sanitizeHomePostRowMedia(base) {
   if (!base || typeof base !== "object") return base;
   base.videoUrl = preferCdnMediaUrl(base.videoUrl);
+  base.hlsUrl = preferCdnMediaUrl(base.hlsUrl);
   base.imageUrl = preferCdnMediaUrl(base.imageUrl);
   base.thumbnailUrl = preferCdnMediaUrl(base.thumbnailUrl);
   base.authorAvatarUrl = preferCdnMediaUrl(base.authorAvatarUrl);

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Asset } from "expo-asset";
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -46,7 +46,6 @@ import { WebCameraCapture } from "./WebCameraCapture";
 import { StoryCameraPreview } from "./StoryCameraPreview";
 import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
 import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
-import { LiveKitRoomView } from "../screens/live/LiveKitRoomView";
 import {
   fetchGalleryAlbums,
   fetchGalleryAssets,
@@ -64,6 +63,11 @@ import {
   FARMING_TOPICS,
   type FarmingTopicId
 } from "../social/farmingContentPolicy";
+
+/** LiveKit/WebRTC — loaded only when hosting a live stream. */
+const LiveKitRoomView = React.lazy(() =>
+  import("../screens/live/LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView }))
+);
 
 type TaggedPerson = { id: number; name: string };
 
@@ -3355,17 +3359,25 @@ export function CreateModal({
     </Modal>
 
     <Modal visible={liveKitHostOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
-      <LiveKitRoomView
-        visible={liveKitHostOpen}
-        roomName={liveKitHostRoomName}
-        isHost
-        postId={liveKitHostPostId ?? undefined}
-        sharePost={liveKitHostSharePost}
-        title={liveKitHostTitle || "Live stream"}
-        initialCameraFacing={liveHostCameraFacing}
-        onLiveEnded={handleHostLiveSessionEnded}
-        onClose={handleClose}
-      />
+      <Suspense
+        fallback={
+          <View style={{ flex: 1, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}>
+            <ActivityIndicator color={APP_LIME} size="large" />
+          </View>
+        }
+      >
+        <LiveKitRoomView
+          visible={liveKitHostOpen}
+          roomName={liveKitHostRoomName}
+          isHost
+          postId={liveKitHostPostId ?? undefined}
+          sharePost={liveKitHostSharePost}
+          title={liveKitHostTitle || "Live stream"}
+          initialCameraFacing={liveHostCameraFacing}
+          onLiveEnded={handleHostLiveSessionEnded}
+          onClose={handleClose}
+        />
+      </Suspense>
     </Modal>
 
     <Modal visible={showLiveDatePicker} transparent animationType="fade" onRequestClose={() => setShowLiveDatePicker(false)}>

@@ -7,7 +7,7 @@ import "./LoginPage.css";
 export function LoginPage() {
   const { token, signIn, loading } = useAuth();
   const [email, setEmail] = useState("info@cropvibe.com");
-  const [password, setPassword] = useState("Cropvibe@2026");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -165,18 +165,18 @@ export function LoginPage() {
       <footer className="admin-login__footer">
         <div className="admin-login__footer-inner">
           <span className="admin-login__footer-brand">CROPVIBE</span>
-          <nav className="admin-login__footer-nav">
-            <span>Copyright {new Date().getFullYear()}</span>
+          <div className="admin-login__footer-right">
+            <span>Copyright © {new Date().getFullYear()}</span>
             <Link to="https://cropvibe.com/privacy" target="_blank" rel="noreferrer">
               Privacy Policy
             </Link>
             <Link to="https://cropvibe.com" target="_blank" rel="noreferrer">
               Contact Us
             </Link>
-          </nav>
-          <p className="admin-login__footer-craft">
-            Crafted with <span aria-hidden="true">♥</span> in Hyderabad, India
-          </p>
+            <p className="admin-login__footer-craft">
+              Crafted With <span aria-hidden="true">♥</span> In <em>Hyderabad, India</em>
+            </p>
+          </div>
         </div>
       </footer>
     </div>

@@ -31,7 +31,7 @@ export function ReelGridTile({
   onVideoError
 }: ReelGridTileProps) {
   const stillUri = reelGridStillUri(post) || previewUri || null;
-  const videoUri = post.videoUrl ? videoPlaybackUrl(post.videoUrl) : null;
+  const videoUri = post.videoUrl ? videoPlaybackUrl(post.videoUrl, post.hlsUrl) : null;
   const isVideo = !!videoUri;
   const showPlayingVideo = isPlaying && isVideo;
 

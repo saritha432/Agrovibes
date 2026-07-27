@@ -121,7 +121,7 @@ export function AdminLayout({ title, titleAccent = false, breadcrumbs, children 
       <footer className="admin-layout__footer">
         <span className="admin-layout__footer-brand">CROPVIBE</span>
         <div className="admin-layout__footer-right">
-          <span>Copyright {new Date().getFullYear()}</span>
+          <span>Copyright © {new Date().getFullYear()}</span>
           <a href="https://cropvibe.com/privacy" target="_blank" rel="noreferrer">
             Privacy Policy
           </a>
@@ -129,7 +129,7 @@ export function AdminLayout({ title, titleAccent = false, breadcrumbs, children 
             Contact Us
           </a>
           <p className="admin-layout__footer-craft">
-            Crafted with <span aria-hidden="true">♥</span> in <em>Hyderabad, India</em>
+            Crafted With <span aria-hidden="true">♥</span> In <em>Hyderabad, India</em>
           </p>
         </div>
       </footer>

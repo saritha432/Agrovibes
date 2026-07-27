@@ -3,6 +3,7 @@
   "exclude": ["node_modules", "eas-inspect-out"],
   "compilerOptions": {
     "target": "es2017",
+    "module": "esnext",
     "lib": [
       "es2017"
     ],

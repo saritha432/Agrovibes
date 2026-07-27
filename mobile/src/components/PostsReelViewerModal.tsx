@@ -229,6 +229,7 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
 
 type ContainedExpoVideoProps = {
   uri: string;
+  hlsUrl?: string | null;
   shouldPlay: boolean;
   preloadOnly?: boolean;
   containerWidth: number;
@@ -247,6 +248,7 @@ type ContainedExpoVideoHandle = {
 const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo(
   {
     uri,
+    hlsUrl,
     shouldPlay,
     preloadOnly = false,
     containerWidth,
@@ -270,7 +272,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [blocked, setBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
   const durationRef = useRef(0);
-  const playbackSources = useMemo(() => videoPlaybackSources(uri), [uri]);
+  const playbackSources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
   const [sourceIndex, setSourceIndex] = useState(0);
   const activeUri = videoPlaybackUrl(playbackSources[sourceIndex] ?? uri);
 
@@ -278,7 +280,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     setNatural(null);
     setSourceIndex(0);
     setBlocked(false);
-  }, [uri]);
+  }, [uri, hlsUrl]);
 
   useEffect(() => {
     return () => {
@@ -1143,7 +1145,8 @@ export function PostsReelViewerModal({
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
-                uri={videoPlaybackUrl(post.videoUrl)}
+                uri={post.videoUrl}
+                hlsUrl={post.hlsUrl}
                 shouldPlay={shouldPlayVideo}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
@@ -1442,9 +1445,9 @@ export function PostsReelViewerModal({
               extraData={`${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${viewerPosts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
-              initialNumToRender={Math.min(3, viewerPosts.length || 1)}
-              maxToRenderPerBatch={2}
-              windowSize={3}
+              initialNumToRender={1}
+              maxToRenderPerBatch={1}
+              windowSize={2}
               removeClippedSubviews={false}
             />
           ) : null}

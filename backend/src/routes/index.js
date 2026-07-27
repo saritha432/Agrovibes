@@ -31,6 +31,13 @@ const {
 const { isMediaStorageConfigured, uploadMediaBuffer, checkMediaStorageHealth, getMediaStorageProvider } = require("../mediaStorage");
 const { stripLegacyCloudinaryUrl, sanitizeHomePostRowMedia, sanitizeStoryRowMedia } = require("../mediaUrls");
 const {
+  isHlsTranscodeConfigured,
+  startHlsJobForUploadedVideo,
+  resolveCompletedHlsUrlForVideo,
+  startHlsJobPolling
+} = require("../hlsTranscode");
+const { extractS3ObjectKeyFromUrl } = require("../s3Storage");
+const {
   isEgressConfigured,
   startLiveRoomRecording,
   stopLiveRoomRecordingAndGetVideoUrl
@@ -1241,11 +1248,30 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS farming_topic TEXT`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS report_count INT NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS feed_hidden_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS hls_url TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_feed_hidden_at_idx ON home_posts (feed_hidden_at)`);
   homePostsTableReady = true;
+}
+
+async function ensureMediaHlsJobsTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS media_hls_jobs (
+      id SERIAL PRIMARY KEY,
+      job_id TEXT NOT NULL UNIQUE,
+      source_key TEXT NOT NULL,
+      video_url TEXT NOT NULL,
+      hls_url TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'SUBMITTED',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS media_hls_jobs_status_idx ON media_hls_jobs (status)`);
+  await query(`CREATE INDEX IF NOT EXISTS media_hls_jobs_video_url_idx ON media_hls_jobs (video_url)`);
 }
 
 const POST_REPORT_AUTO_HIDE_THRESHOLD = 10;
@@ -1583,6 +1609,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       ${HOME_POST_RESHARES_COUNT_SQL},
       ${HOME_POST_RECENT_RESHARERS_SQL},
       p.video_url AS "videoUrl",
+      p.hls_url AS "hlsUrl",
       p.image_url AS "imageUrl",
       p.image_urls AS "image_urls",
       p.thumbnail_url AS "thumbnailUrl",
@@ -5569,6 +5596,15 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
     const imageUrlsJson = urlList.length > 1 ? JSON.stringify(urlList) : null;
     const cleanVideoUrl = stripLegacyCloudinaryUrl(videoUrl);
     const cleanThumbnailUrl = stripLegacyCloudinaryUrl(thumbnailUrl);
+    let cleanHlsUrl = stripLegacyCloudinaryUrl(req.body?.hlsUrl);
+    if (!cleanHlsUrl && cleanVideoUrl) {
+      try {
+        await ensureMediaHlsJobsTable();
+        cleanHlsUrl = await resolveCompletedHlsUrlForVideo(query, cleanVideoUrl);
+      } catch {
+        cleanHlsUrl = null;
+      }
+    }
     const hasVideo = !!cleanVideoUrl;
     const hasImage = !!primaryImage;
     const isLivePost = /^\[LIVE\]/i.test(String(caption || "").trim());
@@ -5633,8 +5669,8 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
 
     const result = await query(
       `
-      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url, creative_meta, farming_topic)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12::jsonb, $13)
+      INSERT INTO home_posts (user_id, user_name, location, caption, video_url, hls_url, image_url, image_urls, thumbnail_url, tagged_user_ids, music_label, music_audio_url, creative_meta, farming_topic)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13::jsonb, $14)
       RETURNING
         id,
         user_id AS "userId",
@@ -5644,6 +5680,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         likes_count AS "likesCount",
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
+        hls_url AS "hlsUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -5660,6 +5697,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         location,
         caption,
         cleanVideoUrl,
+        cleanHlsUrl,
         primaryImage,
         imageUrlsJson,
         cleanThumbnailUrl,
@@ -5731,6 +5769,7 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
         likes_count AS "likesCount",
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
+        hls_url AS "hlsUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -5752,6 +5791,19 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
     await invalidateProfilePostsCache(me);
     const post = normalizeHomePostRow(updated.rows[0]);
     if (post.liveStatus !== "ended") post.liveStatus = "ended";
+    if (cleanVideoUrl && isHlsTranscodeConfigured()) {
+      void (async () => {
+        try {
+          await ensureMediaHlsJobsTable();
+          await startHlsJobForUploadedVideo(query, {
+            sourceKey: extractS3ObjectKeyFromUrl(cleanVideoUrl),
+            videoUrl: cleanVideoUrl
+          });
+        } catch (error) {
+          console.warn("[hls] live-video enqueue failed:", error?.message || error);
+        }
+      })();
+    }
     res.json({ post });
   } catch (error) {
     res.status(500).json({ message: "Failed to update live video", error: error.message });
@@ -5834,6 +5886,7 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
         likes_count AS "likesCount",
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
+        hls_url AS "hlsUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6268,6 +6321,7 @@ router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => 
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -6620,6 +6674,7 @@ router.get("/v1/admin/reports/posts", authRequired, async (req, res) => {
         p.user_name AS "userName",
         p.caption,
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.thumbnail_url AS "thumbnailUrl",
         p.report_count AS "reportCount",
@@ -6689,6 +6744,7 @@ router.get("/v1/admin/reports/posts/:postId", authRequired, async (req, res) => 
         p.user_name AS "userName",
         p.caption,
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.thumbnail_url AS "thumbnailUrl",
         p.report_count AS "reportCount",
@@ -6963,6 +7019,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7039,6 +7096,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7100,6 +7158,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7158,6 +7217,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7261,6 +7321,7 @@ router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7387,6 +7448,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7558,6 +7620,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7651,6 +7714,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         ${HOME_POST_RESHARES_COUNT_SQL},
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -8075,7 +8139,22 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
         mimeType,
         objectPath
       });
-      res.status(201).json({ url: uploaded.url, provider: uploaded.provider, path: uploaded.path });
+      const payload = { url: uploaded.url, provider: uploaded.provider, path: uploaded.path };
+      if (isVideo && uploaded.provider === "s3" && isHlsTranscodeConfigured()) {
+        void (async () => {
+          try {
+            await ensureMediaHlsJobsTable();
+            await startHlsJobForUploadedVideo(query, {
+              sourceKey: uploaded.path || objectPath,
+              videoUrl: uploaded.url
+            });
+          } catch (error) {
+            console.warn("[hls] upload enqueue failed:", error?.message || error);
+          }
+        })();
+        payload.hlsPending = true;
+      }
+      res.status(201).json(payload);
     } catch (error) {
       const msg = String(error.message || "");
       res.status(500).json({
@@ -8615,6 +8694,7 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
         COALESCE(NULLIF(TRIM(owner.full_name), ''), p.user_name) AS "userName",
         p.caption,
         p.video_url AS "videoUrl",
+        p.hls_url AS "hlsUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
