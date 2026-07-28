@@ -14,9 +14,12 @@ import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { isActiveLiveStream, isLivePost, liveRoomName } from "./livePostUtils";
 import { isAlreadyHostingRoom } from "./liveSessionState";
 
-/** LiveKit/WebRTC — only load when joining/watching an active live. */
-const LiveKitRoomView = React.lazy(() =>
-  import("./LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView }))
+import { lazyScreen } from "../../utils/lazyScreen";
+
+/** LiveKit/WebRTC — lazy on native; sync require on web (Metro HMR-safe). */
+const LiveKitRoomView = lazyScreen(
+  () => import("./LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView })),
+  () => require("./LiveKitRoomView").LiveKitRoomView
 );
 
 const BG = APP_BLACK;

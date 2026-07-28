@@ -98,7 +98,7 @@ function SettingsRowList({ items }: { items: SettingsRowItem[] }) {
   );
 }
 
-function PromoCard() {
+function PromoCard({ onJoinPress }: { onJoinPress?: () => void }) {
   return (
     <View style={styles.promoWrap}>
       <View style={styles.promoCard}>
@@ -276,7 +276,10 @@ export function SettingsMenuScreen() {
           />
         </SettingsSection>
 
-        <PromoCard />
+        {/* TODO(provider): enable navigation later */}
+        <PromoCard
+          // onJoinPress={() => navigation.navigate("Main", { screen: "Services" })}
+        />
 
         <SettingsSection title={labels.howYouUse}>
           <SettingsRowList
@@ -529,7 +532,7 @@ const styles = StyleSheet.create({
     backgroundColor: DIVIDER
   },
   promoWrap: {
-    marginBottom: 16
+    marginBottom: 16,
   },
   promoCard: {
     backgroundColor: "#ffffff",
