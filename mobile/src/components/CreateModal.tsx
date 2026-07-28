@@ -65,8 +65,12 @@ import {
 } from "../social/farmingContentPolicy";
 
 /** LiveKit/WebRTC — loaded only when hosting a live stream. */
-const LiveKitRoomView = React.lazy(() =>
-  import("../screens/live/LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView }))
+import { lazyScreen } from "../utils/lazyScreen";
+
+/** LiveKit/WebRTC — lazy on native; sync require on web (Metro HMR-safe). */
+const LiveKitRoomView = lazyScreen(
+  () => import("../screens/live/LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView })),
+  () => require("../screens/live/LiveKitRoomView").LiveKitRoomView
 );
 
 type TaggedPerson = { id: number; name: string };
