@@ -21,12 +21,14 @@ import { fetchHomePost } from "../services/api";
 import { queueOpenSharedPostViewer } from "./sharedPostViewerBridge";
 import { useAuth } from "../auth/AuthContext";
 import { APP_LIME } from "../theme/appColors";
+import { lazyScreen } from "../utils/lazyScreen";
 
 const Tab = createBottomTabNavigator();
 
-/** Heavy create/live UI — only parse when the create sheet opens. */
-const CreateModal = React.lazy(() =>
-  import("../components/CreateModal").then((m) => ({ default: m.CreateModal }))
+/** Heavy create/live UI — lazy on native; sync require on web (Metro HMR-safe). */
+const CreateModal = lazyScreen(
+  () => import("../components/CreateModal").then((m) => ({ default: m.CreateModal })),
+  () => require("../components/CreateModal").CreateModal
 );
 
 function CreateModalFallback() {
