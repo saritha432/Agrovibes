@@ -39,7 +39,7 @@ import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
 import { APP_LIME } from "../theme/appColors";
 
-const EXPLORE_POSTS_LIMIT = 60;
+const EXPLORE_POSTS_LIMIT = 24;
 const BG = "#121212";
 const SEARCH_BG = "#303132";
 const ROW_BORDER = "#2a2a2a";
@@ -220,6 +220,7 @@ export function UserSearchScreen() {
   const isAccountDeactivated = useIsAccountDeactivated();
   const { width } = useWindowDimensions();
   const searchInputRef = useRef<TextInput>(null);
+  const lastSearchPrefetchAtRef = useRef(0);
 
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
@@ -328,7 +329,7 @@ export function UserSearchScreen() {
     try {
       if (token) {
         try {
-          const { users: remoteUsers } = await fetchUsers(token, { limit: 150 });
+          const { users: remoteUsers } = await fetchUsers(token, { limit: 40 });
           const directory = buildSearchUserList(remoteUsers, user);
           setUserDirectory(directory);
           setSuggestedUsers(directory.slice(0, 20));
@@ -442,10 +443,17 @@ export function UserSearchScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void loadSuggestedUsers();
-      void loadExplorePosts();
+      const now = Date.now();
+      const hasCachedExplore = explorePosts.length > 0;
+      const fresh = now - lastSearchPrefetchAtRef.current < 60_000;
+      // Avoid refetching 40 users + explore grid every time the Search tab is tapped.
+      if (!fresh || !hasCachedExplore) {
+        lastSearchPrefetchAtRef.current = now;
+        void loadSuggestedUsers();
+        void loadExplorePosts();
+      }
       void loadPersistedSearchState();
-    }, [loadExplorePosts, loadPersistedSearchState, loadSuggestedUsers])
+    }, [explorePosts.length, loadExplorePosts, loadPersistedSearchState, loadSuggestedUsers])
   );
 
   const exploreAuthors = useMemo(() => {

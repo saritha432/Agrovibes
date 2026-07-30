@@ -98,21 +98,39 @@ function SettingsRowList({ items }: { items: SettingsRowItem[] }) {
   );
 }
 
-function PromoCard({ onJoinPress }: { onJoinPress?: () => void }) {
+function PromoCard({ onPress }: { onPress?: () => void }) {
   return (
-    <View style={styles.promoWrap}>
+    <Pressable
+      style={styles.promoWrap}
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Join As Provider"
+    >
       <View style={styles.promoCard}>
         <LinearGradient
-          colors={["rgba(201, 255, 53, 0.55)", "rgba(201, 255, 53, 0)"]}
-          start={{ x: 1, y: 0 }}
-          end={{ x: 0.4, y: 1 }}
-          style={styles.promoGlow}
+          colors={["rgba(201, 255, 53, 0.45)", "rgba(201, 255, 53, 0)"]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 0.55, y: 0.5 }}
+          style={styles.promoGlowLeft}
           pointerEvents="none"
         />
-        <Text style={styles.promoTitle}>Khet Se Ghar Tak</Text>
-        <Text style={styles.promoSubtitle}>Bhoomi, Bazaar, Barakath.</Text>
+        <LinearGradient
+          colors={["rgba(201, 255, 53, 0)", "rgba(201, 255, 53, 0.35)"]}
+          start={{ x: 0.45, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.promoGlowRight}
+          pointerEvents="none"
+        />
+        <Text style={styles.promoTitle}>
+          Rent It. Service It. <Text style={styles.promoTitleAccent}>Earn</Text>
+        </Text>
+        <Text style={styles.promoSubtitle}>Machinery. Experts. Opportunity.</Text>
+        <View style={styles.promoCta}>
+          <Text style={styles.promoCtaText}>Join As Provider</Text>
+        </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -276,10 +294,7 @@ export function SettingsMenuScreen() {
           />
         </SettingsSection>
 
-        {/* TODO(provider): enable navigation later */}
-        <PromoCard
-          // onJoinPress={() => navigation.navigate("Main", { screen: "Services" })}
-        />
+        <PromoCard onPress={() => navigation.navigate("ProviderOnboarding")} />
 
         <SettingsSection title={labels.howYouUse}>
           <SettingsRowList
@@ -532,37 +547,66 @@ const styles = StyleSheet.create({
     backgroundColor: DIVIDER
   },
   promoWrap: {
-    marginBottom: 16,
+    marginBottom: 16
   },
   promoCard: {
-    backgroundColor: "#ffffff",
+    backgroundColor: "#1a1b1c",
     borderRadius: 14,
     paddingHorizontal: 18,
-    paddingVertical: 22,
+    paddingTop: 20,
+    paddingBottom: 18,
     overflow: "hidden",
-    minHeight: 108,
-    justifyContent: "center"
+    minHeight: 132,
+    borderWidth: 1,
+    borderColor: "rgba(201, 255, 53, 0.12)"
   },
-  promoGlow: {
+  promoGlowLeft: {
     position: "absolute",
-    top: -20,
-    right: -10,
-    width: 180,
-    height: 120,
-    borderRadius: 90
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 120
+  },
+  promoGlowRight: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: 100
   },
   promoTitle: {
-    color: "#111111",
+    color: TEXT,
     fontSize: 22,
     fontWeight: "800",
-    letterSpacing: -0.4
+    letterSpacing: -0.4,
+    lineHeight: 28
+  },
+  promoTitleAccent: {
+    color: LIME,
+    fontWeight: "800"
   },
   promoSubtitle: {
-    color: "#111111",
+    color: MUTED,
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "500",
     marginTop: 6,
-    opacity: 0.92
+    letterSpacing: 0.1
+  },
+  promoCta: {
+    alignSelf: "flex-start",
+    marginTop: 16,
+    backgroundColor: "#0d0d0d",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(201, 255, 53, 0.28)"
+  },
+  promoCtaText: {
+    color: LIME,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.1
   },
   footerSection: {
     marginTop: 8,

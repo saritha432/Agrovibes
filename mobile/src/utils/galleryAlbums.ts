@@ -16,16 +16,31 @@ export type GalleryGridAsset = {
   duration?: number;
 };
 
+export type GalleryAssetsPage = {
+  assets: GalleryGridAsset[];
+  hasNextPage: boolean;
+  endCursor: string | null;
+};
+
+export const GALLERY_INITIAL_PAGE_SIZE = 40;
+export const GALLERY_PAGE_SIZE = 40;
+
 const RECENTS_ID = "";
 
-async function resolveAssetDisplayUri(asset: MediaLibrary.Asset): Promise<string> {
-  if (Platform.OS !== "android") return asset.uri;
-  try {
-    const info = await MediaLibrary.getAssetInfoAsync(asset);
-    return info.localUri || info.uri || asset.uri;
-  } catch {
-    return asset.uri;
-  }
+function mediaTypesForMode(mode: "post" | "story" | "reel" | "live") {
+  if (mode === "post") return [MediaLibrary.MediaType.photo];
+  if (mode === "reel") return [MediaLibrary.MediaType.video];
+  return [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video];
+}
+
+function mapAsset(a: MediaLibrary.Asset): GalleryGridAsset {
+  return {
+    id: a.id,
+    uri: a.uri,
+    mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "image",
+    filename: a.filename,
+    duration: a.duration
+  };
 }
 
 export function defaultPostGallerySelection(assets: GalleryGridAsset[]): string[] {
@@ -33,11 +48,49 @@ export function defaultPostGallerySelection(assets: GalleryGridAsset[]): string[
   return first ? [first.id] : [];
 }
 
+/** Fast path: load one page of grid assets (paginated). */
+export async function fetchGalleryAssetsPage(
+  albumId: string | null,
+  mode: "post" | "story" | "reel" | "live",
+  options?: { after?: string | null; first?: number }
+): Promise<GalleryAssetsPage> {
+  const perm = await ensureMediaLibraryAccess();
+  if (!perm.granted) {
+    return { assets: [], hasNextPage: false, endCursor: null };
+  }
+
+  const first = options?.first ?? (options?.after ? GALLERY_PAGE_SIZE : GALLERY_INITIAL_PAGE_SIZE);
+  const result = await MediaLibrary.getAssetsAsync({
+    first,
+    after: options?.after ?? undefined,
+    mediaType: mediaTypesForMode(mode),
+    sortBy: [MediaLibrary.SortBy.creationTime],
+    ...(albumId ? { album: albumId } : {})
+  });
+
+  return {
+    assets: result.assets.map(mapAsset),
+    hasNextPage: result.hasNextPage,
+    endCursor: result.endCursor ?? null
+  };
+}
+
+/** Backward-compatible helper for callers that need the full first page only. */
+export async function fetchGalleryAssets(
+  albumId: string | null,
+  mode: "post" | "story" | "reel" | "live"
+): Promise<GalleryGridAsset[]> {
+  const page = await fetchGalleryAssetsPage(albumId, mode);
+  return page.assets;
+}
+
+/** Album list — defer calling until the album picker opens (can be slow on large libraries). */
 export async function fetchGalleryAlbums(): Promise<GalleryAlbum[]> {
   const perm = await ensureMediaLibraryAccess();
   if (!perm.granted) {
     return [{ id: RECENTS_ID, title: "Recents", assetCount: 0 }];
   }
+
   const albums = await MediaLibrary.getAlbumsAsync();
   const mapped = albums
     .filter((a) => (a.assetCount ?? 0) > 0)
@@ -61,55 +114,22 @@ export async function fetchGalleryAlbums(): Promise<GalleryAlbum[]> {
       return a.title.localeCompare(b.title);
     });
 
-  const recentCount = await MediaLibrary.getAssetsAsync({
-    first: 1,
-    mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-    sortBy: [MediaLibrary.SortBy.creationTime]
-  });
+  const recentsTotal = mapped.reduce((sum, album) => sum + album.assetCount, 0);
 
   return [
     {
       id: RECENTS_ID,
       title: "Recents",
-      assetCount: recentCount.totalCount ?? mapped.reduce((s, a) => s + a.assetCount, 0)
+      assetCount: recentsTotal
     },
     ...mapped
   ];
 }
 
-export async function fetchGalleryAssets(
-  albumId: string | null,
-  mode: "post" | "story" | "reel" | "live"
-): Promise<GalleryGridAsset[]> {
-  const perm = await ensureMediaLibraryAccess();
-  if (!perm.granted) return [];
-
-  const mediaType =
-    mode === "post"
-      ? [MediaLibrary.MediaType.photo]
-      : mode === "reel"
-        ? [MediaLibrary.MediaType.video]
-        : [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video];
-
-  const result = await MediaLibrary.getAssetsAsync({
-    first: mode === "story" ? 48 : 120,
-    mediaType,
-    sortBy: [MediaLibrary.SortBy.creationTime],
-    ...(albumId ? { album: albumId } : {})
-  });
-
-  const mapped = await Promise.all(
-    result.assets.map(async (a) => ({
-      id: a.id,
-      uri: await resolveAssetDisplayUri(a),
-      mediaType: a.mediaType === MediaLibrary.MediaType.video ? ("video" as const) : ("image" as const),
-      filename: a.filename,
-      duration: a.duration
-    }))
-  );
-  return mapped;
-}
-
 export function recentsAlbumId() {
   return RECENTS_ID;
+}
+
+export function defaultGalleryAlbums(): GalleryAlbum[] {
+  return [{ id: RECENTS_ID, title: "Recents", assetCount: 0 }];
 }

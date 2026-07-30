@@ -25,6 +25,7 @@ import {
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { Image as ExpoImage } from "expo-image";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
@@ -850,6 +851,32 @@ const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
         objectFit: fit
       } as ViewStyle)
     : ({} as ViewStyle);
+
+/** Cached feed stills — prefers disk cache over RN Image for scroll performance. */
+const FeedMediaImage = React.memo(function FeedMediaImage({
+  uri,
+  style,
+  contentFit = "cover"
+}: {
+  uri: string;
+  style: ImageStyle | ImageStyle[];
+  contentFit?: "cover" | "contain";
+}) {
+  const clean = String(uri || "").trim();
+  if (!clean) {
+    return <View style={[{ backgroundColor: "#1a1a1a" }, style as ViewStyle]} />;
+  }
+  return (
+    <ExpoImage
+      source={{ uri: clean }}
+      style={style}
+      contentFit={contentFit}
+      cachePolicy="memory-disk"
+      recyclingKey={clean}
+      transition={120}
+    />
+  );
+});
 
 function FeedPostVideo({
   uri,
@@ -1882,7 +1909,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (!token || !appIsActive || user?.accountStatus === "deactivated") return;
       const mediaBusy = !!(reelViewerOpen || watchingLivePost || playingPostId != null);
       // While a reel/live is playing, poll far less often so playback isn't fighting the network.
-      const pollMs = mediaBusy ? 90_000 : 45_000;
+      const pollMs = mediaBusy ? 120_000 : 90_000;
       const poll = () => {
         if (feedPollInFlightRef.current) return;
         // Skip background refresh while the user is actively watching media.
@@ -1911,7 +1938,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           });
       };
       // First poll only when idle — avoid stacking with initial feed fetch + video warm.
-      const startDelay = mediaBusy ? pollMs : 8_000;
+      const startDelay = mediaBusy ? pollMs : 30_000;
       const startTimer = setTimeout(poll, startDelay);
       const timer = setInterval(poll, pollMs);
       return () => {
@@ -2573,10 +2600,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
     void (async () => {
       try {
-        await Promise.all([loadPosts(), loadStories(), loadReposts()]);
+        // Paint the feed first — stories/reposts can wait so Home feels snappy.
+        await loadPosts();
       } finally {
         if (mounted) finishPullRefreshTask();
       }
+      if (!mounted) return;
+      InteractionManager.runAfterInteractions(() => {
+        void Promise.all([loadStories(), loadReposts()]);
+      });
     })();
     return () => {
       mounted = false;
@@ -4685,10 +4717,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   />
                 ) : (
                   <>
-                    <Image
+                    <FeedMediaImage
                       style={styles.video}
-                      source={{ uri: post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || "" }}
-                      resizeMode="cover"
+                      uri={post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || ""}
+                      contentFit="cover"
                     />
                     <View style={styles.videoPreviewPlayBadge} pointerEvents="none">
                       <Ionicons name="play" size={20} color="#fff" />
@@ -4735,10 +4767,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                       }}
                       onPress={() => onPostMediaTap(post)}
                     >
-                      <Image
+                      <FeedMediaImage
                         style={{ width: feedMediaWidth, height: feedMediaWidth }}
-                        source={{ uri }}
-                        resizeMode="contain"
+                        uri={uri}
+                        contentFit="contain"
                       />
                     </Pressable>
                   ))}
@@ -4746,7 +4778,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               </View>
             ) : gallery[0] ? (
               <Pressable style={styles.videoTapArea} onPress={() => onPostMediaTap(post)}>
-                <Image style={styles.video} source={{ uri: gallery[0] }} resizeMode="cover" />
+                <FeedMediaImage style={styles.video} uri={gallery[0]} contentFit="cover" />
               </Pressable>
             ) : (
               <Pressable style={styles.videoTapArea} onPress={() => onPostMediaTap(post)}>
@@ -5012,12 +5044,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         data={tabPosts}
         keyExtractor={(item) => item.feedEntryKey || String(item.id)}
         renderItem={renderPost}
-        removeClippedSubviews
+        removeClippedSubviews={Platform.OS === "android"}
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={5}
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        updateCellsBatchingPeriod={50}
+        windowSize={7}
         refreshControl={<RefreshControl refreshing={isPullRefreshing} onRefresh={onPullRefresh} tintColor={APP_LIME} />}
         onEndReached={onFeedEndReached}
         onEndReachedThreshold={0.4}

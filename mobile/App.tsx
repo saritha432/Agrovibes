@@ -1,6 +1,6 @@
 import "fast-text-encoding";
 import React from "react";
-import { Image, Platform, StatusBar, StyleSheet, View } from "react-native";
+import { Image, InteractionManager, Platform, StatusBar, StyleSheet, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { initialWindowMetrics, SafeAreaProvider, type Metrics } from "react-native-safe-area-context";
 import { RootNavigator } from "./src/navigation/RootNavigator";
@@ -12,20 +12,13 @@ import { LanguageProvider } from "./src/localization/LanguageContext";
 import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { APP_BLACK } from "./src/theme/appColors";
-import { PushNotificationBootstrap } from "./src/push/PushNotificationBootstrap";
-import { IncomingCallNotificationBootstrap } from "./src/push/IncomingCallNotificationBootstrap";
-import { CallSignalBootstrap } from "./src/push/CallSignalBootstrap";
-import { GlobalIncomingCallHost } from "./src/push/GlobalIncomingCallHost";
-import { SocketChatBootstrap } from "./src/messaging/SocketChatBootstrap";
-import { FirebaseBootstrap } from "./src/firebase/FirebaseBootstrap";
-import { ReelDeepLinkBootstrap } from "./src/navigation/ReelDeepLinkBootstrap";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
-import { setupDirectMessageNotificationCategory, ensureIncomingCallCategoriesReady, setupMissedCallNotificationCategory } from "./src/push/pushNotifications";
+import { OtaUpdateBanner } from "./src/components/OtaUpdateBanner";
+import { warmUpServer } from "./src/services/api";
 
-void setupDirectMessageNotificationCategory();
-void ensureIncomingCallCategoriesReady();
-void setupMissedCallNotificationCategory();
+/** Wake Railway ASAP — do not wait for fonts/auth restore. */
+warmUpServer();
 
 const CROPVIBE_INTRO_IMAGE = require("./assets/onboarding/cropvibe_intro.png");
 
@@ -59,6 +52,71 @@ function IntroBootScreen() {
   );
 }
 
+/**
+ * Push / socket / Firebase / call hosts — start AFTER first navigation frame
+ * so Home feed can paint without competing for JS thread & network.
+ */
+function DeferredAppServices() {
+  const [services, setServices] = React.useState<{
+    PushNotificationBootstrap: React.ComponentType;
+    IncomingCallNotificationBootstrap: React.ComponentType;
+    CallSignalBootstrap: React.ComponentType;
+    GlobalIncomingCallHost: React.ComponentType;
+    SocketChatBootstrap: React.ComponentType;
+    FirebaseBootstrap: React.ComponentType;
+    ReelDeepLinkBootstrap: React.ComponentType;
+  } | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let delayTimer: ReturnType<typeof setTimeout> | undefined;
+    const task = InteractionManager.runAfterInteractions(() => {
+      delayTimer = setTimeout(() => {
+        if (cancelled) return;
+        setServices({
+          PushNotificationBootstrap: require("./src/push/PushNotificationBootstrap").PushNotificationBootstrap,
+          IncomingCallNotificationBootstrap: require("./src/push/IncomingCallNotificationBootstrap")
+            .IncomingCallNotificationBootstrap,
+          CallSignalBootstrap: require("./src/push/CallSignalBootstrap").CallSignalBootstrap,
+          GlobalIncomingCallHost: require("./src/push/GlobalIncomingCallHost").GlobalIncomingCallHost,
+          SocketChatBootstrap: require("./src/messaging/SocketChatBootstrap").SocketChatBootstrap,
+          FirebaseBootstrap: require("./src/firebase/FirebaseBootstrap").FirebaseBootstrap,
+          ReelDeepLinkBootstrap: require("./src/navigation/ReelDeepLinkBootstrap").ReelDeepLinkBootstrap
+        });
+      }, 400);
+    });
+    return () => {
+      cancelled = true;
+      if (delayTimer) clearTimeout(delayTimer);
+      task.cancel?.();
+    };
+  }, []);
+
+  if (!services) return null;
+
+  const {
+    PushNotificationBootstrap,
+    IncomingCallNotificationBootstrap,
+    CallSignalBootstrap,
+    GlobalIncomingCallHost,
+    SocketChatBootstrap,
+    FirebaseBootstrap,
+    ReelDeepLinkBootstrap
+  } = services;
+
+  return (
+    <>
+      <PushNotificationBootstrap />
+      <IncomingCallNotificationBootstrap />
+      <CallSignalBootstrap />
+      <GlobalIncomingCallHost />
+      <SocketChatBootstrap />
+      <FirebaseBootstrap />
+      <ReelDeepLinkBootstrap />
+    </>
+  );
+}
+
 /** One boot gate: fonts + restore saved login, then open the app (no second auth splash). */
 function AppShell() {
   const { ready: fontsReady } = useAppFonts();
@@ -85,13 +143,6 @@ function AppShell() {
   return (
     <>
       <LanguageSync />
-      <PushNotificationBootstrap />
-      <IncomingCallNotificationBootstrap />
-      <CallSignalBootstrap />
-      <GlobalIncomingCallHost />
-      <SocketChatBootstrap />
-      <FirebaseBootstrap />
-      <ReelDeepLinkBootstrap />
       <NavigationContainer
         ref={navigationRef}
         onReady={() => {
@@ -104,7 +155,9 @@ function AppShell() {
         }}
       >
         <RootNavigator />
+        <OtaUpdateBanner />
       </NavigationContainer>
+      <DeferredAppServices />
     </>
   );
 }
