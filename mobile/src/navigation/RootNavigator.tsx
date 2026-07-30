@@ -1,24 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { AppNavigator } from "./AppNavigator";
-import { SplashScreen } from "../screens/SplashScreen";
-import { AuthChoiceScreen } from "../screens/onboarding/AuthChoiceScreen";
-import { OtpVerifyScreen } from "../screens/onboarding/OtpVerifyScreen";
-import { PersonalInfoScreen } from "../screens/onboarding/PersonalInfoScreen";
-import { RoleSelectionScreen } from "../screens/onboarding/RoleSelectionScreen";
-import { BuyerInterestsScreen } from "../screens/onboarding/BuyerInterestsScreen";
-import { BuyerDeliveryScreen } from "../screens/onboarding/BuyerDeliveryScreen";
-import { BuyerWalkthroughScreen } from "../screens/onboarding/BuyerWalkthroughScreen";
-import { SellerFarmScreen } from "../screens/onboarding/SellerFarmScreen";
-import { SellerKycScreen } from "../screens/onboarding/SellerKycScreen";
-import { SellerBankScreen } from "../screens/onboarding/SellerBankScreen";
-import { ExpertDomainScreen } from "../screens/onboarding/ExpertDomainScreen";
-import { ExpertCredentialsScreen } from "../screens/onboarding/ExpertCredentialsScreen";
-import { ExpertVerificationScreen } from "../screens/onboarding/ExpertVerificationScreen";
-import { SecurityVerificationScreen } from "../screens/onboarding/SecurityVerificationScreen";
-import { InitialSetupScreen } from "../screens/InitialSetupScreen";
-import { ForgotPasswordScreen } from "../screens/onboarding/ForgotPasswordScreen";
-import { ForgotPasswordOtpResetScreen } from "../screens/onboarding/ForgotPasswordOtpResetScreen";
 import type { RootStackParamList } from "./rootStackTypes";
 import { socialDiscoveryTheme } from "../theme/socialDiscoveryTheme";
 import { useAuth } from "../auth/AuthContext";
@@ -46,6 +28,10 @@ const slideBottomTransparent = {
   contentStyle: { backgroundColor: "transparent" }
 };
 
+/**
+ * Only Main (tabs) is eagerly imported.
+ * Onboarding + settings screens load on first navigation — big cold-start win for logged-in users.
+ */
 export function RootNavigator() {
   const { token, user } = useAuth();
   const hasSession = Boolean(token || user);
@@ -55,28 +41,83 @@ export function RootNavigator() {
       initialRouteName={hasSession ? "Main" : "InitialSetup"}
       screenOptions={{ headerShown: false }}
     >
-      {/* Eager: cold path for login / session restore */}
-      <Stack.Screen name="Splash" component={SplashScreen} options={{ animation: "none" }} />
-      <Stack.Screen name="InitialSetup" component={InitialSetupScreen} />
-      <Stack.Screen name="AuthChoice" component={AuthChoiceScreen} />
-      <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} />
-      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-      <Stack.Screen name="ForgotPasswordOtp" component={ForgotPasswordOtpResetScreen} />
-      <Stack.Screen name="PersonalInfo" component={PersonalInfoScreen} />
-      <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />
-      <Stack.Screen name="BuyerInterests" component={BuyerInterestsScreen} />
-      <Stack.Screen name="BuyerDelivery" component={BuyerDeliveryScreen} />
-      <Stack.Screen name="BuyerWalkthrough" component={BuyerWalkthroughScreen} />
-      <Stack.Screen name="SellerFarm" component={SellerFarmScreen} />
-      <Stack.Screen name="SellerKYC" component={SellerKycScreen} />
-      <Stack.Screen name="SellerBank" component={SellerBankScreen} />
-      <Stack.Screen name="ExpertDomain" component={ExpertDomainScreen} />
-      <Stack.Screen name="ExpertCredentials" component={ExpertCredentialsScreen} />
-      <Stack.Screen name="ExpertVerification" component={ExpertVerificationScreen} />
-      <Stack.Screen name="SecurityVerification" component={SecurityVerificationScreen} />
+      <Stack.Screen
+        name="Splash"
+        getComponent={() => require("../screens/SplashScreen").SplashScreen}
+        options={{ animation: "none" }}
+      />
+      <Stack.Screen
+        name="InitialSetup"
+        getComponent={() => require("../screens/InitialSetupScreen").InitialSetupScreen}
+      />
+      <Stack.Screen
+        name="AuthChoice"
+        getComponent={() => require("../screens/onboarding/AuthChoiceScreen").AuthChoiceScreen}
+      />
+      <Stack.Screen
+        name="OtpVerify"
+        getComponent={() => require("../screens/onboarding/OtpVerifyScreen").OtpVerifyScreen}
+      />
+      <Stack.Screen
+        name="ForgotPassword"
+        getComponent={() => require("../screens/onboarding/ForgotPasswordScreen").ForgotPasswordScreen}
+      />
+      <Stack.Screen
+        name="ForgotPasswordOtp"
+        getComponent={() =>
+          require("../screens/onboarding/ForgotPasswordOtpResetScreen").ForgotPasswordOtpResetScreen
+        }
+      />
+      <Stack.Screen
+        name="PersonalInfo"
+        getComponent={() => require("../screens/onboarding/PersonalInfoScreen").PersonalInfoScreen}
+      />
+      <Stack.Screen
+        name="RoleSelection"
+        getComponent={() => require("../screens/onboarding/RoleSelectionScreen").RoleSelectionScreen}
+      />
+      <Stack.Screen
+        name="BuyerInterests"
+        getComponent={() => require("../screens/onboarding/BuyerInterestsScreen").BuyerInterestsScreen}
+      />
+      <Stack.Screen
+        name="BuyerDelivery"
+        getComponent={() => require("../screens/onboarding/BuyerDeliveryScreen").BuyerDeliveryScreen}
+      />
+      <Stack.Screen
+        name="BuyerWalkthrough"
+        getComponent={() => require("../screens/onboarding/BuyerWalkthroughScreen").BuyerWalkthroughScreen}
+      />
+      <Stack.Screen
+        name="SellerFarm"
+        getComponent={() => require("../screens/onboarding/SellerFarmScreen").SellerFarmScreen}
+      />
+      <Stack.Screen
+        name="SellerKYC"
+        getComponent={() => require("../screens/onboarding/SellerKycScreen").SellerKycScreen}
+      />
+      <Stack.Screen
+        name="SellerBank"
+        getComponent={() => require("../screens/onboarding/SellerBankScreen").SellerBankScreen}
+      />
+      <Stack.Screen
+        name="ExpertDomain"
+        getComponent={() => require("../screens/onboarding/ExpertDomainScreen").ExpertDomainScreen}
+      />
+      <Stack.Screen
+        name="ExpertCredentials"
+        getComponent={() => require("../screens/onboarding/ExpertCredentialsScreen").ExpertCredentialsScreen}
+      />
+      <Stack.Screen
+        name="ExpertVerification"
+        getComponent={() => require("../screens/onboarding/ExpertVerificationScreen").ExpertVerificationScreen}
+      />
+      <Stack.Screen
+        name="SecurityVerification"
+        getComponent={() => require("../screens/onboarding/SecurityVerificationScreen").SecurityVerificationScreen}
+      />
       <Stack.Screen name="Main" component={AppNavigator} />
 
-      {/* Lazy: settings / activity / profile stacks — parsed only when opened */}
       <Stack.Screen
         name="InstructorStudio"
         getComponent={() => require("../screens/InstructorStudioScreen").InstructorStudioScreen}
@@ -107,6 +148,26 @@ export function RootNavigator() {
         name="SettingsMenu"
         getComponent={() => require("../screens/SettingsMenuScreen").SettingsMenuScreen}
         options={{ headerShown: false, animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="ProviderOnboarding"
+        getComponent={() => require("../screens/ProviderOnboardingScreen").ProviderOnboardingScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderTerms"
+        getComponent={() => require("../screens/ProviderTermsScreen").ProviderTermsScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderOfferRole"
+        getComponent={() => require("../screens/ProviderOfferRoleScreen").ProviderOfferRoleScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderRentalForm"
+        getComponent={() => require("../screens/ProviderRentalFormScreen").ProviderRentalFormScreen}
+        options={slideRightBg}
       />
       <Stack.Screen
         name="SavedSettings"

@@ -3,15 +3,9 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { HomePost } from "../services/api";
 import { HomeScreen } from "../screens/HomeScreen";
-import { MarketStackNavigator } from "./MarketStackNavigator";
-import { ProfileScreen } from "../screens/ProfileScreen";
-import { ServicesScreen } from "../screens/ServicesScreen";
-import { UserSearchScreen } from "../screens/UserSearchScreen";
-import { DirectInboxScreen } from "../screens/messaging/DirectInboxScreen";
 import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
 import type { OpenCreateOptions } from "../screens/HomeScreen";
-import { LearnStackNavigator } from "./LearnStackNavigator";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
 import { subscribeOpenLiveCreate } from "./liveCreateBridge";
 import { setFeedPlaybackSuspended } from "./feedPlaybackBridge";
@@ -132,12 +126,31 @@ export function AppNavigator() {
               />
             )}
           />
-          <Tab.Screen name="Search" component={UserSearchScreen} />
-          <Tab.Screen name="Market" component={MarketStackNavigator} />
-          <Tab.Screen name="Learn" component={LearnStackNavigator} />
-          <Tab.Screen name="Services" component={ServicesScreen} />
-          <Tab.Screen name="Messages" component={DirectInboxScreen} />
-          <Tab.Screen name="Profile" component={ProfileScreen} />
+          {/* Defer non-Home tabs until first visit — avoids parsing Search/Market/Chat/etc at cold start. */}
+          <Tab.Screen
+            name="Search"
+            getComponent={() => require("../screens/UserSearchScreen").UserSearchScreen}
+          />
+          <Tab.Screen
+            name="Market"
+            getComponent={() => require("./MarketStackNavigator").MarketStackNavigator}
+          />
+          <Tab.Screen
+            name="Learn"
+            getComponent={() => require("./LearnStackNavigator").LearnStackNavigator}
+          />
+          <Tab.Screen
+            name="Services"
+            getComponent={() => require("../screens/ServicesScreen").ServicesScreen}
+          />
+          <Tab.Screen
+            name="Messages"
+            getComponent={() => require("../screens/messaging/DirectInboxScreen").DirectInboxScreen}
+          />
+          <Tab.Screen
+            name="Profile"
+            getComponent={() => require("../screens/ProfileScreen").ProfileScreen}
+          />
         </Tab.Navigator>
         {isCreateOpen ? (
           <Suspense fallback={<CreateModalFallback />}>

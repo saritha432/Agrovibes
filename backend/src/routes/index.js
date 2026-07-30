@@ -5673,13 +5673,15 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     }
 
     scheduleHomeFeedMaintenance();
-    await ensureHomePostsTable();
-    await ensureLearnUsersTable();
-    await ensureSocialFollowsTable();
-    await ensureSocialBlocksTable();
-    await ensureHomePostLikesTable();
-    await ensureHomePostSavesTable();
-    await ensureHomePostResharesTable();
+    await Promise.all([
+      ensureHomePostsTable(),
+      ensureLearnUsersTable(),
+      ensureSocialFollowsTable(),
+      ensureSocialBlocksTable(),
+      ensureHomePostLikesTable(),
+      ensureHomePostSavesTable(),
+      ensureHomePostResharesTable()
+    ]);
     const params = [viewerId];
     if (cursor != null) params.push(cursor);
     params.push(limit + 1);
@@ -5699,7 +5701,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       hasMore
     };
     res.json(body);
-    await cacheSetJson(cacheKey, body, 30);
+    await cacheSetJson(cacheKey, body, 90);
   } catch (error) {
     res.json({
       posts: [],
@@ -5729,13 +5731,15 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
     }
 
     scheduleHomeFeedMaintenance();
-    await ensureHomePostsTable();
-    await ensureLearnUsersTable();
-    await ensureSocialFollowsTable();
-    await ensureSocialBlocksTable();
-    await ensureHomePostLikesTable();
-    await ensureHomePostSavesTable();
-    await ensureHomePostResharesTable();
+    await Promise.all([
+      ensureHomePostsTable(),
+      ensureLearnUsersTable(),
+      ensureSocialFollowsTable(),
+      ensureSocialBlocksTable(),
+      ensureHomePostLikesTable(),
+      ensureHomePostSavesTable(),
+      ensureHomePostResharesTable()
+    ]);
     const params = [viewerId];
     if (cursor != null) params.push(cursor);
     params.push(limit + 1);
@@ -5755,7 +5759,7 @@ router.get("/v1/home/posts/reels", authOptional, async (req, res) => {
       hasMore
     };
     res.json(body);
-    await cacheSetJson(cacheKey, body, 45);
+    await cacheSetJson(cacheKey, body, 90);
   } catch (error) {
     res.status(500).json({ message: "Failed to load reels", error: error.message });
   }

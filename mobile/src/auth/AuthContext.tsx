@@ -38,10 +38,35 @@ const STORAGE_KEY = "agrovibes.auth";
 
 const AuthContext = React.createContext<AuthState | null>(null);
 
+async function persistAuth(nextToken: string | null, nextUser: AuthUser | null) {
+  try {
+    if (!nextToken || !nextUser) {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        token: nextToken,
+        user: nextUser
+      })
+    );
+  } catch {
+    // ignore persistence failures — in-memory auth still works for this session
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = React.useState<string | null>(null);
   const [user, setUser] = React.useState<AuthUser | null>(null);
   const [loading, setLoading] = React.useState(true);
+
+  /** Keep latest token for stable callbacks (avoids recreating updateUser/refreshUser on every token change). */
+  const tokenRef = React.useRef<string | null>(null);
+  tokenRef.current = token;
+
+  /** Prevent overlapping profile refreshes (Home/Profile both call refreshUser on focus). */
+  const refreshingRef = React.useRef(false);
 
   React.useEffect(() => {
     warmUpServer();
@@ -65,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(parsed.token);
         setUser(parsed.user);
       } catch {
-        // ignore
+        // ignore corrupt storage
       } finally {
         if (mounted) setLoading(false);
       }
@@ -78,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = React.useCallback(async (payload: { token: string; user: AuthUser }) => {
     setToken(payload.token);
     setUser(payload.user);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    await persistAuth(payload.token, payload.user);
     void upsertSavedLogin(payload.user);
   }, []);
 
@@ -86,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(nextToken);
     setUser((prev) => {
       if (!prev) return prev;
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: nextToken, user: prev })).catch(() => {});
+      void persistAuth(nextToken, prev);
       return prev;
     });
   }, []);
@@ -95,11 +120,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearReelPreviewCache();
     setToken(null);
     setUser(null);
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await persistAuth(null, null);
   }, []);
-
-  const tokenRef = React.useRef<string | null>(null);
-  tokenRef.current = token;
 
   const updateUser = React.useCallback(async (patch: Partial<AuthUser>) => {
     setUser((prev) => {
@@ -107,7 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const merged = { ...prev, ...patch };
       const t = tokenRef.current;
       if (t) {
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ token: t, user: merged })).catch(() => {});
+        void persistAuth(t, merged);
       }
       return merged;
     });
@@ -115,26 +137,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = React.useCallback(async () => {
     const t = tokenRef.current;
-    if (!t) return;
-    const data = await fetchMyAccount(t);
-    if (!data?.user) return;
-    await updateUser({
-      id: data.user.id,
-      email: data.user.email,
-      fullName: data.user.fullName,
-      role: data.user.role,
-      phone: data.user.phone,
-      username: data.user.username,
-      avatarUrl: data.user.avatarUrl,
-      bio: data.user.bio,
-      website: data.user.website,
-      locationLabel: data.user.locationLabel,
-      accountStatus: data.user.accountStatus,
-      isPrivate: data.user.isPrivate
-    });
+    if (!t || refreshingRef.current) return;
+    refreshingRef.current = true;
+    try {
+      const data = await fetchMyAccount(t);
+      if (!data?.user) return;
+      await updateUser({
+        id: data.user.id,
+        email: data.user.email,
+        fullName: data.user.fullName,
+        role: data.user.role,
+        phone: data.user.phone,
+        username: data.user.username,
+        avatarUrl: data.user.avatarUrl,
+        bio: data.user.bio,
+        website: data.user.website,
+        locationLabel: data.user.locationLabel,
+        accountStatus: data.user.accountStatus,
+        isPrivate: data.user.isPrivate
+      });
+    } finally {
+      refreshingRef.current = false;
+    }
   }, [updateUser]);
 
-  const value: AuthState = { token, user, loading, signIn, refreshToken, refreshUser, signOut, updateUser };
+  const value = React.useMemo<AuthState>(
+    () => ({
+      token,
+      user,
+      loading,
+      signIn,
+      refreshToken,
+      refreshUser,
+      signOut,
+      updateUser
+    }),
+    [token, user, loading, signIn, refreshToken, refreshUser, signOut, updateUser]
+  );
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
@@ -143,4 +183,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
-

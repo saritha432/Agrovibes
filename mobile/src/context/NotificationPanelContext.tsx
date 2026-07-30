@@ -324,19 +324,21 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   useEffect(() => {
     if (!appIsActive || !dismissedReady) return;
     void loadNotifications();
-    // Background badge refresh — keep light so JS thread stays free for swipes.
+    // Background badge refresh — keep infrequent so feed/chat/search stay responsive.
+    // Full notification enrichment is expensive; only poll often while the sheet is open.
     const timer = setInterval(() => {
       void loadNotifications();
-    }, sheetOpen ? 20000 : 15000);
+    }, sheetOpen ? 45_000 : 120_000);
     return () => clearInterval(timer);
   }, [appIsActive, dismissedReady, loadNotifications, sheetOpen]);
 
   useEffect(() => {
     if (!appIsActive) return;
     void loadMessageUnread();
+    // fetchMessageThreads is heavy — don't hammer it for a badge count.
     const timer = setInterval(() => {
       void loadMessageUnread();
-    }, 30000);
+    }, 90_000);
     return () => clearInterval(timer);
   }, [appIsActive, loadMessageUnread]);
 

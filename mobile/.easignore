@@ -33,6 +33,10 @@ ios/
 eas-inspect-out/
 .tmp-android-export/
 .tmp-web-export/
+.expo-web-check/
+.expo-web-clean/
+.expo-web-test3/
+.expo-web-verify/
 dist/
 
 # Unused bulky market SVG exports (app uses PNG icons; Metro only bundles require()'d files)

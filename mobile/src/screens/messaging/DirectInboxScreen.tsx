@@ -85,7 +85,7 @@ export function DirectInboxScreen() {
       if (socketConnected) return;
       const timer = setInterval(() => {
         void load();
-      }, 20000);
+      }, 45_000);
       return () => clearInterval(timer);
     }, [load, socketConnected])
   );

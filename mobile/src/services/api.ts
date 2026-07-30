@@ -10,8 +10,8 @@ import { resolveWebAppOrigin } from "../utils/webAppOrigin";
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://cropvibe-api-production.up.railway.app/api";
 
-const API_FETCH_TIMEOUT_MS = 45_000;
-const API_FETCH_RETRIES = 2;
+const API_FETCH_TIMEOUT_MS = 15_000;
+const API_FETCH_RETRIES = 1;
 
 /** Fire-and-forget ping to warm the API before the user taps Login/Register. */
 export function warmUpServer(): void {
@@ -68,15 +68,20 @@ async function fetchWithRetry(url: string, init: RequestInit = {}, timeoutMs = A
       const response = await fetch(url, { ...init, signal: controller.signal });
       clearTimeout(timer);
       if (attempt < API_FETCH_RETRIES && [502, 503, 504].includes(response.status)) {
-        await new Promise((resolve) => setTimeout(resolve, 1800 * (attempt + 1)));
+        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
         continue;
       }
       return response;
     } catch (error) {
       clearTimeout(timer);
       lastError = error;
+      const aborted =
+        (error instanceof Error && (error.name === "AbortError" || /aborted/i.test(error.message))) ||
+        (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError");
+      // Timeouts should fail fast — retrying makes the app feel frozen for minutes.
+      if (aborted) break;
       if (attempt < API_FETCH_RETRIES) {
-        await new Promise((resolve) => setTimeout(resolve, 1800 * (attempt + 1)));
+        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
         continue;
       }
     }
