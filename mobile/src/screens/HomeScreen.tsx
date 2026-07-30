@@ -2118,9 +2118,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const otherStories = useMemo(() => {
     if (!token) return [];
-    // Server already scopes: own + followed + public accounts.
-    return stories.filter((s) => !storyViewerOwns(s, currentUserId, currentUserStoryKeys));
-  }, [currentUserId, currentUserStoryKeys, stories, token]);
+    // Instagram-style: only stories from people you follow (accepted), plus own (handled separately).
+    return stories.filter(
+      (s) =>
+        !storyViewerOwns(s, currentUserId, currentUserStoryKeys) &&
+        storyIsFromAcceptedFollow(s, followingUserIds, followingNameKeys)
+    );
+  }, [currentUserId, currentUserStoryKeys, followingNameKeys, followingUserIds, stories, token]);
 
   const avatarLookup = useMemo(
     () => buildAvatarLookup(posts, user, socialAvatarsByUserId),

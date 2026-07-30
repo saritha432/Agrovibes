@@ -5205,7 +5205,6 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
             AND sf.following_id = COALESCE(s.user_id, lu.id)
             AND sf.status = 'accepted'
         )
-        OR COALESCE(lu.is_private, nm.is_private, false) = false
       )
       ${authorFilter}
     ORDER BY
@@ -5233,7 +5232,7 @@ router.get("/v1/home/stories", authOptional, async (req, res) => {
     const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v1:home:stories:v5:${gen}:${viewerKey}`;
+    const cacheKey = `v2:home:stories:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
