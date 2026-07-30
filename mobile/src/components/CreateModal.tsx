@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Dimensions,
   FlatList,
   Image,
@@ -22,6 +23,7 @@ import {
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { Image as ExpoImage } from "expo-image";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
@@ -47,14 +49,15 @@ import { StoryCameraPreview } from "./StoryCameraPreview";
 import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
 import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 import {
+  defaultGalleryAlbums,
   fetchGalleryAlbums,
-  fetchGalleryAssets,
+  fetchGalleryAssetsPage,
   defaultPostGallerySelection,
   recentsAlbumId,
   type GalleryAlbum,
   type GalleryGridAsset
 } from "../utils/galleryAlbums";
-import { ensureMediaLibraryAccess } from "../utils/mediaLibraryPermission";
+import { clearMediaLibraryPermissionCache, ensureMediaLibraryAccess } from "../utils/mediaLibraryPermission";
 import { APP_LIME, APP_LIME_SOFT_BG } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { UserAvatar } from "./UserAvatar";
@@ -72,6 +75,21 @@ const LiveKitRoomView = lazyScreen(
   () => import("../screens/live/LiveKitRoomView").then((m) => ({ default: m.LiveKitRoomView })),
   () => require("../screens/live/LiveKitRoomView").LiveKitRoomView
 );
+
+const CAMERA_GRID_ID = "__camera__";
+
+const GalleryThumbnail = React.memo(function GalleryThumbnail({ uri }: { uri: string }) {
+  return (
+    <ExpoImage
+      source={{ uri }}
+      style={{ width: "100%", height: "100%" }}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      recyclingKey={uri}
+      transition={0}
+    />
+  );
+});
 
 type TaggedPerson = { id: number; name: string };
 
@@ -363,8 +381,6 @@ type MediaCreativeProps = {
   shouldPlay?: boolean;
 };
 
-const CAMERA_GRID_ID = "__camera__";
-
 function PostComposeThumbnail({ uri }: { uri: string }) {
   const [failed, setFailed] = React.useState(false);
   return (
@@ -538,7 +554,12 @@ export function CreateModal({
   const [audioSearchLoading, setAudioSearchLoading] = useState(false);
   const [audioSearchError, setAudioSearchError] = useState("");
   const [recentGridAssets, setRecentGridAssets] = useState<GalleryGridAsset[]>([]);
-  const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>([]);
+  const [galleryAlbums, setGalleryAlbums] = useState<GalleryAlbum[]>(defaultGalleryAlbums());
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryLoadingMore, setGalleryLoadingMore] = useState(false);
+  const [galleryHasMore, setGalleryHasMore] = useState(false);
+  const galleryEndCursorRef = useRef<string | null>(null);
+  const galleryRefreshIdRef = useRef(0);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [captureEntryView, setCaptureEntryView] = useState<"camera" | "gallery">("camera");
@@ -803,32 +824,106 @@ export function CreateModal({
 
   const refreshGallery = React.useCallback(async () => {
     if (Platform.OS === "web") {
-      setGalleryAlbums([{ id: recentsAlbumId(), title: "Recents", assetCount: 0 }]);
+      setGalleryAlbums(defaultGalleryAlbums());
       setRecentGridAssets([]);
+      setGalleryHasMore(false);
+      galleryEndCursorRef.current = null;
+      return;
+    }
+
+    const refreshId = ++galleryRefreshIdRef.current;
+    setGalleryLoading(true);
+    try {
+      const page = await fetchGalleryAssetsPage(selectedAlbumId, entryType);
+      if (refreshId !== galleryRefreshIdRef.current) return;
+
+      setRecentGridAssets(page.assets);
+      setGalleryHasMore(page.hasNextPage);
+      galleryEndCursorRef.current = page.endCursor;
+
+      if (entryType === "post") {
+        setEntrySelectedIds((prev) => {
+          const kept = prev.filter((id) => page.assets.some((a) => a.id === id));
+          if (kept.length) return kept;
+          return defaultPostGallerySelection(page.assets);
+        });
+      }
+    } catch {
+      if (refreshId !== galleryRefreshIdRef.current) return;
+      setRecentGridAssets([]);
+      setGalleryHasMore(false);
+      galleryEndCursorRef.current = null;
+    } finally {
+      if (refreshId === galleryRefreshIdRef.current) {
+        setGalleryLoading(false);
+      }
+    }
+  }, [entryType, selectedAlbumId]);
+
+  const loadMoreGallery = React.useCallback(async () => {
+    if (Platform.OS === "web" || galleryLoading || galleryLoadingMore || !galleryHasMore) return;
+    const cursor = galleryEndCursorRef.current;
+    if (!cursor) return;
+
+    const refreshId = galleryRefreshIdRef.current;
+    setGalleryLoadingMore(true);
+    try {
+      const page = await fetchGalleryAssetsPage(selectedAlbumId, entryType, { after: cursor });
+      if (refreshId !== galleryRefreshIdRef.current) return;
+
+      setRecentGridAssets((prev) => {
+        const seen = new Set(prev.map((asset) => asset.id));
+        const next = page.assets.filter((asset) => !seen.has(asset.id));
+        return next.length ? [...prev, ...next] : prev;
+      });
+      setGalleryHasMore(page.hasNextPage);
+      galleryEndCursorRef.current = page.endCursor;
+    } catch {
+      // Keep existing grid if pagination fails.
+    } finally {
+      if (refreshId === galleryRefreshIdRef.current) {
+        setGalleryLoadingMore(false);
+      }
+    }
+  }, [entryType, galleryHasMore, galleryLoading, galleryLoadingMore, selectedAlbumId]);
+
+  const refreshGalleryAlbums = React.useCallback(async () => {
+    if (Platform.OS === "web") {
+      setGalleryAlbums(defaultGalleryAlbums());
       return;
     }
     try {
       const albums = await fetchGalleryAlbums();
       setGalleryAlbums(albums);
-      const assets = await fetchGalleryAssets(selectedAlbumId, entryType);
-      setRecentGridAssets(assets);
-      if (entryType === "post") {
-        setEntrySelectedIds((prev) => {
-          const kept = prev.filter((id) => assets.some((a) => a.id === id));
-          if (kept.length) return kept;
-          return defaultPostGallerySelection(assets);
-        });
-      }
     } catch {
-      setGalleryAlbums([{ id: recentsAlbumId(), title: "Recents", assetCount: 0 }]);
-      setRecentGridAssets([]);
+      setGalleryAlbums(defaultGalleryAlbums());
     }
-  }, [entryType, selectedAlbumId]);
+  }, []);
 
   React.useEffect(() => {
     if (!visible || createType) return;
+    const shouldPrefetchGallery = entryType === "post" || captureEntryView === "gallery";
+    if (!shouldPrefetchGallery) return;
     void refreshGallery();
-  }, [createType, refreshGallery, visible]);
+  }, [captureEntryView, createType, entryType, refreshGallery, visible]);
+
+  // Re-fetch gallery when app returns to foreground (e.g. after iOS limited
+  // access photo selection via system picker or "Select More Photos" prompt).
+  React.useEffect(() => {
+    if (!visible || Platform.OS !== "ios" || captureEntryView !== "gallery") return;
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        clearMediaLibraryPermissionCache();
+        void refreshGallery();
+      }
+    });
+    return () => sub.remove();
+  }, [captureEntryView, visible, refreshGallery]);
+
+  React.useEffect(() => {
+    if (!showAlbumPicker || Platform.OS === "web") return;
+    void refreshGalleryAlbums();
+  }, [refreshGalleryAlbums, showAlbumPicker]);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -1595,6 +1690,12 @@ export function CreateModal({
         await launchWebOrNativeImageLibrary();
         return;
       }
+      // iOS limited access: MediaLibrary only returns pre-selected photos.
+      // Use the system image picker which correctly shows the limited photo set.
+      if (Platform.OS === "ios" && access.limited) {
+        await launchWebOrNativeImageLibrary();
+        return;
+      }
       setCaptureEntryView("gallery");
       void refreshGallery();
       return;
@@ -1612,6 +1713,12 @@ export function CreateModal({
             { text: "Settings", onPress: () => void Linking.openSettings() }
           ]);
         }
+        await launchWebOrNativeImageLibrary();
+        return;
+      }
+      // iOS limited access: MediaLibrary only returns pre-selected photos.
+      // Use the system image picker which correctly shows the limited photo set.
+      if (Platform.OS === "ios" && access.limited) {
         await launchWebOrNativeImageLibrary();
         return;
       }
@@ -1867,6 +1974,19 @@ export function CreateModal({
     () => [{ id: CAMERA_GRID_ID, isCamera: true as const }, ...recentGridAssets],
     [recentGridAssets]
   );
+  const galleryListProps = React.useMemo(
+    () => ({
+      initialNumToRender: 16,
+      maxToRenderPerBatch: 12,
+      windowSize: 5,
+      removeClippedSubviews: Platform.OS === "android",
+      onEndReachedThreshold: 0.4,
+      onEndReached: () => {
+        void loadMoreGallery();
+      }
+    }),
+    [loadMoreGallery]
+  );
   const selectedUri = createType === "story" ? pickedStoryVideoUri : pickedPostAssets[0]?.uri ?? "";
   const postFirst = pickedPostAssets[0];
   const isSelectedVideo =
@@ -2101,6 +2221,22 @@ export function CreateModal({
               keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
               numColumns={4}
               contentContainerStyle={styles.igPostEntryGrid}
+              ListEmptyComponent={
+                galleryLoading ? (
+                  <View style={styles.igGalleryLoading}>
+                    <ActivityIndicator size="small" color="#C9FF35" />
+                    <Text style={styles.igGalleryLoadingText}>Loading photos…</Text>
+                  </View>
+                ) : null
+              }
+              ListFooterComponent={
+                galleryLoadingMore ? (
+                  <View style={styles.igGalleryLoadingMore}>
+                    <ActivityIndicator size="small" color="#C9FF35" />
+                  </View>
+                ) : null
+              }
+              {...galleryListProps}
               renderItem={({ item }) => {
                 if ("isCamera" in item && item.isCamera) {
                   return (
@@ -2114,7 +2250,7 @@ export function CreateModal({
                 const asset = item as GalleryGridAsset;
                 return (
                   <Pressable style={styles.igPostEntryCell} onPress={() => onEntryPressAsset(asset)}>
-                    <Image source={{ uri: asset.uri }} style={styles.igPostEntryCellImage} resizeMode="cover" />
+                    <GalleryThumbnail uri={asset.uri} />
                     {entrySelectedIds.includes(asset.id) ? (
                       <View style={styles.igPostEntrySelectedBadge}>
                         <Text style={styles.igPostEntrySelectedText}>{entrySelectedIds.indexOf(asset.id) + 1}</Text>
@@ -2165,6 +2301,22 @@ export function CreateModal({
               keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
               numColumns={4}
               contentContainerStyle={styles.igPostEntryGrid}
+              ListEmptyComponent={
+                galleryLoading ? (
+                  <View style={styles.igGalleryLoading}>
+                    <ActivityIndicator size="small" color="#C9FF35" />
+                    <Text style={styles.igGalleryLoadingText}>Loading media…</Text>
+                  </View>
+                ) : null
+              }
+              ListFooterComponent={
+                galleryLoadingMore ? (
+                  <View style={styles.igGalleryLoadingMore}>
+                    <ActivityIndicator size="small" color="#C9FF35" />
+                  </View>
+                ) : null
+              }
+              {...galleryListProps}
               renderItem={({ item }) => {
                 if ("isCamera" in item && item.isCamera) {
                   return (
@@ -2178,7 +2330,7 @@ export function CreateModal({
                 const asset = item as GalleryGridAsset;
                 return (
                   <Pressable style={styles.igPostEntryCell} onPress={() => onCaptureGalleryAsset(asset)}>
-                    <Image source={{ uri: asset.uri }} style={styles.igPostEntryCellImage} resizeMode="cover" />
+                    <GalleryThumbnail uri={asset.uri} />
                     {asset.mediaType === "video" ? (
                       <View style={styles.storyGalleryVideoBadge}>
                         <Ionicons name="play" size={10} color="#fff" />
@@ -4021,6 +4173,21 @@ const styles = StyleSheet.create({
   /** FlatList must grow so mode tabs stay pinned under empty gallery space. */
   igPostEntryGridList: { flex: 1 },
   igPostEntryGrid: { flexGrow: 1, paddingBottom: 8 },
+  igGalleryLoading: {
+    flex: 1,
+    minHeight: 180,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 24
+  },
+  igGalleryLoadingText: { color: "#94a3b8", fontSize: 13, fontWeight: "600" },
+  igGalleryLoadingMore: {
+    width: "100%",
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center"
+  },
   igPostEntryCell: {
     width: "25%",
     aspectRatio: 1,

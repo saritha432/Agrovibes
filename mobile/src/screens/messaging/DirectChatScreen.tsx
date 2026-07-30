@@ -728,7 +728,7 @@ export function DirectChatScreen() {
 
   useEffect(() => {
     if (socketConnected) return;
-    const pollMs = callSession?.direction === "outgoing" ? 2000 : 5000;
+    const pollMs = callSession?.direction === "outgoing" ? 2000 : 12_000;
     const timer = setInterval(() => {
       void reload();
     }, pollMs);

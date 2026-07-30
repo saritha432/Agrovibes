@@ -45,6 +45,10 @@ export type RootStackParamList = {
     incomingCall?: { roomName: string; mode: "voice" | "video"; callerId: number; autoAccept?: boolean };
   };
   SettingsMenu: undefined;
+  ProviderOnboarding: undefined;
+  ProviderTerms: undefined;
+  ProviderOfferRole: undefined;
+  ProviderRentalForm: undefined;
   SavedSettings: undefined;
   YourActivity: undefined;
   YourActivityLikes: undefined;

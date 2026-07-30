@@ -39,3 +39,11 @@ mobile/.env
 
 # Mobile platform leftovers
 mobile/.expo/web/cache/
+mobile/eas-inspect-out/
+mobile/.tmp-android-export/
+mobile/.tmp-web-export/
+mobile/.expo-web-check/
+mobile/.expo-web-clean/
+mobile/.expo-web-test3/
+mobile/.expo-web-verify/
+mobile/dist/
