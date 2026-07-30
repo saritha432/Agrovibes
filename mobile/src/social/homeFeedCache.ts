@@ -66,6 +66,29 @@ function mergePostRow(prev: HomePost | undefined, post: HomePost): HomePost {
   };
 }
 
+/** Merge by id but keep the viewer's current scroll order (no re-sort). */
+export function mergeHomeFeedPreservingOrder(fresh: HomePost[], existing: HomePost[]): HomePost[] {
+  if (!existing.length) return fresh.slice();
+  if (!fresh.length) return existing.slice();
+  const freshById = new Map<number, HomePost>();
+  for (const post of fresh) freshById.set(post.id, post);
+  const seen = new Set<number>();
+  const out: HomePost[] = [];
+  for (const prev of existing) {
+    const next = freshById.get(prev.id);
+    if (next) {
+      out.push(mergePostRow(prev, next));
+      seen.add(prev.id);
+    } else {
+      out.push(prev);
+    }
+  }
+  for (const post of fresh) {
+    if (!seen.has(post.id)) out.push(post);
+  }
+  return out;
+}
+
 /** Merge fresh page(s) with existing feed — newer API data wins per id. Does not remove stale rows. */
 export function mergeHomeFeedPosts(fresh: HomePost[], existing: HomePost[]): HomePost[] {
   const byId = new Map<number, HomePost>();
@@ -80,21 +103,41 @@ export function mergeHomeFeedPosts(fresh: HomePost[], existing: HomePost[]): Hom
  * Reconcile the home feed with a fresh first page from the API.
  * Drops posts in the first-page id range that the API no longer returns
  * (private accounts, deletes, blocks, etc.) while keeping older load-more rows.
+ * Preserves the current on-screen order so scrolling does not jump.
  */
 export function reconcileHomeFeedWithFirstPage(fresh: HomePost[], existing: HomePost[]): HomePost[] {
   if (!fresh.length) return [];
+  if (!existing.length) return fresh.slice();
   const minFreshId = Math.min(...fresh.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0));
-  if (!Number.isFinite(minFreshId)) return mergeHomeFeedPosts(fresh, existing);
+  if (!Number.isFinite(minFreshId)) return mergeHomeFeedPreservingOrder(fresh, existing);
 
-  const byId = new Map<number, HomePost>();
-  for (const post of existing) {
-    const id = Number(post.id);
-    if (Number.isFinite(id) && id < minFreshId) byId.set(id, post);
+  const freshById = new Map<number, HomePost>();
+  for (const post of fresh) freshById.set(post.id, post);
+  const seen = new Set<number>();
+  const out: HomePost[] = [];
+
+  for (const prev of existing) {
+    const id = Number(prev.id);
+    const fromFresh = freshById.get(prev.id);
+    if (fromFresh) {
+      out.push(mergePostRow(prev, fromFresh));
+      seen.add(prev.id);
+      continue;
+    }
+    // Keep older load-more rows (below the first-page window).
+    if (Number.isFinite(id) && id < minFreshId) {
+      out.push(prev);
+      seen.add(prev.id);
+    }
+    // Else: first-page id missing from API → drop (private/deleted/blocked).
   }
+
+  // Brand-new first-page posts (not already shown) go to the front in API order.
+  const brandNew: HomePost[] = [];
   for (const post of fresh) {
-    byId.set(post.id, mergePostRow(byId.get(post.id), post));
+    if (!seen.has(post.id)) brandNew.push(post);
   }
-  return sortHomeFeedPosts(Array.from(byId.values()));
+  return brandNew.length ? [...brandNew, ...out] : out;
 }
 
 function feedSortTime(post: HomePost): number {
@@ -123,11 +166,12 @@ export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePos
     };
   });
 
+  // Append repost-only rows without re-sorting the whole feed (avoids jump-to-top).
   const presentIds = new Set(out.map((post) => post.id));
   for (const repostPost of repostItems) {
     if (!presentIds.has(repostPost.id)) out.push(repostPost);
   }
-  return out.sort((a, b) => feedSortTime(b) - feedSortTime(a) || b.id - a.id);
+  return out;
 }
 
 /** Prefer API count; fall back when repost metadata exists but count was not loaded yet. */

@@ -120,7 +120,7 @@ import {
 } from "../social/localFollowStore";
 import {
   clearHomeFeedCache,
-  mergeHomeFeedPosts,
+  mergeHomeFeedPreservingOrder,
   mergeRepostFeedItems,
   shownResharesCount,
   latestResharersForDisplay,
@@ -276,9 +276,9 @@ function seededPostScore(post: HomePost, seed: number): number {
 }
 
 /**
- * The viewer's own most-recent post is always pinned first.
+ * The viewer's own most-recent post is always pinned first on a fresh shuffle.
  * Other fresh posts/reels stay next so newly published content is immediately visible.
- * Older content is shuffled per session/refresh so the feed does not feel stuck.
+ * Older content is shuffled once per pull-to-refresh so the feed does not jump mid-scroll.
  */
 function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number, viewerUserId?: number): HomePost[] {
   let pinned: HomePost | undefined;
@@ -306,6 +306,25 @@ function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number, viewer
   fresh.sort((a, b) => postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
   rest.sort((a, b) => seededPostScore(a, seed) - seededPostScore(b, seed) || postCreatedMs(b) - postCreatedMs(a) || b.id - a.id);
   return [...(pinned ? [pinned] : []), ...fresh, ...rest];
+}
+
+/** Keep the current on-screen sequence; only append posts that are not already present. */
+function stabilizeFeedOrder(previousOrdered: HomePost[], nextList: HomePost[]): HomePost[] {
+  if (!previousOrdered.length) return nextList;
+  if (!nextList.length) return [];
+  const nextById = new Map(nextList.map((p) => [p.id, p]));
+  const seen = new Set<number>();
+  const out: HomePost[] = [];
+  for (const prev of previousOrdered) {
+    const updated = nextById.get(prev.id);
+    if (!updated) continue;
+    out.push(updated);
+    seen.add(prev.id);
+  }
+  for (const post of nextList) {
+    if (!seen.has(post.id)) out.push(post);
+  }
+  return out;
 }
 
 function dismissedPostsStorageKey(userId: string | number | undefined) {
@@ -1329,6 +1348,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const onPullRefresh = useCallback(() => {
     refreshPendingRef.current = 1;
     setIsPullRefreshing(true);
+    setFeedShuffleSeed(Date.now());
     setManualRefreshToken((v) => v + 1);
   }, []);
 
@@ -1570,6 +1590,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         return;
       }
       const primary = ordered[ordered.length - 1];
+      lastPlayingIndexRef.current = primary.index;
       setPlayingPostId(primary.post.id);
       prefetchPostMedia(primary.post);
       prefetchUpcomingPosts(tabPostsRef.current, primary.index, 1);
@@ -1578,6 +1599,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const tabPostsRef = useRef<HomePost[]>([]);
+  const lastPlayingIndexRef = useRef(0);
 
   const viewabilityCallbackRef = useRef(onViewableItemsChanged);
   viewabilityCallbackRef.current = onViewableItemsChanged;
@@ -1641,7 +1663,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     });
   }, [repostFeedItems, blockedUsers, followingUserIds, relationships, viewerUserId]);
 
-  const tabPosts = useMemo(() => {
+  const rawTabPosts = useMemo(() => {
     const nowMs = Date.now();
     const dismissed = new Set(dismissedPostIds);
     const strip = (list: HomePost[]) => list.filter((p) => !dismissed.has(p.id));
@@ -1675,6 +1697,23 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     }
     return orderPostsForFeed(strip(visiblePosts), feedShuffleSeed, nowMs, viewerUserId);
   }, [activeHomeTab, visiblePosts, visibleRepostFeedItems, followingUserIds, dismissedPostIds, feedShuffleSeed, viewerUserId]);
+
+  const stableTabPostsRef = useRef<HomePost[]>([]);
+  const lastFeedShuffleSeedRef = useRef(feedShuffleSeed);
+  const lastHomeTabRef = useRef(activeHomeTab);
+  const tabPosts = useMemo(() => {
+    const tabChanged = lastHomeTabRef.current !== activeHomeTab;
+    const reshuffled = lastFeedShuffleSeedRef.current !== feedShuffleSeed;
+    lastHomeTabRef.current = activeHomeTab;
+    lastFeedShuffleSeedRef.current = feedShuffleSeed;
+    if (tabChanged || reshuffled || !stableTabPostsRef.current.length) {
+      stableTabPostsRef.current = rawTabPosts;
+      return rawTabPosts;
+    }
+    const stabilized = stabilizeFeedOrder(stableTabPostsRef.current, rawTabPosts);
+    stableTabPostsRef.current = stabilized;
+    return stabilized;
+  }, [rawTabPosts, feedShuffleSeed, activeHomeTab]);
 
   tabPostsRef.current = tabPosts;
 
@@ -1718,10 +1757,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         return;
       }
       const withLikes = await applyLocalLikesToPosts(page.posts);
-      setPosts((prev) => mergeHomeFeedPosts(withLikes, prev));
+      setPosts((prev) => mergeHomeFeedPreservingOrder(withLikes, prev));
       feedNextCursorRef.current = page.hasMore ? page.nextCursor : null;
       setFeedHasMore(page.hasMore);
-      void writeHomeFeedCache(mergeHomeFeedPosts(withLikes, postsRef.current), user?.id ?? "anon");
+      void writeHomeFeedCache(mergeHomeFeedPreservingOrder(withLikes, postsRef.current), user?.id ?? "anon");
     } catch {
       // keep scroll position and existing items
     } finally {
@@ -2088,8 +2127,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       return;
     }
     setPlayingPostId((current) => {
-      if (current != null && tabPosts.some((p) => p.id === current)) return current;
-      return tabPosts[0]?.id ?? null;
+      if (current != null && tabPosts.some((p) => p.id === current)) {
+        const idx = tabPosts.findIndex((p) => p.id === current);
+        if (idx >= 0) lastPlayingIndexRef.current = idx;
+        return current;
+      }
+      // Prefer staying near the last watched index instead of jumping to post 1.
+      const fallbackIdx = Math.max(0, Math.min(lastPlayingIndexRef.current, tabPosts.length - 1));
+      lastPlayingIndexRef.current = fallbackIdx;
+      return tabPosts[fallbackIdx]?.id ?? null;
     });
   }, [tabPosts]);
 
@@ -2562,9 +2608,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const merged = applyPendingHomePost(data.posts, pending);
         const withLikes = await applyLocalLikesToPosts(merged);
         if (!mounted) return;
-        // Always replace first page so private/deleted posts cannot linger from cache.
-        const nextPosts = withLikes;
-        setFeedShuffleSeed(Date.now());
+        const isPullRefresh = refreshPendingRef.current > 0;
+        // Pull refresh: replace + new shuffle. Background/initial reload: keep scroll order.
+        const nextPosts = isPullRefresh
+          ? withLikes
+          : postsRef.current.length
+            ? mergeHomeFeedPreservingOrder(withLikes, postsRef.current)
+            : withLikes;
         setPosts(nextPosts);
         void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
       } catch {
@@ -2613,7 +2663,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return () => {
       mounted = false;
     };
-  }, [applyLocalLikesToPosts, manualRefreshToken, refreshToken, token, user?.accountStatus, user?.email, user?.fullName, user?.id, takePendingFeedPost]);
+  }, [manualRefreshToken, refreshToken, token, user?.accountStatus, user?.id, takePendingFeedPost, applyLocalLikesToPosts]);
 
   const relationshipAuthorKey = useMemo(() => {
     if (!user?.id) return "";
@@ -2997,6 +3047,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (reelSlotHeight <= 0 || tabPosts.length === 0) return;
       const index = Math.max(0, Math.min(tabPosts.length - 1, Math.round(offsetY / reelSlotHeight)));
       const post = tabPosts[index];
+      lastPlayingIndexRef.current = index;
       setPlayingPostId(post?.id ?? null);
     },
     [reelSlotHeight, tabPosts]
