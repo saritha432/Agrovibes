@@ -67,6 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /** Prevent overlapping profile refreshes (Home/Profile both call refreshUser on focus). */
   const refreshingRef = React.useRef(false);
+  /** Login already returned a fresh user — skip the immediate Home `/auth/me` bounce. */
+  const skipNextProfileRefreshRef = React.useRef(false);
 
   React.useEffect(() => {
     warmUpServer();
@@ -101,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = React.useCallback(async (payload: { token: string; user: AuthUser }) => {
+    skipNextProfileRefreshRef.current = true;
     setToken(payload.token);
     setUser(payload.user);
     await persistAuth(payload.token, payload.user);
@@ -138,6 +141,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = React.useCallback(async () => {
     const t = tokenRef.current;
     if (!t || refreshingRef.current) return;
+    if (skipNextProfileRefreshRef.current) {
+      skipNextProfileRefreshRef.current = false;
+      return;
+    }
     refreshingRef.current = true;
     try {
       const data = await fetchMyAccount(t);

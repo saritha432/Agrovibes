@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, InteractionManager, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
@@ -243,8 +243,9 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
   }, [token, viewerUserId]);
 
-  const loadNotifications = useCallback(async () => {
+  const loadNotifications = useCallback(async (opts?: { enrich?: boolean }) => {
     if (!user?.fullName) return;
+    const enrich = opts?.enrich === true;
 
     const snap = await fetchNotificationFeedSnapshot({
       token,
@@ -260,6 +261,9 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     setPostLikes((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postLikes)));
     setPostComments((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postComments)));
     setLiveStarts((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.liveStarts)));
+
+    // Heavy enrichment only when the sheet is open — keep login/home feed free.
+    if (!enrich) return;
 
     const fbQueue = followBackQueueRef.current;
     const nameSet = new Set<string>();
@@ -323,23 +327,46 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 
   useEffect(() => {
     if (!appIsActive || !dismissedReady) return;
-    void loadNotifications();
-    // Background badge refresh — keep infrequent so feed/chat/search stay responsive.
-    // Full notification enrichment is expensive; only poll often while the sheet is open.
+    let cancelled = false;
+    let delayTimer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      delayTimer = setTimeout(() => {
+        if (!cancelled) void loadNotifications({ enrich: false });
+      }, 2000);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel?.();
+      if (delayTimer) clearTimeout(delayTimer);
+    };
+  }, [appIsActive, dismissedReady, loadNotifications]);
+
+  useEffect(() => {
+    if (!appIsActive || !dismissedReady) return;
     const timer = setInterval(() => {
-      void loadNotifications();
+      void loadNotifications({ enrich: sheetOpen });
     }, sheetOpen ? 45_000 : 120_000);
     return () => clearInterval(timer);
   }, [appIsActive, dismissedReady, loadNotifications, sheetOpen]);
 
   useEffect(() => {
     if (!appIsActive) return;
-    void loadMessageUnread();
-    // fetchMessageThreads is heavy — don't hammer it for a badge count.
+    let cancelled = false;
+    let delayTimer: ReturnType<typeof setTimeout> | null = null;
+    const task = InteractionManager.runAfterInteractions(() => {
+      delayTimer = setTimeout(() => {
+        if (!cancelled) void loadMessageUnread();
+      }, 2500);
+    });
     const timer = setInterval(() => {
       void loadMessageUnread();
     }, 90_000);
-    return () => clearInterval(timer);
+    return () => {
+      cancelled = true;
+      task.cancel?.();
+      if (delayTimer) clearTimeout(delayTimer);
+      clearInterval(timer);
+    };
   }, [appIsActive, loadMessageUnread]);
 
   useEffect(() => {
@@ -410,7 +437,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const openNotificationSheet = useCallback(() => {
     setFollowRequestsExpanded(false);
     setSheetOpen(true);
-    void loadNotifications();
+    void loadNotifications({ enrich: true });
   }, [loadNotifications]);
 
   const closeNotificationSheet = useCallback(() => {
@@ -426,12 +453,12 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     if (entry?.isLocal) {
       await respondLocalFollowRequest(String(entry.id), action);
-      void loadNotifications();
+      void loadNotifications({ enrich: true });
       return;
     }
     if (token && entry?.followId) {
       await respondToFollowRequest(token, Number(entry.followId), action);
-      void loadNotifications();
+      void loadNotifications({ enrich: true });
     }
   };
 

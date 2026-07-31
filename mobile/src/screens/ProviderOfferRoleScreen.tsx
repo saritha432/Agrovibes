@@ -76,7 +76,17 @@ export function ProviderOfferRoleScreen() {
       <View style={styles.footer}>
         <Pressable
           style={styles.continueBtn}
-          onPress={() => navigation.navigate("ProviderRentalForm")}
+          onPress={() => {
+            if (selectedRole === "service") {
+              navigation.navigate("ProviderServiceForm");
+              return;
+            }
+            if (selectedRole === "both") {
+              navigation.navigate("ProviderRentalForm", { both: true });
+              return;
+            }
+            navigation.navigate("ProviderRentalForm");
+          }}
           accessibilityRole="button"
         >
           <Text style={styles.continueBtnText}>Continue</Text>
@@ -126,31 +136,33 @@ const styles = StyleSheet.create({
   },
   optionsWrap: {
     marginTop: 28,
-    paddingHorizontal: 10,
-    gap: 12
+    paddingHorizontal: 16,
+    gap: 1,
+    alignItems: "center"
   },
   optionCard: {
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: "transparent",
-    backgroundColor: "transparent"
+    width: "100%",
+    maxWidth: 398,
+    height: 133,
+    borderRadius: 16,
+    padding: 14,
+    opacity: 1,
+    borderWidth: 0,
+    borderBottomWidth: 8,
+    borderBottomColor: "transparent",
+    backgroundColor: "transparent",
+    justifyContent: "center"
   },
   optionCardActive: {
     backgroundColor: "#2a2a2a",
-    borderColor: "rgba(201,255,53,0.5)",
-    shadowColor: APP_LIME,
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4
+    borderBottomColor: APP_LIME,
+    opacity: 1
   },
   optionTitle: {
     color: TEXT,
-    fontSize: 33,
-    lineHeight: 37,
-    fontWeight: "700"
+    fontSize: 24,
+    lineHeight: 24,
+    fontWeight: "500"
   },
   optionTitleActive: {
     color: APP_LIME
@@ -159,7 +171,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: MUTED,
     fontSize: 12,
-    lineHeight: 17
+    lineHeight: 20
   },
   footer: {
     paddingHorizontal: 16,

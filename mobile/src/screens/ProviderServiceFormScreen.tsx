@@ -23,24 +23,26 @@ import {
   providerFormStyles as pf
 } from "./provider/providerFormUi";
 
-const CATEGORIES = ["Machinery", "Drivers", "Workers", "Land", "Warehouses"] as const;
-type Category = (typeof CATEGORIES)[number];
+const SERVICES = [
+  "Agriculture Expert Consultation",
+  "Technician Support",
+  "Equipment Repairs & Maintenance",
+  "Soil Testing",
+  "Irrigation Support",
+  "Other"
+] as const;
+type Service = (typeof SERVICES)[number];
 
-const PRICE_UNITS = ["Per Hour", "Per Day", "Per Acre", "Per KM"] as const;
+const PRICE_UNITS = ["Per Hour", "Per Day", "Per Acre", "Per Trip", "Per Visit", "Per Consultation", "Per Test"] as const;
 type PriceUnit = (typeof PRICE_UNITS)[number];
 
-const TYPE_OPTIONS: Record<Category, string[]> = {
-  Machinery: ["Tractor", "Harvester", "Thresher", "Rotavator", "Sprayer", "Plough", "Leveller", "Other"],
-  Drivers: ["Tractor Driver", "Truck Driver", "Harvester Operator", "Other"],
-  Workers: ["Farm Laborer", "Transplanting Team", "Harvesting Team", "Other"],
-  Land: ["Agricultural Land", "Storage Land", "Other"],
-  Warehouses: ["Cold Storage", "Dry Storage", "Other"]
-};
-
-const MAKE_OPTIONS = ["Mahindra", "John Deere", "Sonalika", "TAFE", "New Holland", "Eicher", "Other"];
-const YEAR_OPTIONS = Array.from({ length: 30 }, (_, i) => String(new Date().getFullYear() - i));
-const LANGUAGE_OPTIONS = ["Telugu", "Hindi", "Tamil", "Kannada", "Malayalam", "Marathi", "English", "Other"];
-const EXPERIENCE_OPTIONS = ["0-1 years", "1-3 years", "3-5 years", "5-10 years", "10+ years"];
+const EXPERT_TYPES = ["Agronomist", "Horticulturist", "Crop Specialist", "Livestock Advisor", "Other"];
+const YEARS_PRACTICE = ["0-1 years", "1-3 years", "3-5 years", "5-10 years", "10+ years"];
+const EQUIPMENT_TYPES = ["Tractor", "Harvester", "Pump / Motor", "Sprayer", "Irrigation Kit", "Other"];
+const SYSTEM_TYPES = ["Drip", "Sprinkler", "Flood", "Pivot", "Other"];
+const LAB_AFFILIATIONS = ["NABL Lab", "State Agri Lab", "Private Lab", "On-field Kit", "Other"];
+const TEST_TYPES = ["Soil NPK", "pH / EC", "Micronutrients", "Water Quality", "Full Panel", "Other"];
+const TURNAROUND = ["Same day", "24 hours", "2-3 days", "1 week", "Other"];
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 function SelectDropdown({
@@ -56,7 +58,7 @@ function SelectDropdown({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <View>
+    <View style={{ marginBottom: 12 }}>
       <Pressable style={styles.dropdown} onPress={() => setOpen((v) => !v)}>
         <Text style={value ? styles.dropdownVal : styles.dropdownPlaceholder}>{value || placeholder}</Text>
         <Ionicons name={open ? "chevron-up" : "chevron-down"} size={18} color={PROVIDER_MUTED} />
@@ -81,34 +83,6 @@ function SelectDropdown({
   );
 }
 
-function MultiChipRow({
-  items,
-  selected,
-  onToggle
-}: {
-  items: readonly string[];
-  selected: Set<string>;
-  onToggle: (val: string) => void;
-}) {
-  return (
-    <View style={pf.chipRow}>
-      {items.map((item) => {
-        const active = selected.has(item);
-        return (
-          <Pressable
-            key={item}
-            onPress={() => onToggle(item)}
-            style={[pf.chip, active && pf.chipActive]}
-            accessibilityRole="button"
-          >
-            <Text style={[pf.chipText, active && pf.chipTextActive]}>{item}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 function AvailabilityCalendarModal({
   visible,
   selectedDates,
@@ -124,7 +98,6 @@ function AvailabilityCalendarModal({
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const monthLabel = cursor.toLocaleString("en-US", { month: "long", year: "numeric" });
@@ -141,13 +114,6 @@ function AvailabilityCalendarModal({
     return out;
   }, [month, year]);
 
-  const toggleDay = (key: string) => {
-    const next = new Set(selectedDates);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    onChange(next);
-  };
-
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.calOverlay}>
@@ -159,25 +125,15 @@ function AvailabilityCalendarModal({
             <Text style={styles.calTitle}>Calendar</Text>
             <View style={{ width: 22 }} />
           </View>
-
           <View style={styles.calNav}>
-            <Pressable
-              onPress={() => setCursor(new Date(year, month - 1, 1))}
-              hitSlop={10}
-              accessibilityLabel="Previous month"
-            >
+            <Pressable onPress={() => setCursor(new Date(year, month - 1, 1))} hitSlop={10}>
               <Ionicons name="chevron-back" size={22} color={APP_LIME} />
             </Pressable>
             <Text style={styles.calMonth}>{monthLabel}</Text>
-            <Pressable
-              onPress={() => setCursor(new Date(year, month + 1, 1))}
-              hitSlop={10}
-              accessibilityLabel="Next month"
-            >
+            <Pressable onPress={() => setCursor(new Date(year, month + 1, 1))} hitSlop={10}>
               <Ionicons name="chevron-forward" size={22} color={APP_LIME} />
             </Pressable>
           </View>
-
           <View style={styles.calWeekRow}>
             {WEEKDAYS.map((d) => (
               <Text key={d} style={styles.calWeekday}>
@@ -185,32 +141,27 @@ function AvailabilityCalendarModal({
               </Text>
             ))}
           </View>
-
           <View style={styles.calGrid}>
             {cells.map((cell) => {
-              if (cell.day == null) {
-                return <View key={cell.key} style={styles.calCell} />;
-              }
+              if (cell.day == null) return <View key={cell.key} style={styles.calCell} />;
               const active = selectedDates.has(cell.key);
               return (
                 <Pressable
                   key={cell.key}
                   style={[styles.calCell, active && styles.calCellActive]}
-                  onPress={() => toggleDay(cell.key)}
+                  onPress={() => {
+                    const next = new Set(selectedDates);
+                    if (next.has(cell.key)) next.delete(cell.key);
+                    else next.add(cell.key);
+                    onChange(next);
+                  }}
                 >
                   <Text style={[styles.calDay, active && styles.calDayActive]}>{cell.day}</Text>
                 </Pressable>
               );
             })}
           </View>
-
-          <Text style={styles.calHint}>
-            {selectedDates.size
-              ? `${selectedDates.size} day${selectedDates.size === 1 ? "" : "s"} selected`
-              : "Tap dates you are available"}
-          </Text>
-
-          <Pressable style={styles.calApply} onPress={onClose} accessibilityRole="button">
+          <Pressable style={styles.calApply} onPress={onClose}>
             <Text style={styles.calApplyText}>Apply</Text>
           </Pressable>
         </View>
@@ -219,56 +170,59 @@ function AvailabilityCalendarModal({
   );
 }
 
-export function ProviderRentalFormScreen() {
+function formatDisplayDate(iso: string) {
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return "MM/DD/YYYY";
+  return `${m}/${d}/${y}`;
+}
+
+export function ProviderServiceFormScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const route = useRoute<any>();
-  const both = route.params?.both === true;
-  const [categories, setCategories] = useState<Set<Category>>(() => new Set(["Machinery"]));
-  const [selectedType, setSelectedType] = useState("");
-  const [selectedMake, setSelectedMake] = useState("");
-  const [selectedYear, setSelectedYear] = useState("");
-  const [languages, setLanguages] = useState("");
-  const [skillType, setSkillType] = useState("");
-  const [experience, setExperience] = useState("");
+  const fromBoth = route.params?.fromBoth === true;
+
+  const [selected, setSelected] = useState<Set<Service>>(() => new Set());
+  const [expertType, setExpertType] = useState("");
+  const [yearsPractice, setYearsPractice] = useState("");
+  const [equipmentTypes, setEquipmentTypes] = useState("");
+  const [systemTypes, setSystemTypes] = useState("");
+  const [labAffiliation, setLabAffiliation] = useState("");
+  const [testTypes, setTestTypes] = useState("");
+  const [turnaround, setTurnaround] = useState("");
   const [priceUnit, setPriceUnit] = useState<PriceUnit>("Per Day");
   const [amount, setAmount] = useState("300");
   const [radius, setRadius] = useState(20);
   const [serviceArea, setServiceArea] = useState("");
-  const [availability, setAvailability] = useState(true);
+  const [availability, setAvailability] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [availableDates, setAvailableDates] = useState<Set<string>>(() => new Set());
 
-  const showMachineryFields = categories.has("Machinery") || categories.has("Land") || categories.has("Warehouses");
-  const showPeopleFields = categories.has("Drivers") || categories.has("Workers");
+  const sortedDates = useMemo(
+    () => [...availableDates].sort(),
+    [availableDates]
+  );
+  const dateFrom = sortedDates[0] ? formatDisplayDate(sortedDates[0]) : "MM/DD/YYYY";
+  const dateTo = sortedDates.length > 1 ? formatDisplayDate(sortedDates[sortedDates.length - 1]!) : "MM/DD/YYYY";
 
-  const typeOptions = useMemo(() => {
-    const merged = new Set<string>();
-    categories.forEach((c) => {
-      (TYPE_OPTIONS[c] || []).forEach((t) => merged.add(t));
-    });
-    return [...merged];
-  }, [categories]);
-
-  const skillOptions = useMemo(() => {
-    const merged = new Set<string>();
-    if (categories.has("Drivers")) TYPE_OPTIONS.Drivers.forEach((t) => merged.add(t));
-    if (categories.has("Workers")) TYPE_OPTIONS.Workers.forEach((t) => merged.add(t));
-    return [...merged];
-  }, [categories]);
-
-  const toggleCategory = (item: Category) => {
-    setCategories((prev) => {
+  const toggleService = (item: Service) => {
+    setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(item)) {
-        if (next.size === 1) return prev;
-        next.delete(item);
-      } else {
-        next.add(item);
-      }
+      if (next.has(item)) next.delete(item);
+      else next.add(item);
       return next;
     });
-    setSelectedType("");
-    setSkillType("");
+  };
+
+  const showExpert = selected.has("Agriculture Expert Consultation");
+  const showTechnician = selected.has("Technician Support");
+  const showIrrigation = selected.has("Irrigation Support");
+  const showSoilOrOther =
+    selected.has("Soil Testing") ||
+    selected.has("Other") ||
+    selected.has("Equipment Repairs & Maintenance");
+
+  const onContinue = () => {
+    navigation.navigate("ProviderPersonalDetails", { track: fromBoth ? "both" : "service" });
   };
 
   return (
@@ -282,80 +236,99 @@ export function ProviderRentalFormScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={pf.sectionTitle}>What Are You Renting Out?</Text>
-        <Text style={pf.sectionSub}>Pick everything that applies</Text>
+        <Text style={styles.heading}>What Service Do You Offer?</Text>
+        <Text style={pf.sectionSub}>Select all that apply</Text>
 
-        <MultiChipRow
-          items={CATEGORIES}
-          selected={categories}
-          onToggle={(v) => toggleCategory(v as Category)}
-        />
+        <View style={pf.chipRow}>
+          {SERVICES.map((item) => {
+            const active = selected.has(item);
+            return (
+              <Pressable
+                key={item}
+                onPress={() => toggleService(item)}
+                style={[pf.chip, active && pf.chipActive]}
+              >
+                <Text style={[pf.chipText, active && pf.chipTextActive]}>{item}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <View style={pf.fieldGap} />
 
-        {showMachineryFields ? (
+        {showExpert ? (
           <>
             <SelectDropdown
-              placeholder="Select Type"
-              value={selectedType}
-              options={typeOptions}
-              onSelect={setSelectedType}
+              placeholder="Select Agriculture Expert"
+              value={expertType}
+              options={EXPERT_TYPES}
+              onSelect={setExpertType}
             />
-            <View style={pf.fieldGap} />
-            <View style={styles.twoCol}>
-              <View style={styles.colHalf}>
-                <SelectDropdown
-                  placeholder="Select Model"
-                  value={selectedMake}
-                  options={MAKE_OPTIONS}
-                  onSelect={setSelectedMake}
-                />
-              </View>
-              <View style={styles.colHalf}>
-                <SelectDropdown
-                  placeholder="Select Year"
-                  value={selectedYear}
-                  options={YEAR_OPTIONS}
-                  onSelect={setSelectedYear}
-                />
-              </View>
-            </View>
-            <View style={pf.fieldGap} />
+            <SelectDropdown
+              placeholder="Select Years Of Practice"
+              value={yearsPractice}
+              options={YEARS_PRACTICE}
+              onSelect={setYearsPractice}
+            />
           </>
         ) : null}
 
-        {showPeopleFields ? (
+        {showTechnician ? (
+          <SelectDropdown
+            placeholder="Select Equipment Types Serviced"
+            value={equipmentTypes}
+            options={EQUIPMENT_TYPES}
+            onSelect={setEquipmentTypes}
+          />
+        ) : null}
+
+        {showIrrigation ? (
+          <SelectDropdown
+            placeholder="Select System Types"
+            value={systemTypes}
+            options={SYSTEM_TYPES}
+            onSelect={setSystemTypes}
+          />
+        ) : null}
+
+        {showSoilOrOther ? (
           <>
             <SelectDropdown
-              placeholder="Select Languages"
-              value={languages}
-              options={LANGUAGE_OPTIONS}
-              onSelect={setLanguages}
+              placeholder="Select Lab Affiliation"
+              value={labAffiliation}
+              options={LAB_AFFILIATIONS}
+              onSelect={setLabAffiliation}
             />
-            <View style={pf.fieldGap} />
             <SelectDropdown
-              placeholder="Select Skill Type"
-              value={skillType}
-              options={skillOptions.length ? skillOptions : typeOptions}
-              onSelect={setSkillType}
+              placeholder="Select Test Types Offered"
+              value={testTypes}
+              options={TEST_TYPES}
+              onSelect={setTestTypes}
             />
-            <View style={pf.fieldGap} />
             <SelectDropdown
-              placeholder="Select Experience"
-              value={experience}
-              options={EXPERIENCE_OPTIONS}
-              onSelect={setExperience}
+              placeholder="Select Turnaround Time"
+              value={turnaround}
+              options={TURNAROUND}
+              onSelect={setTurnaround}
             />
-            <View style={pf.fieldGap} />
           </>
         ) : null}
 
         <Text style={pf.fieldLabel}>Price Unit</Text>
-        <MultiChipRow
-          items={PRICE_UNITS}
-          selected={new Set([priceUnit])}
-          onToggle={(v) => setPriceUnit(v as PriceUnit)}
-        />
+        <View style={pf.chipRow}>
+          {PRICE_UNITS.map((unit) => {
+            const active = priceUnit === unit;
+            return (
+              <Pressable
+                key={unit}
+                onPress={() => setPriceUnit(unit)}
+                style={[pf.chip, active && pf.chipActive]}
+              >
+                <Text style={[pf.chipText, active && pf.chipTextActive]}>{unit}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <View style={pf.fieldGap} />
 
@@ -364,13 +337,12 @@ export function ProviderRentalFormScreen() {
           value={amount}
           onChangeText={setAmount}
           keyboardType="numeric"
-          placeholder="Enter amount in ₹"
+          placeholder="Enter Amount (₹)*"
           placeholderTextColor={PROVIDER_MUTED}
         />
 
         <View style={pf.fieldGap} />
-
-        <Text style={pf.fieldLabel}>Work Area</Text>
+        <Text style={pf.fieldLabel}>Service Area</Text>
         <View style={styles.sliderWrap}>
           <Text style={styles.sliderLabel}>With In {radius}km</Text>
           <View style={styles.sliderTrack}>
@@ -390,7 +362,7 @@ export function ProviderRentalFormScreen() {
           style={pf.input}
           value={serviceArea}
           onChangeText={setServiceArea}
-          placeholder="Enter Search Area"
+          placeholder="Enter Service Area"
           placeholderTextColor={PROVIDER_MUTED}
         />
 
@@ -401,8 +373,6 @@ export function ProviderRentalFormScreen() {
             setAvailability(next);
             if (next) setCalendarOpen(true);
           }}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: availability }}
         >
           <Ionicons
             name={availability ? "checkbox-outline" : "square-outline"}
@@ -410,28 +380,28 @@ export function ProviderRentalFormScreen() {
             color={availability ? APP_LIME : PROVIDER_MUTED}
           />
           <Text style={styles.checkText}>Availability</Text>
-          {availability ? (
-            <Pressable onPress={() => setCalendarOpen(true)} hitSlop={8} style={styles.calLink}>
-              <Ionicons name="calendar-outline" size={16} color={APP_LIME} />
-              <Text style={styles.calLinkText}>
-                {availableDates.size ? `${availableDates.size} days` : "Set dates"}
-              </Text>
-            </Pressable>
-          ) : null}
         </Pressable>
+
+        {availability ? (
+          <View style={styles.dateRow}>
+            <Pressable style={styles.dateField} onPress={() => setCalendarOpen(true)}>
+              <Text style={styles.dateText}>{dateFrom}</Text>
+              <Ionicons name="calendar-outline" size={16} color={APP_LIME} />
+            </Pressable>
+            <Pressable style={styles.dateField} onPress={() => setCalendarOpen(true)}>
+              <Text style={styles.dateText}>{dateTo}</Text>
+              <Ionicons name="calendar-outline" size={16} color={APP_LIME} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={{ height: 24 }} />
       </ScrollView>
 
       <ProviderContinueButton
-        label={both ? "Continue to Services" : "Continue"}
-        onPress={() => {
-          if (both) {
-            navigation.navigate("ProviderServiceForm", { fromBoth: true });
-            return;
-          }
-          navigation.navigate("ProviderPersonalDetails", { track: "rental" });
-        }}
+        disabled={selected.size === 0}
+        label={fromBoth ? "Continue to Personal Details" : "Continue"}
+        onPress={onContinue}
       />
 
       <AvailabilityCalendarModal
@@ -445,6 +415,7 @@ export function ProviderRentalFormScreen() {
 }
 
 const styles = StyleSheet.create({
+  heading: { color: APP_LIME, fontSize: 26, fontWeight: "800", lineHeight: 32, marginBottom: 4 },
   dropdown: {
     flexDirection: "row",
     alignItems: "center",
@@ -456,15 +427,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)"
   },
-  dropdownVal: { color: PROVIDER_TEXT, fontSize: 14 },
-  dropdownPlaceholder: { color: PROVIDER_MUTED, fontSize: 14 },
+  dropdownVal: { color: PROVIDER_TEXT, fontSize: 14, flex: 1, paddingRight: 8 },
+  dropdownPlaceholder: { color: PROVIDER_MUTED, fontSize: 14, flex: 1 },
   dropdownList: {
     backgroundColor: "#333435",
     borderRadius: 8,
     marginTop: 4,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
-    zIndex: 99,
     maxHeight: 200,
     overflow: "hidden"
   },
@@ -475,8 +445,6 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.07)"
   },
   dropdownItemText: { color: PROVIDER_TEXT, fontSize: 14 },
-  twoCol: { flexDirection: "row", gap: 10 },
-  colHalf: { flex: 1 },
   amountInput: {
     backgroundColor: PROVIDER_CARD,
     borderRadius: 8,
@@ -513,21 +481,25 @@ const styles = StyleSheet.create({
     top: -8,
     marginLeft: -10
   },
-  sliderTicks: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 8
-  },
+  sliderTicks: { flexDirection: "row", justifyContent: "space-between", marginTop: 8 },
   sliderTick: { color: PROVIDER_MUTED, fontSize: 10 },
-  checkRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  checkRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
   checkText: { color: PROVIDER_TEXT, fontSize: 14, fontWeight: "500" },
-  calLink: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 4 },
-  calLinkText: { color: APP_LIME, fontSize: 12, fontWeight: "600" },
-  calOverlay: {
+  dateRow: { flexDirection: "row", gap: 10, marginTop: 12 },
+  dateField: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "flex-end"
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: PROVIDER_CARD,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)"
   },
+  dateText: { color: PROVIDER_MUTED, fontSize: 13 },
+  calOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   calSheet: {
     backgroundColor: "#222",
     borderTopLeftRadius: 18,
@@ -569,14 +541,8 @@ const styles = StyleSheet.create({
   calCellActive: { backgroundColor: APP_LIME },
   calDay: { color: PROVIDER_TEXT, fontSize: 14, fontWeight: "600" },
   calDayActive: { color: "#000" },
-  calHint: {
-    color: PROVIDER_MUTED,
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 10,
-    marginBottom: 14
-  },
   calApply: {
+    marginTop: 14,
     backgroundColor: APP_LIME,
     borderRadius: 10,
     paddingVertical: 14,

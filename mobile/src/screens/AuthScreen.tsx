@@ -40,7 +40,7 @@ export function AuthScreen() {
       if (mode === "login" && (payload.user as any)?.id != null) {
         await markLaunchSetupComplete((payload.user as any).id);
       }
-      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
+      navigation.reset({ index: 0, routes: [{ name: "Main" }] });
     } catch (e: unknown) {
       setError(formatAuthError(e, "Failed"));
     } finally {

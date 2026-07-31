@@ -11,6 +11,10 @@ function storageKey(viewerId?: string | number | null) {
   return `${STORAGE_KEY_PREFIX}.${key}`;
 }
 
+export async function peekCachedBlockedUsers(viewerId?: string | number | null): Promise<BlockedUser[]> {
+  return readCachedBlockedUsers(viewerId);
+}
+
 async function readCachedBlockedUsers(viewerId?: string | number | null): Promise<BlockedUser[]> {
   try {
     const raw = await AsyncStorage.getItem(storageKey(viewerId));

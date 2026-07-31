@@ -170,6 +170,31 @@ export function RootNavigator() {
         options={slideRightBg}
       />
       <Stack.Screen
+        name="ProviderServiceForm"
+        getComponent={() => require("../screens/ProviderServiceFormScreen").ProviderServiceFormScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderPersonalDetails"
+        getComponent={() => require("../screens/ProviderPersonalDetailsScreen").ProviderPersonalDetailsScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderBankDetails"
+        getComponent={() => require("../screens/ProviderBankDetailsScreen").ProviderBankDetailsScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderKycVerification"
+        getComponent={() => require("../screens/ProviderKycVerificationScreen").ProviderKycVerificationScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="ProviderVerification"
+        getComponent={() => require("../screens/ProviderVerificationScreen").ProviderVerificationScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
         name="SavedSettings"
         getComponent={() => require("../screens/SavedSettingsScreen").SavedSettingsScreen}
         options={slideRightBg}

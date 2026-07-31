@@ -133,6 +133,7 @@ import {
   forgetBlockedUser,
   isUserBlocked,
   loadBlockedUsers,
+  peekCachedBlockedUsers,
   rememberBlockedUser,
   subscribeBlockedUsersChanged
 } from "../social/blockedUsers";
@@ -1559,15 +1560,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   useEffect(() => {
     if (Platform.OS === "web") return;
-    void Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-      shouldDuckAndroid: true,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      playThroughEarpieceAndroid: false
+    const task = InteractionManager.runAfterInteractions(() => {
+      void Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+        shouldDuckAndroid: true,
+        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+        playThroughEarpieceAndroid: false
+      });
     });
+    return () => task.cancel?.();
   }, []);
 
   const viewabilityConfig = useMemo(
@@ -1626,8 +1630,22 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, [token, user?.id]);
 
   useEffect(() => {
-    void reloadBlockedUsers();
-  }, [reloadBlockedUsers]);
+    let cancelled = false;
+    if (!token) {
+      setBlockedUsers([]);
+      return;
+    }
+    void peekCachedBlockedUsers(user?.id).then((cached) => {
+      if (!cancelled && cached.length) setBlockedUsers(cached);
+    });
+    const task = InteractionManager.runAfterInteractions(() => {
+      void reloadBlockedUsers();
+    });
+    return () => {
+      cancelled = true;
+      task.cancel?.();
+    };
+  }, [reloadBlockedUsers, token, user?.id]);
 
   useEffect(() => {
     const unsubscribe = subscribeBlockedUsersChanged(() => {
@@ -1720,7 +1738,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useEffect(() => {
     let cancelled = false;
     void readHomeFeedCache(user?.id ?? "anon").then((cached) => {
-      if (!cancelled && cached?.length) setPosts(cached);
+      if (cancelled || !cached?.length) return;
+      setPosts(cached);
+      // Warm first images immediately so scroll feels Instagram-instant.
+      for (const post of cached.slice(0, 3)) prefetchPostMedia(post, { warmVideo: false });
     });
     return () => {
       cancelled = true;
@@ -1939,7 +1960,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   useFocusEffect(
     useCallback(() => {
       if (!token) return;
-      void refreshUser().catch(() => {});
+      let delayTimer: ReturnType<typeof setTimeout> | null = null;
+      const task = InteractionManager.runAfterInteractions(() => {
+        delayTimer = setTimeout(() => {
+          void refreshUser().catch(() => {});
+        }, 2500);
+      });
+      return () => {
+        task.cancel?.();
+        if (delayTimer) clearTimeout(delayTimer);
+      };
     }, [refreshUser, token])
   );
 
@@ -2606,17 +2636,33 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         feedNextCursorRef.current = data.hasMore ? data.nextCursor : null;
         setFeedHasMore(data.hasMore);
         const merged = applyPendingHomePost(data.posts, pending);
-        const withLikes = await applyLocalLikesToPosts(merged);
-        if (!mounted) return;
         const isPullRefresh = refreshPendingRef.current > 0;
-        // Pull refresh: replace + new shuffle. Background/initial reload: keep scroll order.
-        const nextPosts = isPullRefresh
-          ? withLikes
+        // Paint network rows immediately (IG-style); hydrate local likes after.
+        const painted = isPullRefresh
+          ? merged
           : postsRef.current.length
-            ? mergeHomeFeedPreservingOrder(withLikes, postsRef.current)
-            : withLikes;
-        setPosts(nextPosts);
-        void writeHomeFeedCache(nextPosts, user?.id ?? "anon");
+            ? mergeHomeFeedPreservingOrder(merged, postsRef.current)
+            : merged;
+        setPosts(painted);
+        for (const post of painted.slice(0, 3)) prefetchPostMedia(post, { warmVideo: false });
+        void writeHomeFeedCache(painted, user?.id ?? "anon");
+
+        void applyLocalLikesToPosts(painted).then((withLikes) => {
+          if (!mounted) return;
+          setPosts((prev) => {
+            // Keep scroll order; only overlay like state from this page.
+            const likeById = new Map(withLikes.map((p) => [p.id, p]));
+            return prev.map((p) => {
+              const next = likeById.get(p.id);
+              if (!next) return p;
+              return {
+                ...p,
+                viewerHasLiked: next.viewerHasLiked,
+                likesCount: next.likesCount
+              };
+            });
+          });
+        });
       } catch {
         if (!mounted) return;
         if (!postsRef.current.length) setPosts([]);
