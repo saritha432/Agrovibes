@@ -46,7 +46,7 @@ export function OtpVerifyScreen() {
       if (!auth.isNewUser && auth?.user?.id != null) {
         await markLaunchSetupComplete(auth.user.id);
       }
-      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
+      navigation.reset({ index: 0, routes: [{ name: "Main" }] });
     } catch (e: any) {
       setError(e?.message || t("invalidOtp"));
     } finally {

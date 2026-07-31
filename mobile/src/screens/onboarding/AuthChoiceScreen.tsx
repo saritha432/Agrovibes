@@ -112,7 +112,7 @@ export function AuthChoiceScreen() {
       if (mode === "login" && auth?.user?.id != null) {
         await markLaunchSetupComplete(auth.user.id);
       }
-      navigation.reset({ index: 0, routes: [{ name: "Splash" }] });
+      navigation.reset({ index: 0, routes: [{ name: "Main" }] });
     } catch (error: unknown) {
       setErrorText(
         mode === "register"

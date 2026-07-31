@@ -23,7 +23,7 @@ warmUpServer();
 const CROPVIBE_INTRO_IMAGE = require("./assets/onboarding/cropvibe_intro.png");
 
 /** Brief brand flash — keep short so cold start feels snappy. */
-const INTRO_MIN_MS = 500;
+const INTRO_MIN_MS = 280;
 
 /** Avoid drawing under the iOS status bar when native safe-area top is missing/0. */
 function resolveInitialSafeAreaMetrics(): Metrics | undefined {

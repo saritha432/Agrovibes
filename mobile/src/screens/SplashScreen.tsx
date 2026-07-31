@@ -26,7 +26,7 @@ export function SplashScreen() {
       if (hasSession) {
         setTimeout(() => runPendingNotificationNavigation(), 0);
       }
-    }, 1200);
+    }, 200);
     return () => clearTimeout(timer);
   }, [token, user, navigation]);
 
