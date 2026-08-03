@@ -3980,15 +3980,19 @@ router.post("/v1/social/mutual-connections", authRequired, async (req, res) => {
     for (const row of mutualRes.rows) {
       const tid = Number(row.targetUserId);
       if (!grouped[tid]) grouped[tid] = [];
+      const uid = Number(row.userId);
+      // Deduplicate — joins can theoretically repeat the same mutual person.
+      if (grouped[tid].some((p) => p.userId === uid)) continue;
       grouped[tid].push({
-        userId: Number(row.userId),
+        userId: uid,
         fullName: row.fullName,
-        avatarUrl: row.avatarUrl || undefined
+        avatarUrl: stripLegacyCloudinaryUrl(row.avatarUrl) || undefined
       });
     }
     for (const tid of userIds) {
       const all = grouped[tid] || [];
-      connections[tid].mutual = all.slice(0, 3);
+      // Full mutual list for the sheet (UI still shows only 3 avatars in the header).
+      connections[tid].mutual = all.slice(0, 40);
       connections[tid].mutualCount = all.length;
     }
 

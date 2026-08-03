@@ -32,7 +32,6 @@ const TEXT = "#ffffff";
 const MUTED = "#9e9e9e";
 const BORDER = "#2a2a2a";
 const SEARCH_BG = "#303132";
-const AVATAR_BG = "#3a3f46";
 const LIME = APP_LIME;
 
 const SEARCH_ICON = require("../../../assets/bottom-icons/search.svg");
@@ -213,8 +212,6 @@ export function DirectInboxScreen() {
                   size={56}
                   borderRadius={28}
                   style={styles.avatar}
-                  fallbackBackgroundColor={AVATAR_BG}
-                  initialsColor={MUTED}
                 />
                 <View style={styles.rowBody}>
                   <Text style={[styles.peerName, unread ? styles.peerNameUnread : null]} numberOfLines={1}>
@@ -296,8 +293,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 56,
     height: 56,
-    borderRadius: 28,
-    backgroundColor: AVATAR_BG
+    borderRadius: 28
   },
   rowBody: { flex: 1, minWidth: 0, gap: 4 },
   peerName: { fontSize: 15, fontWeight: "700", color: TEXT },

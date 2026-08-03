@@ -20,6 +20,7 @@ import { useAuth } from "../auth/AuthContext";
 import { fetchHomePosts, fetchLikedHomePosts, type HomePost } from "../services/api";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
+import { UserAvatar } from "../components/UserAvatar";
 import { getLocalLikeStateForPosts } from "../social/localEngagementStore";
 
 const CARD = "#303132";
@@ -80,12 +81,6 @@ function getAuthorMeta(post: HomePost, index: number) {
   const avatarCandidate = post.authorAvatarUrl || postAny.userAvatarUrl || postAny.avatarUrl;
   const avatarUrl = typeof avatarCandidate === "string" && avatarCandidate.trim() ? avatarCandidate.trim() : null;
   return { key, label, subtitle, avatarUrl };
-}
-
-function getAuthorInitial(label: string) {
-  const trimmed = String(label || "").trim();
-  if (!trimmed) return "U";
-  return trimmed.charAt(0).toUpperCase();
 }
 
 export function YourActivityLikesScreen() {
@@ -392,13 +387,13 @@ export function YourActivityLikesScreen() {
                     })
                   }
                 >
-                  {author.avatarUrl ? (
-                    <Image source={{ uri: author.avatarUrl }} style={styles.authorAvatarImage} />
-                  ) : (
-                    <View style={styles.authorAvatar}>
-                      <Text style={styles.authorAvatarInitial}>{getAuthorInitial(author.label)}</Text>
-                    </View>
-                  )}
+                  <UserAvatar
+                    uri={author.avatarUrl}
+                    name={author.label || "?"}
+                    size={36}
+                    borderRadius={18}
+                    style={styles.authorAvatar}
+                  />
                   <View style={styles.authorBody}>
                     <Text style={styles.sheetLabel}>{author.label}</Text>
                     <Text style={styles.sheetSubLabel}>{author.subtitle}</Text>

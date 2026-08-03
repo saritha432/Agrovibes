@@ -1,14 +1,17 @@
 import React, { forwardRef } from "react";
 import { View } from "react-native";
-import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
+import type { StoryCameraPreviewHandle, StoryCameraZoomLevel } from "./storyCameraTypes";
 
 type Props = {
   facing?: "front" | "back";
   active?: boolean;
+  flashOn?: boolean;
+  zoomLevel?: StoryCameraZoomLevel;
   mode?: "picture" | "video";
   onPress?: () => void;
   onRecordingChange?: (recording: boolean) => void;
   onAutoRecordFinished?: (payload: { uri: string }) => void;
+  onZoomChange?: (zoom: number) => void;
 };
 
 /** Fallback when platform-specific preview is unavailable. */

@@ -1,6 +1,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useCameraPinchZoom } from "../hooks/useCameraPinchZoom";
 import type { StoryCameraPreviewHandle, StoryCameraZoomLevel } from "./storyCameraTypes";
 import { REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 
@@ -13,6 +14,7 @@ type Props = {
   onPress?: () => void;
   onRecordingChange?: (recording: boolean) => void;
   onAutoRecordFinished?: (payload: { uri: string }) => void;
+  onZoomChange?: (zoom: number) => void;
 };
 
 type VideoTrackCaps = MediaTrackCapabilities & {
@@ -22,7 +24,7 @@ type VideoTrackCaps = MediaTrackCapabilities & {
 
 async function applyWebCameraControls(
   stream: MediaStream | null,
-  options: { flashOn: boolean; zoomLevel: StoryCameraZoomLevel; facing: "front" | "back" }
+  options: { flashOn: boolean; zoomRatio: number; facing: "front" | "back" }
 ) {
   const track = stream?.getVideoTracks()[0];
   if (!track?.getCapabilities) return;
@@ -31,12 +33,12 @@ async function applyWebCameraControls(
   if (caps.zoom && typeof caps.zoom === "object") {
     const min = caps.zoom.min ?? 1;
     const max = caps.zoom.max ?? min;
-    const zoom = options.zoomLevel === 2 ? Math.min(max, Math.max(min, min * 2)) : min;
+    const zoom = min + (max - min) * Math.min(1, Math.max(0, options.zoomRatio));
     try {
-      await track.applyConstraints({ advanced: [{ zoom }] });
+      await track.applyConstraints({ advanced: [{ zoom } as MediaTrackConstraintSet] });
     } catch {
       try {
-        await track.applyConstraints({ zoom });
+        await track.applyConstraints({ zoom } as MediaTrackConstraints);
       } catch {
         // Hardware zoom may be unavailable; CSS preview zoom still applies.
       }
@@ -46,18 +48,18 @@ async function applyWebCameraControls(
   if (!caps.torch) return;
   const torchOn = options.flashOn && options.facing === "back";
   try {
-    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+    await track.applyConstraints({ advanced: [{ torch: torchOn } as MediaTrackConstraintSet] });
   } catch {
     try {
-      await track.applyConstraints({ torch: torchOn });
+      await track.applyConstraints({ torch: torchOn } as MediaTrackConstraints);
     } catch {
       // Torch is unsupported on most desktop browsers.
     }
   }
 }
 
-function applyVideoPresentation(video: HTMLVideoElement, facing: "front" | "back", zoomLevel: StoryCameraZoomLevel) {
-  const scale = zoomLevel === 2 ? 2 : 1;
+function applyVideoPresentation(video: HTMLVideoElement, facing: "front" | "back", zoomRatio: number) {
+  const scale = 1 + Math.min(1, Math.max(0, zoomRatio)) * 2;
   video.style.transformOrigin = "center center";
   if (facing === "front") {
     video.style.transform = scale === 1 ? "scaleX(-1)" : `scaleX(-1) scale(${scale})`;
@@ -90,7 +92,8 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
     mode = "picture",
     onPress,
     onRecordingChange,
-    onAutoRecordFinished
+    onAutoRecordFinished,
+    onZoomChange
   },
   ref
 ) {
@@ -107,6 +110,11 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   const [errorText, setErrorText] = useState("");
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { zoom: cameraZoom, zoomDisplay, pinchHandlers } = useCameraPinchZoom({
+    zoomLevel,
+    enabled: active && ready,
+    onZoomChange
+  });
 
   useEffect(() => {
     activeRef.current = active;
@@ -155,20 +163,20 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
       }
       streamRef.current = stream;
       video.srcObject = stream;
-      applyVideoPresentation(video, facing, zoomLevel);
-      await applyWebCameraControls(stream, { flashOn, zoomLevel, facing });
+      applyVideoPresentation(video, facing, 0);
+      await applyWebCameraControls(stream, { flashOn, zoomRatio: 0, facing });
       await video.play();
       setReady(true);
     } catch (e) {
       setErrorText(e instanceof Error ? e.message : "Could not access camera.");
     }
-  }, [facing, flashOn, mode, zoomLevel]);
+  }, [facing, flashOn, mode]);
 
   useEffect(() => {
     if (!ready || !streamRef.current || !videoRef.current) return;
-    applyVideoPresentation(videoRef.current, facing, zoomLevel);
-    void applyWebCameraControls(streamRef.current, { flashOn, zoomLevel, facing });
-  }, [ready, flashOn, zoomLevel, facing]);
+    applyVideoPresentation(videoRef.current, facing, cameraZoom);
+    void applyWebCameraControls(streamRef.current, { flashOn, zoomRatio: cameraZoom, facing });
+  }, [ready, flashOn, cameraZoom, facing]);
 
   useEffect(() => {
     if (!active) {
@@ -234,7 +242,7 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         if (!ctx) return null;
-        const zoomScale = zoomLevel === 2 ? 2 : 1;
+        const zoomScale = 1 + cameraZoom * 2;
         const sw = w / zoomScale;
         const sh = h / zoomScale;
         const sx = (w - sw) / 2;
@@ -251,7 +259,7 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         setBusy(false);
       }
     },
-    [busy, facing, ready, zoomLevel]
+    [busy, cameraZoom, facing, ready]
   );
 
   const startRecording = useCallback(
@@ -352,9 +360,9 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   }
 
   return (
-    <View ref={hostRef} style={styles.wrap} collapsable={false}>
+    <View ref={hostRef} style={styles.wrap} collapsable={false} {...pinchHandlers}>
       {!ready ? (
-        <View style={styles.loading}>
+        <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color="#C9FF35" />
         </View>
       ) : null}
@@ -362,6 +370,11 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         <View style={styles.recordingBadge} pointerEvents="none">
           <View style={styles.recordingDot} />
           <Text style={styles.recordingText}>Recording</Text>
+        </View>
+      ) : null}
+      {ready && cameraZoom > 0.02 ? (
+        <View style={styles.zoomBadge} pointerEvents="none">
+          <Text style={styles.zoomBadgeText}>{zoomDisplay.toFixed(1)}x</Text>
         </View>
       ) : null}
     </View>
@@ -395,5 +408,16 @@ const styles = StyleSheet.create({
     zIndex: 2
   },
   recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#ef4444" },
-  recordingText: { color: "#fff", fontSize: 12, fontWeight: "700" }
+  recordingText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  zoomBadge: {
+    position: "absolute",
+    bottom: 28,
+    alignSelf: "center",
+    zIndex: 2,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14
+  },
+  zoomBadgeText: { color: "#fff", fontSize: 13, fontWeight: "800" }
 });

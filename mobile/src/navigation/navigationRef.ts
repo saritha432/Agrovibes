@@ -1,4 +1,4 @@
-import { createNavigationContainerRef } from "@react-navigation/native";
+import { createNavigationContainerRef, StackActions } from "@react-navigation/native";
 import type { RootStackParamList } from "./RootNavigator";
 
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
@@ -34,9 +34,15 @@ export function navigateToUserSearch() {
 }
 
 export function navigateToPublicProfile(params: RootStackParamList["PublicProfile"]) {
-  if (navigationRef.isReady()) {
-    navigationRef.navigate("PublicProfile", params);
+  if (!navigationRef.isReady()) return;
+  // Push so opening a mutual/follower from an existing PublicProfile stacks a new screen
+  // instead of silently updating (or no-op'ing) the current route.
+  const current = navigationRef.getCurrentRoute();
+  if (current?.name === "PublicProfile") {
+    navigationRef.dispatch(StackActions.push("PublicProfile", params));
+    return;
   }
+  navigationRef.navigate("PublicProfile", params);
 }
 
 export function navigateToJoinLive() {

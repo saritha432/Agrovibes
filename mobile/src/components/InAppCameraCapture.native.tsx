@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useCameraPinchZoom } from "../hooks/useCameraPinchZoom";
 import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 
 export type InAppCameraCaptureMode = "photo" | "video" | "any";
@@ -84,6 +85,9 @@ export function InAppCameraCapture({
   const [errorText, setErrorText] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
   const [recordSecondsLeft, setRecordSecondsLeft] = useState(maxVideoDurationSec);
+  const { zoom: cameraZoom, zoomDisplay, pinchHandlers, setZoom } = useCameraPinchZoom({
+    enabled: visible && cameraReady
+  });
 
   useEffect(() => {
     if (!visible) return;
@@ -97,7 +101,8 @@ export function InAppCameraCapture({
     recordingStartedAtRef.current = 0;
     unavailableNotifiedRef.current = false;
     setRecordSecondsLeft(maxVideoDurationSec);
-  }, [initialFacing, maxVideoDurationSec, visible]);
+    setZoom(0);
+  }, [initialFacing, maxVideoDurationSec, setZoom, visible]);
 
   React.useEffect(() => {
     if (!recording || mode !== "video") return;
@@ -315,26 +320,36 @@ export function InAppCameraCapture({
           </View>
         ) : (
           <>
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing={facing}
-              mode={cameraViewMode}
-              videoQuality="720p"
-              active={visible}
-              onCameraReady={() => setCameraReady(true)}
-              onMountError={() => {
-                setErrorText("Camera could not start.");
-                if (!unavailableNotifiedRef.current) {
-                  unavailableNotifiedRef.current = true;
-                  onUnavailable?.();
-                  onClose();
-                }
-              }}
-            />
+            <View style={StyleSheet.absoluteFill} collapsable={false}>
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing={facing}
+                mode={cameraViewMode}
+                videoQuality="720p"
+                active={visible}
+                zoom={cameraZoom}
+                pointerEvents="none"
+                onCameraReady={() => setCameraReady(true)}
+                onMountError={() => {
+                  setErrorText("Camera could not start.");
+                  if (!unavailableNotifiedRef.current) {
+                    unavailableNotifiedRef.current = true;
+                    onUnavailable?.();
+                    onClose();
+                  }
+                }}
+              />
+              <View style={styles.pinchLayer} {...pinchHandlers} collapsable={false} />
+            </View>
             {!cameraReady ? (
               <View style={styles.centerWrap} pointerEvents="none">
                 <ActivityIndicator size="large" color="#C9FF35" />
+              </View>
+            ) : null}
+            {cameraReady && cameraZoom > 0.02 ? (
+              <View style={styles.zoomBadge} pointerEvents="none">
+                <Text style={styles.zoomBadgeText}>{zoomDisplay.toFixed(1)}x</Text>
               </View>
             ) : null}
             <View style={[styles.topBar, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
@@ -503,5 +518,20 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10
   },
-  errorText: { color: "#fecaca", textAlign: "center", fontWeight: "600", fontSize: 13 }
+  errorText: { color: "#fecaca", textAlign: "center", fontWeight: "600", fontSize: 13 },
+  pinchLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1
+  },
+  zoomBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "42%",
+    zIndex: 2,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14
+  },
+  zoomBadgeText: { color: "#fff", fontSize: 13, fontWeight: "800" }
 });
