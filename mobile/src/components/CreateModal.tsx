@@ -23,12 +23,12 @@ import {
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { Image as ExpoImage } from "expo-image";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import { uploadVideoThumbnailFromUri } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
+import { FeedImage } from "./FeedImage";
 import {
   createHomePost,
   createHomeStory,
@@ -80,7 +80,7 @@ const CAMERA_GRID_ID = "__camera__";
 
 const GalleryThumbnail = React.memo(function GalleryThumbnail({ uri }: { uri: string }) {
   return (
-    <ExpoImage
+    <FeedImage
       source={{ uri }}
       style={{ width: "100%", height: "100%" }}
       contentFit="cover"

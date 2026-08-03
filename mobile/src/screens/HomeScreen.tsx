@@ -25,7 +25,6 @@ import {
   type ViewToken
 } from "react-native";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
-import { Image as ExpoImage } from "expo-image";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
@@ -887,13 +886,13 @@ const FeedMediaImage = React.memo(function FeedMediaImage({
     return <View style={[{ backgroundColor: "#1a1a1a" }, style as ViewStyle]} />;
   }
   return (
-    <ExpoImage
+    <FeedImage
       source={{ uri: clean }}
       style={style}
       contentFit={contentFit}
       cachePolicy="memory-disk"
       recyclingKey={clean}
-      transition={120}
+      transition={0}
     />
   );
 });
