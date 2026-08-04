@@ -32,6 +32,8 @@ export type RootStackParamList = {
   ExpertVerification: undefined;
   SecurityVerification: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
+  ProviderMain: undefined;
+  ProviderNewListing: undefined;
   InstructorStudio: undefined;
   EditProfile: undefined;
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };

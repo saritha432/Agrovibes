@@ -296,6 +296,16 @@ export function SettingsMenuScreen() {
 
         <PromoCard onPress={() => navigation.navigate("ProviderOnboarding")} />
 
+        <SettingsSection title="Provider">
+          <SettingsRow
+            icon="storefront-outline"
+            title="Open provider dashboard"
+            subtitle="Overview, rental, listings, and services"
+            onPress={() => navigation.navigate("ProviderMain")}
+            showDivider={false}
+          />
+        </SettingsSection>
+
         <SettingsSection title={labels.howYouUse}>
           <SettingsRowList
             items={[

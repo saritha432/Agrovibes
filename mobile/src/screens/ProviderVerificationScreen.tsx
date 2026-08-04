@@ -1,7 +1,7 @@
 import React from "react";
 import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { APP_LIME } from "../theme/appColors";
@@ -19,10 +19,17 @@ export function ProviderVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
 
   const onSubmit = () => {
-    Alert.alert("Submitted", "Your provider KYC is under review.", [
+    Alert.alert("Submitted", "Opening your provider dashboard.", [
       {
         text: "OK",
-        onPress: () => navigation.navigate("SettingsMenu")
+        onPress: () => {
+          navigation.dispatch(
+            CommonActions.reset({
+              index: 0,
+              routes: [{ name: "ProviderMain" }]
+            })
+          );
+        }
       }
     ]);
   };
