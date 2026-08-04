@@ -9,6 +9,7 @@ import { APP_BLACK, APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColor
 import { useAuth } from "../auth/AuthContext";
 import { fetchHomePostComments, fetchHomePosts, type HomePost } from "../services/api";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
+import { UserAvatar } from "../components/UserAvatar";
 
 const CARD = "#303132";
 const DIVIDER = "rgba(255,255,255,0.08)";
@@ -43,11 +44,6 @@ const DATE_OPTIONS: Array<{ key: DateFilter; label: string }> = [
   { key: "year", label: "Past year" },
   { key: "range", label: "Date range" }
 ];
-
-function getInitial(label: string) {
-  const normalized = String(label || "").trim();
-  return normalized ? normalized.charAt(0).toUpperCase() : "U";
-}
 
 function getRelativeTime(createdAt?: string) {
   const ms = Date.parse(String(createdAt || ""));
@@ -265,13 +261,13 @@ export function YourActivityCommentsScreen() {
               })
             }
           >
-            {item.userAvatarUrl ? (
-              <Image source={{ uri: item.userAvatarUrl }} style={styles.avatarImage} />
-            ) : (
-              <View style={styles.avatarFallback}>
-                <Text style={styles.avatarInitial}>{getInitial(item.userLabel)}</Text>
-              </View>
-            )}
+            <UserAvatar
+              uri={item.userAvatarUrl}
+              name={item.userLabel || "?"}
+              size={28}
+              borderRadius={14}
+              style={styles.avatarImage}
+            />
             <View style={styles.rowBody}>
               <Text style={styles.rowTitle}>{item.userLabel}</Text>
               <Text style={styles.rowText} numberOfLines={2}>
@@ -388,13 +384,13 @@ export function YourActivityCommentsScreen() {
                     })
                   }
                 >
-                  {author.avatarUrl ? (
-                    <Image source={{ uri: author.avatarUrl }} style={styles.authorAvatarImage} />
-                  ) : (
-                    <View style={styles.authorAvatar}>
-                      <Text style={styles.authorAvatarInitial}>{getInitial(author.label)}</Text>
-                    </View>
-                  )}
+                  <UserAvatar
+                    uri={author.avatarUrl}
+                    name={author.label || "?"}
+                    size={28}
+                    borderRadius={14}
+                    style={styles.authorAvatar}
+                  />
                   <View style={styles.authorBody}>
                     <Text style={styles.sheetLabel}>{author.label}</Text>
                     <Text style={styles.sheetSubLabel}>{author.subtitle}</Text>

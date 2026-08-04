@@ -1,7 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Alert, InteractionManager, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppIsActive } from "../hooks/useAppIsActive";
+import { useTopChromeInset } from "../theme/topChromeInset";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -34,7 +36,7 @@ import { NotificationPostThumb } from "../components/NotificationPostThumb";
 import { SwipeActionsRow, type SwipeAction } from "../components/SwipeActionsRow";
 import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { useLanguage } from "../localization/LanguageContext";
-import { navigateToJoinLive } from "../navigation/navigationRef";
+import { navigateToJoinLive, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenLiveCreate } from "../navigation/liveCreateBridge";
@@ -62,6 +64,8 @@ export function useNotificationPanel(): NotificationPanelContextValue {
 export function NotificationPanelProvider({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuth();
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
+  const topChromeInset = useTopChromeInset();
   const appIsActive = useAppIsActive();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pending, setPending] = useState<any[]>([]);
@@ -196,7 +200,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       if (entry?.isLocal) {
         const id = String(entry.id);
         void (async () => {
-          if (entry.type === "post_like" || entry.type === "post_comment" || entry.type === "comment_reply") {
+          if (entry.type === "post_like" || entry.type === "post_tag" || entry.type === "post_comment" || entry.type === "comment_reply") {
             await markLocalEngagementRead(id);
             return;
           }
@@ -768,6 +772,9 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     const kind = n.postIsReel ? t("postKindReel") : t("postKindPost");
     const ex = String(n.commentExcerpt || "").trim();
     const excerpt = ex ? `: "${ex}"` : "";
+    if (n.type === "post_tag") {
+      return `${String(n.actorName || "Someone")} tagged you in a ${kind}`;
+    }
     if (n.type === "comment_reply") {
       return t("notifRepliedComment", { name: String(n.actorName || ""), excerpt });
     }
@@ -822,7 +829,15 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       const kind = String(n.type || "live_start");
       items.push({ kind, createdAt: n.createdAt || "", entry: n, key: `live-${kind}-${String(n.id)}` });
     }
-    for (const n of postLikes) items.push({ kind: "post_like", createdAt: n.createdAt || "", entry: n, key: `like-${n.isLocal ? n.id : `r-${n.id}`}` });
+    for (const n of postLikes) {
+      const kind = n.type === "post_tag" ? "post_tag" : "post_like";
+      items.push({
+        kind,
+        createdAt: n.createdAt || "",
+        entry: n,
+        key: `${kind}-${n.isLocal ? n.id : `r-${n.id}`}`
+      });
+    }
     for (const n of postComments) {
       const kind = n.type === "comment_reply" ? "comment_reply" : "post_comment";
       items.push({ kind, createdAt: n.createdAt || "", entry: n, key: `cmt-${n.isLocal ? n.id : `r-${n.id}`}` });
@@ -902,10 +917,71 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     return undefined;
   }, []);
 
+  const onOpenActorProfile = useCallback(
+    (entry: any) => {
+      const actorId = resolveActorId(entry);
+      const actorName = String(entry?.actorName || "").trim() || "User";
+      if (!actorId && !actorName) return;
+      bumpLastSeenFromEntry(entry);
+      setSheetOpen(false);
+      InteractionManager.runAfterInteractions(() => {
+        if (actorId && actorId === Number(user?.id)) {
+          navigateToMyProfile();
+          return;
+        }
+        navigateToPublicProfile({
+          userId: actorId ?? undefined,
+          userName: actorName,
+          avatarUrl: actorAvatarUri(entry) ?? null
+        });
+      });
+    },
+    [actorAvatarUri, bumpLastSeenFromEntry, user?.id]
+  );
+
   const actorDisplayName = useCallback((entry: any) => String(entry?.actorName || "User"), []);
+
+  /** Bold actor name + normal remainder (i18n-safe via placeholder split). */
+  const renderNamedMessage = useCallback(
+    (
+      entry: any,
+      buildWithMarker: (nameMarker: string) => string,
+      options?: { onPressRest?: () => void }
+    ) => {
+      const name = actorDisplayName(entry);
+      const marker = "\u0001";
+      const full = buildWithMarker(marker);
+      const idx = full.indexOf(marker);
+      const prefix = idx >= 0 ? full.slice(0, idx) : "";
+      const suffix = idx >= 0 ? full.slice(idx + marker.length) : full;
+      return (
+        <Text style={styles.figMessageText}>
+          {prefix ? (
+            <Text style={styles.figActionText} onPress={options?.onPressRest} suppressHighlighting>
+              {prefix}
+            </Text>
+          ) : null}
+          <Text
+            style={styles.figActorName}
+            onPress={() => onOpenActorProfile(entry)}
+            suppressHighlighting
+          >
+            {name}
+          </Text>
+          {suffix ? (
+            <Text style={styles.figActionText} onPress={options?.onPressRest} suppressHighlighting>
+              {suffix}
+            </Text>
+          ) : null}
+        </Text>
+      );
+    },
+    [actorDisplayName, onOpenActorProfile]
+  );
 
   const notificationBadgeIcon = useCallback((kind: string): keyof typeof Ionicons.glyphMap => {
     if (kind === "post_comment" || kind === "comment_reply") return "chatbubble";
+    if (kind === "post_tag") return "person";
     if (kind === "follow_back" || kind === "new_follow" || kind === "pending") return "person-add";
     if (kind === "accepted") return "checkmark";
     if (kind === "declined") return "close";
@@ -929,7 +1005,15 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       {children}
       <Modal visible={sheetOpen} animationType="none" onRequestClose={closeNotificationSheet}>
         <View style={styles.overlay}>
-          <View style={styles.sheet}>
+          <View
+            style={[
+              styles.sheet,
+              {
+                paddingTop: topChromeInset + 4,
+                paddingBottom: Math.max(insets.bottom, 12)
+              }
+            ]}
+          >
             <View style={styles.sheetHeader}>
               <Pressable
                 style={styles.headerBackBtn}
@@ -983,13 +1067,13 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                             borderRadius={21}
                             fallbackBackgroundColor="#404040"
                             initialsColor="#f2f5f7"
+                            disableStoryOpen
+                            onPressFallback={() => onOpenActorProfile(n)}
+                            accessibilityLabel={`Open ${actorDisplayName(n)} profile`}
                           />
                         </View>
                         <View style={[styles.figContentWrap, styles.figContentWrapExpanded]}>
-                          <Text style={styles.figMessageText}>
-                            <Text style={styles.figActorName}>{String(n.actorName || "User")}</Text>
-                            <Text style={styles.figActionText}> requested follow</Text>
-                          </Text>
+                          {renderNamedMessage(n, (m) => `${m} requested follow`)}
                         </View>
                         <View style={styles.figRightWrap}>
                           <View style={styles.rowActionsHorizontal}>
@@ -1026,7 +1110,10 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                       ((item.kind === "follow_back" || item.kind === "new_follow") && followStatus === "accepted");
 
                     const openPostFromRow =
-                      item.kind === "post_like" || item.kind === "post_comment" || item.kind === "comment_reply"
+                      item.kind === "post_like" ||
+                      item.kind === "post_tag" ||
+                      item.kind === "post_comment" ||
+                      item.kind === "comment_reply"
                         ? () => onOpenPostFromNotification(n)
                         : null;
 
@@ -1042,6 +1129,9 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                             borderRadius={21}
                             fallbackBackgroundColor="#404040"
                             initialsColor="#f2f5f7"
+                            disableStoryOpen
+                            onPressFallback={() => onOpenActorProfile(n)}
+                            accessibilityLabel={`Open ${actorDisplayName(n)} profile`}
                           />
                           <View style={styles.figBadge}>
                             <Ionicons name={notificationBadgeIcon(item.kind)} size={9} color="#1f2328" />
@@ -1053,27 +1143,38 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                             hideRightPaneForType ? styles.figContentWrapExpanded : null
                           ]}
                         >
-                          {item.kind === "pending" ? (
-                            <Text style={styles.figMessageText}>
-                              {t("notifFollowRequest", { name: String(n.actorName || "") })}
-                            </Text>
-                          ) : item.kind === "follow_back" || item.kind === "new_follow" ? (
-                            <Text style={styles.figMessageText}>
-                              {t("notifNowFollowing", { name: String(n.actorName || "") })}
-                            </Text>
-                          ) : item.kind === "accepted" ? (
-                            <Text style={styles.figMessageText}>
-                              {t("notifAcceptedRequest", { name: String(n.actorName || "") })}
-                            </Text>
-                          ) : item.kind === "declined" ? (
-                            <Text style={styles.figMessageText}>
-                              {t("notifDeclinedRequest", { name: String(n.actorName || "") })}
-                            </Text>
-                          ) : item.kind === "post_like" || item.kind === "post_comment" || item.kind === "comment_reply" ? (
-                            <Text style={styles.figMessageText}>{postActivityLabel(n)}</Text>
-                          ) : (
-                            <Text style={styles.figMessageText}>{liveStartLabel(n)}</Text>
-                          )}
+                          {item.kind === "pending"
+                            ? renderNamedMessage(n, (m) => t("notifFollowRequest", { name: m }))
+                            : item.kind === "follow_back" || item.kind === "new_follow"
+                              ? renderNamedMessage(n, (m) => t("notifNowFollowing", { name: m }))
+                              : item.kind === "accepted"
+                                ? renderNamedMessage(n, (m) => t("notifAcceptedRequest", { name: m }))
+                                : item.kind === "declined"
+                                  ? renderNamedMessage(n, (m) => t("notifDeclinedRequest", { name: m }))
+                                  : item.kind === "post_like" ||
+                                      item.kind === "post_tag" ||
+                                      item.kind === "post_comment" ||
+                                      item.kind === "comment_reply"
+                                    ? renderNamedMessage(
+                                        n,
+                                        (m) => {
+                                          const kind = n.postIsReel ? t("postKindReel") : t("postKindPost");
+                                          const ex = String(n.commentExcerpt || "").trim();
+                                          const excerpt = ex ? `: "${ex}"` : "";
+                                          if (n.type === "post_tag") {
+                                            return `${m} tagged you in a ${kind}.`;
+                                          }
+                                          if (n.type === "comment_reply") {
+                                            return t("notifRepliedComment", { name: m, excerpt });
+                                          }
+                                          if (n.type === "post_comment" || (n.isLocal && n.commentExcerpt)) {
+                                            return t("notifCommentedOn", { name: m, kind, excerpt });
+                                          }
+                                          return t("notifLikedYour", { name: m, kind });
+                                        },
+                                        { onPressRest: openPostFromRow || undefined }
+                                      )
+                                    : renderNamedMessage(n, (m) => liveStartLabel({ ...n, actorName: m }))}
                           <Text style={styles.figTimeText}>{relativeTimeLabel(item.createdAt)}</Text>
                         </View>
                         {!hideRightPaneForType ? (
@@ -1125,7 +1226,10 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                 }
                                 return <View style={styles.figPostPlaceholder} />;
                               })()
-                            ) : item.kind === "post_like" || item.kind === "post_comment" || item.kind === "comment_reply" ? (
+                            ) : item.kind === "post_like" ||
+                              item.kind === "post_tag" ||
+                              item.kind === "post_comment" ||
+                              item.kind === "comment_reply" ? (
                               <NotificationPostThumb
                                 postId={n.postId}
                                 postThumbnailUrl={n.postThumbnailUrl}
@@ -1133,6 +1237,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                 postVideoUrl={n.postVideoUrl}
                                 postIsReel={n.postIsReel}
                                 token={token}
+                                onPress={openPostFromRow || undefined}
                               />
                             ) : (
                               <View style={styles.figPostPlaceholder} />
@@ -1142,13 +1247,8 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                       </View>
                     );
 
-                    const rowCore = openPostFromRow ? (
-                      <Pressable onPress={openPostFromRow} accessibilityRole="button">
-                        {rowInner}
-                      </Pressable>
-                    ) : (
-                      rowInner
-                    );
+                    // Avoid wrapping the whole row so name/avatar profile taps are not stolen.
+                    const rowCore = rowInner;
 
                     if (item.kind === "pending") {
                       return <View key={item.key}>{rowCore}</View>;
@@ -1179,8 +1279,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#262626",
     paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 12,
     borderTopWidth: 0
   },
   sheetHeader: {
@@ -1278,19 +1376,21 @@ const styles = StyleSheet.create({
   },
   figMessageText: {
     color: "#ffffff",
-    fontWeight: "600",
+    fontWeight: "400",
     fontSize: 14,
-    lineHeight: 22
+    lineHeight: 20
   },
   figActorName: {
     color: "#ffffff",
-    fontWeight: "600",
-    fontSize: 12
+    fontWeight: "800",
+    fontSize: 14,
+    lineHeight: 20
   },
   figActionText: {
     color: "#ffffff",
     fontWeight: "400",
-    fontSize: 12
+    fontSize: 14,
+    lineHeight: 20
   },
   figTimeText: {
     marginTop: 2,

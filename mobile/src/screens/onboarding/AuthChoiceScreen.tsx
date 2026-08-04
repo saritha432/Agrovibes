@@ -11,6 +11,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { authLogin, authRegister, formatAuthError } from "../../services/api";
 import { getLoginDevicePayload } from "../../utils/deviceInfo";
 import { APP_BLACK, APP_LIME, APP_SURFACE } from "../../theme/appColors";
+import { useTopChromeInset } from "../../theme/topChromeInset";
 import { SignupLegalNotice } from "../../components/SignupLegalNotice";
 
 const GREEN = APP_LIME;
@@ -35,6 +36,7 @@ export function AuthChoiceScreen() {
   const route = useRoute<RouteProp<RootStackParamList, "AuthChoice">>();
   const { signIn } = useAuth();
   const { t } = useLanguage();
+  const topInset = useTopChromeInset();
   const initialMode = route.params?.initialMode === "login" ? "login" : "register";
   const [mode, setMode] = React.useState<"register" | "login">(initialMode);
   const [loginPhone, setLoginPhone] = React.useState(() => {
@@ -132,7 +134,7 @@ export function AuthChoiceScreen() {
     !loadingSubmit;
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: topInset + 16 }]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -250,7 +252,7 @@ export function AuthChoiceScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16, paddingTop: 48 },
+  screen: { flex: 1, backgroundColor: BG, paddingHorizontal: 16 },
   scrollContent: { paddingBottom: 28 },
   header: { marginBottom: 14 },
   modeSegment: {

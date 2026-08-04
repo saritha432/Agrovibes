@@ -1,10 +1,13 @@
 import type { HomePost } from "../services/api";
 import { reelGridStillUri } from "./reelGrid";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
+import { hasExpoImageNative } from "./hasExpoImageNative";
 
 let ExpoImageModule: typeof import("expo-image").Image | null = null;
 try {
-  ExpoImageModule = require("expo-image").Image;
+  if (hasExpoImageNative()) {
+    ExpoImageModule = require("expo-image").Image;
+  }
 } catch {
   ExpoImageModule = null;
 }

@@ -1253,8 +1253,6 @@ export function DirectChatScreen() {
             size={40}
             borderRadius={20}
             style={styles.headerAvatar}
-            fallbackBackgroundColor="#3a3f46"
-            initialsColor={TEXT}
           />
           <View style={styles.headerMeta}>
             <Text style={styles.headerTitle} numberOfLines={1}>
@@ -1492,8 +1490,6 @@ export function DirectChatScreen() {
                       name={sharedProfile.userName}
                       size={44}
                       borderRadius={22}
-                      fallbackBackgroundColor="#262626"
-                      initialsColor={YELLOW}
                     />
                     <View style={styles.sharedProfileMeta}>
                       <Text style={styles.sharedProfileName} numberOfLines={1}>{sharedProfile.userName}</Text>
@@ -1827,10 +1823,7 @@ const styles = StyleSheet.create({
   headerAvatar: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: "#3a3f46",
-    alignItems: "center",
-    justifyContent: "center"
+    borderRadius: 20
   },
   headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT },
   headerHandle: { marginTop: 2, fontSize: 13, fontWeight: "500", color: MUTED },

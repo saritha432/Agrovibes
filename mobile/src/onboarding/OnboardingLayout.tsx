@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { APP_LIME } from "../theme/appColors";
+import { useTopChromeInset } from "../theme/topChromeInset";
 
 const GREEN = APP_LIME;
 const BORDER = "#dce3e1";
@@ -27,9 +28,11 @@ export function OnboardingLayout({
   onBack,
   showBack = true
 }: Props) {
+  const topInset = useTopChromeInset();
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.bottom} keyboardShouldPersistTaps="handled">
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: topInset + 12 }]}>
         {showBack && onBack ? (
           <Pressable onPress={onBack} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={18} color="#22312d" />
@@ -57,7 +60,7 @@ export function OnboardingLayout({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f2f5f4" },
   bottom: { paddingBottom: 48, paddingHorizontal: 12 },
-  header: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingTop: 12, paddingBottom: 8 },
+  header: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingBottom: 8 },
   backBtn: {
     width: 34,
     height: 34,

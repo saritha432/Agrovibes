@@ -361,8 +361,6 @@ export function NewMessageComposerModal({ visible, recentThreads = [], onClose }
                         name={item.name}
                         size={48}
                         borderRadius={24}
-                        fallbackBackgroundColor="#3a3f46"
-                        initialsColor={MUTED}
                       />
                       <View style={styles.rowBody}>
                         <Text style={styles.rowName} numberOfLines={1}>

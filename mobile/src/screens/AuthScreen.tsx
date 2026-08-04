@@ -8,6 +8,7 @@ import { markLaunchSetupComplete } from "../onboarding/launchSetup";
 import { authLogin, authRegister, formatAuthError } from "../services/api";
 import { getLoginDevicePayload } from "../utils/deviceInfo";
 import { APP_LIME } from "../theme/appColors";
+import { useTopChromeInset } from "../theme/topChromeInset";
 
 type Mode = "login" | "register";
 
@@ -17,6 +18,7 @@ const BORDER = "#dce3e1";
 export function AuthScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { signIn } = useAuth();
+  const topInset = useTopChromeInset();
 
   const [mode, setMode] = React.useState<Mode>("login");
   const [email, setEmail] = React.useState("");
@@ -50,7 +52,7 @@ export function AuthScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.bottom} keyboardShouldPersistTaps="handled">
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: topInset + 12 }]}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={18} color="#22312d" />
         </Pressable>
@@ -138,7 +140,7 @@ export function AuthScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#f2f5f4" },
   bottom: { paddingBottom: 60 },
-  header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8 },
+  header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingBottom: 8 },
   backBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, alignItems: "center", justifyContent: "center" },
   title: { fontWeight: "900", color: "#111616", fontSize: 18 },
   card: { margin: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 12 },

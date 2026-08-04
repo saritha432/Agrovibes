@@ -11,6 +11,7 @@ import { CartProvider } from "./src/cart/CartContext";
 import { LanguageProvider } from "./src/localization/LanguageContext";
 import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
+import { EnsureIosSafeAreaInsets } from "./src/safeArea/EnsureIosSafeAreaInsets";
 import { APP_BLACK } from "./src/theme/appColors";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
@@ -165,16 +166,18 @@ function AppShell() {
 export default function App() {
   return (
     <SafeAreaProvider initialMetrics={resolveInitialSafeAreaMetrics()}>
-      <StatusBar barStyle="light-content" translucent={Platform.OS === "android"} backgroundColor="transparent" />
-      <LanguageProvider>
-        <AuthProvider>
-          <OnboardingProvider>
-            <CartProvider>
-              <AppShell />
-            </CartProvider>
-          </OnboardingProvider>
-        </AuthProvider>
-      </LanguageProvider>
+      <EnsureIosSafeAreaInsets>
+        <StatusBar barStyle="light-content" translucent={Platform.OS === "android"} backgroundColor="transparent" />
+        <LanguageProvider>
+          <AuthProvider>
+            <OnboardingProvider>
+              <CartProvider>
+                <AppShell />
+              </CartProvider>
+            </OnboardingProvider>
+          </AuthProvider>
+        </LanguageProvider>
+      </EnsureIosSafeAreaInsets>
     </SafeAreaProvider>
   );
 }
