@@ -137,8 +137,6 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClo
                   name={item.name}
                   size={46}
                   borderRadius={23}
-                  fallbackBackgroundColor="#3a3f46"
-                  initialsColor="#fff"
                 />
                 <Text style={styles.rowName} numberOfLines={1}>
                   {item.name}

@@ -26,6 +26,7 @@ import { ProfilePhotoCaptureReview } from "../components/ProfilePhotoCaptureRevi
 import { WebCameraCapture } from "../components/WebCameraCapture";
 import { useAuth } from "../auth/AuthContext";
 import { updateMyProfile, uploadImageFile } from "../services/api";
+import { UserAvatar, avatarColorForName } from "../components/UserAvatar";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { isChosenUsername } from "../localization/feedDisplay";
@@ -190,6 +191,11 @@ export function EditProfileScreen() {
       .join("");
   }, [fullName, user?.fullName]);
 
+  const initialsBg = useMemo(
+    () => avatarColorForName(String(fullName || user?.fullName || "U")),
+    [fullName, user?.fullName]
+  );
+
   const displayAvatarUri = removeAvatarPending ? "" : pendingAvatarUri || avatarUrl;
 
   const save = async () => {
@@ -341,7 +347,7 @@ export function EditProfileScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={t("changeProfilePhoto")}
               >
-                <View style={styles.avatar}>
+                <View style={[styles.avatar, !displayAvatarUri ? { backgroundColor: initialsBg } : null]}>
                   {displayAvatarUri ? (
                     <Image source={{ uri: displayAvatarUri }} style={styles.avatarImage} resizeMode="cover" />
                   ) : (
@@ -629,7 +635,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden"
   },
-  avatarText: { fontSize: 34, fontWeight: "800", color: TEXT },
+  avatarText: { fontSize: 34, fontWeight: "800", color: "#ffffff" },
   avatarImage: { width: "100%", height: "100%" },
   avatarBadge: {
     position: "absolute",

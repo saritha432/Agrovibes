@@ -76,7 +76,7 @@ import {
   subscribeBlockedUsersChanged
 } from "../social/blockedUsers";
 import type { BlockedUser } from "../services/api";
-import { navigateToEditProfile } from "../navigation/navigationRef";
+import { navigateToEditProfile, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { UserReportSheet } from "../components/UserReportSheet";
 import { ReelGridTile } from "../components/ReelGridTile";
@@ -179,6 +179,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [profileContentRestricted, setProfileContentRestricted] = useState(false);
   const [publicPostsCount, setPublicPostsCount] = useState(0);
   const [mutualConnection, setMutualConnection] = useState<MutualConnectionInfo | null>(null);
+  const [mutualsSheetOpen, setMutualsSheetOpen] = useState(false);
   const [incomingFollowId, setIncomingFollowId] = useState<number | null>(null);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
   const [publicBio, setPublicBio] = useState("");
@@ -674,7 +675,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     void fetchMutualConnections(token, [publicUserId])
       .then((res) => {
         if (cancelled) return;
-        setMutualConnection(res.connections?.[publicUserId] || null);
+        const map = res.connections || {};
+        setMutualConnection(
+          map[publicUserId] || (map as Record<string, MutualConnectionInfo>)[String(publicUserId)] || null
+        );
       })
       .catch(() => {
         if (!cancelled) setMutualConnection(null);
@@ -963,6 +967,49 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     [mutualConnection, t]
   );
 
+  const mutualPeople = useMemo(() => {
+    const seen = new Set<number>();
+    const list: Array<{ userId: number; fullName: string; avatarUrl?: string }> = [];
+    for (const p of mutualConnection?.mutual || []) {
+      const uid = Number(p.userId);
+      if (!Number.isFinite(uid) || uid <= 0 || seen.has(uid)) continue;
+      seen.add(uid);
+      list.push({
+        userId: uid,
+        fullName: String(p.fullName || "").trim() || "User",
+        avatarUrl: stripLegacyCloudinaryUrl(p.avatarUrl) || undefined
+      });
+    }
+    return list;
+  }, [mutualConnection]);
+
+  /** Prefer loaded people so "N others" always matches the sheet (never inflate past the list). */
+  const mutualTotalCount = mutualPeople.length;
+  const mutualOthersCount = Math.max(0, mutualTotalCount - 1);
+
+  const openMutualProfile = useCallback(
+    (person: { userId: number; fullName: string; avatarUrl?: string }) => {
+      const uid = Number(person.userId);
+      if (!Number.isFinite(uid) || uid <= 0) return;
+      setMutualsSheetOpen(false);
+      if (uid === Number(user?.id)) {
+        navigateToMyProfile();
+        return;
+      }
+      navigateToPublicProfile({
+        userId: uid,
+        userName: person.fullName || "User",
+        avatarUrl: person.avatarUrl || undefined
+      });
+    },
+    [user?.id]
+  );
+
+  const openMutualsSheet = useCallback(() => {
+    if (!mutualPeople.length) return;
+    setMutualsSheetOpen(true);
+  }, [mutualPeople.length]);
+
   const profileSubject = useMemo(() => {
     if (isPublicProfileView) {
       const displayName = resolvePersonDisplayName({
@@ -1246,6 +1293,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     return followPublicBusy ? t("followBusy") : t("follow");
   }, [followPublicBusy, incomingFollowId, publicCanFollowBack, publicFollowStatus, publicReverseStatus, t]);
 
+  const publicFollowIsPrimaryCta =
+    publicFollowStatus !== "accepted" &&
+    publicFollowStatus !== "pending" &&
+    !(publicReverseStatus === "pending" && incomingFollowId);
+
   const publicFollowDisabled =
     followPublicBusy || (publicFollowStatus === "pending" && !(publicReverseStatus === "pending" && incomingFollowId));
 
@@ -1441,8 +1493,6 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
               userName={profileSubject?.fullName || profileSubject?.username || publicUserName || ""}
               size={88}
               borderRadius={44}
-              fallbackBackgroundColor={SURFACE}
-              initialsColor={TEXT}
               style={styles.avatar}
               onPressFallback={() => {
                 if (displayAvatarUrl) setAvatarPreviewOpen(true);
@@ -1488,28 +1538,76 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
           {profileSubject?.bio?.trim() ? <Text style={styles.bio}>{profileSubject.bio.trim()}</Text> : null}
 
-          {isPublicProfileView && (mutualFollowLabel || (mutualConnection?.mutual?.length ?? 0) > 0) ? (
-            <View style={styles.mutualRow}>
-              {(mutualConnection?.mutual || []).slice(0, 3).length ? (
-                <View style={styles.mutualAvatars}>
-                  {(mutualConnection?.mutual || []).slice(0, 3).map((person, idx) => (
-                    <View
+          {isPublicProfileView && (mutualFollowLabel || mutualPeople.length > 0) ? (
+            <View style={styles.mutualRow} collapsable={false}>
+              {mutualPeople.length > 0 ? (
+                <View style={styles.mutualAvatars} collapsable={false}>
+                  {mutualPeople.slice(0, 3).map((person, idx) => (
+                    <Pressable
                       key={person.userId}
                       style={[styles.mutualAvatarWrap, { marginLeft: idx === 0 ? 0 : -8, zIndex: 3 - idx }]}
+                      onPress={() => openMutualProfile(person)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={person.fullName}
                     >
                       <UserAvatar
                         uri={person.avatarUrl}
                         name={person.fullName}
                         size={22}
                         borderRadius={11}
-                        fallbackBackgroundColor={SURFACE_ALT}
-                        initialsColor={TEXT}
                       />
-                    </View>
+                    </Pressable>
                   ))}
                 </View>
               ) : null}
-              {mutualFollowLabel ? (
+              {mutualPeople.length > 0 ? (
+                <View style={styles.mutualTextWrap} collapsable={false}>
+                  <Text style={styles.mutualTextMuted}>{t("followedByPrefix") || "Followed by"} </Text>
+                  <Pressable
+                    onPress={() => openMutualProfile(mutualPeople[0])}
+                    hitSlop={4}
+                    accessibilityRole="link"
+                    accessibilityLabel={mutualPeople[0].fullName}
+                  >
+                    <Text style={styles.mutualTextLink}>{mutualPeople[0].fullName}</Text>
+                  </Pressable>
+                  {mutualPeople.length === 2 ? (
+                    <>
+                      <Text style={styles.mutualTextMuted}> {t("followedByAnd") || "and"} </Text>
+                      <Pressable
+                        onPress={() => openMutualProfile(mutualPeople[1])}
+                        hitSlop={4}
+                        accessibilityRole="link"
+                        accessibilityLabel={mutualPeople[1].fullName}
+                      >
+                        <Text style={styles.mutualTextLink}>{mutualPeople[1].fullName}</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                  {(mutualTotalCount > 2) ? (
+                    <>
+                      <Text style={styles.mutualTextMuted}> {t("followedByAnd") || "and"} </Text>
+                      <Pressable
+                        onPress={openMutualsSheet}
+                        hitSlop={4}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          t("followedByOthers", {
+                            count: mutualOthersCount
+                          }) || `${mutualOthersCount} others`
+                        }
+                      >
+                        <Text style={styles.mutualTextLink}>
+                          {t("followedByOthers", {
+                            count: mutualOthersCount
+                          }) || `${mutualOthersCount} others`}
+                        </Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                </View>
+              ) : mutualFollowLabel ? (
                 <Text style={styles.mutualText} numberOfLines={2}>
                   {mutualFollowLabel}
                 </Text>
@@ -1520,11 +1618,18 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           {isPublicProfileView ? (
             <View style={styles.profileActionsRow}>
               <Pressable
-                style={styles.profileActionBtn}
+                style={[styles.profileActionBtn, publicFollowIsPrimaryCta ? styles.profileFollowPrimaryBtn : null]}
                 onPress={() => void onPublicFollowPress()}
                 disabled={publicFollowDisabled}
               >
-                <Text style={styles.profileActionBtnText}>{publicFollowLabel}</Text>
+                <Text
+                  style={[
+                    styles.profileActionBtnText,
+                    publicFollowIsPrimaryCta ? styles.profileFollowPrimaryBtnText : null
+                  ]}
+                >
+                  {publicFollowLabel}
+                </Text>
               </Pressable>
               <Pressable style={styles.profileActionBtn} onPress={openPublicMessage}>
                 <Text style={styles.profileActionBtnText}>{t("messageBtn")}</Text>
@@ -1580,7 +1685,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       handleShareProfile,
       isInstructor,
       isPublicProfileView,
+      mutualConnection?.mutualCount,
+      mutualFollowLabel,
+      mutualOthersCount,
+      mutualPeople,
+      mutualTotalCount,
       openFollowList,
+      openMutualProfile,
+      openMutualsSheet,
       openPublicMessage,
       profileModel?.followers,
       profileModel?.following,
@@ -1591,6 +1703,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       profileHeaderHandle,
       publicFollowLabel,
       publicFollowDisabled,
+      publicFollowIsPrimaryCta,
       onPublicFollowPress,
       showDeactivatedGallery,
       t
@@ -1726,7 +1839,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             initialNumToRender={12}
             maxToRenderPerBatch={9}
             windowSize={5}
-            removeClippedSubviews={Platform.OS === "android"}
+            removeClippedSubviews={false}
             showsVerticalScrollIndicator={false}
             extraData={`${profilePlayingPostId}-${Object.keys(previewUriByPostId).length}`}
           />
@@ -1854,8 +1967,6 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                           name={recipient.name}
                           size={52}
                           borderRadius={26}
-                          fallbackBackgroundColor={SURFACE}
-                          initialsColor={LIME}
                         />
                       )}
                     </View>
@@ -1948,8 +2059,6 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                         size={40}
                         borderRadius={20}
                         style={styles.personListAvatar}
-                        fallbackBackgroundColor={SURFACE}
-                        initialsColor={LIME}
                       />
                       <Text style={styles.personName} numberOfLines={2}>
                         {person.name}
@@ -1996,6 +2105,56 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
                     </View>
                   );
                 })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={mutualsSheetOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMutualsSheetOpen(false)}
+      >
+        <View style={styles.overlay}>
+          <Pressable style={styles.overlayTapAboveSheet} onPress={() => setMutualsSheetOpen(false)} />
+          <View style={styles.sheet} collapsable={false}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{t("mutualConnections") || "Mutual connections"}</Text>
+              <Pressable onPress={() => setMutualsSheetOpen(false)}>
+                <Ionicons name="close" size={22} color={TEXT} />
+              </Pressable>
+            </View>
+            <ScrollView
+              style={[styles.sheetScroll, { maxHeight: Math.min(440, Math.round(windowHeight * 0.52)) }]}
+              contentContainerStyle={styles.sheetBody}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+              bounces={false}
+            >
+              {mutualPeople.length === 0 ? (
+                <Text style={styles.sheetEmpty}>{t("noUsersFound")}</Text>
+              ) : (
+                mutualPeople.map((person) => (
+                  <Pressable
+                    key={person.userId}
+                    style={styles.personRow}
+                    onPress={() => openMutualProfile(person)}
+                  >
+                    <UserAvatar
+                      uri={person.avatarUrl}
+                      name={person.fullName}
+                      size={40}
+                      borderRadius={20}
+                      style={styles.personListAvatar}
+                    />
+                    <Text style={styles.personName} numberOfLines={2}>
+                      {person.fullName}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={18} color={TEXT} style={{ opacity: 0.45 }} />
+                  </Pressable>
+                ))
               )}
             </ScrollView>
           </View>
@@ -2213,7 +2372,25 @@ const styles = StyleSheet.create({
     color: "#c8cdd2",
     fontSize: 12,
     fontWeight: "600",
-    lineHeight: 16
+    lineHeight: 17
+  },
+  mutualTextWrap: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center"
+  },
+  mutualTextMuted: {
+    color: "#c8cdd2",
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17
+  },
+  mutualTextLink: {
+    color: "#e8ecf0",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17
   },
   profileDisplayName: {
     marginTop: 12,
@@ -2246,6 +2423,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   profileActionBtnText: { color: TEXT, fontWeight: "700", fontSize: 14 },
+  profileFollowPrimaryBtn: { backgroundColor: LIME },
+  profileFollowPrimaryBtnText: { color: "#111111", fontWeight: "800" },
 
   studioBtn: {
     marginTop: 12,
@@ -2423,7 +2602,7 @@ const styles = StyleSheet.create({
     backgroundColor: SURFACE
   },
   personRowMenuOpen: { zIndex: 40 },
-  personListAvatar: { marginRight: 10 },
+  personListAvatar: { marginRight: 10, flexShrink: 0 },
   personName: {
     color: TEXT,
     fontWeight: "800",
@@ -2485,8 +2664,8 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 12
   },
-  followBackBtn: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  followBackBtnText: { color: TEXT, fontWeight: "900", fontSize: 12 },
+  followBackBtn: { backgroundColor: LIME, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  followBackBtnText: { color: "#111111", fontWeight: "900", fontSize: 12 },
   requestedPill: { backgroundColor: SURFACE, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   requestedPillText: { color: TEXT, opacity: 0.72, fontWeight: "800", fontSize: 12 },
   followingPill: { backgroundColor: SURFACE_ALT, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },

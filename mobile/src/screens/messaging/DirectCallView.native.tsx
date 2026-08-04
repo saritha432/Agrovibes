@@ -405,8 +405,6 @@ function CallRoomContent({
             name={peerName}
             size={120}
             borderRadius={60}
-            fallbackBackgroundColor="#262626"
-            initialsColor="#fff"
           />
         </View>
       )}
@@ -639,8 +637,6 @@ export function DirectCallView({
             name={peerName}
             size={148}
             borderRadius={74}
-            fallbackBackgroundColor={APP_LIME}
-            initialsColor="#111"
             style={styles.incomingAvatar}
           />
           <View style={styles.incomingActions}>

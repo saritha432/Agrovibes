@@ -19,6 +19,7 @@ type Props = {
   style?: StyleProp<ViewStyle>;
   fallbackBackgroundColor?: string;
   initialsColor?: string;
+  colorizeInitials?: boolean;
   /** When there is no active story, or as long-press. */
   onPressFallback?: () => void;
   /** Force-disable story open (e.g. own avatar preview on profile). */
@@ -36,6 +37,7 @@ export function StoryRingAvatar({
   style,
   fallbackBackgroundColor,
   initialsColor,
+  colorizeInitials,
   onPressFallback,
   disableStoryOpen,
   accessibilityLabel
@@ -66,6 +68,7 @@ export function StoryRingAvatar({
       borderRadius={avatarRadius}
       fallbackBackgroundColor={fallbackBackgroundColor}
       initialsColor={initialsColor}
+      colorizeInitials={colorizeInitials}
     />
   );
 

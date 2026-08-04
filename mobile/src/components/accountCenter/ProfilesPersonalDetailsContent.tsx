@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Image, Linking, StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, Text, View } from "react-native";
 import {
   AccountCenterCard,
   AccountCenterChevronRow,
@@ -9,13 +9,8 @@ import {
 } from "./AccountCenterSubLayout";
 import { useAccountCenterSheetNav } from "./accountCenterSheetNav";
 import { useAuth } from "../../auth/AuthContext";
-import { APP_BLACK, APP_LIME } from "../../theme/appColors";
-
-function profileInitial(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "?";
-  return trimmed.charAt(0).toUpperCase();
-}
+import { UserAvatar } from "../UserAvatar";
+import { APP_LIME } from "../../theme/appColors";
 
 function formatPhone(phone?: string) {
   if (!phone) return "";
@@ -34,14 +29,7 @@ function formatDateOfBirth(value?: string) {
 }
 
 function ProfileAvatar({ label, avatarUrl }: { label: string; avatarUrl?: string }) {
-  if (avatarUrl) {
-    return <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />;
-  }
-  return (
-    <View style={styles.avatarFallback}>
-      <Text style={styles.avatarInitial}>{profileInitial(label)}</Text>
-    </View>
-  );
+  return <UserAvatar uri={avatarUrl} name={label || "?"} size={48} borderRadius={24} />;
 }
 
 export function ProfilesPersonalDetailsContent() {
@@ -128,24 +116,6 @@ const styles = StyleSheet.create({
     color: APP_LIME,
     fontWeight: "600",
     textDecorationLine: "underline"
-  },
-  avatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20
-  },
-  avatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: APP_LIME,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  avatarInitial: {
-    color: APP_BLACK,
-    fontSize: 18,
-    fontWeight: "800"
   },
   addIconWrap: {
     width: 40,

@@ -2,20 +2,32 @@ import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useCameraPinchZoom } from "../hooks/useCameraPinchZoom";
 import type { StoryCameraPreviewHandle, StoryCameraZoomLevel } from "./storyCameraTypes";
-import { REEL_MAX_RECORD_SECONDS, storyZoomToExpoRatio } from "./storyCameraTypes";
+import { REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 
 type Props = {
   facing?: "front" | "back";
   active?: boolean;
   flashOn?: boolean;
   zoomLevel?: StoryCameraZoomLevel;
+  /**
+   * Continuous CameraView zoom 0–1. When set (e.g. Create overlay pinch),
+   * this overrides internal pinch zoom so gestures can live on the UI overlay.
+   */
+  zoom?: number;
   /** `video` keeps preview in video mode (required for reliable recording on Android). */
   mode?: "picture" | "video";
   onPress?: () => void;
   onRecordingChange?: (recording: boolean) => void;
   /** Fired when recording ends (manual stop or max duration). */
   onAutoRecordFinished?: (payload: { uri: string }) => void;
+  /** Continuous CameraView zoom 0–1 (pinch + 1x/2x buttons). */
+  onZoomChange?: (zoom: number) => void;
+  /** When false, skip internal pinch layer (parent overlay handles pinches). */
+  enableInternalPinch?: boolean;
+  /** Color tint applied only on the camera feed (not UI chrome). */
+  filterOverlayColor?: string | null;
 };
 
 export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(function StoryCameraPreview(
@@ -24,10 +36,14 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
     active = false,
     flashOn = false,
     zoomLevel = 1,
+    zoom: zoomProp,
     mode = "picture",
     onPress,
     onRecordingChange,
-    onAutoRecordFinished
+    onAutoRecordFinished,
+    onZoomChange,
+    enableInternalPinch = true,
+    filterOverlayColor = null
   },
   ref
 ) {
@@ -41,6 +57,14 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   const [ready, setReady] = useState(false);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
+  const controlled = typeof zoomProp === "number";
+  const { zoom: internalZoom, pinchHandlers } = useCameraPinchZoom({
+    zoomLevel: controlled ? undefined : zoomLevel,
+    enabled: active && ready && enableInternalPinch && !controlled,
+    onZoomChange
+  });
+  const cameraZoom = controlled ? Math.min(1, Math.max(0, zoomProp)) : internalZoom;
+  const zoomDisplay = 1 + cameraZoom * 2;
 
   useEffect(() => {
     if (!active || permission?.granted) return;
@@ -140,7 +164,6 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   );
 
   const torchOn = flashOn && facing === "back" && ready;
-  const cameraZoom = storyZoomToExpoRatio(zoomLevel);
   // Torch is more reliable in video mode on many Android devices.
   const cameraViewMode: "picture" | "video" =
     mode === "video" || recording || torchOn ? "video" : "picture";
@@ -173,7 +196,11 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   }
 
   return (
-    <View style={styles.wrap}>
+    <View
+      style={styles.wrap}
+      collapsable={false}
+      {...(enableInternalPinch && !controlled ? pinchHandlers : null)}
+    >
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -184,7 +211,14 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         zoom={cameraZoom}
         enableTorch={torchOn}
         onCameraReady={() => setReady(true)}
+        pointerEvents="none"
       />
+      {enableInternalPinch && !controlled ? (
+        <View style={styles.pinchLayer} {...pinchHandlers} collapsable={false} />
+      ) : null}
+      {filterOverlayColor ? (
+        <View pointerEvents="none" style={[styles.filterOverlay, { backgroundColor: filterOverlayColor }]} />
+      ) : null}
       {!ready ? (
         <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color="#C9FF35" />
@@ -196,12 +230,25 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
           <Text style={styles.recordingText}>Recording</Text>
         </View>
       ) : null}
+      {ready && cameraZoom > 0.02 && !controlled ? (
+        <View style={styles.zoomBadge} pointerEvents="none">
+          <Text style={styles.zoomBadgeText}>{zoomDisplay.toFixed(1)}x</Text>
+        </View>
+      ) : null}
     </View>
   );
 });
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: "hidden", backgroundColor: "#000" },
+  pinchLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1
+  },
+  filterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2
+  },
   fallback: {
     flex: 1,
     alignItems: "center",
@@ -210,11 +257,12 @@ const styles = StyleSheet.create({
     gap: 8
   },
   hint: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "600" },
-  loading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  loading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", zIndex: 2 },
   recordingBadge: {
     position: "absolute",
     top: 12,
     alignSelf: "center",
+    zIndex: 2,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -224,5 +272,16 @@ const styles = StyleSheet.create({
     borderRadius: 16
   },
   recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#ef4444" },
-  recordingText: { color: "#fff", fontSize: 12, fontWeight: "700" }
+  recordingText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  zoomBadge: {
+    position: "absolute",
+    bottom: 28,
+    alignSelf: "center",
+    zIndex: 2,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14
+  },
+  zoomBadgeText: { color: "#fff", fontSize: 13, fontWeight: "800" }
 });

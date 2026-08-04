@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Platform,
   Pressable,
   StyleSheet,
@@ -22,14 +21,10 @@ import {
   type BlockedUser
 } from "../services/api";
 import { forgetBlockedUser } from "../social/blockedUsers";
+import { UserAvatar } from "../components/UserAvatar";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
 const DIVIDER = "rgba(255,255,255,0.1)";
-
-function getInitial(name: string) {
-  const letter = String(name || "").trim().charAt(0).toUpperCase();
-  return letter || "?";
-}
 
 export function BlockedAccountsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -114,13 +109,13 @@ export function BlockedAccountsScreen() {
             const username = String(item.username || "").replace(/^@+/, "");
             return (
               <View style={styles.row}>
-                {item.avatarUrl ? (
-                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatarFallback}>
-                    <Text style={styles.avatarInitial}>{getInitial(item.fullName)}</Text>
-                  </View>
-                )}
+                <UserAvatar
+                  uri={item.avatarUrl}
+                  name={item.fullName || "?"}
+                  size={44}
+                  borderRadius={22}
+                  style={styles.avatar}
+                />
                 <View style={styles.rowBody}>
                   <Text style={styles.name} numberOfLines={1}>
                     {item.fullName}
@@ -180,16 +175,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 12
   },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: APP_SURFACE },
-  avatarFallback: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: APP_SURFACE,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  avatarInitial: { color: APP_TEXT, fontSize: 16, fontWeight: "700" },
+  avatar: { width: 44, height: 44, borderRadius: 22 },
   rowBody: { flex: 1, gap: 2 },
   name: { color: APP_TEXT, fontSize: 15, fontWeight: "600" },
   username: { color: APP_TEXT_MUTED, fontSize: 13 },
