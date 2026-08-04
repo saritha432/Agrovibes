@@ -25,7 +25,9 @@ const slideBottomTransparent = {
   headerShown: false,
   presentation: "transparentModal" as const,
   animation: "slide_from_bottom" as const,
-  contentStyle: { backgroundColor: "transparent" }
+  contentStyle: { backgroundColor: "transparent" },
+  // Avoid native stack hairline above transparent modals (esp. web)
+  freezeOnBlur: true
 };
 
 /**
@@ -117,6 +119,18 @@ export function RootNavigator() {
         getComponent={() => require("../screens/onboarding/SecurityVerificationScreen").SecurityVerificationScreen}
       />
       <Stack.Screen name="Main" component={AppNavigator} />
+      <Stack.Screen
+        name="ProviderMain"
+        getComponent={() => require("./ProviderAppNavigator").ProviderAppNavigator}
+        options={{ animation: "fade" }}
+      />
+      <Stack.Screen
+        name="ProviderNewListing"
+        getComponent={() =>
+          require("../screens/provider/dashboard/ProviderNewListingScreen").ProviderNewListingScreen
+        }
+        options={slideBottomTransparent}
+      />
 
       <Stack.Screen
         name="InstructorStudio"
