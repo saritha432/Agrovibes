@@ -4486,7 +4486,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
     const followAccepted = result.rows.filter((r) => r.type === "follow_accept");
     const newFollows = result.rows.filter((r) => r.type === "new_follow");
-    const postLikes = result.rows.filter((r) => r.type === "post_like");
+    const postLikes = result.rows.filter((r) => r.type === "post_like" || r.type === "post_tag");
     const postComments = result.rows.filter(
       (r) => r.type === "post_comment" || r.type === "comment_reply"
     );
@@ -4504,6 +4504,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         r.type === "follow_accept" ||
         r.type === "new_follow" ||
         r.type === "post_like" ||
+        r.type === "post_tag" ||
         r.type === "post_comment" ||
         r.type === "comment_reply" ||
         r.type === "live_start" ||
@@ -5937,6 +5938,30 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         postId: normalizedPost.id,
         commentExcerpt: "started live"
       });
+    }
+
+    if (cleanTagged.length > 0 && Number.isFinite(actorId) && actorId > 0) {
+      await ensureSocialNotificationsTable();
+      const tagActorName = await actorDisplayName(actorId);
+      const hasVideo =
+        typeof normalizedPost.videoUrl === "string" && String(normalizedPost.videoUrl).trim().length > 0;
+      const tagExcerpt = hasVideo ? "tagged you in a reel" : "tagged you in a post";
+      for (const taggedId of cleanTagged) {
+        if (!Number.isFinite(taggedId) || taggedId <= 0 || taggedId === actorId) continue;
+        await query(
+          `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+           VALUES ($1, $2, NULL, 'post_tag', false, $3, $4)`,
+          [taggedId, actorId, normalizedPost.id, tagExcerpt]
+        );
+        fireSocialPush({
+          userId: taggedId,
+          type: "post_tag",
+          actorName: tagActorName,
+          actorId,
+          postId: normalizedPost.id,
+          commentExcerpt: tagExcerpt
+        });
+      }
     }
 
     await cacheIncr("home:posts:gen");

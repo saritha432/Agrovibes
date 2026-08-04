@@ -7,11 +7,14 @@ type Props = {
   active?: boolean;
   flashOn?: boolean;
   zoomLevel?: StoryCameraZoomLevel;
+  zoom?: number;
   mode?: "picture" | "video";
   onPress?: () => void;
   onRecordingChange?: (recording: boolean) => void;
   onAutoRecordFinished?: (payload: { uri: string }) => void;
   onZoomChange?: (zoom: number) => void;
+  enableInternalPinch?: boolean;
+  filterOverlayColor?: string | null;
 };
 
 /** Fallback when platform-specific preview is unavailable. */

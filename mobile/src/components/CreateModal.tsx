@@ -48,6 +48,7 @@ import { WebCameraCapture } from "./WebCameraCapture";
 import { StoryCameraPreview } from "./StoryCameraPreview";
 import type { StoryCameraPreviewHandle } from "./storyCameraTypes";
 import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
+import { useCameraPinchZoom } from "../hooks/useCameraPinchZoom";
 import {
   defaultGalleryAlbums,
   fetchGalleryAlbums,
@@ -138,7 +139,6 @@ const CREATE_CAMERA_ASSETS = {
   touchup: require("../../assets/touchup.svg"),
   torch: require("../../assets/torch.svg"),
   timer: require("../../assets/timer.svg"),
-  zoom1x: require("../../assets/1x.svg"),
   settings: require("../../assets/settings-icon.svg")
 } as const;
 
@@ -299,6 +299,34 @@ function filterTint(id: CreativeFilterId): string | null {
       return "rgba(0, 0, 0, 0.38)";
     default:
       return null;
+  }
+}
+
+/** Slot pitch for filter snap (centers land under shutter). */
+const FILTER_CAROUSEL_SLOT = 64;
+const FILTER_NEIGHBOR_SIZE = 40;
+const FILTER_SHUTTER_OUTER = 80;
+/** Fills the ring hole (outer 80 − border 5×2). */
+const FILTER_SHUTTER_INNER = 70;
+const ENTRY_TIMER_OPTIONS = [0, 3, 5, 7, 9, 11] as const;
+
+/** Solid-ish swatch for filter circles / shutter (not the live camera overlay). */
+function filterSwatchColor(id: CreativeFilterId): string {
+  switch (id) {
+    case "warm":
+      return "rgba(255, 170, 70, 0.85)";
+    case "cool":
+      return "rgba(70, 150, 255, 0.8)";
+    case "mono":
+      return "rgba(120, 120, 120, 0.9)";
+    case "vivid":
+      return "rgba(255, 70, 170, 0.75)";
+    case "sunset":
+      return "rgba(255, 110, 50, 0.85)";
+    case "noir":
+      return "rgba(30, 30, 30, 0.95)";
+    default:
+      return "#303030";
   }
 }
 
@@ -513,7 +541,10 @@ export function CreateModal({
   const [fullScreenCameraOpen, setFullScreenCameraOpen] = useState(false);
   const [entryFlashOn, setEntryFlashOn] = useState(false);
   const [entryZoomLabel, setEntryZoomLabel] = useState<"1x" | "2x">("1x");
-  const [entryTimerOn, setEntryTimerOn] = useState(false);
+  /** Instagram-style shutter delay: 0 = off, else countdown seconds. */
+  const [entryTimerSec, setEntryTimerSec] = useState<0 | 3 | 5 | 7 | 9 | 11>(0);
+  const [entryCountdown, setEntryCountdown] = useState<number | null>(null);
+  const entryCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [entryStoryTool, setEntryStoryTool] = useState<"none" | "create" | "boomerang" | "layout" | "handsfree">("none");
   const [entryLeftRailExpanded, setEntryLeftRailExpanded] = useState(false);
   const [createStep, setCreateStep] = useState<"preview" | "compose">("preview");
@@ -538,6 +569,78 @@ export function CreateModal({
   /** Post / reel picks (reel always length 1). */
   const [pickedPostAssets, setPickedPostAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [creativeFilter, setCreativeFilter] = useState<CreativeFilterId>("none");
+  const creativeFilterRef = useRef<CreativeFilterId>("none");
+  creativeFilterRef.current = creativeFilter;
+  const filterListRef = useRef<FlatList<(typeof filterOptions)[number]>>(null);
+  const filterScrollSyncingRef = useRef(false);
+  const filterOffsetRef = useRef(0);
+  const filterSnapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [filterCarouselWidth, setFilterCarouselWidth] = useState(0);
+  const selectedFilterIndex = Math.max(
+    0,
+    filterOptions.findIndex((f) => f.id === creativeFilter)
+  );
+  const filterCarouselSidePad = Math.max(0, (filterCarouselWidth - FILTER_CAROUSEL_SLOT) / 2);
+
+  const clearFilterSnapTimer = React.useCallback(() => {
+    if (filterSnapTimerRef.current) {
+      clearTimeout(filterSnapTimerRef.current);
+      filterSnapTimerRef.current = null;
+    }
+  }, []);
+
+  const indexFromFilterOffset = React.useCallback(
+    (offsetX: number) => {
+      const index = Math.round(offsetX / FILTER_CAROUSEL_SLOT);
+      return Math.max(0, Math.min(filterOptions.length - 1, index));
+    },
+    [filterOptions.length]
+  );
+
+  const commitFilterAtIndex = React.useCallback(
+    (index: number) => {
+      const next = filterOptions[index]?.id;
+      if (next && next !== creativeFilterRef.current) setCreativeFilter(next);
+    },
+    [filterOptions]
+  );
+
+  const scrollFilterCarouselToIndex = React.useCallback(
+    (index: number, animated = true) => {
+      const clamped = Math.max(0, Math.min(filterOptions.length - 1, index));
+      const targetX = clamped * FILTER_CAROUSEL_SLOT;
+      clearFilterSnapTimer();
+      filterScrollSyncingRef.current = true;
+      filterOffsetRef.current = targetX;
+      commitFilterAtIndex(clamped);
+      filterListRef.current?.scrollToOffset({ offset: targetX, animated });
+      filterSnapTimerRef.current = setTimeout(
+        () => {
+          filterListRef.current?.scrollToOffset({ offset: targetX, animated: false });
+          filterOffsetRef.current = targetX;
+          filterScrollSyncingRef.current = false;
+          filterSnapTimerRef.current = null;
+        },
+        animated ? 280 : 0
+      );
+    },
+    [clearFilterSnapTimer, commitFilterAtIndex, filterOptions.length]
+  );
+
+  const snapFilterCarouselToNearest = React.useCallback(
+    (offsetX: number, animated = true) => {
+      scrollFilterCarouselToIndex(indexFromFilterOffset(offsetX), animated);
+    },
+    [indexFromFilterOffset, scrollFilterCarouselToIndex]
+  );
+
+  React.useEffect(() => {
+    if (!visible || filterCarouselWidth <= 0) return;
+    const index = Math.max(0, filterOptions.findIndex((f) => f.id === creativeFilterRef.current));
+    scrollFilterCarouselToIndex(index, false);
+  }, [visible, filterCarouselWidth, scrollFilterCarouselToIndex, filterOptions]);
+
+  React.useEffect(() => () => clearFilterSnapTimer(), [clearFilterSnapTimer]);
   const [creativeText, setCreativeText] = useState("");
   const [creativeFont, setCreativeFont] = useState<CreativeFontId>("classic");
   const [creativeTextColor, setCreativeTextColor] = useState<CreativeTextColor>("white");
@@ -560,6 +663,7 @@ export function CreateModal({
   const [galleryHasMore, setGalleryHasMore] = useState(false);
   const galleryEndCursorRef = useRef<string | null>(null);
   const galleryRefreshIdRef = useRef(0);
+  const postGalleryListRef = useRef<FlatList>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [captureEntryView, setCaptureEntryView] = useState<"camera" | "gallery">("camera");
@@ -686,6 +790,7 @@ export function CreateModal({
       setShowStickerPanel(false);
       setShowEditPanel(false);
       setShowAudioPanel(false);
+      setShowAlbumPicker(false);
       void stopAudioPreview();
       return;
     }
@@ -708,7 +813,12 @@ export function CreateModal({
     setEntryCameraFacing(ImagePicker.CameraType.back);
     setEntryFlashOn(false);
     setEntryZoomLabel("1x");
-    setEntryTimerOn(false);
+    setEntryTimerSec(0);
+    setEntryCountdown(null);
+    if (entryCountdownIntervalRef.current) {
+      clearInterval(entryCountdownIntervalRef.current);
+      entryCountdownIntervalRef.current = null;
+    }
     setPostPreviewResizeMode("cover");
     setEntryStoryTool("none");
     setEntryLeftRailExpanded(false);
@@ -1054,6 +1164,10 @@ export function CreateModal({
       if (prev.includes(asset.id)) return prev.filter((id) => id !== asset.id);
       if (prev.length >= 10) return prev;
       return [...prev, asset.id];
+    });
+    // Instagram-style: bring the preview back into view after picking.
+    requestAnimationFrame(() => {
+      postGalleryListRef.current?.scrollToOffset({ offset: 0, animated: true });
     });
   };
 
@@ -1524,16 +1638,25 @@ export function CreateModal({
     await startLiveKitHostFromSheet();
   };
 
-  const handleEntryShutterPress = () => {
-    setErrorText("");
+  const clearEntryCountdown = React.useCallback(() => {
+    if (entryCountdownIntervalRef.current) {
+      clearInterval(entryCountdownIntervalRef.current);
+      entryCountdownIntervalRef.current = null;
+    }
+    setEntryCountdown(null);
+  }, []);
+
+  React.useEffect(() => () => clearEntryCountdown(), [clearEntryCountdown]);
+
+  React.useEffect(() => {
+    clearEntryCountdown();
+  }, [entryType, clearEntryCountdown]);
+
+  const fireEntryShutterAction = () => {
     if (entryType === "live") {
       setLiveMode((prev) => prev || "now");
       setShowLiveTitleSheet(false);
       setShowLiveSetupSheet(true);
-      return;
-    }
-    if (entryShutterLongPressRef.current) {
-      entryShutterLongPressRef.current = false;
       return;
     }
     if (entryType === "reel") {
@@ -1542,6 +1665,38 @@ export function CreateModal({
       return;
     }
     void captureEntryPhoto();
+  };
+
+  const handleEntryShutterPress = () => {
+    setErrorText("");
+    if (entryType === "live") {
+      fireEntryShutterAction();
+      return;
+    }
+    if (entryShutterLongPressRef.current) {
+      entryShutterLongPressRef.current = false;
+      return;
+    }
+    // Tap during countdown cancels (Instagram-style).
+    if (entryCountdown != null) {
+      clearEntryCountdown();
+      return;
+    }
+    if (entryTimerSec > 0 && !entryIsRecording) {
+      let left = entryTimerSec;
+      setEntryCountdown(left);
+      entryCountdownIntervalRef.current = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearEntryCountdown();
+          fireEntryShutterAction();
+          return;
+        }
+        setEntryCountdown(left);
+      }, 1000);
+      return;
+    }
+    fireEntryShutterAction();
   };
 
   const handleEntryShutterLongPress = async () => {
@@ -2007,10 +2162,20 @@ export function CreateModal({
   const selectedAudioTrack =
     [...audioSearchResults, ...AUDIO_TRACKS].find((t) => t.id === selectedAudioTrackId) ?? null;
   const selectedAudioLabel = selectedAudioTrack ? `${selectedAudioTrack.title} - ${selectedAudioTrack.artist}` : "";
+  const openAudioPicker = React.useCallback(() => {
+    setShowAudioPanel(true);
+  }, []);
+  const cycleEntryTimer = React.useCallback(() => {
+    setEntryTimerSec((current) => {
+      const idx = ENTRY_TIMER_OPTIONS.indexOf(current);
+      const nextIdx = idx < 0 ? 0 : (idx + 1) % ENTRY_TIMER_OPTIONS.length;
+      return ENTRY_TIMER_OPTIONS[nextIdx];
+    });
+  }, []);
 
   const storyLeftRailPrimary = React.useMemo(
     () => [
-      { key: "audio", icon: "musical-notes-outline" as const, label: "Audio", onPress: () => setShowAudioPanel(true) },
+      { key: "audio", icon: "musical-notes-outline" as const, label: "Audio", onPress: openAudioPicker },
       { key: "effects", icon: "sparkles-outline" as const, label: "Effects", onPress: () => setShowCreativeFilterPanel(true) },
       { key: "length", icon: "time-outline" as const, label: "Length", onPress: () => Alert.alert("Length", "Story length options coming soon.") },
       {
@@ -2021,7 +2186,7 @@ export function CreateModal({
       },
       { key: "touchup", icon: "color-wand-outline" as const, label: "Touch up", onPress: () => setShowEditPanel(true) }
     ],
-    []
+    [openAudioPicker]
   );
 
   const storyLeftRailModes = React.useMemo(
@@ -2089,6 +2254,12 @@ export function CreateModal({
     !liveKitHostOpen &&
     captureEntryView === "camera";
 
+  const { zoom: entryCameraZoom, zoomDisplay: entryZoomDisplay, pinchHandlers: entryPinchHandlers } =
+    useCameraPinchZoom({
+      zoomLevel: entryZoomLevel,
+      enabled: entryCameraActive
+    });
+
   // Hard-stop inline camera whenever create is not actively on the camera surface.
   React.useEffect(() => {
     if (entryCameraActive) return;
@@ -2108,7 +2279,7 @@ export function CreateModal({
       displayText: selectedAudioTrack
         ? t("audioPrefix", { title: selectedAudioTrack.title })
         : t("addAudio"),
-      onPress: () => setShowAudioPanel(true)
+      onPress: openAudioPicker
     },
     {
       icon: "person-add-outline",
@@ -2170,57 +2341,69 @@ export function CreateModal({
               </Pressable>
             </View>
 
-            <View style={styles.igPostEntryPreview}>
-              {selectedEntryAsset ? (
-                <Image
-                  source={{ uri: selectedEntryAsset.uri }}
-                  style={styles.igPostEntryPreviewImage}
-                  resizeMode={postPreviewResizeMode}
-                />
-              ) : (
-                <View style={styles.igPostEntryPreviewFallback}>
-                  <Ionicons name="images-outline" size={34} color="#fff" />
-                </View>
-              )}
-              <View style={styles.igPostGridOverlay} pointerEvents="none">
-                <View style={styles.igPostGridLineH} />
-                <View style={[styles.igPostGridLineH, { top: "66.666%" }]} />
-                <View style={styles.igPostGridLineV} />
-                <View style={[styles.igPostGridLineV, { left: "66.666%" }]} />
-              </View>
-              <Pressable
-                style={styles.igPostPreviewFitBtn}
-                onPress={() => setPostPreviewResizeMode((m) => (m === "cover" ? "contain" : "cover"))}
-                hitSlop={8}
-              >
-                <Ionicons name="scan-outline" size={18} color="#fff" />
-              </Pressable>
-            </View>
-
-            <View style={styles.igPostEntryRecentsRow}>
-              <Pressable style={styles.igPostAlbumPicker} onPress={() => setShowAlbumPicker(true)}>
-                <Text style={styles.igPostEntryRecentsText}>
-                  {selectedAlbumTitle === "Recents" ? "Recent" : selectedAlbumTitle}
-                </Text>
-                <Ionicons name="chevron-forward" size={16} color="#f8fafc" />
-              </Pressable>
-              <Pressable
-                style={[styles.igPostEntrySelectBtn, entryMultiSelect ? styles.igPostEntrySelectBtnOn : null]}
-                onPress={() => setEntryMultiSelect((v) => !v)}
-              >
-                <Ionicons name="copy-outline" size={14} color={entryMultiSelect ? "#C9FF35" : "#fff"} />
-                <Text style={[styles.igPostEntrySelectText, entryMultiSelect ? styles.igPostEntrySelectTextOn : null]}>
-                  Select
-                </Text>
-              </Pressable>
-            </View>
-
             <FlatList
+              ref={postGalleryListRef}
               style={styles.igPostEntryGridList}
               data={postGridData}
               keyExtractor={(item) => ("isCamera" in item ? item.id : item.id)}
               numColumns={4}
               contentContainerStyle={styles.igPostEntryGrid}
+              showsVerticalScrollIndicator={false}
+              bounces
+              ListHeaderComponent={
+                <View>
+                  <View style={styles.igPostEntryPreview}>
+                    {selectedEntryAsset ? (
+                      <Image
+                        source={{ uri: selectedEntryAsset.uri }}
+                        style={styles.igPostEntryPreviewImage}
+                        resizeMode={postPreviewResizeMode}
+                      />
+                    ) : (
+                      <View style={styles.igPostEntryPreviewFallback}>
+                        <Ionicons name="images-outline" size={34} color="#fff" />
+                      </View>
+                    )}
+                    <View style={styles.igPostGridOverlay} pointerEvents="none">
+                      <View style={styles.igPostGridLineH} />
+                      <View style={[styles.igPostGridLineH, { top: "66.666%" }]} />
+                      <View style={styles.igPostGridLineV} />
+                      <View style={[styles.igPostGridLineV, { left: "66.666%" }]} />
+                    </View>
+                    <Pressable
+                      style={styles.igPostPreviewFitBtn}
+                      onPress={() => setPostPreviewResizeMode((m) => (m === "cover" ? "contain" : "cover"))}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="scan-outline" size={18} color="#fff" />
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.igPostEntryRecentsRow} collapsable={false}>
+                    <Pressable
+                      style={styles.igPostAlbumPicker}
+                      onPress={() => setShowAlbumPicker(true)}
+                      hitSlop={{ top: 12, bottom: 12, left: 8, right: 12 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Choose album"
+                    >
+                      <Text style={styles.igPostEntryRecentsText}>
+                        {selectedAlbumTitle === "Recents" ? "Recent" : selectedAlbumTitle}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color="#f8fafc" />
+                    </Pressable>
+                    <Pressable
+                      style={[styles.igPostEntrySelectBtn, entryMultiSelect ? styles.igPostEntrySelectBtnOn : null]}
+                      onPress={() => setEntryMultiSelect((v) => !v)}
+                    >
+                      <Ionicons name="copy-outline" size={14} color={entryMultiSelect ? "#C9FF35" : "#fff"} />
+                      <Text style={[styles.igPostEntrySelectText, entryMultiSelect ? styles.igPostEntrySelectTextOn : null]}>
+                        Select
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              }
               ListEmptyComponent={
                 galleryLoading ? (
                   <View style={styles.igGalleryLoading}>
@@ -2286,7 +2469,13 @@ export function CreateModal({
               <Pressable style={styles.igCamTopGhostBtn} onPress={() => setCaptureEntryView("camera")} hitSlop={10}>
                 <Ionicons name="chevron-back" size={24} color="#fff" />
               </Pressable>
-              <Pressable style={styles.igPostAlbumPicker} onPress={() => setShowAlbumPicker(true)}>
+              <Pressable
+                style={styles.igPostAlbumPicker}
+                onPress={() => setShowAlbumPicker(true)}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Choose album"
+              >
                 <Text style={styles.igPostEntryRecentsText}>
                   {selectedAlbumTitle === "Recents" ? "Recent" : selectedAlbumTitle}
                 </Text>
@@ -2372,6 +2561,9 @@ export function CreateModal({
               facing={entryFacing}
               flashOn={entryFlashOn}
               zoomLevel={entryZoomLevel}
+              zoom={entryCameraZoom}
+              enableInternalPinch={false}
+              filterOverlayColor={filterTint(creativeFilter)}
               mode={entryType === "reel" || entryType === "live" ? "video" : entryType === "post" ? "picture" : "picture"}
               onRecordingChange={onEntryRecordingChange}
               onAutoRecordFinished={onInlineAutoRecordFinished}
@@ -2380,12 +2572,19 @@ export function CreateModal({
             <View
               style={[
                 styles.igCaptureOverlay,
-                { paddingTop: insets.top + 6 }
+                { paddingTop: Math.max(insets.top - 10, 0) }
               ]}
               pointerEvents="box-none"
             >
               <View style={styles.igCaptureTopRow} pointerEvents="box-none">
-                <Pressable style={styles.igCamTopSquareBtn} onPress={handleClose} hitSlop={10}>
+                <Pressable
+                  style={styles.igCamTopSquareBtn}
+                  onPress={() => {
+                    clearEntryCountdown();
+                    handleClose();
+                  }}
+                  hitSlop={10}
+                >
                   <Ionicons name="close" size={22} color="#fff" />
                 </Pressable>
                 <View style={styles.igCamTopCenterGroup} pointerEvents="box-none">
@@ -2415,21 +2614,34 @@ export function CreateModal({
                     style={styles.igCamTopSquareBtn}
                     onPress={() => setEntryZoomLabel((z) => (z === "1x" ? "2x" : "1x"))}
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Zoom ${entryZoomLabel}`}
                   >
-                    {entryZoomLabel === "1x" ? (
-                      <CreateCameraSvgIcon module={CREATE_CAMERA_ASSETS.zoom1x} size={22} fallbackName="scan-outline" />
-                    ) : (
-                      <Text style={styles.igCamZoomText}>{entryZoomLabel}</Text>
-                    )}
+                    <Text style={styles.igCamZoomText}>{entryZoomLabel}</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.igCamTopSquareBtn, entryTimerOn ? styles.igCamTopSquareBtnOn : null]}
-                    onPress={() => setEntryTimerOn((v) => !v)}
+                    style={[styles.igCamTopSquareBtn, entryTimerSec > 0 ? styles.igCamTopSquareBtnOn : null]}
+                    onPress={cycleEntryTimer}
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      entryTimerSec === 0
+                        ? "Timer off"
+                        : `Timer ${entryTimerSec} seconds`
+                    }
                   >
-                    <CreateCameraSvgIcon module={CREATE_CAMERA_ASSETS.timer} size={22} fallbackName="timer-outline" />
+                    {entryTimerSec > 0 ? (
+                      <Text style={styles.igCamTimerSecText}>{entryTimerSec}</Text>
+                    ) : (
+                      <CreateCameraSvgIcon
+                        module={CREATE_CAMERA_ASSETS.timer}
+                        size={22}
+                        fallbackName="timer-outline"
+                      />
+                    )}
                   </Pressable>
                 </View>
+                {/* Settings (opens side tools) — hidden for now
                 <Pressable
                   style={styles.igCamTopSquareBtn}
                   onPress={() => setEntryLeftRailExpanded((v) => !v)}
@@ -2437,15 +2649,29 @@ export function CreateModal({
                 >
                   <CreateCameraSvgIcon module={CREATE_CAMERA_ASSETS.settings} size={20} fallbackName="settings-outline" />
                 </Pressable>
+                */}
+                <View style={styles.igCaptureHeaderSpacer} />
               </View>
 
               {(entryType === "story" || entryType === "reel") && !entryIsRecording ? (
-                <Pressable style={styles.igAddAudioPill} onPress={() => setShowAudioPanel(true)} hitSlop={8}>
+                <Pressable
+                  style={styles.igAddAudioPill}
+                  onPress={openAudioPicker}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add audio"
+                >
                   <Text style={styles.igAddAudioText} numberOfLines={1}>
                     {selectedAudioTrack ? selectedAudioTrack.title : t("addAudio")}
                   </Text>
                   <CreateCameraSvgIcon module={CREATE_CAMERA_ASSETS.audio} size={16} fallbackName="musical-note" />
                 </Pressable>
+              ) : null}
+
+              {entryCountdown != null ? (
+                <View style={styles.igCamTimerCountdownOverlay} pointerEvents="none">
+                  <Text style={styles.igCamTimerCountdownText}>{entryCountdown}</Text>
+                </View>
               ) : null}
 
               {entryIsRecording && (entryType === "reel" || entryType === "live") ? (
@@ -2457,7 +2683,18 @@ export function CreateModal({
                 </View>
               ) : null}
 
-              <View style={styles.igCamMiddleArea} pointerEvents="box-none">
+              <View
+                style={styles.igCamMiddleArea}
+                pointerEvents="auto"
+                collapsable={false}
+                {...entryPinchHandlers}
+              >
+                {entryCameraZoom > 0.02 ? (
+                  <View style={styles.igCamPinchZoomBadge} pointerEvents="none">
+                    <Text style={styles.igCamPinchZoomBadgeText}>{entryZoomDisplay.toFixed(1)}x</Text>
+                  </View>
+                ) : null}
+                {/* Side tools rail (Audio / Effects / Length / …) — hidden for now
                 {(entryType === "story" || entryType === "reel") && !entryIsRecording ? (
                   <View style={styles.igCamLeftRail} pointerEvents="box-none">
                     {entryType === "story" && entryLeftRailExpanded
@@ -2486,6 +2723,7 @@ export function CreateModal({
                         ))}
                   </View>
                 ) : null}
+                */}
                 {entryType === "live" ? (
                   <Pressable
                     style={[styles.liveTitleFab, liveScheduleTopic.trim() ? styles.liveTitleFabWithText : null]}
@@ -2518,55 +2756,161 @@ export function CreateModal({
                 pointerEvents="box-none"
               >
               <View style={styles.igCamCaptureRow} pointerEvents="box-none">
-                <View style={styles.igCamCaptureSideSlot}>
-                  {entryType === "live" ? (
-                    <View style={styles.igCamLiveOnlyPill}>
-                      <Ionicons name="videocam" size={16} color="#C9FF35" />
-                      <Text style={styles.igCamLiveOnlyText}>Video only</Text>
+                {entryType === "live" ? (
+                  <>
+                    <View style={styles.igCamCaptureSideSlot}>
+                      <View style={styles.igCamLiveOnlyPill}>
+                        <Ionicons name="videocam" size={16} color="#C9FF35" />
+                        <Text style={styles.igCamLiveOnlyText}>Video only</Text>
+                      </View>
                     </View>
-                  ) : entryType === "story" && !entryIsRecording ? (
                     <Pressable
-                      onPress={() => setEntryStoryTool((t) => (t === "boomerang" ? "none" : "boomerang"))}
-                      hitSlop={10}
-                      style={styles.igCamSideIconBtn}
+                      style={[
+                        styles.igCamCaptureOuter,
+                        entryIsRecording ? styles.igCamCaptureOuterRecording : null,
+                        !entryIsRecording ? styles.igCamLiveCaptureOuter : null
+                      ]}
+                      onPress={handleEntryShutterPress}
+                      onLongPress={() => void handleEntryShutterLongPress()}
+                      onPressOut={() => void handleEntryShutterRelease()}
+                      delayLongPress={280}
                     >
-                      <Ionicons
-                        name="infinite-outline"
-                        size={28}
-                        color={entryStoryTool === "boomerang" ? "#C9FF35" : "rgba(255,255,255,0.85)"}
-                      />
+                      {!entryIsRecording ? (
+                        <Ionicons name="radio-outline" size={34} color="#fff" />
+                      ) : (
+                        <View style={[styles.igCamCaptureInner, styles.igCamCaptureInnerRecording]} />
+                      )}
                     </Pressable>
-                  ) : null}
-                </View>
-                <Pressable
-                  style={[
-                    styles.igCamCaptureOuter,
-                    entryIsRecording ? styles.igCamCaptureOuterRecording : null,
-                    entryType === "live" && !entryIsRecording ? styles.igCamLiveCaptureOuter : null
-                  ]}
-                  onPress={handleEntryShutterPress}
-                  onLongPress={() => void handleEntryShutterLongPress()}
-                  onPressOut={() => void handleEntryShutterRelease()}
-                  delayLongPress={280}
-                >
-                  {entryType === "live" && !entryIsRecording ? (
-                    <Ionicons name="radio-outline" size={34} color="#fff" />
-                  ) : entryStoryTool === "create" && entryType === "story" && !entryIsRecording ? (
-                    <Text style={styles.igCamShutterAa}>Aa</Text>
-                  ) : entryStoryTool === "boomerang" && entryType === "story" && !entryIsRecording ? (
-                    <Ionicons name="infinite" size={32} color="#C9FF35" />
-                  ) : (
-                    <View style={[styles.igCamCaptureInner, entryIsRecording ? styles.igCamCaptureInnerRecording : null]} />
-                  )}
-                </Pressable>
-                <View style={styles.igCamCaptureSideSlot}>
-                  {!entryIsRecording ? (
-                    <View style={styles.igCamAuxDots}>
-                      <View style={styles.igCamAuxDot} />
-                      <View style={[styles.igCamAuxDot, styles.igCamAuxDotSm]} />
+                    <View style={styles.igCamCaptureSideSlot} />
+                  </>
+                ) : (
+                  <View style={styles.igCamFilterCenterCluster} pointerEvents="box-none">
+                    {!entryIsRecording ? (
+                      <Text style={styles.igCamFilterActiveName} pointerEvents="none">
+                        {filterOptions.find((f) => f.id === creativeFilter)?.label ?? "Normal"}
+                      </Text>
+                    ) : (
+                      <View style={styles.igCamFilterActiveNameSpacer} />
+                    )}
+
+                    <View
+                      style={styles.igCamFilterCarouselWrap}
+                      onLayout={(e) => {
+                        const w = e.nativeEvent.layout.width;
+                        if (w > 0 && Math.abs(w - filterCarouselWidth) > 1) setFilterCarouselWidth(w);
+                      }}
+                    >
+                      {filterCarouselWidth > 0 ? (
+                        <FlatList
+                          ref={filterListRef}
+                          horizontal
+                          data={filterOptions}
+                          keyExtractor={(f) => f.id}
+                          showsHorizontalScrollIndicator={false}
+                          scrollEnabled={!entryIsRecording}
+                          bounces={false}
+                          overScrollMode="never"
+                          decelerationRate="fast"
+                          snapToInterval={FILTER_CAROUSEL_SLOT}
+                          snapToAlignment="start"
+                          disableIntervalMomentum
+                          getItemLayout={(_, index) => ({
+                            length: FILTER_CAROUSEL_SLOT,
+                            offset: FILTER_CAROUSEL_SLOT * index,
+                            index
+                          })}
+                          contentContainerStyle={{
+                            paddingHorizontal: filterCarouselSidePad,
+                            alignItems: "center"
+                          }}
+                          onScroll={(e) => {
+                            const x = e.nativeEvent.contentOffset.x;
+                            filterOffsetRef.current = x;
+                            if (filterScrollSyncingRef.current) return;
+                            commitFilterAtIndex(indexFromFilterOffset(x));
+                          }}
+                          onScrollEndDrag={(e) => {
+                            if (Math.abs(e.nativeEvent.velocity?.x ?? 0) > 0.15) return;
+                            snapFilterCarouselToNearest(e.nativeEvent.contentOffset.x, true);
+                          }}
+                          onMomentumScrollEnd={(e) =>
+                            snapFilterCarouselToNearest(e.nativeEvent.contentOffset.x, true)
+                          }
+                          scrollEventThrottle={16}
+                          renderItem={({ item: f, index: i }) => {
+                            const isSelected = i === selectedFilterIndex;
+                            return (
+                              <Pressable
+                                onPress={() => {
+                                  if (isSelected) {
+                                    handleEntryShutterPress();
+                                    return;
+                                  }
+                                  scrollFilterCarouselToIndex(i, true);
+                                }}
+                                onLongPress={() => {
+                                  if (isSelected) void handleEntryShutterLongPress();
+                                }}
+                                onPressOut={() => {
+                                  if (isSelected) void handleEntryShutterRelease();
+                                }}
+                                delayLongPress={280}
+                                style={styles.igCamFilterCarouselSlot}
+                                accessibilityRole="button"
+                                accessibilityState={{ selected: isSelected }}
+                                accessibilityLabel={isSelected ? `${f.label}, shutter` : f.label}
+                              >
+                                {/* Selected thumb is hidden — shutter fill above shows it seated in the ring. */}
+                                <View
+                                  style={[
+                                    styles.igCamBesideFilterThumb,
+                                    {
+                                      width: FILTER_NEIGHBOR_SIZE,
+                                      height: FILTER_NEIGHBOR_SIZE,
+                                      borderRadius: FILTER_NEIGHBOR_SIZE / 2,
+                                      borderWidth: 1.5,
+                                      borderColor: "rgba(255,255,255,0.28)",
+                                      backgroundColor: filterSwatchColor(f.id),
+                                      opacity: isSelected ? 0 : 1
+                                    }
+                                  ]}
+                                />
+                              </Pressable>
+                            );
+                          }}
+                        />
+                      ) : null}
+
+                      {/* Fixed shutter: always centered; inner fill = active filter */}
+                      <View
+                        pointerEvents="none"
+                        style={[
+                          styles.igCamCaptureOuter,
+                          styles.igCamFilterShutterOverlay,
+                          filterCarouselWidth > 0
+                            ? { left: (filterCarouselWidth - FILTER_SHUTTER_OUTER) / 2 }
+                            : null,
+                          entryIsRecording ? styles.igCamCaptureOuterRecording : null
+                        ]}
+                      >
+                        {entryStoryTool === "create" && entryType === "story" && !entryIsRecording ? (
+                          <Text style={styles.igCamShutterAa}>Aa</Text>
+                        ) : entryStoryTool === "boomerang" && entryType === "story" && !entryIsRecording ? (
+                          <Ionicons name="infinite" size={32} color="#C9FF35" />
+                        ) : entryIsRecording ? (
+                          <View style={[styles.igCamCaptureInner, styles.igCamCaptureInnerRecording]} />
+                        ) : (
+                          <View
+                            style={[
+                              styles.igCamCaptureInner,
+                              { backgroundColor: filterSwatchColor(creativeFilter) }
+                            ]}
+                          />
+                        )}
+                      </View>
                     </View>
-                  ) : null}
-                </View>
+                  </View>
+                )}
               </View>
 
               {entryType === "live" && !entryIsRecording ? (
@@ -2586,8 +2930,8 @@ export function CreateModal({
               ) : null}
 
               <View style={styles.igCamBottomNav} pointerEvents="box-none">
-                {entryType === "live" ? (
-                  <View style={styles.igCamGalleryThumbSpacer} />
+                {entryType === "live" || entryIsRecording ? (
+                  <View style={styles.igCamBottomNavSideSpacer} />
                 ) : (
                   <Pressable
                     style={styles.igCamGalleryThumb}
@@ -2595,6 +2939,9 @@ export function CreateModal({
                       if (entryType === "post") setCaptureEntryView("gallery");
                       else void openEntryGallery();
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open gallery"
+                    hitSlop={6}
                   >
                     {recentGridAssets[0] ? (
                       <Image
@@ -2603,7 +2950,7 @@ export function CreateModal({
                         resizeMode="cover"
                       />
                     ) : (
-                      <Ionicons name="images-outline" size={22} color="#C9FF35" />
+                      <Ionicons name="image-outline" size={18} color="#fff" />
                     )}
                   </Pressable>
                 )}
@@ -3041,7 +3388,7 @@ export function CreateModal({
                   <Pressable onPress={() => setCreateType(null)} hitSlop={10} style={styles.igCamTopSquareBtn}>
                     <Ionicons name="close" size={24} color="#fff" />
                   </Pressable>
-                  <Pressable style={styles.igAddAudioPill} onPress={() => setShowAudioPanel(true)}>
+                  <Pressable style={styles.igAddAudioPill} onPress={openAudioPicker}>
                     <Text style={styles.igAddAudioText} numberOfLines={1}>
                       {selectedAudioTrack ? selectedAudioTrack.title : t("addAudio")}
                     </Text>
@@ -3075,7 +3422,7 @@ export function CreateModal({
                   <Pressable onPress={() => setShowStickerPanel(true)} hitSlop={8} style={styles.igStoryPreviewToolBtn}>
                     <CreateCameraSvgIcon module={STORY_PREVIEW_ASSETS.sticker} size={24} fallbackName="happy-outline" />
                   </Pressable>
-                  <Pressable onPress={() => setShowAudioPanel(true)} hitSlop={8} style={styles.igStoryPreviewToolBtn}>
+                  <Pressable onPress={openAudioPicker} hitSlop={8} style={styles.igStoryPreviewToolBtn}>
                     <CreateCameraSvgIcon module={STORY_PREVIEW_ASSETS.audio} size={22} fallbackName="musical-notes-outline" />
                   </Pressable>
                   <Pressable onPress={() => openCreativePanel("filter")} hitSlop={8} style={styles.igStoryPreviewToolBtn}>
@@ -3205,7 +3552,7 @@ export function CreateModal({
               <>
                 <View style={styles.igPostToolsRow}>
                   {[
-                    { id: "audio", label: "Audio", icon: "musical-note-outline" as const, onPress: () => setShowAudioPanel(true) },
+                    { id: "audio", label: "Audio", icon: "musical-note-outline" as const, onPress: openAudioPicker },
                     {
                       id: "text",
                       label: "Text",
@@ -3512,6 +3859,126 @@ export function CreateModal({
       </Pressable>
       )
       )}
+
+      {showAlbumPicker ? (
+        <View style={styles.albumPickerOverlayRoot} pointerEvents="box-none">
+          <Pressable
+            style={styles.albumPickerBackdrop}
+            onPress={() => setShowAlbumPicker(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss albums"
+          />
+          <View style={styles.albumPickerSheet} accessibilityViewIsModal>
+            <Text style={styles.albumPickerTitle}>Albums</Text>
+            <ScrollView style={styles.albumPickerList} bounces={false}>
+              {galleryAlbums.map((album) => {
+                const selected = (selectedAlbumId ?? recentsAlbumId()) === album.id;
+                return (
+                  <Pressable
+                    key={album.id || "recents"}
+                    style={[styles.albumPickerRow, selected ? styles.albumPickerRowOn : null]}
+                    onPress={() => {
+                      setSelectedAlbumId(album.id === recentsAlbumId() ? null : album.id);
+                      setShowAlbumPicker(false);
+                    }}
+                  >
+                    <Text style={[styles.albumPickerRowText, selected ? styles.albumPickerRowTextOn : null]}>
+                      {album.title}
+                    </Text>
+                    {album.assetCount > 0 ? (
+                      <Text style={styles.albumPickerRowCount}>{album.assetCount}</Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+
+      {showAudioPanel ? (
+        <View style={styles.audioPanelOverlayRoot} pointerEvents="box-none">
+          <Pressable
+            style={styles.audioPanelBackdrop}
+            onPress={() => {
+              setShowAudioPanel(false);
+              void stopAudioPreview();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss audio picker"
+          />
+          <View style={[styles.creativePanelCard, styles.audioPanelCard]} pointerEvents="auto">
+            <Text style={styles.creativePanelTitle}>Add audio</Text>
+            <Text style={styles.creativePanelHint}>Select a music track for your story or reel.</Text>
+            <TextInput
+              value={audioQuery}
+              onChangeText={setAudioQuery}
+              style={styles.audioSearchInput}
+              placeholder="Search any song..."
+              placeholderTextColor="#8b9793"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+            />
+            {audioSearchLoading ? (
+              <View style={styles.audioSearchStateRow}>
+                <ActivityIndicator size="small" color="#C9FF35" />
+                <Text style={styles.audioSearchStateText}>Searching songs...</Text>
+              </View>
+            ) : null}
+            {audioSearchError ? <Text style={styles.audioSearchErrorText}>{audioSearchError}</Text> : null}
+            <ScrollView style={styles.audioTrackList} keyboardShouldPersistTaps="handled">
+              {audioTracksToShow.map((track) => {
+                const selected = selectedAudioTrackId === track.id;
+                const playing = audioPreviewTrackId === track.id;
+                return (
+                  <Pressable
+                    key={track.id}
+                    style={[styles.audioTrackRow, selected ? styles.audioTrackRowSelected : null]}
+                    onPress={() => setSelectedAudioTrackId(track.id)}
+                  >
+                    <View style={styles.audioTrackMeta}>
+                      <Text style={styles.audioTrackTitle}>{track.title}</Text>
+                      <Text style={styles.audioTrackArtist}>{track.artist}</Text>
+                    </View>
+                    <Pressable
+                      style={styles.audioTrackPlayBtn}
+                      onPress={() => {
+                        void previewAudioTrack(track);
+                      }}
+                    >
+                      <Ionicons name={playing ? "pause" : "play"} size={16} color="#111" />
+                    </Pressable>
+                  </Pressable>
+                );
+              })}
+              {!audioSearchLoading && audioQuery.trim().length >= 2 && !audioTracksToShow.length ? (
+                <Text style={styles.audioSearchStateText}>No playable preview found for this search.</Text>
+              ) : null}
+            </ScrollView>
+            <View style={styles.audioActionsRow}>
+              <Pressable
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  setSelectedAudioTrackId(null);
+                  void stopAudioPreview();
+                }}
+              >
+                <Text style={styles.secondaryBtnText}>Remove</Text>
+              </Pressable>
+              <Pressable
+                style={styles.audioDoneBtn}
+                onPress={() => {
+                  setShowAudioPanel(false);
+                  void stopAudioPreview();
+                }}
+              >
+                <Text style={styles.primaryBtnText}>Done</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </Modal>
 
     <Modal visible={liveKitHostOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
@@ -3752,94 +4219,6 @@ export function CreateModal({
       </Pressable>
     </Modal>
 
-    <Modal
-      visible={showAudioPanel}
-      transparent
-      animationType="fade"
-      onRequestClose={() => {
-        setShowAudioPanel(false);
-        void stopAudioPreview();
-      }}
-    >
-      <Pressable
-        style={styles.creativePanelBackdrop}
-        onPress={() => {
-          setShowAudioPanel(false);
-          void stopAudioPreview();
-        }}
-      >
-        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
-          <Text style={styles.creativePanelTitle}>Add audio</Text>
-          <Text style={styles.creativePanelHint}>Select a music track for your story or reel.</Text>
-          <TextInput
-            value={audioQuery}
-            onChangeText={setAudioQuery}
-            style={styles.audioSearchInput}
-            placeholder="Search any song..."
-            placeholderTextColor="#8b9793"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {audioSearchLoading ? (
-            <View style={styles.audioSearchStateRow}>
-              <ActivityIndicator size="small" color="#C9FF35" />
-              <Text style={styles.audioSearchStateText}>Searching songs...</Text>
-            </View>
-          ) : null}
-          {audioSearchError ? <Text style={styles.audioSearchErrorText}>{audioSearchError}</Text> : null}
-          <View style={styles.audioTrackList}>
-            {audioTracksToShow.map((track) => {
-              const selected = selectedAudioTrackId === track.id;
-              const playing = audioPreviewTrackId === track.id;
-              return (
-                <Pressable
-                  key={track.id}
-                  style={[styles.audioTrackRow, selected ? styles.audioTrackRowSelected : null]}
-                  onPress={() => setSelectedAudioTrackId(track.id)}
-                >
-                  <View style={styles.audioTrackMeta}>
-                    <Text style={styles.audioTrackTitle}>{track.title}</Text>
-                    <Text style={styles.audioTrackArtist}>{track.artist}</Text>
-                  </View>
-                  <Pressable
-                    style={styles.audioTrackPlayBtn}
-                    onPress={() => {
-                      void previewAudioTrack(track);
-                    }}
-                  >
-                    <Ionicons name={playing ? "pause" : "play"} size={16} color="#111" />
-                  </Pressable>
-                </Pressable>
-              );
-            })}
-            {!audioSearchLoading && audioQuery.trim().length >= 2 && !audioTracksToShow.length ? (
-              <Text style={styles.audioSearchStateText}>No playable preview found for this search.</Text>
-            ) : null}
-          </View>
-          <View style={styles.audioActionsRow}>
-            <Pressable
-              style={styles.secondaryBtn}
-              onPress={() => {
-                setSelectedAudioTrackId(null);
-                void stopAudioPreview();
-              }}
-            >
-              <Text style={styles.secondaryBtnText}>Remove</Text>
-            </Pressable>
-            <Pressable
-              style={styles.audioDoneBtn}
-              onPress={() => {
-                setShowAudioPanel(false);
-                void stopAudioPreview();
-              }}
-            >
-              <Text style={styles.primaryBtnText}>Done</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-
     <Modal visible={showLocationPanel} transparent animationType="fade" onRequestClose={() => setShowLocationPanel(false)}>
       <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowLocationPanel(false)}>
         <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
@@ -3943,36 +4322,6 @@ export function CreateModal({
       </Pressable>
     </Modal>
 
-    <Modal visible={showAlbumPicker} transparent animationType="fade" onRequestClose={() => setShowAlbumPicker(false)}>
-      <Pressable style={styles.albumPickerBackdrop} onPress={() => setShowAlbumPicker(false)}>
-        <Pressable style={styles.albumPickerSheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.albumPickerTitle}>Albums</Text>
-          <ScrollView style={styles.albumPickerList}>
-            {galleryAlbums.map((album) => {
-              const selected = (selectedAlbumId ?? recentsAlbumId()) === album.id;
-              return (
-                <Pressable
-                  key={album.id || "recents"}
-                  style={[styles.albumPickerRow, selected ? styles.albumPickerRowOn : null]}
-                  onPress={() => {
-                    setSelectedAlbumId(album.id === recentsAlbumId() ? null : album.id);
-                    setShowAlbumPicker(false);
-                  }}
-                >
-                  <Text style={[styles.albumPickerRowText, selected ? styles.albumPickerRowTextOn : null]}>
-                    {album.title}
-                  </Text>
-                  {album.assetCount > 0 ? (
-                    <Text style={styles.albumPickerRowCount}>{album.assetCount}</Text>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
-
     {Platform.OS === "web" ? (
       <WebCameraCapture
         visible={fullScreenCameraOpen}
@@ -4053,7 +4402,8 @@ const styles = StyleSheet.create({
     width: "100%",
     aspectRatio: 1,
     backgroundColor: "#383838",
-    position: "relative"
+    position: "relative",
+    overflow: "hidden"
   },
   igPostEntryPreviewImage: { width: "100%", height: "100%" },
   igPostEntryPreviewFallback: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
@@ -4090,11 +4440,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  albumPickerBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.65)",
+  albumPickerOverlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 300,
+    elevation: 300,
     justifyContent: "center",
     paddingHorizontal: 24
+  },
+  audioPanelOverlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 320,
+    elevation: 320,
+    justifyContent: "flex-end",
+    padding: 16
+  },
+  audioPanelBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.55)"
+  },
+  audioPanelCard: {
+    zIndex: 1,
+    elevation: 1,
+    maxHeight: "78%"
+  },
+  albumPickerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.65)"
   },
   albumPickerSheet: {
     backgroundColor: "#1a1f24",
@@ -4102,7 +4473,9 @@ const styles = StyleSheet.create({
     maxHeight: "70%",
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "#303842"
+    borderColor: "#303842",
+    zIndex: 1,
+    elevation: 1
   },
   albumPickerTitle: {
     color: "#f8fafc",
@@ -4519,7 +4892,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#000"
   },
   igCaptureOverlay: {
-    ...StyleSheet.absoluteFillObject
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 5,
+    elevation: 5
   },
   igCamBottomChrome: {
     position: "absolute",
@@ -4542,7 +4917,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10
   },
-  igCaptureHeaderSpacer: { width: 38 },
+  igCaptureHeaderSpacer: { width: 40, height: 40 },
   igCamZoomPill: {
     minWidth: 40,
     height: 40,
@@ -4657,6 +5032,26 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 13
   },
+  igCamTimerSecText: {
+    color: "#C9FF35",
+    fontWeight: "900",
+    fontSize: 14
+  },
+  igCamTimerCountdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 30,
+    elevation: 30
+  },
+  igCamTimerCountdownText: {
+    color: "#fff",
+    fontSize: 120,
+    fontWeight: "200",
+    textShadowColor: "rgba(0,0,0,0.45)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 12
+  },
   igAddAudioPill: {
     alignSelf: "center",
     flexDirection: "row",
@@ -4668,7 +5063,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "rgba(38,38,38,0.92)",
     minWidth: 168,
-    marginBottom: 6
+    marginBottom: 6,
+    zIndex: 40,
+    elevation: 40
   },
   igAddAudioText: {
     color: "#C9FF35",
@@ -4684,8 +5081,28 @@ const styles = StyleSheet.create({
   },
   igCamMiddleArea: {
     ...StyleSheet.absoluteFillObject,
-    top: 56,
+    // Leave room for top chrome + Add audio pill so pinch layer does not steal taps
+    top: 118,
     bottom: 210
+  },
+  igCamPinchZoomBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "42%",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 5
+  },
+  igCamPinchZoomBadgeText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    overflow: "hidden"
   },
   igCamLeftRail: {
     position: "absolute",
@@ -4816,9 +5233,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 8,
+    marginTop: 4,
     marginBottom: 6,
-    paddingHorizontal: 4
+    paddingHorizontal: 6,
+    minHeight: 100,
+    position: "relative"
   },
   igCamCaptureSideSlot: {
     width: 88,
@@ -4833,16 +5252,16 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   igCamGalleryThumbSpacer: {
-    width: 52,
-    height: 52
+    width: 44,
+    height: 44
   },
   igCamGalleryThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#C9FF35",
-    backgroundColor: "#262626",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(40,40,40,0.92)",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden"
@@ -5033,9 +5452,9 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   igCamCaptureInner: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: FILTER_SHUTTER_INNER,
+    height: FILTER_SHUTTER_INNER,
+    borderRadius: FILTER_SHUTTER_INNER / 2,
     backgroundColor: "#303030"
   },
   igCamCaptureOuterRecording: {
@@ -5093,6 +5512,126 @@ const styles = StyleSheet.create({
     width: 11,
     height: 11,
     borderRadius: 6
+  },
+  igCamFilterActiveName: {
+    textAlign: "center",
+    alignSelf: "center",
+    width: "100%",
+    marginBottom: 8,
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+    textShadowColor: "rgba(0,0,0,0.55)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3
+  },
+  igCamFilterActiveNameSpacer: {
+    height: 24,
+    marginBottom: 8
+  },
+  igCamBesideBoomerang: {
+    width: 36,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 2
+  },
+  igCamBesideBoomerangSpacer: {
+    width: 8
+  },
+  igCamRowGalleryBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(40,40,40,0.92)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.28)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  igCamRowGalleryBtnImg: {
+    width: "100%",
+    height: "100%"
+  },
+  igCamRowGalleryBtnSpacer: {
+    width: 40,
+    height: 40
+  },
+  igCamBottomNavSideSpacer: {
+    width: 44,
+    height: 44
+  },
+  igCamFilterCenterCluster: {
+    flex: 1,
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    minHeight: 108
+  },
+  igCamFilterCarouselWrap: {
+    alignSelf: "stretch",
+    width: "100%",
+    height: FILTER_SHUTTER_OUTER,
+    justifyContent: "center",
+    overflow: "visible"
+  },
+  igCamFilterCarouselContent: {
+    alignItems: "center",
+    minHeight: FILTER_SHUTTER_OUTER
+  },
+  igCamFilterCarouselSlot: {
+    width: FILTER_CAROUSEL_SLOT,
+    height: FILTER_SHUTTER_OUTER,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamFilterShutterOverlay: {
+    position: "absolute",
+    top: 0,
+    zIndex: 4,
+    elevation: 4,
+    backgroundColor: "transparent"
+  },
+  igCamFilterBesideRow: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 78
+  },
+  igCamFilterBesideSide: {
+    flex: 1,
+    minWidth: 0
+  },
+  igCamFilterBesideSideScroll: {
+    flexGrow: 0
+  },
+  igCamFilterBesideSideContent: {
+    flexGrow: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+    paddingRight: 10
+  },
+  igCamFilterBesideSideContentStart: {
+    flexGrow: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 6,
+    paddingLeft: 10
+  },
+  igCamBesideFilterItem: {
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igCamBesideFilterThumb: {
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
   },
   igCamFlipBtn: {
     width: 44,
@@ -5294,7 +5833,7 @@ const styles = StyleSheet.create({
   audioSearchStateRow: { marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8 },
   audioSearchStateText: { marginTop: 10, color: "#62706c", fontSize: 12, fontWeight: "600" },
   audioSearchErrorText: { marginTop: 8, color: "#b91c1c", fontSize: 12, fontWeight: "700" },
-  audioTrackList: { marginTop: 8, gap: 10 },
+  audioTrackList: { marginTop: 8, gap: 10, maxHeight: 320 },
   tagPeopleList: { marginTop: 10, maxHeight: 260 },
   audioTrackRow: {
     minHeight: 54,

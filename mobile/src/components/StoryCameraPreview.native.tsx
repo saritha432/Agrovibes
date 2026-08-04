@@ -11,6 +11,11 @@ type Props = {
   active?: boolean;
   flashOn?: boolean;
   zoomLevel?: StoryCameraZoomLevel;
+  /**
+   * Continuous CameraView zoom 0–1. When set (e.g. Create overlay pinch),
+   * this overrides internal pinch zoom so gestures can live on the UI overlay.
+   */
+  zoom?: number;
   /** `video` keeps preview in video mode (required for reliable recording on Android). */
   mode?: "picture" | "video";
   onPress?: () => void;
@@ -19,6 +24,10 @@ type Props = {
   onAutoRecordFinished?: (payload: { uri: string }) => void;
   /** Continuous CameraView zoom 0–1 (pinch + 1x/2x buttons). */
   onZoomChange?: (zoom: number) => void;
+  /** When false, skip internal pinch layer (parent overlay handles pinches). */
+  enableInternalPinch?: boolean;
+  /** Color tint applied only on the camera feed (not UI chrome). */
+  filterOverlayColor?: string | null;
 };
 
 export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(function StoryCameraPreview(
@@ -27,11 +36,14 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
     active = false,
     flashOn = false,
     zoomLevel = 1,
+    zoom: zoomProp,
     mode = "picture",
     onPress,
     onRecordingChange,
     onAutoRecordFinished,
-    onZoomChange
+    onZoomChange,
+    enableInternalPinch = true,
+    filterOverlayColor = null
   },
   ref
 ) {
@@ -45,11 +57,14 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   const [ready, setReady] = useState(false);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
-  const { zoom: cameraZoom, zoomDisplay, pinchHandlers } = useCameraPinchZoom({
-    zoomLevel,
-    enabled: active && ready,
+  const controlled = typeof zoomProp === "number";
+  const { zoom: internalZoom, pinchHandlers } = useCameraPinchZoom({
+    zoomLevel: controlled ? undefined : zoomLevel,
+    enabled: active && ready && enableInternalPinch && !controlled,
     onZoomChange
   });
+  const cameraZoom = controlled ? Math.min(1, Math.max(0, zoomProp)) : internalZoom;
+  const zoomDisplay = 1 + cameraZoom * 2;
 
   useEffect(() => {
     if (!active || permission?.granted) return;
@@ -181,7 +196,11 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
   }
 
   return (
-    <View style={styles.wrap} {...pinchHandlers} collapsable={false}>
+    <View
+      style={styles.wrap}
+      collapsable={false}
+      {...(enableInternalPinch && !controlled ? pinchHandlers : null)}
+    >
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -194,8 +213,12 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
         onCameraReady={() => setReady(true)}
         pointerEvents="none"
       />
-      {/* Captures two-finger pinches above the native camera surface. */}
-      <View style={styles.pinchLayer} {...pinchHandlers} collapsable={false} />
+      {enableInternalPinch && !controlled ? (
+        <View style={styles.pinchLayer} {...pinchHandlers} collapsable={false} />
+      ) : null}
+      {filterOverlayColor ? (
+        <View pointerEvents="none" style={[styles.filterOverlay, { backgroundColor: filterOverlayColor }]} />
+      ) : null}
       {!ready ? (
         <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color="#C9FF35" />
@@ -207,7 +230,7 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
           <Text style={styles.recordingText}>Recording</Text>
         </View>
       ) : null}
-      {ready && cameraZoom > 0.02 ? (
+      {ready && cameraZoom > 0.02 && !controlled ? (
         <View style={styles.zoomBadge} pointerEvents="none">
           <Text style={styles.zoomBadgeText}>{zoomDisplay.toFixed(1)}x</Text>
         </View>
@@ -221,6 +244,10 @@ const styles = StyleSheet.create({
   pinchLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1
+  },
+  filterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2
   },
   fallback: {
     flex: 1,

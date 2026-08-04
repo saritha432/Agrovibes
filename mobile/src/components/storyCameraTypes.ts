@@ -13,7 +13,8 @@ export type StoryCameraZoomLevel = 1 | 2;
 
 /** Maps 1x/2x UI to Expo `CameraView` zoom (0–1 fraction of device max zoom). */
 export function storyZoomToExpoRatio(level: StoryCameraZoomLevel): number {
-  return level === 2 ? 0.22 : 0;
+  // 1x = no digital zoom; 2x ≈ half of device max so the step is clearly visible.
+  return level === 2 ? 0.5 : 0;
 }
 
 export type StoryCameraPreviewHandle = {

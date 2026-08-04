@@ -362,7 +362,7 @@ export async function handleNotificationResponse(
         queueJoinLive(postId);
       }
     });
-  } else if (type === "post_like" || type === "post_comment" || type === "comment_reply") {
+  } else if (type === "post_like" || type === "post_comment" || type === "comment_reply" || type === "post_tag") {
     const postId = Number(data.postId);
     if (Number.isFinite(postId) && postId > 0) {
       scheduleOpenPost(postId, options?.authToken);

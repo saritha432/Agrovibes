@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanResponder, type GestureResponderEvent } from "react-native";
+import type { GestureResponderEvent, ViewProps } from "react-native";
 import { storyZoomToExpoRatio, type StoryCameraZoomLevel } from "../components/storyCameraTypes";
 
 const DEFAULT_MIN = 0;
 const DEFAULT_MAX = 1;
 /** How strongly pinch distance maps into CameraView zoom (0–1). */
-const PINCH_SENSITIVITY = 0.65;
+const PINCH_SENSITIVITY = 0.85;
 
 function touchDistance(event: GestureResponderEvent): number {
   const touches = event.nativeEvent.touches;
@@ -30,8 +30,14 @@ type Options = {
   onZoomChange?: (zoom: number) => void;
 };
 
+export type CameraPinchHandlers = Pick<
+  ViewProps,
+  "onTouchStart" | "onTouchMove" | "onTouchEnd" | "onTouchCancel"
+>;
+
 /**
  * Pinch-in / pinch-out camera zoom for expo-camera `CameraView` (`zoom` 0–1).
+ * Uses onTouch* (not PanResponder) so the second finger is tracked reliably.
  */
 export function useCameraPinchZoom({
   zoomLevel,
@@ -47,12 +53,15 @@ export function useCameraPinchZoom({
   const startDistanceRef = useRef(0);
   const lastZoomLevelRef = useRef<StoryCameraZoomLevel | undefined>(zoomLevel);
   const pinchingRef = useRef(false);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const onZoomChangeRef = useRef(onZoomChange);
   onZoomChangeRef.current = onZoomChange;
 
   const setZoom = useCallback(
     (next: number) => {
       const clamped = clampZoom(next, min, max);
+      if (Math.abs(clamped - zoomRef.current) < 0.001) return;
       zoomRef.current = clamped;
       setZoomState(clamped);
       onZoomChangeRef.current?.(clamped);
@@ -62,52 +71,70 @@ export function useCameraPinchZoom({
 
   useEffect(() => {
     if (zoomLevel == null) return;
-    // Only snap when the discrete control changes — never while a pinch is active.
     if (lastZoomLevelRef.current === zoomLevel) return;
     lastZoomLevelRef.current = zoomLevel;
     if (pinchingRef.current) return;
     setZoom(storyZoomToExpoRatio(zoomLevel));
   }, [setZoom, zoomLevel]);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: (evt) => enabled && (evt.nativeEvent.touches?.length ?? 0) >= 2,
-        onMoveShouldSetPanResponder: (evt) => enabled && (evt.nativeEvent.touches?.length ?? 0) >= 2,
-        onStartShouldSetPanResponderCapture: (evt) => enabled && (evt.nativeEvent.touches?.length ?? 0) >= 2,
-        onMoveShouldSetPanResponderCapture: (evt) => enabled && (evt.nativeEvent.touches?.length ?? 0) >= 2,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: (evt) => {
-          if (!enabled) return;
-          const distance = touchDistance(evt);
-          if (distance <= 0) return;
-          pinchingRef.current = true;
-          startDistanceRef.current = distance;
-          startZoomRef.current = zoomRef.current;
-        },
-        onPanResponderMove: (evt) => {
-          if (!enabled) return;
-          const distance = touchDistance(evt);
-          if (distance <= 0) return;
-          if (startDistanceRef.current <= 0) {
-            startDistanceRef.current = distance;
-            startZoomRef.current = zoomRef.current;
-            return;
-          }
-          const scale = distance / startDistanceRef.current;
-          // Pinch out (scale > 1) zooms in; pinch in zooms out.
-          setZoom(startZoomRef.current + (scale - 1) * PINCH_SENSITIVITY);
-        },
-        onPanResponderRelease: () => {
-          startDistanceRef.current = 0;
-          pinchingRef.current = false;
-        },
-        onPanResponderTerminate: () => {
-          startDistanceRef.current = 0;
-          pinchingRef.current = false;
-        }
-      }),
-    [enabled, setZoom]
+  const endPinch = useCallback(() => {
+    startDistanceRef.current = 0;
+    pinchingRef.current = false;
+  }, []);
+
+  const onTouchStart = useCallback(
+    (evt: GestureResponderEvent) => {
+      if (!enabledRef.current) return;
+      const touches = evt.nativeEvent.touches?.length ?? 0;
+      if (touches < 2) return;
+      const distance = touchDistance(evt);
+      if (distance <= 0) return;
+      pinchingRef.current = true;
+      startDistanceRef.current = distance;
+      startZoomRef.current = zoomRef.current;
+    },
+    []
+  );
+
+  const onTouchMove = useCallback(
+    (evt: GestureResponderEvent) => {
+      if (!enabledRef.current) return;
+      const touches = evt.nativeEvent.touches?.length ?? 0;
+      if (touches < 2) {
+        if (pinchingRef.current) endPinch();
+        return;
+      }
+      const distance = touchDistance(evt);
+      if (distance <= 0) return;
+      if (!pinchingRef.current || startDistanceRef.current <= 0) {
+        pinchingRef.current = true;
+        startDistanceRef.current = distance;
+        startZoomRef.current = zoomRef.current;
+        return;
+      }
+      const scale = distance / startDistanceRef.current;
+      // Pinch out (scale > 1) zooms in; pinch in zooms out.
+      setZoom(startZoomRef.current + (scale - 1) * PINCH_SENSITIVITY);
+    },
+    [endPinch, setZoom]
+  );
+
+  const onTouchEnd = useCallback(
+    (evt: GestureResponderEvent) => {
+      const touches = evt.nativeEvent.touches?.length ?? 0;
+      if (touches < 2) endPinch();
+    },
+    [endPinch]
+  );
+
+  const pinchHandlers: CameraPinchHandlers = useMemo(
+    () => ({
+      onTouchStart,
+      onTouchMove,
+      onTouchEnd,
+      onTouchCancel: endPinch
+    }),
+    [endPinch, onTouchEnd, onTouchMove, onTouchStart]
   );
 
   /** Approximate display multiplier for UI (1.0x … ~3.0x). */
@@ -117,6 +144,6 @@ export function useCameraPinchZoom({
     zoom,
     setZoom,
     zoomDisplay,
-    pinchHandlers: enabled ? panResponder.panHandlers : {}
+    pinchHandlers
   };
 }

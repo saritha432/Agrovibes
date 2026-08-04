@@ -434,6 +434,11 @@ function socialPushCopy({ type, actorName, commentExcerpt }) {
       return { title: "New follower", body: `${actor} started following you` };
     case "post_like":
       return { title: "New like", body: `${actor} liked your post` };
+    case "post_tag":
+      return {
+        title: "Tagged you",
+        body: excerpt || `${actor} tagged you in a post`
+      };
     case "post_comment":
       return { title: "New comment", body: excerpt ? `${actor}: ${excerpt}` : `${actor} commented on your post` };
     case "comment_reply":

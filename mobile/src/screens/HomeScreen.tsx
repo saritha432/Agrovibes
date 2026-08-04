@@ -804,8 +804,8 @@ function applyPendingHomePost(rows: HomePost[], pending?: HomePost): HomePost[] 
   const idx = deduped.findIndex((p) => p.id === pending.id);
   if (idx >= 0) {
     const next = [...deduped];
-    next[idx] = { ...next[idx], ...pending };
-    return next;
+    const [existing] = next.splice(idx, 1);
+    return [{ ...existing, ...pending }, ...next];
   }
   return dedupeHomePosts([pending, ...rows]);
 }
@@ -1353,6 +1353,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   }, []);
 
   const [feedShuffleSeed, setFeedShuffleSeed] = useState(() => Date.now());
+  /** Avoid preserving cache order on the first network paint after app open. */
+  const hasLoadedFeedFromNetworkRef = useRef(false);
   const [dismissedPostIds, setDismissedPostIds] = useState<number[]>([]);
   const [dismissedHydrated, setDismissedHydrated] = useState(false);
   const [reportTargetPost, setReportTargetPost] = useState<HomePost | null>(null);
@@ -2114,6 +2116,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         try {
           const notif = await fetchSocialNotifications(token);
           for (const n of notif.postLikes || []) {
+            if (n.type === "post_tag") continue;
             if (Number(n.postId) !== livePost.id) continue;
             pushLiker({
               userId: Number(n.actorId) || undefined,
@@ -2629,6 +2632,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (pending && isLivePost(pending) && (pending.liveStatus === "ended" || pending.videoUrl)) {
         setPosts((prev) => prev.map((p) => (p.id === pending.id ? { ...p, ...pending, liveStatus: "ended" as const } : p)));
       }
+      // New create: show at top immediately and reshuffle tab order like pull-to-refresh.
+      if (pending && !(isLivePost(pending) && (pending.liveStatus === "ended" || pending.videoUrl))) {
+        setPosts((prev) => applyPendingHomePost(prev, pending));
+        setFeedShuffleSeed(Date.now());
+      }
       try {
         const data = await fetchHomePostsPage(token ?? null, { limit: HOME_FEED_PAGE_SIZE });
         if (!mounted) return;
@@ -2637,12 +2645,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const merged = applyPendingHomePost(data.posts, pending);
         const isPullRefresh = refreshPendingRef.current > 0;
         // Paint network rows immediately (IG-style); hydrate local likes after.
-        const painted = isPullRefresh
-          ? merged
-          : postsRef.current.length
-            ? mergeHomeFeedPreservingOrder(merged, postsRef.current)
-            : merged;
+        // Keep API order on create/pull and on first network load after app open.
+        // Preserve current on-screen order only for subsequent background refreshes.
+        const shouldPreserveExistingOrder =
+          !pending &&
+          !isPullRefresh &&
+          hasLoadedFeedFromNetworkRef.current &&
+          postsRef.current.length > 0;
+        const painted = shouldPreserveExistingOrder
+          ? mergeHomeFeedPreservingOrder(merged, postsRef.current)
+          : merged;
         setPosts(painted);
+        hasLoadedFeedFromNetworkRef.current = true;
         for (const post of painted.slice(0, 3)) prefetchPostMedia(post, { warmVideo: false });
         void writeHomeFeedCache(painted, user?.id ?? "anon");
 

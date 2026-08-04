@@ -15,6 +15,9 @@ type Props = {
   onRecordingChange?: (recording: boolean) => void;
   onAutoRecordFinished?: (payload: { uri: string }) => void;
   onZoomChange?: (zoom: number) => void;
+  enableInternalPinch?: boolean;
+  /** Color tint applied only on the camera feed (not UI chrome). */
+  filterOverlayColor?: string | null;
 };
 
 type VideoTrackCaps = MediaTrackCapabilities & {
@@ -93,7 +96,8 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
     onPress,
     onRecordingChange,
     onAutoRecordFinished,
-    onZoomChange
+    onZoomChange,
+    filterOverlayColor = null
   },
   ref
 ) {
@@ -361,6 +365,9 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
 
   return (
     <View ref={hostRef} style={styles.wrap} collapsable={false} {...pinchHandlers}>
+      {filterOverlayColor ? (
+        <View pointerEvents="none" style={[styles.filterOverlay, { backgroundColor: filterOverlayColor }]} />
+      ) : null}
       {!ready ? (
         <View style={styles.loading} pointerEvents="none">
           <ActivityIndicator color="#C9FF35" />
@@ -383,6 +390,10 @@ export const StoryCameraPreview = forwardRef<StoryCameraPreviewHandle, Props>(fu
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, overflow: "hidden", backgroundColor: "#000" },
+  filterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2
+  },
   fallback: {
     flex: 1,
     alignItems: "center",

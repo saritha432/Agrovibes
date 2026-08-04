@@ -719,7 +719,7 @@ export interface SocialNotificationItem {
 
 export interface SocialPostActivityNotification {
   id: number;
-  type: "post_like" | "post_comment" | "comment_reply";
+  type: "post_like" | "post_comment" | "comment_reply" | "post_tag";
   isRead: boolean;
   createdAt: string;
   actorId: number;
