@@ -80,6 +80,7 @@ let postReportsTableReady = false;
 let userReportsTableReady = false;
 let directMessagesTableReady = false;
 let scheduledLivesTableReady = false;
+let providerKycTableReady = false;
 const phoneOtpMemory = new Map();
 const phoneUserMemory = new Map();
 let homeFeedMaintenanceRunning = false;
@@ -336,6 +337,77 @@ async function ensureSocialNotificationsTable() {
     `CREATE INDEX IF NOT EXISTS social_notifications_user_created_idx ON social_notifications (user_id, created_at DESC)`
   );
   socialNotificationsTableReady = true;
+}
+
+async function ensureProviderKycTable() {
+  if (providerKycTableReady) return;
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS provider_kyc_submissions (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      applicant_name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'rental',
+      document_summary TEXT NOT NULL DEFAULT '',
+      business_name TEXT,
+      phone TEXT,
+      address TEXT,
+      priority TEXT NOT NULL DEFAULT 'Medium',
+      status TEXT NOT NULL DEFAULT 'pending',
+      admin_note TEXT,
+      reviewed_by INT REFERENCES learn_users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS provider_kyc_status_created_idx ON provider_kyc_submissions (status, created_at DESC)`
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS provider_kyc_user_idx ON provider_kyc_submissions (user_id, created_at DESC)`
+  );
+  providerKycTableReady = true;
+}
+
+async function notifyAdminUsersOfKyc(actorId, submissionId, applicantName, role) {
+  await ensureSocialNotificationsTable();
+  const admins = await query(
+    `
+    SELECT id
+    FROM learn_users
+    WHERE LOWER(COALESCE(role, '')) = 'admin'
+    ORDER BY id ASC
+    LIMIT 50
+    `
+  );
+  const excerpt = JSON.stringify({
+    kind: "provider_kyc",
+    submissionId,
+    applicantName: String(applicantName || "").slice(0, 120),
+    role: String(role || "rental")
+  });
+  for (const admin of admins.rows) {
+    if (Number(admin.id) === Number(actorId)) continue;
+    await query(
+      `
+      INSERT INTO social_notifications (user_id, actor_id, type, is_read, comment_excerpt)
+      VALUES ($1, $2, 'provider_kyc_submitted', false, $3)
+      `,
+      [admin.id, actorId, excerpt]
+    );
+    fireSocialPush({
+      userId: admin.id,
+      title: "New KYC submission",
+      body: `${applicantName || "A provider"} submitted KYC for ${role || "provider"} approval.`,
+      data: {
+        type: "provider_kyc_submitted",
+        submissionId: String(submissionId)
+      }
+    });
+  }
 }
 
 function liveScheduleExcerpt(topic, scheduledAt) {
@@ -9052,5 +9124,226 @@ async function handleShareProfilePage(req, res) {
 }
 
 router.get("/share/profile/:userIdOrHandle", (req, res) => void handleShareProfilePage(req, res));
+
+router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
+  try {
+    await ensureProviderKycTable();
+    const userId = Number(req.user.id);
+    const applicantName = String(req.body?.applicantName || req.user.fullName || "Provider").trim().slice(0, 160);
+    const role = String(req.body?.role || "rental").trim().toLowerCase().slice(0, 40) || "rental";
+    const documentSummary = String(req.body?.documentSummary || "").trim().slice(0, 500);
+    const businessName = String(req.body?.businessName || "").trim().slice(0, 160) || null;
+    const phone = String(req.body?.phone || "").trim().slice(0, 40) || null;
+    const address = String(req.body?.address || "").trim().slice(0, 400) || null;
+    const priorityRaw = String(req.body?.priority || "Medium").trim();
+    const priority = ["High", "Medium", "Low"].includes(priorityRaw) ? priorityRaw : "Medium";
+
+    if (!documentSummary) {
+      res.status(400).json({ message: "Upload KYC documents before submitting." });
+      return;
+    }
+
+    await query(
+      `
+      UPDATE provider_kyc_submissions
+      SET status = 'superseded', updated_at = NOW()
+      WHERE user_id = $1 AND status = 'pending'
+      `,
+      [userId]
+    );
+
+    const inserted = await query(
+      `
+      INSERT INTO provider_kyc_submissions (
+        user_id, applicant_name, role, document_summary, business_name, phone, address, priority, status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+      RETURNING
+        id,
+        applicant_name AS "applicant",
+        role,
+        document_summary AS "document",
+        priority,
+        status,
+        created_at AS "submittedAt"
+      `,
+      [userId, applicantName, role, documentSummary, businessName, phone, address, priority]
+    );
+
+    const row = inserted.rows[0];
+    await notifyAdminUsersOfKyc(userId, row.id, applicantName, role);
+
+    res.status(201).json({
+      submission: {
+        id: row.id,
+        applicant: row.applicant,
+        role: row.role,
+        document: row.document,
+        priority: row.priority,
+        status: row.status,
+        submitted: row.submittedAt
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to submit KYC", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/admin/kyc", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    await ensureProviderKycTable();
+    const status = String(req.query.status || "").trim().toLowerCase();
+    const result = await query(
+      `
+      SELECT
+        k.id,
+        k.applicant_name AS "applicant",
+        k.role,
+        k.document_summary AS "document",
+        k.priority,
+        k.status,
+        k.business_name AS "businessName",
+        k.phone,
+        k.address,
+        k.created_at AS "submitted",
+        k.reviewed_at AS "reviewedAt",
+        u.email AS "applicantEmail"
+      FROM provider_kyc_submissions k
+      LEFT JOIN learn_users u ON u.id = k.user_id
+      WHERE ($1::TEXT = '' OR k.status = $1)
+        AND k.status <> 'superseded'
+      ORDER BY
+        CASE WHEN k.status = 'pending' THEN 0 ELSE 1 END,
+        k.created_at DESC
+      LIMIT 200
+      `,
+      [status === "pending" || status === "approved" || status === "rejected" ? status : ""]
+    );
+    res.json({
+      submissions: result.rows.map((row) => ({
+        ...row,
+        submitted: row.submitted ? new Date(row.submitted).toISOString() : null
+      })),
+      pendingCount: result.rows.filter((row) => row.status === "pending").length
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load KYC submissions", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/provider/kyc/status", authRequired, async (req, res) => {
+  try {
+    await ensureProviderKycTable();
+    const userId = Number(req.user.id);
+    const result = await query(
+      `
+      SELECT
+        id,
+        status,
+        created_at AS "submittedAt",
+        reviewed_at AS "reviewedAt",
+        admin_note AS "adminNote"
+      FROM provider_kyc_submissions
+      WHERE user_id = $1 AND status <> 'superseded'
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [userId]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      res.json({ status: "not_submitted", submission: null });
+      return;
+    }
+    res.json({
+      status: row.status,
+      submission: {
+        id: row.id,
+        status: row.status,
+        submitted: row.submittedAt ? new Date(row.submittedAt).toISOString() : null,
+        reviewedAt: row.reviewedAt ? new Date(row.reviewedAt).toISOString() : null,
+        adminNote: row.adminNote || null
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load KYC status", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/admin/kyc/:id/respond", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    await ensureProviderKycTable();
+    await ensureSocialNotificationsTable();
+    const submissionId = Number(req.params.id);
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    const adminNote = String(req.body?.note || "").trim().slice(0, 400) || null;
+    if (!Number.isFinite(submissionId) || submissionId <= 0) {
+      res.status(400).json({ message: "Invalid submission id" });
+      return;
+    }
+    if (action !== "approve" && action !== "reject") {
+      res.status(400).json({ message: "action must be approve or reject" });
+      return;
+    }
+    const nextStatus = action === "approve" ? "approved" : "rejected";
+    const updated = await query(
+      `
+      UPDATE provider_kyc_submissions
+      SET
+        status = $2,
+        admin_note = $3,
+        reviewed_by = $4,
+        reviewed_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING
+        id,
+        user_id AS "userId",
+        applicant_name AS "applicant",
+        role,
+        document_summary AS "document",
+        priority,
+        status
+      `,
+      [submissionId, nextStatus, adminNote, req.user.id]
+    );
+    if (!updated.rows[0]) {
+      res.status(404).json({ message: "Pending KYC submission not found" });
+      return;
+    }
+    const row = updated.rows[0];
+    await query(
+      `
+      INSERT INTO social_notifications (user_id, actor_id, type, is_read, comment_excerpt)
+      VALUES ($1, $2, $3, false, $4)
+      `,
+      [
+        row.userId,
+        req.user.id,
+        nextStatus === "approved" ? "provider_kyc_approved" : "provider_kyc_rejected",
+        JSON.stringify({
+          kind: "provider_kyc",
+          submissionId: row.id,
+          status: nextStatus
+        })
+      ]
+    );
+    fireSocialPush({
+      userId: row.userId,
+      title: nextStatus === "approved" ? "KYC Approved" : "KYC Rejected",
+      body:
+        nextStatus === "approved"
+          ? "Admin approved your provider registration. You can start your business."
+          : "Admin rejected your provider KYC. Please review and resubmit.",
+      data: {
+        type: nextStatus === "approved" ? "provider_kyc_approved" : "provider_kyc_rejected",
+        submissionId: String(row.id)
+      }
+    });
+    res.json({ submission: row });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update KYC submission", error: error?.message || String(error) });
+  }
+});
 
 module.exports = router;

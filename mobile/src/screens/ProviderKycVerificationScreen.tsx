@@ -15,6 +15,7 @@ import {
   ProviderStepBar,
   providerFormStyles as pf
 } from "./provider/providerFormUi";
+import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
 type DocKey =
   | "aadhaarFront"
@@ -164,7 +165,7 @@ export function ProviderKycVerificationScreen() {
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={4} />
+      <ProviderStepBar currentStep={3} />
 
       <ScrollView
         style={pf.scroll}
@@ -189,7 +190,16 @@ export function ProviderKycVerificationScreen() {
 
       <ProviderContinueButton
         disabled={!requiredOk}
-        onPress={() => navigation.navigate("ProviderVerification", { track })}
+        onPress={() => {
+          const labels = fields
+            .filter((f) => !!docs[f.key])
+            .map((f) => f.label.replace(/\s*\*$/, "").trim());
+          void updateProviderRegistrationDraft({
+            track,
+            documentLabels: labels
+          });
+          navigation.navigate("ProviderVerification", { track });
+        }}
       />
     </SafeAreaView>
   );

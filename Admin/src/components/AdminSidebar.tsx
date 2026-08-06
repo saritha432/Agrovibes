@@ -53,9 +53,16 @@ type Props = {
   onToggle: () => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
+  kycPendingCount?: number;
 };
 
-export function AdminSidebar({ collapsed, onToggle, searchQuery, onSearchChange }: Props) {
+export function AdminSidebar({
+  collapsed,
+  onToggle,
+  searchQuery,
+  onSearchChange,
+  kycPendingCount = 0
+}: Props) {
   const platformSection = ADMIN_NAV_SECTIONS[0];
   const otherSections = ADMIN_NAV_SECTIONS.slice(1);
 
@@ -130,6 +137,9 @@ export function AdminSidebar({ collapsed, onToggle, searchQuery, onSearchChange 
                   >
                     <img src={item.icon} alt="" />
                     {!collapsed ? <span>{item.label}</span> : null}
+                    {!collapsed && item.to === "/kyc-verification" && kycPendingCount > 0 ? (
+                      <span className="admin-sidebar__badge">{kycPendingCount > 9 ? "9+" : kycPendingCount}</span>
+                    ) : null}
                   </NavLink>
                 </li>
               ))}

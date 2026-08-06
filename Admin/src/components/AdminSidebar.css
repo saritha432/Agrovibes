@@ -190,6 +190,20 @@
   white-space: nowrap;
 }
 
+.admin-sidebar__badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #c6ff00;
+  color: #111;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
 .admin-sidebar__link:hover {
   background: rgba(255, 255, 255, 0.06);
 }

@@ -179,16 +179,6 @@ export function RootNavigator() {
         options={slideRightBg}
       />
       <Stack.Screen
-        name="ProviderRentalForm"
-        getComponent={() => require("../screens/ProviderRentalFormScreen").ProviderRentalFormScreen}
-        options={slideRightBg}
-      />
-      <Stack.Screen
-        name="ProviderServiceForm"
-        getComponent={() => require("../screens/ProviderServiceFormScreen").ProviderServiceFormScreen}
-        options={slideRightBg}
-      />
-      <Stack.Screen
         name="ProviderPersonalDetails"
         getComponent={() => require("../screens/ProviderPersonalDetailsScreen").ProviderPersonalDetailsScreen}
         options={slideRightBg}

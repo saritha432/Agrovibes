@@ -10,6 +10,7 @@ import {
   ProviderStepBar,
   providerFormStyles as pf
 } from "./provider/providerFormUi";
+import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
 export function ProviderPersonalDetailsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
@@ -29,10 +30,24 @@ export function ProviderPersonalDetailsScreen() {
     village.trim().length > 0 &&
     district.trim().length > 0;
 
+  const onContinue = () => {
+    void updateProviderRegistrationDraft({
+      track,
+      fullName: fullName.trim(),
+      phone: phone.trim(),
+      businessName: businessName.trim(),
+      street: street.trim(),
+      village: village.trim(),
+      district: district.trim(),
+      yearsExperience: yearsExperience.trim()
+    });
+    navigation.navigate("ProviderBankDetails", { track });
+  };
+
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={2} />
+      <ProviderStepBar currentStep={1} />
 
       <ScrollView
         style={pf.scroll}
@@ -101,10 +116,7 @@ export function ProviderPersonalDetailsScreen() {
         />
       </ScrollView>
 
-      <ProviderContinueButton
-        disabled={!canContinue}
-        onPress={() => navigation.navigate("ProviderBankDetails", { track })}
-      />
+      <ProviderContinueButton disabled={!canContinue} onPress={onContinue} />
     </SafeAreaView>
   );
 }
