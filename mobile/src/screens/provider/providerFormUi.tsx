@@ -10,11 +10,10 @@ export const PROVIDER_MUTED = APP_TEXT_MUTED;
 export const PROVIDER_DIVIDER = "rgba(255,255,255,0.08)";
 
 export const PROVIDER_STEPS = [
-  { id: 1, label: "Rental", sub: "Choose a category." },
-  { id: 2, label: "Personal Details", sub: "Description Text" },
-  { id: 3, label: "Bank Details", sub: "For earnings" },
-  { id: 4, label: "KYC Verification", sub: "Upload documents" },
-  { id: 5, label: "Verification", sub: "Submit for review" }
+  { id: 1, label: "Personal Details", sub: "Description Text" },
+  { id: 2, label: "Bank Details", sub: "For earnings" },
+  { id: 3, label: "KYC Verification", sub: "Upload documents" },
+  { id: 4, label: "Verification", sub: "Submit for review" }
 ] as const;
 
 /** Show current step ±1 to match compact App Store-style step chips. */
@@ -24,9 +23,7 @@ export function visibleProviderSteps(currentStep: number) {
       ? [1, 2, 3]
       : currentStep === 3
         ? [2, 3, 4]
-        : currentStep === 4
-          ? [2, 4, 5]
-          : [3, 4, 5];
+        : [2, 3, 4];
   return PROVIDER_STEPS.filter((s) => ids.includes(s.id));
 }
 

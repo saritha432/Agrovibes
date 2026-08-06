@@ -50,8 +50,6 @@ export type RootStackParamList = {
   ProviderOnboarding: undefined;
   ProviderTerms: undefined;
   ProviderOfferRole: undefined;
-  ProviderRentalForm: { both?: boolean } | undefined;
-  ProviderServiceForm: { fromBoth?: boolean } | undefined;
   ProviderPersonalDetails: { track?: "rental" | "service" | "both" } | undefined;
   ProviderBankDetails: { track?: "rental" | "service" | "both" } | undefined;
   ProviderKycVerification: { track?: "rental" | "service" | "both" } | undefined;

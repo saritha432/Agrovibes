@@ -10,6 +10,7 @@ import {
   ProviderStepBar,
   providerFormStyles as pf
 } from "./provider/providerFormUi";
+import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
 export function ProviderBankDetailsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
@@ -37,13 +38,21 @@ export function ProviderBankDetailsScreen() {
       Alert.alert("Account mismatch", "Account number and confirmation must match.");
       return;
     }
+    void updateProviderRegistrationDraft({
+      track,
+      holderName: holderName.trim(),
+      bankName: bankName.trim(),
+      accountNumber: accountDigits,
+      ifsc: ifsc.trim(),
+      upi: upi.trim()
+    });
     navigation.navigate("ProviderKycVerification", { track });
   };
 
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={3} />
+      <ProviderStepBar currentStep={2} />
 
       <ScrollView
         style={pf.scroll}

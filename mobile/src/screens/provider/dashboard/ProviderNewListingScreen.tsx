@@ -16,6 +16,12 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
+import { useAuth } from "../../../auth/AuthContext";
+import {
+  getProviderRegistrationStatus,
+  submitListingForApproval,
+  syncProviderRegistrationFromApi
+} from "../../../services/providerWorkflow";
 
 const BG = "#303132";
 const SHEET_BG = "#1A1A1A";
@@ -870,6 +876,7 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 }) {
 
 export function ProviderNewListingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
+  const { token } = useAuth();
   const insets = useSafeAreaInsets();
   const [channel, setChannel] = useState<ListingChannel>("Rental");
   const [step, setStep] = useState<Step>(1);
@@ -1279,36 +1286,53 @@ export function ProviderNewListingScreen() {
     setStep(3);
   };
 
-  const onPublish = () => {
+  const onPublish = async () => {
+    const registrationStatus = await syncProviderRegistrationFromApi(token).catch(() =>
+      getProviderRegistrationStatus()
+    );
+    if (registrationStatus !== "approved") {
+      Alert.alert(
+        "Registration pending",
+        "Admin must approve your provider registration before listings can be submitted."
+      );
+      return;
+    }
+    const listingTitle = equipmentName.trim() || selectedAssetMeta?.title || "Untitled listing";
+    const listingCategory = selectedAssetMeta?.title || (isService ? "Service" : "Rental");
+    await submitListingForApproval({
+      title: listingTitle,
+      category: listingCategory,
+      channel
+    });
     Alert.alert(
-      "Listing published",
+      "Listing submitted",
       isSoilTesting
-        ? "Your soil testing service listing is live for review."
+        ? "Your soil testing service listing was sent to admin for approval."
         : isFarmConsultancy
-          ? "Your farm consultancy listing is live for review."
+          ? "Your farm consultancy listing was sent to admin for approval."
           : isMechanic
-            ? "Your mechanic service listing is live for review."
+            ? "Your mechanic service listing was sent to admin for approval."
             : isIrrigation
-              ? "Your irrigation service listing is live for review."
+              ? "Your irrigation service listing was sent to admin for approval."
               : isDrone
-                ? "Your drone spray listing is live for review."
+                ? "Your drone spray listing was sent to admin for approval."
                 : isCropInspection
-                  ? "Your crop inspection listing is live for review."
+                  ? "Your crop inspection listing was sent to admin for approval."
                   : isEquipmentRepair
-                    ? "Your equipment repair listing is live for review."
+                    ? "Your equipment repair listing was sent to admin for approval."
                     : isService
-                      ? "Your service listing is live for review."
+                      ? "Your service listing was sent to admin for approval."
                       : isWarehouse
-                        ? "Your warehouse listing is live for review."
+                        ? "Your warehouse listing was sent to admin for approval."
                         : isLand
-                          ? "Your land listing is live for review."
+                          ? "Your land listing was sent to admin for approval."
                           : isDriver
-                            ? "Your driver listing is live for review."
+                            ? "Your driver listing was sent to admin for approval."
                             : isLabor
-                              ? "Your labour listing is live for review."
+                              ? "Your labour listing was sent to admin for approval."
                               : isMachinery
-                                ? "Your machinery listing is live for review."
-                                : "Your farm equipment listing is live for review.",
+                                ? "Your machinery listing was sent to admin for approval."
+                                : "Your farm equipment listing was sent to admin for approval.",
       [
       { text: "OK", onPress: () => navigation.goBack() }
     ]);

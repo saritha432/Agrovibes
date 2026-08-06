@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { fetchAdminKyc } from "../api/kyc";
 import { AdminSidebar, ADMIN_NAV_SECTIONS } from "./AdminSidebar";
 import "./AdminLayout.css";
 
@@ -19,7 +20,8 @@ type Props = {
 };
 
 export function AdminLayout({ title, titleAccent = false, breadcrumbs, children }: Props) {
-  const { user, signOut } = useAuth();
+  const { token, user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(COLLAPSE_KEY) === "1";
@@ -29,6 +31,8 @@ export function AdminLayout({ title, titleAccent = false, breadcrumbs, children 
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [pendingKyc, setPendingKyc] = useState(0);
 
   useEffect(() => {
     try {
@@ -37,6 +41,27 @@ export function AdminLayout({ title, titleAccent = false, breadcrumbs, children 
       // ignore
     }
   }, [collapsed]);
+
+  const refreshPending = useCallback(async () => {
+    if (!token || token.startsWith("local-admin-")) {
+      setPendingKyc(0);
+      return;
+    }
+    try {
+      const data = await fetchAdminKyc(token);
+      setPendingKyc(Number(data.pendingCount) || 0);
+    } catch {
+      // Keep last known count
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void refreshPending();
+    const timer = window.setInterval(() => {
+      void refreshPending();
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, [refreshPending]);
 
   const filteredHint = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -64,19 +89,53 @@ export function AdminLayout({ title, titleAccent = false, breadcrumbs, children 
         onToggle={() => setCollapsed((v) => !v)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        kycPendingCount={pendingKyc}
       />
       <div className="admin-layout__main">
         <header className="admin-layout__topbar">
           <div className="admin-layout__topbar-right">
-            <button type="button" className="admin-layout__icon-btn" aria-label="Notifications">
-              <img src="/notifications-icon.png" alt="" width={18} height={18} />
-            </button>
+            <div className="admin-layout__notif">
+              <button
+                type="button"
+                className="admin-layout__icon-btn"
+                aria-label="Notifications"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setNotifOpen((v) => !v);
+                }}
+              >
+                <img src="/notifications-icon.png" alt="" width={18} height={18} />
+                {pendingKyc > 0 ? <span className="admin-layout__badge">{pendingKyc > 9 ? "9+" : pendingKyc}</span> : null}
+              </button>
+              {notifOpen ? (
+                <div className="admin-layout__notif-menu">
+                  {pendingKyc > 0 ? (
+                    <button
+                      type="button"
+                      className="admin-layout__notif-item"
+                      onClick={() => {
+                        setNotifOpen(false);
+                        navigate("/kyc-verification");
+                      }}
+                    >
+                      <strong>{pendingKyc} KYC submission{pendingKyc === 1 ? "" : "s"}</strong>
+                      <span>Waiting for verification</span>
+                    </button>
+                  ) : (
+                    <p className="admin-layout__notif-empty">No new KYC notifications</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
             <div className="admin-layout__profile">
               <button
                 type="button"
                 className="admin-layout__avatar"
                 aria-label="Account menu"
-                onClick={() => setMenuOpen((v) => !v)}
+                onClick={() => {
+                  setNotifOpen(false);
+                  setMenuOpen((v) => !v);
+                }}
               >
                 {initial}
               </button>

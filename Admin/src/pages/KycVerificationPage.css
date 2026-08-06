@@ -46,6 +46,24 @@
   white-space: normal !important;
 }
 
+.kyc-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 107, 107, 0.45);
+  background: rgba(255, 107, 107, 0.08);
+  color: #ff8f8f;
+  font-size: 0.88rem;
+}
+
+.kyc-muted {
+  display: block;
+  margin-top: 4px;
+  color: #8a8a8a;
+  font-size: 0.75rem;
+  white-space: normal;
+}
+
 .kyc-row--approved {
   opacity: 0.72;
 }

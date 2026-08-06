@@ -1,10 +1,12 @@
-import React from "react";
-import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Alert, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { CommonActions, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../auth/AuthContext";
 import { APP_LIME } from "../theme/appColors";
+import { submitProviderRegistrationForApproval } from "../services/providerWorkflow";
 import {
   PROVIDER_CARD,
   PROVIDER_MUTED,
@@ -17,27 +19,49 @@ import {
 
 export function ProviderVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
+  const { token } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
 
-  const onSubmit = () => {
-    Alert.alert("Submitted", "Opening your provider dashboard.", [
-      {
-        text: "OK",
-        onPress: () => {
-          navigation.dispatch(
-            CommonActions.reset({
-              index: 0,
-              routes: [{ name: "ProviderMain" }]
-            })
-          );
-        }
+  const goToProviderDashboard = () => {
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [{ name: "ProviderMain" }]
+      })
+    );
+  };
+
+  const onSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitProviderRegistrationForApproval(token);
+      const message =
+        "Admin has been notified. Your KYC will appear in Admin → KYC Verification for approval.";
+      if (Platform.OS === "web") {
+        window.alert(`Submitted For Approval\n\n${message}`);
+        goToProviderDashboard();
+      } else {
+        Alert.alert("Submitted For Approval", message, [
+          { text: "OK", onPress: goToProviderDashboard }
+        ]);
       }
-    ]);
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : "Could not submit KYC. Please try again.";
+      if (Platform.OS === "web") {
+        window.alert(`Submission failed\n\n${errMsg}`);
+      } else {
+        Alert.alert("Submission failed", errMsg);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={5} />
+      <ProviderStepBar currentStep={4} />
 
       <ScrollView style={pf.scroll} contentContainerStyle={pf.content}>
         <Text style={styles.title}>Verification</Text>
@@ -53,7 +77,13 @@ export function ProviderVerificationScreen() {
         </View>
       </ScrollView>
 
-      <ProviderContinueButton label="Submit for Review" onPress={onSubmit} />
+      <ProviderContinueButton
+        label={submitting ? "Submitting..." : "Submit for Review"}
+        onPress={() => {
+          void onSubmit();
+        }}
+        disabled={submitting}
+      />
     </SafeAreaView>
   );
 }

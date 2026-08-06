@@ -77,15 +77,9 @@ export function ProviderOfferRoleScreen() {
         <Pressable
           style={styles.continueBtn}
           onPress={() => {
-            if (selectedRole === "service") {
-              navigation.navigate("ProviderServiceForm");
-              return;
-            }
-            if (selectedRole === "both") {
-              navigation.navigate("ProviderRentalForm", { both: true });
-              return;
-            }
-            navigation.navigate("ProviderRentalForm");
+            const track =
+              selectedRole === "service" ? "service" : selectedRole === "both" ? "both" : "rental";
+            navigation.navigate("ProviderPersonalDetails", { track });
           }}
           accessibilityRole="button"
         >
@@ -122,8 +116,10 @@ const styles = StyleSheet.create({
   title: {
     color: TEXT,
     fontSize: 40,
-    lineHeight: 44,
-    fontWeight: "700"
+    lineHeight: 52,
+    fontWeight: "700",
+    paddingTop: 4,
+    includeFontPadding: false
   },
   titleAccent: {
     color: APP_LIME
@@ -132,7 +128,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: MUTED,
     fontSize: 13,
-    lineHeight: 18
+    lineHeight: 20,
+    includeFontPadding: false
   },
   optionsWrap: {
     marginTop: 28,
@@ -161,8 +158,9 @@ const styles = StyleSheet.create({
   optionTitle: {
     color: TEXT,
     fontSize: 24,
-    lineHeight: 24,
-    fontWeight: "500"
+    lineHeight: 32,
+    fontWeight: "500",
+    includeFontPadding: false
   },
   optionTitleActive: {
     color: APP_LIME
@@ -171,7 +169,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: MUTED,
     fontSize: 12,
-    lineHeight: 20
+    lineHeight: 20,
+    includeFontPadding: false
   },
   footer: {
     paddingHorizontal: 16,

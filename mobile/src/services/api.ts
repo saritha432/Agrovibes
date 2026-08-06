@@ -531,6 +531,70 @@ export async function fetchAdminUsers(token: string, params: { search?: string; 
   };
 }
 
+export type ProviderKycSubmission = {
+  id: number;
+  applicant: string;
+  role: string;
+  document: string;
+  priority: "High" | "Medium" | "Low" | string;
+  status: "pending" | "approved" | "rejected" | string;
+  submitted?: string | null;
+  businessName?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  applicantEmail?: string | null;
+};
+
+export async function submitProviderKyc(
+  token: string,
+  payload: {
+    applicantName: string;
+    role: string;
+    documentSummary: string;
+    businessName?: string;
+    phone?: string;
+    address?: string;
+    priority?: "High" | "Medium" | "Low";
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/submit`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { submission: ProviderKycSubmission };
+}
+
+export async function fetchProviderKycStatus(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/status`, token)) as {
+    status: "not_submitted" | "pending" | "approved" | "rejected" | string;
+    submission: {
+      id: number;
+      status: string;
+      submitted?: string | null;
+      reviewedAt?: string | null;
+      adminNote?: string | null;
+    } | null;
+  };
+}
+
+export async function fetchAdminKycSubmissions(token: string, params: { status?: string } = {}) {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set("status", params.status);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/admin/kyc${suffix}`, token)) as {
+    submissions: ProviderKycSubmission[];
+    pendingCount: number;
+  };
+}
+
+export async function respondAdminKyc(token: string, submissionId: number, action: "approve" | "reject", note?: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/admin/kyc/${submissionId}/respond`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, note })
+  })) as { submission: ProviderKycSubmission };
+}
+
 export async function fetchUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {
   const qs = new URLSearchParams();
   if (params.search) qs.set("search", params.search);

@@ -106,6 +106,7 @@
   place-items: center;
   cursor: pointer;
   padding: 0;
+  position: relative;
 }
 
 .admin-layout__icon-btn img {
@@ -117,6 +118,74 @@
 
 .admin-layout__icon-btn:hover {
   background: rgba(198, 255, 0, 0.08);
+}
+
+.admin-layout__badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.admin-layout__notif {
+  position: relative;
+}
+
+.admin-layout__notif-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 260px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #1a1a1a;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  padding: 8px;
+  z-index: 40;
+}
+
+.admin-layout__notif-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #eee;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.admin-layout__notif-item:hover {
+  background: rgba(198, 255, 0, 0.08);
+}
+
+.admin-layout__notif-item strong {
+  color: #c6ff00;
+  font-size: 0.86rem;
+}
+
+.admin-layout__notif-item span {
+  color: #9a9a9a;
+  font-size: 0.78rem;
+}
+
+.admin-layout__notif-empty {
+  margin: 0;
+  padding: 14px 12px;
+  color: #8a8a8a;
+  font-size: 0.84rem;
 }
 
 .admin-layout__profile {

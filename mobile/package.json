@@ -36,6 +36,7 @@
     "build:android:prod": "node scripts/eas.js build --platform android --profile production",
     "build:ios:preview": "node scripts/eas.js build --platform ios --profile preview",
     "build:ios:prod": "node scripts/eas.js build --platform ios --profile production",
+    "submit:ios:prod": "node scripts/eas.js submit --platform ios --profile production --latest",
     "build:all:preview": "node scripts/eas.js build --platform all --profile preview",
     "build:all:prod": "node scripts/eas.js build --platform all --profile production",
     "doctor": "npx expo-doctor",
