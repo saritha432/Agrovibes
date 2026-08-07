@@ -71,7 +71,7 @@ export function ProviderVerificationScreen() {
           <Ionicons name="shield-checkmark-outline" size={36} color={APP_LIME} />
           <Text style={styles.cardTitle}>Documents ready for review</Text>
           <Text style={styles.cardBody}>
-            Our team will verify your KYC documents and activate your rental listing. This usually
+            Our team will verify your KYC document photos and activate your rental listing. This usually
             takes 1–2 business days.
           </Text>
         </View>

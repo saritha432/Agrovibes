@@ -531,15 +531,24 @@ export async function fetchAdminUsers(token: string, params: { search?: string; 
   };
 }
 
+export type ProviderKycDocument = {
+  key: string;
+  label: string;
+  url: string;
+};
+
 export type ProviderKycSubmission = {
   id: number;
   applicant: string;
   role: string;
+  registrationType?: "individual" | "business" | string;
   document: string;
+  documents?: ProviderKycDocument[];
   priority: "High" | "Medium" | "Low" | string;
   status: "pending" | "approved" | "rejected" | string;
   submitted?: string | null;
   businessName?: string | null;
+  gstNumber?: string | null;
   phone?: string | null;
   address?: string | null;
   applicantEmail?: string | null;
@@ -550,8 +559,12 @@ export async function submitProviderKyc(
   payload: {
     applicantName: string;
     role: string;
+    registrationType?: "individual" | "business";
     documentSummary: string;
+    documents: ProviderKycDocument[];
     businessName?: string;
+    gstNumber?: string;
+    email?: string;
     phone?: string;
     address?: string;
     priority?: "High" | "Medium" | "Low";
@@ -593,6 +606,89 @@ export async function respondAdminKyc(token: string, submissionId: number, actio
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, note })
   })) as { submission: ProviderKycSubmission };
+}
+
+export type IfscLookupResult = {
+  ifsc: string;
+  bank: string;
+  branch: string;
+  address?: string;
+  city?: string;
+  district?: string;
+  state?: string;
+};
+
+export async function lookupIfsc(ifsc: string) {
+  const code = String(ifsc || "").trim().toUpperCase();
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) {
+    throw new Error("Enter a valid 11-character IFSC code.");
+  }
+
+  // Prefer app API when deployed; fall back to public IFSC directory.
+  try {
+    const response = await fetchWithRetry(`${API_BASE_URL}/v1/bank/ifsc/${encodeURIComponent(code)}`);
+    if (response.ok) {
+      return (await parseJsonOrThrow(response)) as IfscLookupResult;
+    }
+  } catch {
+    // fall through
+  }
+
+  const publicRes = await fetch(`https://ifsc.razorpay.com/${code}`);
+  if (!publicRes.ok) {
+    throw new Error("IFSC not found. Check the code and try again.");
+  }
+  const data = (await publicRes.json()) as {
+    BANK?: string;
+    BRANCH?: string;
+    ADDRESS?: string;
+    CITY?: string;
+    DISTRICT?: string;
+    STATE?: string;
+  };
+  return {
+    ifsc: code,
+    bank: String(data.BANK || "").trim(),
+    branch: String(data.BRANCH || "").trim(),
+    address: String(data.ADDRESS || "").trim(),
+    city: String(data.CITY || "").trim(),
+    district: String(data.DISTRICT || "").trim(),
+    state: String(data.STATE || "").trim()
+  } satisfies IfscLookupResult;
+}
+
+export async function resolveBankAccountName(payload: {
+  accountNumber: string;
+  ifsc: string;
+  suggestedName?: string;
+}) {
+  try {
+    const response = await fetchWithRetry(`${API_BASE_URL}/v1/bank/resolve-account`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (response.ok) {
+      return (await parseJsonOrThrow(response)) as {
+        verified: boolean;
+        holderName: string | null;
+        bank?: string | null;
+        message?: string;
+      };
+    }
+  } catch {
+    // fall through when route is not deployed yet
+  }
+
+  const suggested = String(payload.suggestedName || "").trim() || null;
+  return {
+    verified: false,
+    holderName: suggested,
+    bank: null,
+    message: suggested
+      ? "Confirm account holder name matches bank records."
+      : "Enter account holder name as on the passbook."
+  };
 }
 
 export async function fetchUsers(token: string, params: { search?: string; limit?: number; offset?: number } = {}) {

@@ -17,14 +17,7 @@ import {
 } from "./provider/providerFormUi";
 import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
-type DocKey =
-  | "aadhaarFront"
-  | "aadhaarBack"
-  | "driverLicense"
-  | "governmentId"
-  | "vehicleRc"
-  | "panCard"
-  | "farmerId";
+type DocKey = "aadhaarFront" | "aadhaarBack" | "panCard" | "gstCertificate";
 
 type DocField = {
   key: DocKey;
@@ -33,40 +26,7 @@ type DocField = {
   required: boolean;
 };
 
-const RENTAL_DOC_FIELDS: DocField[] = [
-  {
-    key: "aadhaarFront",
-    label: "Aadhar Card Front *",
-    placeholder: "Upload Aadhar card front",
-    required: true
-  },
-  {
-    key: "aadhaarBack",
-    label: "Aadhar Card Back *",
-    placeholder: "Upload Aadhar card back",
-    required: true
-  },
-  {
-    key: "driverLicense",
-    label: "Driver License Copy *",
-    placeholder: "Upload Driver License copy",
-    required: true
-  },
-  {
-    key: "vehicleRc",
-    label: "Vehicle RC | Equipment Ownership Proof *",
-    placeholder: "Upload Vehicle RC / Ownership proof",
-    required: true
-  },
-  {
-    key: "panCard",
-    label: "Pan Card (Optional)",
-    placeholder: "Upload Pan card",
-    required: false
-  }
-];
-
-const SERVICE_DOC_FIELDS: DocField[] = [
+const INDIVIDUAL_DOC_FIELDS: DocField[] = [
   {
     key: "aadhaarFront",
     label: "Aadhaar Card Front *",
@@ -80,21 +40,36 @@ const SERVICE_DOC_FIELDS: DocField[] = [
     required: true
   },
   {
-    key: "governmentId",
-    label: "Government ID Type *",
-    placeholder: "Upload Government ID Type",
+    key: "panCard",
+    label: "PAN Card *",
+    placeholder: "Upload PAN card",
+    required: true
+  }
+];
+
+const BUSINESS_DOC_FIELDS: DocField[] = [
+  {
+    key: "aadhaarFront",
+    label: "Aadhaar Card Front *",
+    placeholder: "Upload authorized person Aadhaar front",
     required: true
   },
   {
-    key: "vehicleRc",
-    label: "Vehicle RC / Equipment Ownership Proof *",
-    placeholder: "Upload Vehicle RC / Equipment Ownership Proof",
+    key: "aadhaarBack",
+    label: "Aadhaar Card Back *",
+    placeholder: "Upload authorized person Aadhaar back",
     required: true
   },
   {
-    key: "farmerId",
-    label: "Farmer ID (optional)",
-    placeholder: "Upload Farmer ID",
+    key: "panCard",
+    label: "PAN Card *",
+    placeholder: "Upload business / authorized person PAN",
+    required: true
+  },
+  {
+    key: "gstCertificate",
+    label: "GST Certificate (if applicable)",
+    placeholder: "Upload GST certificate",
     required: false
   }
 ];
@@ -138,9 +113,11 @@ export function ProviderKycVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const route = useRoute<any>();
   const track = route.params?.track === "service" || route.params?.track === "both" ? route.params.track : "rental";
+  const registrationType =
+    route.params?.registrationType === "business" ? "business" : "individual";
   const fields = useMemo(
-    () => (track === "service" || track === "both" ? SERVICE_DOC_FIELDS : RENTAL_DOC_FIELDS),
-    [track]
+    () => (registrationType === "business" ? BUSINESS_DOC_FIELDS : INDIVIDUAL_DOC_FIELDS),
+    [registrationType]
   );
   const [docs, setDocs] = useState<Partial<Record<DocKey, string>>>({});
 
@@ -174,7 +151,11 @@ export function ProviderKycVerificationScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>KYC Verification</Text>
-        <Text style={styles.sub}>Upload clear photos or scans</Text>
+        <Text style={styles.sub}>
+          {registrationType === "business"
+            ? "Upload Aadhaar, PAN, and GST certificate if applicable"
+            : "Upload Aadhaar and PAN for verification"}
+        </Text>
 
         {fields.map((field) => (
           <UploadDocCard
@@ -191,14 +172,20 @@ export function ProviderKycVerificationScreen() {
       <ProviderContinueButton
         disabled={!requiredOk}
         onPress={() => {
-          const labels = fields
+          const selected = fields
             .filter((f) => !!docs[f.key])
-            .map((f) => f.label.replace(/\s*\*$/, "").trim());
+            .map((f) => ({
+              key: f.key,
+              label: f.label.replace(/\s*\*$/, "").replace(/\s*\(if applicable\)/i, "").trim(),
+              uri: docs[f.key] as string
+            }));
           void updateProviderRegistrationDraft({
             track,
-            documentLabels: labels
+            registrationType,
+            documentLabels: selected.map((d) => d.label),
+            documents: selected
           });
-          navigation.navigate("ProviderVerification", { track });
+          navigation.navigate("ProviderVerification", { track, registrationType });
         }}
       />
     </SafeAreaView>
@@ -225,33 +212,29 @@ const styles = StyleSheet.create({
     marginBottom: 8
   },
   uploadBox: {
-    minHeight: 88,
-    backgroundColor: PROVIDER_CARD,
-    borderRadius: 10,
+    height: 120,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: PROVIDER_CARD,
     overflow: "hidden",
-    alignItems: "center",
     justifyContent: "center"
   },
   uploadBoxDone: {
     borderColor: "rgba(201,255,53,0.45)"
   },
   uploadInner: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 28,
-    paddingHorizontal: 12
+    paddingHorizontal: 16,
+    alignItems: "center"
   },
   uploadPlaceholder: {
-    color: APP_LIME,
+    color: PROVIDER_MUTED,
     fontSize: 13,
-    textAlign: "center",
-    fontWeight: "600"
+    textAlign: "center"
   },
   preview: {
     width: "100%",
-    height: 140
+    height: "100%"
   },
   doneBadge: {
     position: "absolute",

@@ -350,7 +350,11 @@ async function ensureProviderKycTable() {
       applicant_name TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'rental',
       document_summary TEXT NOT NULL DEFAULT '',
+      documents JSONB NOT NULL DEFAULT '[]'::jsonb,
+      registration_type TEXT NOT NULL DEFAULT 'individual',
       business_name TEXT,
+      gst_number TEXT,
+      email TEXT,
       phone TEXT,
       address TEXT,
       priority TEXT NOT NULL DEFAULT 'Medium',
@@ -364,12 +368,40 @@ async function ensureProviderKycTable() {
     `
   );
   await query(
+    `ALTER TABLE provider_kyc_submissions ADD COLUMN IF NOT EXISTS documents JSONB NOT NULL DEFAULT '[]'::jsonb`
+  );
+  await query(
+    `ALTER TABLE provider_kyc_submissions ADD COLUMN IF NOT EXISTS registration_type TEXT NOT NULL DEFAULT 'individual'`
+  );
+  await query(
+    `ALTER TABLE provider_kyc_submissions ADD COLUMN IF NOT EXISTS gst_number TEXT`
+  );
+  await query(
+    `ALTER TABLE provider_kyc_submissions ADD COLUMN IF NOT EXISTS email TEXT`
+  );
+  await query(
     `CREATE INDEX IF NOT EXISTS provider_kyc_status_created_idx ON provider_kyc_submissions (status, created_at DESC)`
   );
   await query(
     `CREATE INDEX IF NOT EXISTS provider_kyc_user_idx ON provider_kyc_submissions (user_id, created_at DESC)`
   );
   providerKycTableReady = true;
+}
+
+function normalizeKycDocuments(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const key = String(item.key || "").trim().slice(0, 60);
+    const label = String(item.label || key || "Document").trim().slice(0, 160);
+    const url = String(item.url || "").trim().slice(0, 1200);
+    if (!label || !url) continue;
+    if (!/^https?:\/\//i.test(url)) continue;
+    out.push({ key: key || `doc_${out.length + 1}`, label, url });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 async function notifyAdminUsersOfKyc(actorId, submissionId, applicantName, role) {
@@ -9125,21 +9157,110 @@ async function handleShareProfilePage(req, res) {
 
 router.get("/share/profile/:userIdOrHandle", (req, res) => void handleShareProfilePage(req, res));
 
+router.get("/v1/bank/ifsc/:code", async (req, res) => {
+  try {
+    const code = String(req.params.code || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) {
+      res.status(400).json({ message: "Enter a valid 11-character IFSC code." });
+      return;
+    }
+    const response = await fetch(`https://ifsc.razorpay.com/${code}`);
+    if (!response.ok) {
+      res.status(404).json({ message: "IFSC not found. Check the code and try again." });
+      return;
+    }
+    const data = await response.json();
+    res.json({
+      ifsc: code,
+      bank: String(data.BANK || "").trim(),
+      branch: String(data.BRANCH || "").trim(),
+      address: String(data.ADDRESS || "").trim(),
+      city: String(data.CITY || "").trim(),
+      district: String(data.DISTRICT || "").trim(),
+      state: String(data.STATE || "").trim()
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to look up IFSC", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/bank/resolve-account", async (req, res) => {
+  try {
+    const accountNumber = String(req.body?.accountNumber || "").replace(/\D/g, "");
+    const ifsc = String(req.body?.ifsc || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    const suggestedName = String(req.body?.suggestedName || "").trim().slice(0, 160) || null;
+    if (accountNumber.length < 6) {
+      res.status(400).json({ message: "Enter a valid account number." });
+      return;
+    }
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+      res.status(400).json({ message: "Enter a valid IFSC code." });
+      return;
+    }
+
+    let bank = null;
+    try {
+      const ifscRes = await fetch(`https://ifsc.razorpay.com/${ifsc}`);
+      if (ifscRes.ok) {
+        const data = await ifscRes.json();
+        bank = String(data.BANK || "").trim() || null;
+      }
+    } catch {
+      // optional enrichment
+    }
+
+    // Live penny-drop providers can be wired via env later.
+    // Until then, return suggested profile name for user confirmation.
+    res.json({
+      verified: false,
+      holderName: suggestedName,
+      bank,
+      message: suggestedName
+        ? "Confirm account holder name matches bank records."
+        : "Enter account holder name as on the passbook."
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to resolve account", error: error?.message || String(error) });
+  }
+});
+
 router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
   try {
     await ensureProviderKycTable();
-    const userId = Number(req.user.id);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
     const applicantName = String(req.body?.applicantName || req.user.fullName || "Provider").trim().slice(0, 160);
     const role = String(req.body?.role || "rental").trim().toLowerCase().slice(0, 40) || "rental";
-    const documentSummary = String(req.body?.documentSummary || "").trim().slice(0, 500);
+    const registrationTypeRaw = String(req.body?.registrationType || "individual").trim().toLowerCase();
+    const registrationType = registrationTypeRaw === "business" ? "business" : "individual";
+    const documents = normalizeKycDocuments(req.body?.documents);
+    let documentSummary = String(req.body?.documentSummary || "").trim().slice(0, 500);
+    if (!documentSummary && documents.length) {
+      documentSummary = documents.map((d) => d.label).join(", ").slice(0, 500);
+    }
     const businessName = String(req.body?.businessName || "").trim().slice(0, 160) || null;
+    const gstNumber = String(req.body?.gstNumber || "").trim().toUpperCase().slice(0, 30) || null;
+    const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 160) || null;
     const phone = String(req.body?.phone || "").trim().slice(0, 40) || null;
     const address = String(req.body?.address || "").trim().slice(0, 400) || null;
     const priorityRaw = String(req.body?.priority || "Medium").trim();
     const priority = ["High", "Medium", "Low"].includes(priorityRaw) ? priorityRaw : "Medium";
 
-    if (!documentSummary) {
+    if (!documentSummary && documents.length === 0) {
       res.status(400).json({ message: "Upload KYC documents before submitting." });
+      return;
+    }
+    if (documents.length === 0) {
+      res.status(400).json({ message: "Upload KYC document images before submitting." });
       return;
     }
 
@@ -9155,36 +9276,64 @@ router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
     const inserted = await query(
       `
       INSERT INTO provider_kyc_submissions (
-        user_id, applicant_name, role, document_summary, business_name, phone, address, priority, status
+        user_id, applicant_name, role, registration_type, document_summary, documents, business_name, gst_number, email, phone, address, priority, status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, 'pending')
       RETURNING
         id,
         applicant_name AS "applicant",
         role,
+        registration_type AS "registrationType",
         document_summary AS "document",
+        documents,
+        business_name AS "businessName",
+        gst_number AS "gstNumber",
+        email,
         priority,
         status,
         created_at AS "submittedAt"
       `,
-      [userId, applicantName, role, documentSummary, businessName, phone, address, priority]
+      [
+        userId,
+        applicantName,
+        role,
+        registrationType,
+        documentSummary,
+        JSON.stringify(documents),
+        businessName,
+        gstNumber,
+        email,
+        phone,
+        address,
+        priority
+      ]
     );
 
     const row = inserted.rows[0];
-    await notifyAdminUsersOfKyc(userId, row.id, applicantName, role);
+    try {
+      await notifyAdminUsersOfKyc(userId, row.id, applicantName, role);
+    } catch (notifyError) {
+      console.warn("[kyc] admin notify failed:", notifyError?.message || notifyError);
+    }
 
     res.status(201).json({
       submission: {
         id: row.id,
         applicant: row.applicant,
         role: row.role,
+        registrationType: row.registrationType,
         document: row.document,
+        documents: normalizeKycDocuments(row.documents),
+        businessName: row.businessName,
+        gstNumber: row.gstNumber,
+        email: row.email,
         priority: row.priority,
         status: row.status,
         submitted: row.submittedAt
       }
     });
   } catch (error) {
+    console.error("[kyc] submit failed:", error?.message || error);
     res.status(500).json({ message: "Failed to submit KYC", error: error?.message || String(error) });
   }
 });
@@ -9199,10 +9348,14 @@ router.get("/v1/admin/kyc", authRequired, requireRole("admin"), async (req, res)
         k.id,
         k.applicant_name AS "applicant",
         k.role,
+        k.registration_type AS "registrationType",
         k.document_summary AS "document",
+        k.documents,
         k.priority,
         k.status,
         k.business_name AS "businessName",
+        k.gst_number AS "gstNumber",
+        k.email,
         k.phone,
         k.address,
         k.created_at AS "submitted",
@@ -9222,6 +9375,7 @@ router.get("/v1/admin/kyc", authRequired, requireRole("admin"), async (req, res)
     res.json({
       submissions: result.rows.map((row) => ({
         ...row,
+        documents: normalizeKycDocuments(row.documents),
         submitted: row.submitted ? new Date(row.submitted).toISOString() : null
       })),
       pendingCount: result.rows.filter((row) => row.status === "pending").length
@@ -9234,7 +9388,11 @@ router.get("/v1/admin/kyc", authRequired, requireRole("admin"), async (req, res)
 router.get("/v1/provider/kyc/status", authRequired, async (req, res) => {
   try {
     await ensureProviderKycTable();
-    const userId = Number(req.user.id);
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
     const result = await query(
       `
       SELECT
@@ -9275,10 +9433,15 @@ router.post("/v1/admin/kyc/:id/respond", authRequired, requireRole("admin"), asy
     await ensureProviderKycTable();
     await ensureSocialNotificationsTable();
     const submissionId = Number(req.params.id);
+    const adminUserId = Number(req.user.userId);
     const action = String(req.body?.action || "").trim().toLowerCase();
     const adminNote = String(req.body?.note || "").trim().slice(0, 400) || null;
     if (!Number.isFinite(submissionId) || submissionId <= 0) {
       res.status(400).json({ message: "Invalid submission id" });
+      return;
+    }
+    if (!Number.isFinite(adminUserId) || adminUserId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
       return;
     }
     if (action !== "approve" && action !== "reject") {
@@ -9305,7 +9468,7 @@ router.post("/v1/admin/kyc/:id/respond", authRequired, requireRole("admin"), asy
         priority,
         status
       `,
-      [submissionId, nextStatus, adminNote, req.user.id]
+      [submissionId, nextStatus, adminNote, adminUserId]
     );
     if (!updated.rows[0]) {
       res.status(404).json({ message: "Pending KYC submission not found" });
@@ -9319,7 +9482,7 @@ router.post("/v1/admin/kyc/:id/respond", authRequired, requireRole("admin"), asy
       `,
       [
         row.userId,
-        req.user.id,
+        adminUserId,
         nextStatus === "approved" ? "provider_kyc_approved" : "provider_kyc_rejected",
         JSON.stringify({
           kind: "provider_kyc",

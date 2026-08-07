@@ -1,38 +1,34 @@
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
+import { updateProviderRegistrationDraft, type ProviderRegistrationType } from "../services/providerWorkflow";
 
 const BG = "#1f1f1f";
 const TEXT = APP_TEXT;
 const MUTED = APP_TEXT_MUTED;
 
-type OfferRole = "service" | "rental" | "both";
-
-const ROLE_OPTIONS: Array<{ id: OfferRole; title: string; subtitle: string }> = [
+const TYPE_OPTIONS: Array<{ id: ProviderRegistrationType; title: string; subtitle: string }> = [
   {
-    id: "service",
-    title: "Service Provider",
-    subtitle: "Offer expert services like soil testing, repairs, or technical support."
+    id: "individual",
+    title: "Individual",
+    subtitle: "Register as a person with Aadhaar and personal KYC documents."
   },
   {
-    id: "rental",
-    title: "Rental Provider",
-    subtitle: "Rent out machinery, labour, drivers, vehicles, or warehouse space."
-  },
-  {
-    id: "both",
-    title: "Rental & Service",
-    subtitle: "Complete both registrations now together for equipment and other services in one session."
+    id: "business",
+    title: "Business / Company",
+    subtitle: "Register as a firm or company with business details and documents."
   }
 ];
 
-export function ProviderOfferRoleScreen() {
+export function ProviderRegistrationTypeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  const [selectedRole, setSelectedRole] = useState<OfferRole>("rental");
+  const route = useRoute<any>();
+  const track = route.params?.track === "service" || route.params?.track === "both" ? route.params.track : "rental";
+  const [selectedType, setSelectedType] = useState<ProviderRegistrationType>("individual");
 
   return (
     <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
@@ -45,23 +41,20 @@ export function ProviderOfferRoleScreen() {
 
       <View style={styles.header}>
         <Text style={styles.title}>
-          What Would You <Text style={styles.titleAccent}>Like</Text>
-        </Text>
-        <Text style={styles.title}>
-          <Text style={styles.titleAccent}>To Offer?</Text>
+          Registration <Text style={styles.titleAccent}>Type</Text>
         </Text>
         <Text style={styles.subtitle}>
-          Pick a track to begin. You can add a second role later from your dashboard.
+          Are you registering as an individual or as a business / company?
         </Text>
       </View>
 
       <View style={styles.optionsWrap}>
-        {ROLE_OPTIONS.map((option) => {
-          const active = selectedRole === option.id;
+        {TYPE_OPTIONS.map((option) => {
+          const active = selectedType === option.id;
           return (
             <Pressable
               key={option.id}
-              onPress={() => setSelectedRole(option.id)}
+              onPress={() => setSelectedType(option.id)}
               style={[styles.optionCard, active && styles.optionCardActive]}
               accessibilityRole="radio"
               accessibilityState={{ checked: active }}
@@ -77,9 +70,14 @@ export function ProviderOfferRoleScreen() {
         <Pressable
           style={styles.continueBtn}
           onPress={() => {
-            const track =
-              selectedRole === "service" ? "service" : selectedRole === "both" ? "both" : "rental";
-            navigation.navigate("ProviderRegistrationType", { track });
+            void updateProviderRegistrationDraft({
+              track,
+              registrationType: selectedType
+            });
+            navigation.navigate("ProviderPersonalDetails", {
+              track,
+              registrationType: selectedType
+            });
           }}
           accessibilityRole="button"
         >
