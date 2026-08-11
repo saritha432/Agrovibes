@@ -2,15 +2,25 @@ const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ||
   "https://cropvibe-api-production.up.railway.app/api";
 
+export type AdminKycDocument = {
+  key: string;
+  label: string;
+  url: string;
+};
+
 export type AdminKycRow = {
   id: number;
   applicant: string;
   role: string;
+  registrationType?: "individual" | "business" | string;
   document: string;
+  documents?: AdminKycDocument[];
   priority: string;
   status: "pending" | "approved" | "rejected" | string;
   submitted?: string | null;
   businessName?: string | null;
+  gstNumber?: string | null;
+  email?: string | null;
   phone?: string | null;
   address?: string | null;
   applicantEmail?: string | null;

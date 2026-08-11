@@ -179,6 +179,13 @@ export function RootNavigator() {
         options={slideRightBg}
       />
       <Stack.Screen
+        name="ProviderRegistrationType"
+        getComponent={() =>
+          require("../screens/ProviderRegistrationTypeScreen").ProviderRegistrationTypeScreen
+        }
+        options={slideRightBg}
+      />
+      <Stack.Screen
         name="ProviderPersonalDetails"
         getComponent={() => require("../screens/ProviderPersonalDetailsScreen").ProviderPersonalDetailsScreen}
         options={slideRightBg}

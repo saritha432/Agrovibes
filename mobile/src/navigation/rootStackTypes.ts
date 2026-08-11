@@ -50,10 +50,19 @@ export type RootStackParamList = {
   ProviderOnboarding: undefined;
   ProviderTerms: undefined;
   ProviderOfferRole: undefined;
-  ProviderPersonalDetails: { track?: "rental" | "service" | "both" } | undefined;
-  ProviderBankDetails: { track?: "rental" | "service" | "both" } | undefined;
-  ProviderKycVerification: { track?: "rental" | "service" | "both" } | undefined;
-  ProviderVerification: { track?: "rental" | "service" | "both" } | undefined;
+  ProviderRegistrationType: { track?: "rental" | "service" | "both" } | undefined;
+  ProviderPersonalDetails:
+    | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
+    | undefined;
+  ProviderBankDetails:
+    | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
+    | undefined;
+  ProviderKycVerification:
+    | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
+    | undefined;
+  ProviderVerification:
+    | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
+    | undefined;
   SavedSettings: undefined;
   YourActivity: undefined;
   YourActivityLikes: undefined;

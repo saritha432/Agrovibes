@@ -1,25 +1,40 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetchProviderKycStatus, submitProviderKyc } from "./api";
+import { fetchProviderKycStatus, submitProviderKyc, uploadImageFile } from "./api";
 
 export type ProviderApprovalStatus = "not_submitted" | "pending" | "approved" | "rejected";
 export type ListingApprovalStatus = "pending" | "approved" | "rejected";
 export type ProviderTrack = "rental" | "service" | "both";
+export type ProviderRegistrationType = "individual" | "business";
+
+export type ProviderKycDocument = {
+  key: string;
+  label: string;
+  /** Local file URI until uploaded; remote https URL after upload/submit. */
+  uri: string;
+};
 
 export type ProviderRegistrationDraft = {
   track: ProviderTrack;
+  registrationType: ProviderRegistrationType;
   fullName: string;
   phone: string;
+  email: string;
   businessName: string;
   street: string;
   village: string;
   district: string;
+  state: string;
+  gstNumber: string;
   yearsExperience: string;
   holderName?: string;
   bankName?: string;
+  bankBranch?: string;
+  bankLocation?: string;
   accountNumber?: string;
   ifsc?: string;
   upi?: string;
   documentLabels: string[];
+  documents: ProviderKycDocument[];
 };
 
 export type ProviderListingRecord = {
@@ -84,7 +99,22 @@ async function readState(): Promise<ProviderWorkflowState> {
     const parsed = JSON.parse(raw) as Partial<ProviderWorkflowState>;
     return {
       registrationStatus: parsed.registrationStatus ?? "not_submitted",
-      registrationDraft: parsed.registrationDraft ?? null,
+      registrationDraft: parsed.registrationDraft
+        ? {
+            ...parsed.registrationDraft,
+            registrationType:
+              parsed.registrationDraft.registrationType === "business" ? "business" : "individual",
+            state: parsed.registrationDraft.state || "",
+            gstNumber: parsed.registrationDraft.gstNumber || "",
+            email: parsed.registrationDraft.email || "",
+            documentLabels: Array.isArray(parsed.registrationDraft.documentLabels)
+              ? parsed.registrationDraft.documentLabels
+              : [],
+            documents: Array.isArray(parsed.registrationDraft.documents)
+              ? parsed.registrationDraft.documents
+              : []
+          }
+        : null,
       listings: Array.isArray(parsed.listings) ? parsed.listings : [],
       bookings: Array.isArray(parsed.bookings) ? parsed.bookings : [],
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : []
@@ -169,21 +199,27 @@ export async function updateProviderRegistrationDraft(
   const state = await readState();
   const current = state.registrationDraft ?? {
     track: "rental",
+    registrationType: "individual",
     fullName: "",
     phone: "",
+    email: "",
     businessName: "",
     street: "",
     village: "",
     district: "",
+    state: "",
+    gstNumber: "",
     yearsExperience: "",
-    documentLabels: []
+    documentLabels: [],
+    documents: []
   };
   await writeState({
     ...state,
     registrationDraft: {
       ...current,
       ...patch,
-      documentLabels: patch.documentLabels ?? current.documentLabels
+      documentLabels: patch.documentLabels ?? current.documentLabels,
+      documents: patch.documents ?? current.documents ?? []
     }
   });
 }
@@ -196,20 +232,48 @@ export async function getProviderRegistrationDraft(): Promise<ProviderRegistrati
 export async function submitProviderRegistrationForApproval(token?: string | null): Promise<void> {
   const state = await readState();
   const draft = state.registrationDraft;
-  const documentSummary = (draft?.documentLabels || []).join(", ").trim();
-  if (!documentSummary) {
+  const localDocs = Array.isArray(draft?.documents) ? draft.documents : [];
+  if (localDocs.length === 0) {
     throw new Error("Upload KYC documents before submitting for review.");
   }
   if (!token) {
     throw new Error("Please sign in again, then submit for review.");
   }
 
-  const address = [draft?.street, draft?.village, draft?.district].filter(Boolean).join(", ");
+  const uploadedDocs: Array<{ key: string; label: string; url: string }> = [];
+  for (const doc of localDocs) {
+    const label = String(doc.label || "Document").trim();
+    const key = String(doc.key || "document").trim();
+    const uri = String(doc.uri || "").trim();
+    if (!uri) continue;
+    if (/^https?:\/\//i.test(uri)) {
+      uploadedDocs.push({ key, label, url: uri });
+      continue;
+    }
+    const uploaded = await uploadImageFile(uri);
+    if (!uploaded?.url) {
+      throw new Error(`Failed to upload ${label}. Please try again.`);
+    }
+    uploadedDocs.push({ key, label, url: uploaded.url });
+  }
+  if (uploadedDocs.length === 0) {
+    throw new Error("Upload KYC documents before submitting for review.");
+  }
+
+  const documentSummary =
+    (draft?.documentLabels || []).join(", ").trim() || uploadedDocs.map((d) => d.label).join(", ");
+  const address = [draft?.street, draft?.village, draft?.district, draft?.state]
+    .filter(Boolean)
+    .join(", ");
   await submitProviderKyc(token, {
     applicantName: draft?.fullName || "Provider",
     role: draft?.track || "rental",
+    registrationType: draft?.registrationType || "individual",
     documentSummary,
+    documents: uploadedDocs,
     businessName: draft?.businessName || undefined,
+    gstNumber: draft?.gstNumber || undefined,
+    email: draft?.email || undefined,
     phone: draft?.phone || undefined,
     address: address || undefined,
     priority: "Medium"
@@ -217,7 +281,14 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
 
   let next = {
     ...state,
-    registrationStatus: "pending" as ProviderApprovalStatus
+    registrationStatus: "pending" as ProviderApprovalStatus,
+    registrationDraft: draft
+      ? {
+          ...draft,
+          documents: uploadedDocs.map((d) => ({ key: d.key, label: d.label, uri: d.url })),
+          documentLabels: uploadedDocs.map((d) => d.label)
+        }
+      : draft
   };
   next = pushNotification(
     next,
