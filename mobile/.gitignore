@@ -1,5 +1,6 @@
 .expo/
 node_modules/
+.npmrc
 dist/
 eas-inspect-out/
 .tmp-android-export/
