@@ -3498,10 +3498,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       reelTapTsRef.current[post.id] = now;
       const pending = reelTapTimeoutRef.current[post.id];
       if (pending) clearTimeout(pending);
-      const delay = reelViewerOpenRef.current ? 220 : REEL_SINGLE_TAP_DELAY_MS;
+      const alreadyFullscreen =
+        !!reelViewerOpenRef.current || activeHomeTab === "Feed" || activeHomeTab === "Friends";
+      const delay = alreadyFullscreen ? 220 : REEL_SINGLE_TAP_DELAY_MS;
       reelTapTimeoutRef.current[post.id] = setTimeout(() => {
         reelTapTimeoutRef.current[post.id] = null;
-        if (reelViewerOpenRef.current) {
+        // Feed/Friends are already full-bleed. Opening another Modal stacks a second
+        // ExoPlayer on Android → blank surface + stutter. Toggle pause instead.
+        if (alreadyFullscreen) {
           if (!post.videoUrl) return;
           setReelUserPaused((prev) => {
             const next = !prev;
@@ -3514,7 +3518,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         }
       }, delay);
     },
-    [likeReelFromDoubleTap, openPostFromFeed]
+    [activeHomeTab, likeReelFromDoubleTap, openPostFromFeed]
   );
 
   useEffect(() => {
@@ -4249,16 +4253,21 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const renderFullScreenReel = useCallback(
-    ({ item: post, index }: { item: HomePost; index: number }) => {
-      const reelContentWidth = reelViewerOpen ? windowWidth : reelFrameWidth > 0 ? reelFrameWidth : windowWidth;
-      const pageH = reelViewerOpen
+    ({ item: post, index }: { item: HomePost; index: number }, opts?: { inModal?: boolean }) => {
+      const inModal = !!opts?.inModal;
+      const reelContentWidth = inModal ? windowWidth : reelFrameWidth > 0 ? reelFrameWidth : windowWidth;
+      const pageH = inModal
         ? windowHeight
         : reelSlotHeight > 0
           ? reelSlotHeight
           : Math.max(420, windowHeight * 0.62);
       const isActiveVideo = playingPostId === post.id && !!post.videoUrl;
-      const shouldPlayReel = isActiveVideo && canPlayMedia && (!reelViewerOpen || !reelUserPaused);
-      const showActiveVideo = isActiveVideo && canPlayMedia && (shouldPlayReel || !!(reelViewerOpen && reelUserPaused));
+      // When a modal viewer is open, only the modal list may own ExoPlayer — otherwise
+      // Android shows a blank surface and playback stutters from dual decoders.
+      const ownsDecoder = inModal || !reelViewerOpen;
+      const shouldPlayReel = ownsDecoder && isActiveVideo && canPlayMedia && !reelUserPaused;
+      const showActiveVideo =
+        ownsDecoder && isActiveVideo && canPlayMedia && (shouldPlayReel || reelUserPaused);
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -4282,7 +4291,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const shownRepostsCount = shownResharesCount(post);
-      const reelRowPosts = reelViewerOpen?.posts ?? tabPosts;
+      const reelRowPosts = inModal ? reelViewerOpen?.posts ?? tabPosts : tabPosts;
       const activeIndex = reelRowPosts.findIndex((p) => p.id === playingPostId);
       const isNearActive = activeIndex >= 0 && Math.abs(index - activeIndex) <= 1;
       const gallery = postImageGallery(post);
@@ -4303,10 +4312,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const hasMusicTrack = postHasAttachedMusic(post);
       const showVolumeControl = postShowsVolumeControl(post);
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
-      const fullscreenSafeTop = reelViewerOpen ? modalTopInset : 0;
-      const fullscreenSafeBottom = reelViewerOpen ? modalBottomInset : 0;
+      const fullscreenSafeTop = inModal ? modalTopInset : 0;
+      const fullscreenSafeBottom = inModal ? modalBottomInset : 0;
       const mediaContentH = pageH - fullscreenSafeTop - fullscreenSafeBottom;
-      const mediaFrameStyle = reelViewerOpen
+      const mediaFrameStyle = inModal
         ? { position: "absolute" as const, left: 0, right: 0, top: fullscreenSafeTop, bottom: fullscreenSafeBottom }
         : StyleSheet.absoluteFillObject;
 
@@ -4330,7 +4339,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 useNativeControls={false}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
-              {reelViewerOpen && reelUserPaused && isActiveVideo ? (
+              {reelUserPaused && isActiveVideo ? (
                 <View style={styles.reelPauseOverlay} pointerEvents="none">
                   <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
                   <Ionicons name="play" size={48} color="#fff" />
@@ -4358,7 +4367,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               showsHorizontalScrollIndicator={false}
               style={[
                 { width: reelContentWidth, height: mediaContentH },
-                reelViewerOpen ? { position: "absolute", left: 0, right: 0, top: fullscreenSafeTop } : { height: pageH }
+                inModal ? { position: "absolute", left: 0, right: 0, top: fullscreenSafeTop } : { height: pageH }
               ]}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
@@ -4454,7 +4463,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             seenRef={reelLikeBurstSeenRef}
           />
           <View
-              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, (reelViewerOpen ? modalBottomInset : insets.bottom) + 14) }]}
+              style={[styles.reelOverlayWrap, { paddingBottom: Math.max(18, (inModal ? modalBottomInset : insets.bottom) + 14) }]}
               pointerEvents="box-none"
             >
             <View style={styles.reelLeftMeta} pointerEvents="auto">
@@ -4615,7 +4624,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
             </View>
           {post.videoUrl ? (
-            <View style={[styles.reelSeekWrap, reelViewerOpen ? { bottom: modalBottomInset } : null]} pointerEvents="auto">
+            <View style={[styles.reelSeekWrap, inModal ? { bottom: modalBottomInset } : null]} pointerEvents="auto">
               <ReelSeekBar
                 progressRatio={progressRatio}
                 onSeek={(ratio) => {
@@ -4707,7 +4716,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         );
       }
       const postIndex = reelViewerOpen?.posts.findIndex((p) => p.id === item.post.id) ?? 0;
-      return renderFullScreenReel({ item: item.post, index: Math.max(0, postIndex) });
+      return renderFullScreenReel({ item: item.post, index: Math.max(0, postIndex) }, { inModal: true });
     },
     [
       handleDismissSuggested,
@@ -4735,7 +4744,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const feedMusicLabel = postMusicDisplayLabel(post, language, t);
       const showFeedMusic = postShowsMusicRow(post) && !!feedMusicLabel;
       const isActive = playingPostId === post.id && !!post.videoUrl;
-      const shouldPlayReel = isActive && canPlayMedia;
+      const shouldPlayReel = isActive && canPlayMedia && !reelViewerOpen && !reelUserPaused;
       const gallery = postImageGallery(post);
       const isCarousel = !post.videoUrl && gallery.length > 1;
       const postComments = commentsByPost[post.id] ?? [];

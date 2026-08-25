@@ -7,6 +7,11 @@ export const MAX_UPLOAD_VIDEO_EDGE_PX = 720;
 export const UPLOAD_VIDEO_BITRATE = 2_000_000;
 /** Skip compression for already-small clips (bytes). */
 export const MIN_BYTES_TO_COMPRESS = 3 * 1024 * 1024;
+/**
+ * Incomplete compressor outputs on Android are often just an MP4 `ftyp` box (~28 bytes).
+ * Reject anything below this and keep the original file.
+ */
+export const MIN_VALID_COMPRESSED_VIDEO_BYTES = 80 * 1024;
 
 export type PreparedVideo = {
   uri: string;
@@ -28,6 +33,7 @@ async function fileSizeBytes(uri: string): Promise<number> {
 /**
  * Compress native videos to ~720p / ~2 Mbps before upload.
  * Falls back to the original file on web, Expo Go (no native module), or any failure.
+ * Never returns a truncated compressor output (seen as 28-byte ftyp-only MP4s).
  */
 export async function prepareVideoForUpload(
   fileUri: string,
@@ -80,18 +86,33 @@ export async function prepareVideoForUpload(
     };
 
     const compressedUri = await Video.compress(trimmed, {
-      compressionMethod: "manual",
+      compressionMethod: "auto",
       maxSize: MAX_UPLOAD_VIDEO_EDGE_PX,
       bitrate: UPLOAD_VIDEO_BITRATE,
-      minimumFileSizeForCompress: 0
+      minimumFileSizeForCompress: MIN_BYTES_TO_COMPRESS
     });
 
     const out = String(compressedUri || "").trim();
     if (!out || out === trimmed) return fallback;
 
     const compressedBytes = await fileSizeBytes(out);
+    // Truncated muxer output (ftyp-only ~28B) or absurdly small result → keep original.
+    if (compressedBytes < MIN_VALID_COMPRESSED_VIDEO_BYTES) {
+      console.warn(
+        `[prepareVideoForUpload] rejecting compressed output (${compressedBytes}B); using original`
+      );
+      return fallback;
+    }
     // Prefer original if compression somehow grew the file.
-    if (originalBytes > 0 && compressedBytes > 0 && compressedBytes >= originalBytes) {
+    if (originalBytes > 0 && compressedBytes >= originalBytes) {
+      return fallback;
+    }
+    // Prefer original if compression "saved" almost nothing of a large file but output is tiny fraction
+    // (another incomplete-muxer signal).
+    if (originalBytes > MIN_BYTES_TO_COMPRESS && compressedBytes < originalBytes * 0.02) {
+      console.warn(
+        `[prepareVideoForUpload] compressed ${compressedBytes}B from ${originalBytes}B looks incomplete; using original`
+      );
       return fallback;
     }
 
@@ -101,7 +122,8 @@ export async function prepareVideoForUpload(
       filename: `video-${Date.now()}.mp4`,
       compressed: true
     };
-  } catch {
+  } catch (error) {
+    console.warn("[prepareVideoForUpload] compress failed; using original", error);
     return fallback;
   }
 }

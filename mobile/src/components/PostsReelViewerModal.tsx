@@ -386,8 +386,14 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
               void videoRef.current?.pauseAsync().catch(() => {});
               void videoRef.current?.unloadAsync().catch(() => {});
             }
-          } else if ("error" in status && status.error && sourceIndex + 1 < playbackSources.length) {
-            tryNextPlaybackSource();
+          } else if ("error" in status && status.error) {
+            console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
+            if (sourceIndex + 1 < playbackSources.length) {
+              tryNextPlaybackSource();
+              return;
+            }
+            setBlocked(true);
+            void videoRef.current?.unloadAsync().catch(() => {});
           }
         }}
         onReadyForDisplay={

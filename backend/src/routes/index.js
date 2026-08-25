@@ -8506,6 +8506,15 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
         else if (/\.webp$/i.test(originalName)) mimeType = "image/webp";
         else mimeType = "image/jpeg";
       }
+      // Reject incomplete MP4s (compressor sometimes writes only the 28-byte ftyp box).
+      if (isVideo && req.file.buffer && req.file.buffer.length < 80 * 1024) {
+        res.status(400).json({
+          message: "Video file looks incomplete or corrupted. Please try again.",
+          error: `Video too small (${req.file.buffer.length} bytes)`,
+          hint: "Re-record or re-select the clip. If this keeps happening, restart the app."
+        });
+        return;
+      }
       const ext = mediaExtFromMime(mimeType, originalName);
       const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
       const uploaded = await uploadMediaBuffer({
