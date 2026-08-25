@@ -27,6 +27,7 @@ import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { isRemoteVideoLikelyPlayable } from "../utils/videoUrlHealth";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import { UserAvatar } from "./UserAvatar";
 import { StoryRingAvatar } from "./StoryRingAvatar";
@@ -67,7 +68,7 @@ import {
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { useModalTopChromeInset } from "../theme/topChromeInset";
 
-import { reelGridStillUri, reelPlayerBackground, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
+import { reelGridStillUri, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
 import { buildPostShareLink } from "../utils/postShare";
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
@@ -283,6 +284,24 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   }, [uri, hlsUrl]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const ok = await isRemoteVideoLikelyPlayable(activeUri);
+      if (cancelled) return;
+      if (!ok) {
+        if (sourceIndex + 1 < playbackSources.length) {
+          setSourceIndex((i) => i + 1);
+          return;
+        }
+        setBlocked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUri, playbackSources.length, sourceIndex]);
+
+  useEffect(() => {
     return () => {
       void videoRef.current?.unloadAsync().catch(() => {});
     };
@@ -335,7 +354,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         style={{
           width: containerWidth,
           height: containerHeight,
-          backgroundColor: APP_DARK_BG,
+          backgroundColor: "#000",
           justifyContent: "center",
           alignItems: "center"
         }}
@@ -352,7 +371,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       style={{
         width: containerWidth,
         height: containerHeight,
-        backgroundColor: APP_DARK_BG,
+        backgroundColor: "#000",
         ...(!isCover ? { justifyContent: "center", alignItems: "center" } : {})
       }}
     >
@@ -1134,17 +1153,17 @@ export function PostsReelViewerModal({
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const shownRepostsCount = shownResharesCount(post);
-      const mediaContentH = pageH - modalTopInset - reelBottomInset;
+      const mediaContentH = pageH;
       const mediaFrameStyle = {
         position: "absolute" as const,
         left: 0,
         right: 0,
-        top: modalTopInset,
-        bottom: reelBottomInset
+        top: 0,
+        bottom: 0
       };
 
       return (
-        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: reelPlayerBackground(index) }]}>
+        <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
           {post.videoUrl && isActiveVideo ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
@@ -1156,7 +1175,7 @@ export function PostsReelViewerModal({
                 shouldPlay={shouldPlayVideo}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
-                fit="auto"
+                fit="cover"
                 posterUri={reelPoster || undefined}
                 isLooping
                 isMuted={isReelMuted}
@@ -1171,7 +1190,7 @@ export function PostsReelViewerModal({
             </Pressable>
           ) : post.videoUrl && reelPoster ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
+              <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -1179,7 +1198,7 @@ export function PostsReelViewerModal({
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={{ width: reelContentWidth, height: mediaContentH, position: "absolute", left: 0, right: 0, top: modalTopInset }}
+              style={{ width: reelContentWidth, height: mediaContentH, position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -1195,17 +1214,17 @@ export function PostsReelViewerModal({
                   style={{ width: reelContentWidth, height: mediaContentH, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}
                   onPress={() => onReelSurfaceTap(post)}
                 >
-                  <Image source={{ uri }} style={{ width: reelContentWidth, height: mediaContentH }} resizeMode="contain" />
+                  <Image source={{ uri }} style={{ width: reelContentWidth, height: mediaContentH }} resizeMode="cover" />
                 </Pressable>
               ))}
             </ScrollView>
           ) : reelPoster ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
             </Pressable>
           ) : (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: reelPlayerBackground(index) }]} />
+              <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
             </Pressable>
           )}
           {isCarousel ? (

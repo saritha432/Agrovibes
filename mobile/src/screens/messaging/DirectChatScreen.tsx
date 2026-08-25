@@ -575,6 +575,20 @@ export function DirectChatScreen() {
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
+  /** When IME is open, some Android OEMs report keyboard height as safe-area bottom.
+   * With adjustResize that double-offsets the composer off-screen. */
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvt, () => setKeyboardOpen(true));
+    const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardOpen(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (peerUsernameParam) {
@@ -1199,7 +1213,13 @@ export function DirectChatScreen() {
     [peerUserId, token, user?.id]
   );
 
-  const bottomPad = Math.max(insets.bottom, 8);
+  // Gesture/nav inset only when keyboard is closed. Never apply IME height as padding —
+  // Android adjustResize already shrinks the window (and some devices report IME as insets.bottom).
+  const bottomPad = keyboardOpen
+    ? Platform.OS === "ios"
+      ? 6
+      : 4
+    : Math.min(Math.max(insets.bottom, 8), 34);
 
   const openSharedCropvibeCard = useCallback(
     async (body: string) => {
@@ -1529,7 +1549,7 @@ export function DirectChatScreen() {
         style={styles.composerKeyboardWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         enabled={Platform.OS === "ios"}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={Platform.OS === "ios" ? topChromeInset : 0}
       >
         <View
           collapsable={false}
@@ -1927,12 +1947,16 @@ const styles = StyleSheet.create({
   threadEmptyBold: { fontWeight: "800", color: TEXT },
   composerKeyboardWrap: {
     width: "100%",
-    backgroundColor: BG
+    backgroundColor: BG,
+    zIndex: 2,
+    elevation: 8
   },
   composerWrap: {
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: BG
+    backgroundColor: BG,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: BORDER
   },
   replyComposerBanner: {
     width: "100%",
