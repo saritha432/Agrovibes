@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cropvibe",
     "slug": "agrovibes",
-    "version": "1.0.20",
+    "version": "1.0.21",
     "orientation": "portrait",
     "icon": "./assets/logo-adaptive-foreground.png",
     "platforms": [
@@ -24,7 +24,7 @@
     "assetBundlePatterns": [],
     "android": {
       "package": "com.cropvibe.app",
-      "versionCode": 24,
+      "versionCode": 25,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
@@ -112,7 +112,7 @@
         "NSLocationWhenInUseUsageDescription": "Cropvibe can tag posts with your district when you add a location."
       },
       "icon": "./assets/icon-ios.png",
-      "buildNumber": "26"
+      "buildNumber": "27"
     },
     "web": {
       "favicon": "./assets/logo.png"
@@ -139,7 +139,7 @@
             "useLegacyPackaging": false,
             "ndkVersion": "28.2.13676358",
             "buildToolsVersion": "35.0.0",
-            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*\n-keep class expo.modules.notifications.** { *; }\n-keep class expo.modules.notifications.notifications.model.** { *; }\n-keepclassmembers class expo.modules.notifications.notifications.model.** { *; }\n-keepnames class expo.modules.notifications.notifications.model.** implements java.io.Serializable\n-keep class io.invertase.firebase.** { *; }\n-dontwarn io.invertase.firebase.**\n-keep class com.google.firebase.messaging.** { *; }\n-dontwarn com.google.firebase.messaging.**\n-keep class com.reactnativefullscreennotificationincomingcall.** { *; }"
+            "extraProguardRules": "-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n-keep class com.oney.WebRTCModule.** { *; }\n-keep class livekit.** { *; }\n-keep class io.livekit.** { *; }\n-dontwarn livekit.**\n-dontwarn io.livekit.**\n-keep class livekit.org.jni_zero.JniInit { private static java.lang.Object[] init(); }\n-keepclassmembers class * { native <methods>; }\n-keepattributes *Annotation*\n-keep class expo.modules.** { *; }\n-keep class expo.modules.av.** { *; }\n-keep class expo.modules.video.** { *; }\n-keep class expo.modules.videoThumbnails.** { *; }\n-keep class expo.modules.notifications.** { *; }\n-keep class expo.modules.notifications.notifications.model.** { *; }\n-keepclassmembers class expo.modules.notifications.notifications.model.** { *; }\n-keepnames class expo.modules.notifications.notifications.model.** implements java.io.Serializable\n-keep class com.reactnativecompressor.** { *; }\n-dontwarn com.reactnativecompressor.**\n-keep class com.otaliastudios.** { *; }\n-dontwarn com.otaliastudios.**\n-keep class androidx.media3.** { *; }\n-dontwarn androidx.media3.**\n-keep class com.google.android.exoplayer2.** { *; }\n-dontwarn com.google.android.exoplayer2.**\n-keep class io.invertase.firebase.** { *; }\n-dontwarn io.invertase.firebase.**\n-keep class com.google.firebase.messaging.** { *; }\n-dontwarn com.google.firebase.messaging.**\n-keep class com.reactnativefullscreennotificationincomingcall.** { *; }"
           },
           "ios": {
             "useFrameworks": "static"

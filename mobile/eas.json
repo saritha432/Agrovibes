@@ -44,7 +44,7 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-android-v1.0.20-sdk53-16kb"
+        "key": "production-android-v1.0.21-video-proguard"
       },
       "env": {
         "NODE_ENV": "production",

@@ -23,8 +23,9 @@ export function resizeSupabaseImageUrl(
   const cleaned = stripLegacyCloudinaryUrl(url);
   if (!cleaned) return null;
 
-  // Only resize static images — skip video, HLS, audio
-  if (/\.(mp4|mov|webm|m3u8|m4v|ts|mp3|aac|wav)(\?|$)/i.test(cleaned)) return cleaned;
+  // Only resize static images — skip video, HLS, audio (by extension or /videos/ path)
+  if (/\.(mp4|mov|webm|m3u8|m4v|mkv|avi|ts|mp3|aac|wav)(\?|$)/i.test(cleaned)) return cleaned;
+  if (/\/agrovibes\/videos\//i.test(cleaned) || /\/videos\//i.test(cleaned)) return cleaned;
 
   // Supabase public storage URL pattern
   if (/\/storage\/v1\/object\/public\//i.test(cleaned)) {

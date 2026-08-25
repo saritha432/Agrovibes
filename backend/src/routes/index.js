@@ -8489,9 +8489,24 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
     }
 
     try {
-      const mimeType = String(req.file.mimetype || "application/octet-stream");
-      const isVideo = mimeType.startsWith("video/");
-      const ext = mediaExtFromMime(mimeType, req.file.originalname);
+      const mimeTypeRaw = String(req.file.mimetype || "application/octet-stream");
+      const originalName = String(req.file.originalname || "");
+      const nameLooksVideo = /\.(mp4|mov|webm|m4v|mkv|avi)(\?|$)/i.test(originalName);
+      const nameLooksImage = /\.(jpe?g|png|gif|webp|heic|bmp|avif)(\?|$)/i.test(originalName);
+      // Android FormData sometimes sends application/octet-stream — trust filename too.
+      let mimeType = mimeTypeRaw;
+      let isVideo = mimeType.startsWith("video/") || (nameLooksVideo && !mimeType.startsWith("image/"));
+      if (isVideo && !mimeType.startsWith("video/")) {
+        if (/\.webm$/i.test(originalName)) mimeType = "video/webm";
+        else if (/\.mov$/i.test(originalName)) mimeType = "video/quicktime";
+        else mimeType = "video/mp4";
+      }
+      if (!isVideo && nameLooksImage && mimeType === "application/octet-stream") {
+        if (/\.png$/i.test(originalName)) mimeType = "image/png";
+        else if (/\.webp$/i.test(originalName)) mimeType = "image/webp";
+        else mimeType = "image/jpeg";
+      }
+      const ext = mediaExtFromMime(mimeType, originalName);
       const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
       const uploaded = await uploadMediaBuffer({
         buffer: req.file.buffer,
