@@ -17,6 +17,8 @@ const path = require("node:path");
 
 process.env.EAS_NO_VCS = "1";
 process.env.EAS_PROJECT_ROOT = path.resolve(__dirname, "..");
+// Suppress local CLI Expo Go warning; production profile already excludes dev-client via autolinking.
+process.env.EAS_BUILD_NO_EXPO_GO_WARNING = "true";
 
 const args = process.argv.slice(2);
 const isWindows = process.platform === "win32";

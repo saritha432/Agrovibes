@@ -1504,6 +1504,8 @@ async function ensureHomePostsTable() {
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_feed_hidden_at_idx ON home_posts (feed_hidden_at)`);
+  // Speeds up the LATERAL JOIN that resolves post author by user_id (most posts set this after user_id column was added).
+  await query(`CREATE INDEX IF NOT EXISTS home_posts_user_id_idx ON home_posts (user_id) WHERE user_id IS NOT NULL`);
   homePostsTableReady = true;
 }
 
@@ -1897,9 +1899,10 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
     FROM home_posts p
     LEFT JOIN learn_users owner ON owner.id = p.user_id
     LEFT JOIN LATERAL (
+      -- Skip expensive text-matching when user_id is already resolved (most posts).
       SELECT id, avatar_url, COALESCE(is_private, false) AS is_private
       FROM learn_users
-      WHERE
+      WHERE p.user_id IS NULL AND (
         LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name))
         OR LOWER(TRIM(SPLIT_PART(full_name, ' ', 1))) = LOWER(TRIM(p.user_name))
         OR LOWER(TRIM(full_name)) LIKE LOWER(TRIM(p.user_name)) || ' %'
@@ -1912,6 +1915,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
           email IS NOT NULL AND TRIM(email) <> ''
           AND LOWER(TRIM(SPLIT_PART(email, '@', 1))) = LOWER(TRIM(p.user_name))
         )
+      )
       ORDER BY
         CASE
           WHEN LOWER(TRIM(full_name)) = LOWER(TRIM(p.user_name)) THEN 0
@@ -5776,6 +5780,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
     const cacheKey = `v2:home:posts:${gen}:${viewerKey}:${limit}:${cursor || "start"}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.posts)) {
+      res.set("Cache-Control", "private, max-age=60");
       res.json(cached);
       return;
     }
@@ -5808,6 +5813,7 @@ router.get("/v1/home/posts", authOptional, async (req, res) => {
       nextCursor: hasMore ? nextCursor : null,
       hasMore
     };
+    res.set("Cache-Control", "private, max-age=60");
     res.json(body);
     await cacheSetJson(cacheKey, body, 90);
   } catch (error) {
@@ -8483,9 +8489,24 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
     }
 
     try {
-      const mimeType = String(req.file.mimetype || "application/octet-stream");
-      const isVideo = mimeType.startsWith("video/");
-      const ext = mediaExtFromMime(mimeType, req.file.originalname);
+      const mimeTypeRaw = String(req.file.mimetype || "application/octet-stream");
+      const originalName = String(req.file.originalname || "");
+      const nameLooksVideo = /\.(mp4|mov|webm|m4v|mkv|avi)(\?|$)/i.test(originalName);
+      const nameLooksImage = /\.(jpe?g|png|gif|webp|heic|bmp|avif)(\?|$)/i.test(originalName);
+      // Android FormData sometimes sends application/octet-stream — trust filename too.
+      let mimeType = mimeTypeRaw;
+      let isVideo = mimeType.startsWith("video/") || (nameLooksVideo && !mimeType.startsWith("image/"));
+      if (isVideo && !mimeType.startsWith("video/")) {
+        if (/\.webm$/i.test(originalName)) mimeType = "video/webm";
+        else if (/\.mov$/i.test(originalName)) mimeType = "video/quicktime";
+        else mimeType = "video/mp4";
+      }
+      if (!isVideo && nameLooksImage && mimeType === "application/octet-stream") {
+        if (/\.png$/i.test(originalName)) mimeType = "image/png";
+        else if (/\.webp$/i.test(originalName)) mimeType = "image/webp";
+        else mimeType = "image/jpeg";
+      }
+      const ext = mediaExtFromMime(mimeType, originalName);
       const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
       const uploaded = await uploadMediaBuffer({
         buffer: req.file.buffer,

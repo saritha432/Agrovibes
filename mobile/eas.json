@@ -44,11 +44,12 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-android-v1.0.14-call-crash-fix"
+        "key": "production-android-v1.0.21-video-proguard"
       },
       "env": {
         "NODE_ENV": "production",
-        "INCLUDE_FIREBASE_PLUGINS": "1"
+        "INCLUDE_FIREBASE_PLUGINS": "1",
+        "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
       },
       "android": {
         "buildType": "app-bundle",
