@@ -2114,14 +2114,25 @@ async function uploadToSupabaseServer(fileUri: string, filename: string, nativeM
       clearTimeout(timer);
     }
   } else {
-    uploadRes = await fetchWithRetry(
-      `${API_BASE_URL}/v1/media/upload`,
-      {
+    // Do not retry FormData uploads — RN body streams are single-consume and retries
+    // can upload empty/truncated files (seen as 28-byte ftyp-only MP4s on S3).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120_000);
+    try {
+      uploadRes = await fetch(`${API_BASE_URL}/v1/media/upload`, {
         method: "POST",
-        body: form as any
-      },
-      120_000
-    );
+        body: form as any,
+        signal: controller.signal
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error || "");
+      if (/aborted|abort|timed out|timeout/i.test(msg)) {
+        throw new Error("Upload timed out. Check internet speed and try a smaller video.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   if (!uploadRes.ok) {
     let detail = `Upload failed (${uploadRes.status})`;

@@ -521,6 +521,12 @@ export function CreateModal({
     [t]
   );
   const insets = useSafeAreaInsets();
+  /** Fullscreen camera Modals often report insets.bottom = 0 on Android while the
+   * gesture/nav bar still covers POST/STORY/REEL + gallery — force a floor. */
+  const cameraBottomInset = React.useMemo(() => {
+    if (Platform.OS === "android") return Math.max(insets.bottom, 28);
+    return Math.max(insets.bottom, 16);
+  }, [insets.bottom]);
   const { height: windowHeight } = useWindowDimensions();
   const [liveCameraLayoutKey, setLiveCameraLayoutKey] = useState(0);
   const bumpLiveCameraLayout = React.useCallback(() => {
@@ -2326,7 +2332,7 @@ export function CreateModal({
     >
       {visible && !createType ? (
         entryType === "post" && captureEntryView === "gallery" ? (
-          <View style={[styles.igPostEntryRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View style={[styles.igPostEntryRoot, { paddingTop: insets.top + 4, paddingBottom: cameraBottomInset }]}>
             <View style={styles.igPostEntryTop}>
               <Pressable style={styles.igPostEntryTopBtn} onPress={handleClose}>
                 <Ionicons name="close" size={24} color="#fff" />
@@ -2462,7 +2468,7 @@ export function CreateModal({
           <View
             style={[
               styles.igCaptureGalleryRoot,
-              { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 10) }
+              { paddingTop: insets.top + 4, paddingBottom: cameraBottomInset }
             ]}
           >
             <View style={styles.igCaptureGalleryHeader}>
@@ -2752,7 +2758,7 @@ export function CreateModal({
               ) : null}
 
               <View
-                style={[styles.igCamBottomChrome, { paddingBottom: Math.max(insets.bottom, 12) }]}
+                style={[styles.igCamBottomChrome, { paddingBottom: cameraBottomInset }]}
                 pointerEvents="box-none"
               >
               <View style={styles.igCamCaptureRow} pointerEvents="box-none">
@@ -4902,6 +4908,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 4,
+    paddingTop: 8,
     zIndex: 40,
     elevation: 40
   },

@@ -1,8 +1,10 @@
 import { Platform } from "react-native";
 
 /**
- * Playback source list. Prefer HLS (.m3u8) on native when available; keep MP4 as fallback.
- * Web keeps progressive MP4 for broader browser support.
+ * Playback source list.
+ * Prefer progressive MP4 first — HLS start can stall for seconds (playlist + segments)
+ * and a failed HLS attempt before MP4 fallback makes reels feel "slow" or blank.
+ * Keep HLS as secondary on native when available.
  */
 export function videoPlaybackSources(
   url: string | undefined | null,
@@ -12,8 +14,8 @@ export function videoPlaybackSources(
   if (!input) return [];
   const hls = String(hlsUrl || "").trim();
   const hlsOk = !!hls && /\.m3u8(\?|#|$)/i.test(hls);
-  if (hlsOk && Platform.OS !== "web") {
-    return input && input !== hls ? [hls, input] : [hls];
+  if (hlsOk && Platform.OS !== "web" && input !== hls) {
+    return [input, hls];
   }
   return [input];
 }

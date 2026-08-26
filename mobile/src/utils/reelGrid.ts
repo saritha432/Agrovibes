@@ -9,8 +9,8 @@ export function reelGridTileBackground(index: number, columns = 3) {
   return (row + col) % 2 === 0 ? REEL_GRID_TILE_A : REEL_GRID_TILE_B;
 }
 
-export function reelPlayerBackground(index: number) {
-  return index % 2 === 0 ? REEL_GRID_TILE_A : REEL_GRID_TILE_B;
+export function reelPlayerBackground(_index: number) {
+  return "#000";
 }
 
 export function isReelPost(post: HomePost): boolean {
@@ -38,10 +38,9 @@ export function reelGridStillUri(post: HomePost): string | null {
   return null;
 }
 
-/** Portrait/square reels fill the slot; landscape reels show the full frame. */
-export function pickReelVideoFit(videoWidth: number, videoHeight: number): "cover" | "contain" {
-  if (!videoWidth || !videoHeight) return "cover";
-  return videoWidth > videoHeight ? "contain" : "cover";
+/** Full-bleed reels (Instagram-style). Landscape crops rather than letterboxing grey bars. */
+export function pickReelVideoFit(_videoWidth: number, _videoHeight: number): "cover" | "contain" {
+  return "cover";
 }
 
 export function postMatchesExploreQuery(post: HomePost, query: string): boolean {

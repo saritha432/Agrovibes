@@ -379,7 +379,7 @@ export function InAppCameraCapture({
               </View>
             ) : null}
 
-            <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === "android" ? 28 : 16) }]}>
               {wantsVideo ? (
                 <View style={styles.modeHint}>
                   <Text style={styles.modeHintText}>

@@ -3,9 +3,16 @@ import { Platform } from "react-native";
 import { MAX_MEDIA_UPLOAD_BYTES, MAX_MEDIA_UPLOAD_MB } from "../constants/uploadLimits";
 import { isOversizedUploadVideo } from "./feedVideoLimits";
 
+/** Incomplete MP4s from a failed compressor are often ~28 bytes (ftyp only). */
+export const MIN_VALID_VIDEO_UPLOAD_BYTES = 80 * 1024;
+
 export function videoTooLargeError(actualBytes: number) {
   const mb = actualBytes / (1024 * 1024);
   return `Video is ${mb.toFixed(1)}MB. Maximum upload size is ${MAX_MEDIA_UPLOAD_MB}MB.`;
+}
+
+export function videoTooSmallError(actualBytes: number) {
+  return `Video file looks incomplete (${Math.max(0, actualBytes)} bytes). Please try recording or picking the video again.`;
 }
 
 export function videoResolutionTooLargeError(width: number, height: number) {
@@ -21,22 +28,25 @@ export function assertVideoResolutionWithinLimit(width?: number, height?: number
   }
 }
 
-/** Blocks upload before calling Supabase when the file is over the limit. */
-export async function assertVideoUnderUploadLimit(fileUri: string): Promise<void> {
+async function readFileBytes(fileUri: string): Promise<number> {
   const uri = String(fileUri || "").trim();
-  if (!uri) return;
-
-  let bytes = 0;
+  if (!uri) return 0;
   if (Platform.OS === "web") {
     const res = await fetch(uri);
     const blob = await res.blob();
-    bytes = blob.size;
-  } else {
-    const info = await FileSystem.getInfoAsync(uri, { size: true });
-    if (!info.exists) return;
-    bytes = (info as { size?: number }).size ?? 0;
+    return blob.size;
   }
+  const info = await FileSystem.getInfoAsync(uri, { size: true });
+  if (!info.exists) return 0;
+  return (info as { size?: number }).size ?? 0;
+}
 
+/** Blocks upload before calling the API when the file is over/under size limits. */
+export async function assertVideoUnderUploadLimit(fileUri: string): Promise<void> {
+  const bytes = await readFileBytes(fileUri);
+  if (bytes > 0 && bytes < MIN_VALID_VIDEO_UPLOAD_BYTES) {
+    throw new Error(videoTooSmallError(bytes));
+  }
   if (bytes > 0 && bytes > MAX_MEDIA_UPLOAD_BYTES) {
     throw new Error(videoTooLargeError(bytes));
   }
