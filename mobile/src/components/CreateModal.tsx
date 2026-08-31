@@ -24,7 +24,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { initialWindowMetrics, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import { uploadVideoThumbnailFromUri } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
@@ -522,10 +522,12 @@ export function CreateModal({
   );
   const insets = useSafeAreaInsets();
   /** Fullscreen camera Modals often report insets.bottom = 0 on Android while the
-   * gesture/nav bar still covers POST/STORY/REEL + gallery — force a floor. */
+   * gesture/nav bar still covers POST/STORY/REEL + gallery. Prefer real metrics,
+   * then a floor tall enough for the mode strip (~44) + gesture bar. */
   const cameraBottomInset = React.useMemo(() => {
-    if (Platform.OS === "android") return Math.max(insets.bottom, 28);
-    return Math.max(insets.bottom, 16);
+    const reported = Math.max(insets.bottom, initialWindowMetrics?.insets.bottom ?? 0);
+    if (Platform.OS === "android") return Math.max(reported, 56);
+    return Math.max(reported, 20);
   }, [insets.bottom]);
   const { height: windowHeight } = useWindowDimensions();
   const [liveCameraLayoutKey, setLiveCameraLayoutKey] = useState(0);
@@ -5650,8 +5652,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 4,
-    marginBottom: 2,
-    gap: 4
+    marginTop: 4,
+    marginBottom: 6,
+    gap: 4,
+    minHeight: 44
   },
   igCamBottomModes: {
     flex: 1,
@@ -5659,7 +5663,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
     paddingBottom: 2
   },
   igCamModeItem: {

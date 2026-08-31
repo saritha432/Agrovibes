@@ -46,7 +46,6 @@ import {
 } from "../navigation/storyActivityBridge";
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
-import { isRemoteVideoLikelyPlayable } from "../utils/videoUrlHealth";
 import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
@@ -158,6 +157,7 @@ import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { reelGridStillUri, pickReelVideoFit, postHasAttachedMusic, postShowsVolumeControl } from "../utils/reelGrid";
 import {
   buildReelViewerFeed,
+  dedupePostsById,
   mapPostIndexToFeedIndex,
   type ReelViewerFeedItem
 } from "../utils/reelViewerFeed";
@@ -921,24 +921,6 @@ function FeedPostVideo({
   }, [uri, hlsUrl]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const ok = await isRemoteVideoLikelyPlayable(activeUri);
-      if (cancelled) return;
-      if (!ok) {
-        if (sourceIndex + 1 < sources.length) {
-          setSourceIndex((i) => i + 1);
-          return;
-        }
-        setBlocked(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeUri, sourceIndex, sources.length]);
-
-  useEffect(() => {
     return () => {
       void videoRef.current?.unloadAsync().catch(() => {});
     };
@@ -1049,23 +1031,8 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     setSourceIndex(0);
   }, [uri, hlsUrl]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const ok = await isRemoteVideoLikelyPlayable(activeUri);
-      if (cancelled) return;
-      if (!ok) {
-        if (sourceIndex + 1 < playbackSources.length) {
-          setSourceIndex((i) => i + 1);
-          return;
-        }
-        setPlaybackBlocked(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeUri, playbackSources.length, sourceIndex]);
+  // No poster overlay — on Android it often sticks as a zoomed still while the
+  // decoder is buffering or when shouldPlay flickers, which looks like "image not video".
 
   const fitted = useMemo(() => {
     if (isCover || isWeb || !natural) return null;
@@ -1087,19 +1054,66 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
 
   const resizeMode = isCover ? ResizeMode.COVER : ResizeMode.CONTAIN;
 
+  // Rely on `source` + `shouldPlay`. Light retries only for load/scroll races.
+  // AudioFocus "background" is fixed via staysActiveInBackground (Android Modal pauses Activity).
   useEffect(() => {
-    const ref = videoRef.current;
-    if (!ref) return;
-    if (shouldPlay) {
-      ref.playAsync().catch(() => {});
-    } else {
-      ref.pauseAsync().catch(() => {});
+    if (!shouldPlay) {
+      void videoRef.current?.pauseAsync().catch(() => {});
+      return;
     }
+    let cancelled = false;
+    let attempts = 0;
+    const tryPlay = () => {
+      if (cancelled) return;
+      const v = videoRef.current;
+      if (!v) {
+        attempts += 1;
+        if (attempts < 30) setTimeout(tryPlay, 80);
+        return;
+      }
+      void (async () => {
+        try {
+          const status = await v.getStatusAsync();
+          if (cancelled) return;
+          if (!status.isLoaded) {
+            attempts += 1;
+            if (attempts < 30) setTimeout(tryPlay, 100);
+            return;
+          }
+          if (status.isPlaying) return;
+          await v.playAsync();
+        } catch (error: unknown) {
+          if (cancelled) return;
+          attempts += 1;
+          if (attempts < 30) {
+            setTimeout(tryPlay, 150);
+            return;
+          }
+          // Avoid spamming AudioFocus warnings — usually means audio mode / Activity pause race.
+          const msg = error instanceof Error ? error.message : String(error);
+          if (!/AudioFocusNotAcquired|background/i.test(msg)) {
+            console.warn("[Cropvibe Video] play failed", activeUri.slice(0, 160), error);
+          }
+        }
+      })();
+    };
+    const t = setTimeout(tryPlay, 80);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [shouldPlay, activeUri]);
 
   useEffect(() => {
     return () => {
-      void videoRef.current?.unloadAsync().catch(() => {});
+      const v = videoRef.current;
+      videoRef.current = null;
+      if (!v) return;
+      void v.pauseAsync().catch(() => {});
+      // Defer unload so the next fullscreen reel can grab the decoder first.
+      setTimeout(() => {
+        void v.unloadAsync().catch(() => {});
+      }, 200);
     };
   }, []);
 
@@ -1123,6 +1137,32 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     []
   );
 
+  if (playbackBlocked) {
+    return (
+      <View
+        style={{
+          width: containerWidth,
+          height: containerHeight,
+          backgroundColor: "#000",
+          justifyContent: "center",
+          alignItems: "center"
+        }}
+      >
+        {posterUri ? (
+          <FeedImage
+            source={{ uri: posterUri }}
+            style={{ width: containerWidth, height: containerHeight } as ImageStyle}
+            contentFit="contain"
+            recyclingKey={posterUri}
+          />
+        ) : null}
+        <Text style={{ position: "absolute", bottom: 48, color: "rgba(255,255,255,0.75)", fontSize: 13 }}>
+          Video unavailable
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View
       style={{
@@ -1132,18 +1172,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         ...(!isCover ? { justifyContent: "center", alignItems: "center" } : {})
       }}
     >
-      {playbackBlocked ? (
-        posterUri ? (
-          <FeedImage
-            source={{ uri: posterUri }}
-            style={videoOuterStyle as ImageStyle}
-            contentFit={isCover ? "cover" : "contain"}
-            recyclingKey={posterUri}
-          />
-        ) : (
-          <View style={[videoOuterStyle, { backgroundColor: "#000" }]} />
-        )
-      ) : (
       <Video
         key={activeUri}
         ref={(r) => {
@@ -1154,8 +1182,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
         useNativeControls={useNativeControls}
-        usePoster={!!posterUri}
-        posterSource={posterUri ? { uri: posterUri } : undefined}
+        usePoster={false}
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
@@ -1191,9 +1218,8 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
                 if (dim) setNatural(dim);
               }
         }
-        progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
+        progressUpdateIntervalMillis={preloadOnly ? 4000 : 500}
       />
-      )}
     </View>
   );
 });
@@ -1586,7 +1612,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         void Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
           playsInSilentModeIOS: true,
-          staysActiveInBackground: false,
+          // Android Modal/Dialog pauses the Activity; without this, expo-av throws
+          // AudioFocusNotAcquiredException ("experience is currently in the background").
+          staysActiveInBackground: true,
           interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
           shouldDuckAndroid: true,
           interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
@@ -1602,7 +1630,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       void Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
+        // Required for fullscreen Modal reels on Android (Activity onPause while still visible).
+        staysActiveInBackground: true,
         interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
         shouldDuckAndroid: true,
         interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
@@ -1617,7 +1646,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     []
   );
   const reelViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 35, minimumViewTime: 0 }),
+    () => ({ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }),
     []
   );
 
@@ -1627,10 +1656,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         .filter((v) => v.isViewable && v.item != null)
         .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
         .sort((a, b) => a.index - b.index);
-      if (ordered.length === 0) {
-        setPlayingPostId(null);
-        return;
-      }
+      // Keep last active id if nothing is reported yet (common on first layout).
+      if (ordered.length === 0) return;
       const primary = ordered[ordered.length - 1];
       lastPlayingIndexRef.current = primary.index;
       setPlayingPostId(primary.post.id);
@@ -1940,13 +1967,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ordered = [post];
       initialIndex = 0;
     } else {
-      const list = tabPosts.filter((p) => postHasViewableMedia(p));
+      const list = dedupePostsById(tabPosts.filter((p) => postHasViewableMedia(p)));
       ordered = list.length ? list : [post];
       const ix = ordered.findIndex((p) => p.id === post.id);
       initialIndex = ix >= 0 ? ix : 0;
     }
-    setPlayingPostId(post.id);
+    setReelUserPaused(false);
+    setPlayingPostId(Number(post.id));
     setReelViewerOpen({ posts: ordered, initialIndex });
+    if (Platform.OS !== "web") {
+      setTimeout(() => setPlayingPostId(Number(post.id)), 100);
+      setTimeout(() => setPlayingPostId(Number(post.id)), 350);
+    }
   }, [tabPosts]);
 
   const openQueuedSharedPosts = useCallback((queued: { posts: HomePost[]; initialIndex: number }) => {
@@ -3158,7 +3190,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setPlayingPostId(null);
         return;
       }
-      setPlayingPostId(item.post.id);
+      const nextId = Number(item.post.id);
+      setReelUserPaused(false);
+      setPlayingPostId(nextId);
+      prefetchPostMedia(item.post);
     },
     [reelViewerFeed, reelViewerOpen, windowHeight]
   );
@@ -3169,16 +3204,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         .filter((v) => v.isViewable && v.item != null)
         .map((v) => ({ item: v.item as ReelViewerFeedItem, index: v.index ?? 0 }))
         .sort((a, b) => a.index - b.index);
-      if (!ordered.length) {
-        setPlayingPostId(null);
-        return;
-      }
-      const primary = ordered[ordered.length - 1].item;
+      // Do NOT clear playingPostId when viewableItems is empty — that flashes on mount
+      // and leaves every page showing the poster image instead of Video.
+      if (!ordered.length) return;
+      // Prefer the topmost fully viewable page (stable for vertical paging).
+      const primary = ordered[0]!.item;
       if (primary.type === "suggestions") {
-        setPlayingPostId(null);
         return;
       }
-      setPlayingPostId(primary.post.id);
+      const nextId = Number(primary.post.id);
+      setReelUserPaused(false);
+      setPlayingPostId(nextId);
       prefetchPostMedia(primary.post);
     },
     []
@@ -3570,6 +3606,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     if (reelViewerOpen) {
       setIsReelMuted(false);
       setReelUserPaused(false);
+      if (Platform.OS !== "web") {
+        void Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+          shouldDuckAndroid: true,
+          interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+          playThroughEarpieceAndroid: false
+        });
+      }
     } else {
       setIsReelMuted(true);
       setReelUserPaused(false);
@@ -4296,13 +4343,17 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         : reelSlotHeight > 0
           ? reelSlotHeight
           : Math.max(420, windowHeight * 0.62);
-      const isActiveVideo = playingPostId === post.id && !!post.videoUrl;
+      const isActiveVideo = Number(playingPostId) === Number(post.id) && !!post.videoUrl;
       // When a modal viewer is open, only the modal list may own ExoPlayer — otherwise
       // Android shows a blank surface and playback stutters from dual decoders.
       const ownsDecoder = inModal || !reelViewerOpen;
-      const shouldPlayReel = ownsDecoder && isActiveVideo && canPlayMedia && !reelUserPaused;
-      const showActiveVideo =
-        ownsDecoder && isActiveVideo && canPlayMedia && (shouldPlayReel || reelUserPaused);
+      // Fullscreen Modal briefly flips AppState inactive on Android — do not gate modal
+      // playback on appIsActive or the Video freezes on frame 0 (looks like a still image).
+      const allowPlay = inModal ? true : canPlayMedia;
+      const shouldPlayReel = ownsDecoder && isActiveVideo && allowPlay && !reelUserPaused;
+      // In fullscreen, always mount Video for the active page (even if paused). Falling back
+      // to FeedImage+cover is what users see as a zoomed still instead of playback.
+      const showActiveVideo = inModal ? isActiveVideo : ownsDecoder && isActiveVideo && allowPlay;
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -4383,7 +4434,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           ) : post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {reelPoster ? (
-                <FeedImage source={{ uri: reelPoster }} style={styles.reelVideoFull} contentFit="cover" recyclingKey={reelPoster} />
+                <FeedImage
+                  source={{ uri: reelPoster }}
+                  style={styles.reelVideoFull}
+                  contentFit={inModal ? "contain" : "cover"}
+                  recyclingKey={reelPoster}
+                />
               ) : (
                 <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
               )}
@@ -5146,7 +5202,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <FlatList
                   style={styles.reelFrameList}
                   data={tabPosts}
-                  keyExtractor={(item) => item.feedEntryKey || String(item.id)}
+                  keyExtractor={(item, index) => `${item.feedEntryKey || item.id}#${index}`}
                   renderItem={renderFullScreenReel}
                   removeClippedSubviews={false}
                   initialNumToRender={1}
@@ -5195,7 +5251,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : (
       <FlatList
         data={tabPosts}
-        keyExtractor={(item) => item.feedEntryKey || String(item.id)}
+        keyExtractor={(item, index) => `${item.feedEntryKey || item.id}#${index}`}
         renderItem={renderPost}
         removeClippedSubviews={Platform.OS === "android"}
         nestedScrollEnabled
@@ -5538,7 +5594,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 reelViewerListRef.current = r;
               }}
               data={reelViewerFeed}
-              keyExtractor={(item) => item.key}
+              keyExtractor={(item, index) =>
+                item.type === "post"
+                  ? `rv-${index}-p-${item.post.id}-${item.key}`
+                  : `rv-${index}-s-${item.pageIndex}`
+              }
               renderItem={renderReelViewerItem}
               pagingEnabled
               showsVerticalScrollIndicator={false}
@@ -5568,9 +5628,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${visibleSuggestedUsers.length}-${suggestedFollowDone.size}-${reelViewerFeed.length}-${reelViewerOpen.posts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
-              initialNumToRender={1}
-              maxToRenderPerBatch={1}
-              windowSize={2}
+              initialNumToRender={2}
+              maxToRenderPerBatch={2}
+              windowSize={3}
               removeClippedSubviews={false}
             />
           ) : null}

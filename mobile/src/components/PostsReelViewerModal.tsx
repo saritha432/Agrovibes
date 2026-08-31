@@ -27,7 +27,6 @@ import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
-import { isRemoteVideoLikelyPlayable } from "../utils/videoUrlHealth";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import { UserAvatar } from "./UserAvatar";
 import { StoryRingAvatar } from "./StoryRingAvatar";
@@ -284,24 +283,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   }, [uri, hlsUrl]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const ok = await isRemoteVideoLikelyPlayable(activeUri);
-      if (cancelled) return;
-      if (!ok) {
-        if (sourceIndex + 1 < playbackSources.length) {
-          setSourceIndex((i) => i + 1);
-          return;
-        }
-        setBlocked(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeUri, playbackSources.length, sourceIndex]);
-
-  useEffect(() => {
     return () => {
       void videoRef.current?.unloadAsync().catch(() => {});
     };
@@ -360,8 +341,11 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         }}
       >
         {posterUri ? (
-          <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
         ) : null}
+        <Text style={{ position: "absolute", bottom: 48, color: "rgba(255,255,255,0.75)", fontSize: 13 }}>
+          Video unavailable
+        </Text>
       </View>
     );
   }
@@ -385,8 +369,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
         isLooping={isLooping}
         isMuted={isMuted || preloadOnly}
         useNativeControls={false}
-        usePoster={!!posterUri}
-        posterSource={posterUri ? { uri: posterUri } : undefined}
+        usePoster={false}
         resizeMode={resizeMode}
         style={videoOuterStyle}
         videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
@@ -712,7 +695,7 @@ export function PostsReelViewerModal({
     void Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
+      staysActiveInBackground: true,
       interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
       shouldDuckAndroid: true,
       interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
@@ -1131,7 +1114,7 @@ export function PostsReelViewerModal({
     ({ item: post, index }: { item: HomePost; index: number }) => {
       const pageH = windowHeight;
       const reelContentWidth = windowWidth;
-      const isActiveVideo = effectivePlayingId === post.id && !!post.videoUrl;
+      const isActiveVideo = Number(effectivePlayingId) === Number(post.id) && !!post.videoUrl;
       const shouldPlayVideo = isActiveVideo && !reelUserPaused;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
@@ -1446,7 +1429,7 @@ export function PostsReelViewerModal({
                 reelViewerListRef.current = r;
               }}
               data={viewerPosts}
-              keyExtractor={(item) => `profile-reel-viewer-${item.id}`}
+              keyExtractor={(item, index) => `profile-reel-viewer-${item.id}-${index}`}
               renderItem={renderReelPage}
               pagingEnabled
               showsVerticalScrollIndicator={false}
