@@ -80,6 +80,22 @@ export function buildSuggestionSlides(
   return slides;
 }
 
+/**
+ * Deduplicate by post id while preserving order (keeps first occurrence).
+ * Prevents React key collisions and dual ExoPlayer mounts for the same clip.
+ */
+export function dedupePostsById(posts: HomePost[]): HomePost[] {
+  const seen = new Set<number>();
+  const out: HomePost[] = [];
+  for (const post of posts) {
+    const id = Number(post.id);
+    if (!Number.isFinite(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(post);
+  }
+  return out;
+}
+
 export function buildReelViewerFeed(
   posts: HomePost[],
   options?: { insertSuggestions?: boolean; interval?: number }
@@ -92,8 +108,11 @@ export function buildReelViewerFeed(
   let suggestPageIndex = 0;
   let nextAt = baseInterval + jitterForPage(0);
 
-  for (const post of posts) {
-    items.push({ type: "post", key: `post-${post.id}`, post });
+  // Always include index — feedEntryKey alone can collide when the same post appears twice.
+  for (let i = 0; i < posts.length; i++) {
+    const post = posts[i]!;
+    const base = post.feedEntryKey?.trim() || `post-${post.id}`;
+    items.push({ type: "post", key: `${base}#${i}`, post });
     postsSinceSuggest += 1;
     if (insertSuggestions && postsSinceSuggest >= nextAt) {
       items.push({

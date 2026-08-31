@@ -11,7 +11,7 @@ import {
   View
 } from "react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { initialWindowMetrics, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCameraPinchZoom } from "../hooks/useCameraPinchZoom";
 import { formatReelCountdown, REEL_MAX_RECORD_SECONDS } from "./storyCameraTypes";
 
@@ -60,6 +60,11 @@ export function InAppCameraCapture({
   maxVideoDurationSec = REEL_MAX_RECORD_SECONDS
 }: Props) {
   const insets = useSafeAreaInsets();
+  const cameraBottomInset = Math.max(
+    insets.bottom,
+    initialWindowMetrics?.insets.bottom ?? 0,
+    Platform.OS === "android" ? 56 : 20
+  );
   const cameraRef = useRef<CameraView>(null);
   const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
   const recordingStartedAtRef = useRef<number>(0);
@@ -379,7 +384,7 @@ export function InAppCameraCapture({
               </View>
             ) : null}
 
-            <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, Platform.OS === "android" ? 28 : 16) }]}>
+            <View style={[styles.bottomBar, { paddingBottom: cameraBottomInset }]}>
               {wantsVideo ? (
                 <View style={styles.modeHint}>
                   <Text style={styles.modeHintText}>
