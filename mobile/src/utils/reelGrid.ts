@@ -38,8 +38,16 @@ export function reelGridStillUri(post: HomePost): string | null {
   return null;
 }
 
-/** Full-bleed reels (Instagram-style). Landscape crops rather than letterboxing grey bars. */
-export function pickReelVideoFit(_videoWidth: number, _videoHeight: number): "cover" | "contain" {
+/**
+ * Portrait / near-reel aspect → cover (full-bleed).
+ * Landscape / wide → contain so the frame isn't cropped into a "zoom".
+ */
+export function pickReelVideoFit(videoWidth: number, videoHeight: number): "cover" | "contain" {
+  const w = Number(videoWidth);
+  const h = Number(videoHeight);
+  if (!(w > 0 && h > 0)) return "cover";
+  // Wider than ~3:4 → show full frame (contain) instead of cropping.
+  if (w / h > 0.85) return "contain";
   return "cover";
 }
 

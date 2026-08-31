@@ -1011,7 +1011,8 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const effectiveFit = useMemo((): "contain" | "cover" => {
     if (fit === "cover" || fit === "contain") return fit;
-    if (!natural) return "cover";
+    // Before we know size, prefer contain so landscape doesn't flash as a cropped zoom.
+    if (!natural) return "contain";
     return pickReelVideoFit(natural.width, natural.height);
   }, [fit, natural]);
   const isCover = effectiveFit === "cover";
@@ -4418,7 +4419,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 shouldPlay={shouldPlayReel}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
-                fit="cover"
+                fit="auto"
                 isLooping
                 isMuted={isReelMuted || separateMusicPlaying}
                 useNativeControls={false}

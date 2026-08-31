@@ -265,7 +265,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const effectiveFit = useMemo((): "contain" | "cover" => {
     if (fit === "cover" || fit === "contain") return fit;
-    if (!natural) return "cover";
+    if (!natural) return "contain";
     return pickReelVideoFit(natural.width, natural.height);
   }, [fit, natural]);
   const isCover = effectiveFit === "cover";
@@ -1158,7 +1158,7 @@ export function PostsReelViewerModal({
                 shouldPlay={shouldPlayVideo}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
-                fit="cover"
+                fit="auto"
                 posterUri={reelPoster || undefined}
                 isLooping
                 isMuted={isReelMuted}
