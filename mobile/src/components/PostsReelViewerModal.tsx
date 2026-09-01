@@ -266,8 +266,8 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const effectiveFit = useMemo((): "contain" | "cover" => {
     if (fit === "cover" || fit === "contain") return fit;
     if (!natural) return "contain";
-    return pickReelVideoFit(natural.width, natural.height);
-  }, [fit, natural]);
+    return pickReelVideoFit(natural.width, natural.height, containerWidth, containerHeight);
+  }, [fit, natural, containerWidth, containerHeight]);
   const isCover = effectiveFit === "cover";
   const [blocked, setBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
