@@ -986,6 +986,8 @@ type ContainedExpoVideoProps = {
   isMuted?: boolean;
   posterUri?: string;
   useNativeControls?: boolean;
+  /** Bust native player cache when reopening fullscreen (same uri otherwise reuses a dead surface). */
+  playbackKey?: string;
   onStatusUpdate?: (status: AVPlaybackStatus) => void;
 };
 
@@ -1005,16 +1007,17 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   isMuted = false,
   posterUri,
   useNativeControls = false,
+  playbackKey,
   onStatusUpdate
 }: ContainedExpoVideoProps, ref) {
   const isWeb = Platform.OS === "web";
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const effectiveFit = useMemo((): "contain" | "cover" => {
     if (fit === "cover" || fit === "contain") return fit;
-    // Before we know size, prefer contain so landscape doesn't flash as a cropped zoom.
+    // Before we know size, prefer contain so native doesn't flash a cropped COVER frame.
     if (!natural) return "contain";
-    return pickReelVideoFit(natural.width, natural.height);
-  }, [fit, natural]);
+    return pickReelVideoFit(natural.width, natural.height, containerWidth, containerHeight);
+  }, [fit, natural, containerWidth, containerHeight]);
   const isCover = effectiveFit === "cover";
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const videoRef = useRef<Video | null>(null);
@@ -1111,10 +1114,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       videoRef.current = null;
       if (!v) return;
       void v.pauseAsync().catch(() => {});
-      // Defer unload so the next fullscreen reel can grab the decoder first.
-      setTimeout(() => {
-        void v.unloadAsync().catch(() => {});
-      }, 200);
+      void v.unloadAsync().catch(() => {});
     };
   }, []);
 
@@ -1174,7 +1174,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       }}
     >
       <Video
-        key={activeUri}
+        key={playbackKey ? `${playbackKey}::${activeUri}` : activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
@@ -1429,6 +1429,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   const [reelViewerOpen, setReelViewerOpen] = useState<{ posts: HomePost[]; initialIndex: number } | null>(null);
+  const [reelViewerSession, setReelViewerSession] = useState(0);
+  const reelViewerSessionRef = useRef(0);
 
   const openPostAuthorProfile = React.useCallback(
     (post: HomePost) => {
@@ -1584,6 +1586,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const nextStoryRef = useRef<() => void>(() => {});
   const commentsFetchSeqRef = useRef(0);
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
+  const closeReelViewer = useCallback(() => {
+    setReelViewerOpen(null);
+    reelVideoHandlesRef.current = {};
+  }, []);
   const lastActiveReelIdRef = useRef<number | null>(null);
   const reelTapTsRef = useRef<Record<number, number>>({});
   const reelTapTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
@@ -1973,12 +1979,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const ix = ordered.findIndex((p) => p.id === post.id);
       initialIndex = ix >= 0 ? ix : 0;
     }
+    const postId = Number(post.id);
+    reelViewerSessionRef.current += 1;
+    setReelViewerSession(reelViewerSessionRef.current);
     setReelUserPaused(false);
-    setPlayingPostId(Number(post.id));
     setReelViewerOpen({ posts: ordered, initialIndex });
+    setPlayingPostId(postId);
     if (Platform.OS !== "web") {
-      setTimeout(() => setPlayingPostId(Number(post.id)), 100);
-      setTimeout(() => setPlayingPostId(Number(post.id)), 350);
+      setTimeout(() => setPlayingPostId(postId), 100);
+      setTimeout(() => setPlayingPostId(postId), 400);
     }
   }, [tabPosts]);
 
@@ -1987,7 +1996,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const initialIndex = queued.initialIndex;
     const post = queued.posts[initialIndex] ?? queued.posts[0];
     if (!post) return;
-    setPlayingPostId(post.id);
+    reelViewerSessionRef.current += 1;
+    setReelViewerSession(reelViewerSessionRef.current);
+    setPlayingPostId(Number(post.id));
     setReelViewerOpen({ posts: queued.posts, initialIndex });
   }, []);
 
@@ -4416,6 +4427,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 uri={post.videoUrl}
                 hlsUrl={post.hlsUrl}
                 posterUri={reelPoster || undefined}
+                playbackKey={inModal ? `rv-${reelViewerSession}-${post.id}` : undefined}
                 shouldPlay={shouldPlayReel}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
@@ -4770,6 +4782,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       windowHeight,
       windowWidth,
       reelViewerOpen,
+      reelViewerSession,
       reelUserPaused,
       onReelSurfaceTap,
       displayFeedCopy,
@@ -5559,15 +5572,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         animationType="fade"
         presentationStyle="fullScreen"
         statusBarTranslucent
-        onRequestClose={() => setReelViewerOpen(null)}
+        onRequestClose={closeReelViewer}
       >
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
+        <View style={{ flex: 1, backgroundColor: "#000" }} key={`reel-viewer-root-${reelViewerSession}`}>
           <View
             style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset + 14 }]}
             pointerEvents="box-none"
           >
             <Pressable
-              onPress={() => setReelViewerOpen(null)}
+              onPress={closeReelViewer}
               hitSlop={14}
               style={styles.reelViewerBackBtn}
               accessibilityRole="button"
@@ -5591,6 +5604,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           ) : null}
           {reelViewerOpen && reelViewerFeed.length > 0 ? (
             <FlatList
+              key={`reel-viewer-list-${reelViewerSession}`}
               ref={(r) => {
                 reelViewerListRef.current = r;
               }}
@@ -5626,7 +5640,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   animated: false
                 });
               }}
-              extraData={`${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${visibleSuggestedUsers.length}-${suggestedFollowDone.size}-${reelViewerFeed.length}-${reelViewerOpen.posts
+              extraData={`${reelViewerSession}-${playingPostId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${visibleSuggestedUsers.length}-${suggestedFollowDone.size}-${reelViewerFeed.length}-${reelViewerOpen.posts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
               initialNumToRender={2}

@@ -39,16 +39,35 @@ export function reelGridStillUri(post: HomePost): string | null {
 }
 
 /**
- * Portrait / near-reel aspect → cover (full-bleed).
- * Landscape / wide → contain so the frame isn't cropped into a "zoom".
+ * Pick cover vs contain from video AND screen/container aspect.
+ * Web uses CSS object-fit and looks correct with contain; native ExoPlayer COVER
+ * crops aggressively when aspects differ even slightly (looks "zoomed" on phones).
  */
-export function pickReelVideoFit(videoWidth: number, videoHeight: number): "cover" | "contain" {
+export function pickReelVideoFit(
+  videoWidth: number,
+  videoHeight: number,
+  containerWidth?: number,
+  containerHeight?: number
+): "cover" | "contain" {
   const w = Number(videoWidth);
   const h = Number(videoHeight);
-  if (!(w > 0 && h > 0)) return "cover";
-  // Wider than ~3:4 → show full frame (contain) instead of cropping.
-  if (w / h > 0.85) return "contain";
-  return "cover";
+  if (!(w > 0 && h > 0)) return "contain";
+
+  const cw = Number(containerWidth);
+  const ch = Number(containerHeight);
+  const videoAspect = w / h;
+
+  if (!(cw > 0 && ch > 0)) {
+    // No container — prefer contain so landscape clips aren't cropped.
+    return videoAspect > 0.85 ? "contain" : "cover";
+  }
+
+  const containerAspect = cw / ch;
+  // Aspects close enough → edge-to-edge cover (Instagram-style reel).
+  const aspectDelta = Math.abs(videoAspect - containerAspect) / containerAspect;
+  if (aspectDelta <= 0.08) return "cover";
+  // Mismatch → contain (matches laptop/web — full frame, black bars).
+  return "contain";
 }
 
 export function postMatchesExploreQuery(post: HomePost, query: string): boolean {
