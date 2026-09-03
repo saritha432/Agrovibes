@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchUsers, sendFollowRequest } from "../../api/home";
 import type { UserSearchRecord } from "../../api/types";
@@ -53,7 +53,8 @@ export function HomeRightPanel() {
     postUserName?: string;
   } | null>(null);
 
-  const loadSuggestions = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false;
     if (authLoading) return;
     if (!token || !user?.id) {
       setSuggestions([]);
@@ -63,19 +64,22 @@ export function HomeRightPanel() {
 
     const viewerId = Number(user.id);
     setLoading(true);
-    try {
-      const { users } = await fetchUsers(token, { limit: 100 });
-      setSuggestions(users.filter((u) => isSuggestionCandidate(u, viewerId)).slice(0, 5));
-    } catch {
-      setSuggestions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [authLoading, token, user?.id]);
+    void (async () => {
+      try {
+        const { users } = await fetchUsers(token, { limit: 100 });
+        if (cancelled) return;
+        setSuggestions(users.filter((u) => isSuggestionCandidate(u, viewerId)).slice(0, 5));
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
 
-  useEffect(() => {
-    void loadSuggestions();
-  }, [loadSuggestions]);
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, token, user?.id]);
 
   useEffect(() => {
     const onOpenComments = (evt: Event) => {

@@ -190,29 +190,6 @@ function reelCreativeTextColor(textColor?: string): string {
   }
 }
 
-function containVideoBox(containerW: number, containerH: number, vw: number, vh: number) {
-  if (!containerW || !containerH || !vw || !vh) {
-    return { width: Math.max(1, containerW), height: Math.max(1, containerH) };
-  }
-  const scale = Math.min(containerW / vw, containerH / vh);
-  return { width: Math.round(vw * scale), height: Math.round(vh * scale) };
-}
-
-function readVideoNaturalSize(event: unknown): { width: number; height: number } | null {
-  const e = event as Record<string, unknown> | null | undefined;
-  if (!e) return null;
-  const nested = e["nativeEvent"] as Record<string, unknown> | undefined;
-  const ns = (e["naturalSize"] ?? nested?.["naturalSize"]) as { width?: number; height?: number } | undefined;
-  if (ns && typeof ns.width === "number" && typeof ns.height === "number" && ns.width > 0 && ns.height > 0) {
-    return { width: ns.width, height: ns.height };
-  }
-  const target = e["target"] as { videoWidth?: number; videoHeight?: number } | undefined;
-  if (target && Number(target.videoWidth) > 0 && Number(target.videoHeight) > 0) {
-    return { width: Number(target.videoWidth), height: Number(target.videoHeight) };
-  }
-  return null;
-}
-
 const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
   Platform.OS === "web"
     ? ({
@@ -238,6 +215,7 @@ type ContainedExpoVideoProps = {
   isLooping?: boolean;
   isMuted?: boolean;
   posterUri?: string;
+  playbackKey?: string;
   onStatusUpdate?: (status: AVPlaybackStatus) => void;
 };
 
@@ -257,6 +235,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     isLooping = true,
     isMuted = false,
     posterUri,
+    playbackKey,
     onStatusUpdate
   },
   ref
@@ -277,10 +256,10 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
   const activeUri = videoPlaybackUrl(playbackSources[sourceIndex] ?? uri);
 
   useEffect(() => {
-    setNatural(null);
     setSourceIndex(0);
     setBlocked(false);
-  }, [uri, hlsUrl]);
+    setNatural(null);
+  }, [uri, playbackKey]);
 
   useEffect(() => {
     return () => {
@@ -288,25 +267,54 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     };
   }, [uri]);
 
-  const fitted = useMemo(() => {
-    if (isCover || isWeb || !natural) return null;
-    return containVideoBox(containerWidth, containerHeight, natural.width, natural.height);
-  }, [isCover, isWeb, natural, containerWidth, containerHeight]);
-
-  const videoOuterStyle: ViewStyle = useMemo(() => {
-    if (isCover) return StyleSheet.absoluteFillObject;
-    if (isWeb) return { width: "100%", height: "100%" };
-    if (fitted) return { width: fitted.width, height: fitted.height };
-    return { width: containerWidth, height: containerHeight };
-  }, [isCover, isWeb, fitted, containerWidth, containerHeight]);
+  const videoOuterStyle: ViewStyle = useMemo(
+    () =>
+      isWeb
+        ? { width: "100%", height: "100%" }
+        : StyleSheet.absoluteFillObject,
+    [isWeb]
+  );
 
   const resizeMode = isCover ? ResizeMode.COVER : ResizeMode.CONTAIN;
 
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (shouldPlay) v.playAsync().catch(() => {});
-    else v.pauseAsync().catch(() => {});
+    if (!shouldPlay) {
+      void videoRef.current?.pauseAsync().catch(() => {});
+      return;
+    }
+    let cancelled = false;
+    let attempts = 0;
+    const tryPlay = () => {
+      if (cancelled) return;
+      const v = videoRef.current;
+      if (!v) {
+        attempts += 1;
+        if (attempts < 30) setTimeout(tryPlay, 80);
+        return;
+      }
+      void (async () => {
+        try {
+          const status = await v.getStatusAsync();
+          if (cancelled) return;
+          if (!status.isLoaded) {
+            attempts += 1;
+            if (attempts < 30) setTimeout(tryPlay, 100);
+            return;
+          }
+          if (status.isPlaying) return;
+          await v.playAsync();
+        } catch {
+          if (cancelled) return;
+          attempts += 1;
+          if (attempts < 30) setTimeout(tryPlay, 150);
+        }
+      })();
+    };
+    const t = setTimeout(tryPlay, 80);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [shouldPlay, activeUri]);
 
   const tryNextPlaybackSource = React.useCallback(() => {
@@ -352,15 +360,16 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
 
   return (
     <View
+      collapsable={false}
       style={{
         width: containerWidth,
         height: containerHeight,
-        backgroundColor: "#000",
-        ...(!isCover ? { justifyContent: "center", alignItems: "center" } : {})
+        overflow: "hidden",
+        backgroundColor: "#000"
       }}
     >
       <Video
-        key={activeUri}
+        key={playbackKey ? `${playbackKey}::${activeUri}` : activeUri}
         ref={(r) => {
           videoRef.current = r;
         }}
@@ -378,7 +387,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
           if (status.isLoaded) {
             durationRef.current = Number(status.durationMillis || 0);
             const { width, height } = readVideoSizeFromPlaybackStatus(status);
-            if (width > 0 && height > 0 && (fit === "auto" || !isCover)) {
+            if (width > 0 && height > 0) {
               setNatural((prev) =>
                 prev?.width === width && prev?.height === height ? prev : { width, height }
               );
@@ -398,14 +407,6 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
             void videoRef.current?.unloadAsync().catch(() => {});
           }
         }}
-        onReadyForDisplay={
-          isCover && fit !== "auto"
-            ? undefined
-            : (ev) => {
-                const dim = readVideoNaturalSize(ev);
-                if (dim) setNatural(dim);
-              }
-        }
         progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
       />
     </View>
@@ -542,6 +543,13 @@ export function PostsReelViewerModal({
 
   const [viewerPosts, setViewerPosts] = useState<HomePost[]>([]);
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
+  const [viewerSession, setViewerSession] = useState(0);
+  const [modalPlayerReady, setModalPlayerReady] = useState(false);
+  const [viewerSurfaceReady, setViewerSurfaceReady] = useState(false);
+  const viewerSurfaceReadyRef = useRef(false);
+  viewerSurfaceReadyRef.current = viewerSurfaceReady;
+  const [viewerViewport, setViewerViewport] = useState({ width: 0, height: 0 });
+  const ignoreViewabilityUntilRef = useRef(0);
   const [isReelMuted, setIsReelMuted] = useState(Platform.OS === "web");
   const [reelUserPaused, setReelUserPaused] = useState(false);
   const [reelMuteFeedback, setReelMuteFeedback] = useState<"muted" | "unmuted" | null>(null);
@@ -582,12 +590,12 @@ export function PostsReelViewerModal({
   useEffect(() => {
     const keepOn = visible && playingPostId != null && !reelUserPaused;
     if (!keepOn) {
-      deactivateKeepAwake("reel-viewer");
+      void deactivateKeepAwake("reel-viewer").catch(() => undefined);
       return;
     }
-    void activateKeepAwakeAsync("reel-viewer");
+    void activateKeepAwakeAsync("reel-viewer").catch(() => undefined);
     return () => {
-      deactivateKeepAwake("reel-viewer");
+      void deactivateKeepAwake("reel-viewer").catch(() => undefined);
     };
   }, [visible, playingPostId, reelUserPaused]);
 
@@ -673,22 +681,43 @@ export function PostsReelViewerModal({
       setActiveCommentsPost(null);
       setOptionsPost(null);
       setCommentDraft("");
+      setModalPlayerReady(false);
+      viewerSurfaceReadyRef.current = false;
+      setViewerSurfaceReady(false);
+      setViewerViewport({ width: 0, height: 0 });
       return;
     }
     const nextPosts = posts.length ? posts : [];
     setViewerPosts(nextPosts);
-    const ix = Math.max(0, Math.min(initialIndex, Math.max(0, nextPosts.length - 1)));
-    const post = nextPosts[ix];
+  }, [visible, posts]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const ix = Math.max(0, Math.min(initialIndex, Math.max(0, posts.length - 1)));
+    const post = posts[ix];
     const nextPlayingId = post?.id ?? null;
     setPlayingPostId(nextPlayingId);
     setIsReelMuted(Platform.OS === "web");
     setReelUserPaused(false);
     setReelMuteFeedback(null);
-    if (Platform.OS !== "web" && nextPlayingId) {
-      const timer = setTimeout(() => setPlayingPostId(nextPlayingId), 80);
-      return () => clearTimeout(timer);
-    }
-  }, [visible, posts, initialIndex]);
+    ignoreViewabilityUntilRef.current = Date.now() + 400;
+    viewerSurfaceReadyRef.current = false;
+    setViewerSurfaceReady(false);
+    setViewerViewport({ width: 0, height: 0 });
+    setViewerSession((s) => s + 1);
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (!cancelled) setModalPlayerReady(true);
+    }, Platform.OS === "android" ? 80 : 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [visible, initialIndex]);
+
+  const armModalPlayer = useCallback(() => {
+    setModalPlayerReady(true);
+  }, []);
 
   useEffect(() => {
     if (!visible || Platform.OS === "web") return;
@@ -1069,6 +1098,7 @@ export function PostsReelViewerModal({
   );
 
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    if (Date.now() < ignoreViewabilityUntilRef.current) return;
     const ordered = viewableItems
       .filter((v) => v.isViewable && v.item != null)
       .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
@@ -1086,14 +1116,17 @@ export function PostsReelViewerModal({
 
   const viewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 35, minimumViewTime: 0 }), []);
 
+  const viewerPageH = viewerViewport.height > 0 ? viewerViewport.height : windowHeight;
+  const viewerPageW = viewerViewport.width > 0 ? viewerViewport.width : windowWidth;
+
   const onReelViewerMomentumEnd = useCallback(
     (offsetY: number) => {
-      if (!visible || windowHeight <= 0 || !viewerPosts.length) return;
-      const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / windowHeight)));
+      if (!visible || viewerPageH <= 0 || !viewerPosts.length) return;
+      const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / viewerPageH)));
       const post = viewerPosts[index];
       setPlayingPostId(post?.id ?? null);
     },
-    [visible, viewerPosts, windowHeight]
+    [visible, viewerPosts, viewerPageH]
   );
 
   const intendedPlayingId = useMemo(() => {
@@ -1112,10 +1145,11 @@ export function PostsReelViewerModal({
 
   const renderReelPage = useCallback(
     ({ item: post, index }: { item: HomePost; index: number }) => {
-      const pageH = windowHeight;
-      const reelContentWidth = windowWidth;
+      const pageH = viewerPageH;
+      const reelContentWidth = viewerPageW;
       const isActiveVideo = Number(effectivePlayingId) === Number(post.id) && !!post.videoUrl;
-      const shouldPlayVideo = isActiveVideo && !reelUserPaused;
+      const showActiveVideo = isActiveVideo && viewerSurfaceReady;
+      const shouldPlayVideo = showActiveVideo && !reelUserPaused;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
       const carouselPage = carouselPageByPostId[post.id] ?? 0;
@@ -1147,7 +1181,7 @@ export function PostsReelViewerModal({
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
-          {post.videoUrl && isActiveVideo ? (
+          {post.videoUrl && showActiveVideo ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <ContainedExpoVideo
                 ref={(r) => {
@@ -1156,6 +1190,7 @@ export function PostsReelViewerModal({
                 uri={post.videoUrl}
                 hlsUrl={post.hlsUrl}
                 shouldPlay={shouldPlayVideo}
+                playbackKey={`rv-${viewerSession}-${post.id}-s`}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
                 fit="auto"
@@ -1173,7 +1208,7 @@ export function PostsReelViewerModal({
             </Pressable>
           ) : post.videoUrl && reelPoster ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+              <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -1203,7 +1238,7 @@ export function PostsReelViewerModal({
             </ScrollView>
           ) : reelPoster ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
             </Pressable>
           ) : (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
@@ -1372,6 +1407,8 @@ export function PostsReelViewerModal({
       openPostAuthorProfile,
       openReposterProfile,
       effectivePlayingId,
+      viewerSession,
+      viewerSurfaceReady,
       reelLikeBurstByPostId,
       reelProgressByPostId,
       setRepostTargetPost,
@@ -1385,30 +1422,91 @@ export function PostsReelViewerModal({
       viewerPosts,
       reelBottomInset,
       modalTopInset,
-      windowHeight,
-      windowWidth
+      viewerPageH,
+      viewerPageW
     ]
   );
 
   const safeInitialIndex =
     visible && viewerPosts.length > 0 ? Math.max(0, Math.min(initialIndex, viewerPosts.length - 1)) : 0;
   const activePlayingPost = viewerPosts.find((p) => p.id === effectivePlayingId);
+  const viewerOpenPosterUri = viewerPosts[safeInitialIndex]
+    ? reelGridStillUri(viewerPosts[safeInitialIndex])
+    : null;
+
+  const snapViewerToOpenIndex = useCallback(() => {
+    if (viewerPageH <= 0) return;
+    reelViewerListRef.current?.scrollToOffset({
+      offset: Math.max(0, safeInitialIndex) * viewerPageH,
+      animated: false
+    });
+  }, [safeInitialIndex, viewerPageH]);
+
+  const settleViewerSurface = useCallback(() => {
+    if (viewerSurfaceReadyRef.current) return;
+    snapViewerToOpenIndex();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        snapViewerToOpenIndex();
+        viewerSurfaceReadyRef.current = true;
+        setViewerSurfaceReady(true);
+      });
+    });
+  }, [snapViewerToOpenIndex]);
 
   useEffect(() => {
-    if (!visible || windowHeight <= 0 || safeInitialIndex <= 0) return;
-    const timer = setTimeout(() => {
-      reelViewerListRef.current?.scrollToIndex({ index: safeInitialIndex, animated: false });
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [safeInitialIndex, visible, windowHeight, viewerPosts.length]);
+    if (!visible || viewerPageH <= 0) return;
+    const snap = () => {
+      if (viewerSurfaceReadyRef.current) return;
+      reelViewerListRef.current?.scrollToOffset({
+        offset: Math.max(0, safeInitialIndex) * viewerPageH,
+        animated: false
+      });
+    };
+    snap();
+    const t1 = setTimeout(snap, 50);
+    const t2 = setTimeout(snap, 140);
+    const fallback = setTimeout(() => {
+      snap();
+      if (!viewerSurfaceReadyRef.current) {
+        viewerSurfaceReadyRef.current = true;
+        setViewerSurfaceReady(true);
+      }
+    }, 280);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(fallback);
+    };
+  }, [safeInitialIndex, visible, viewerPageH, viewerPosts.length, viewerSession]);
 
   if (!visible) return null;
 
   return (
     <>
-      <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={onClose}>
-        <View style={{ flex: 1, backgroundColor: APP_DARK_BG }}>
-          <View style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset }]} pointerEvents="box-none">
+      <Modal
+        visible={visible}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onShow={() => {
+          armModalPlayer();
+          snapViewerToOpenIndex();
+          settleViewerSurface();
+        }}
+        onRequestClose={onClose}
+      >
+        <View
+          style={{ flex: 1, backgroundColor: APP_DARK_BG, overflow: "hidden" }}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            if (!(width > 0 && height > 0)) return;
+            setViewerViewport((prev) =>
+              prev.width === width && prev.height === height ? prev : { width, height }
+            );
+          }}
+        >
+          <View style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset, zIndex: 6 }]} pointerEvents="box-none">
             <Pressable onPress={onClose} hitSlop={14} style={styles.reelViewerBackBtn} accessibilityRole="button" accessibilityLabel="Go back">
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
@@ -1423,41 +1521,61 @@ export function PostsReelViewerModal({
               </View>
             </View>
           ) : null}
-          {viewerPosts.length > 0 && windowHeight > 0 ? (
+          {viewerPosts.length > 0 && viewerViewport.height > 0 ? (
             <FlatList
+              key={`profile-reel-viewer-${viewerSession}-${safeInitialIndex}-${viewerViewport.height}`}
               ref={(r) => {
                 reelViewerListRef.current = r;
               }}
+              style={{ flex: 1 }}
               data={viewerPosts}
               keyExtractor={(item, index) => `profile-reel-viewer-${item.id}-${index}`}
               renderItem={renderReelPage}
               pagingEnabled
               showsVerticalScrollIndicator={false}
-              snapToInterval={windowHeight}
+              snapToInterval={viewerViewport.height}
               snapToAlignment="start"
               decelerationRate="fast"
               disableIntervalMomentum
-              initialScrollIndex={
-                safeInitialIndex > 0 && safeInitialIndex < viewerPosts.length ? safeInitialIndex : undefined
+              contentOffset={
+                Platform.OS === "ios" && safeInitialIndex > 0
+                  ? { x: 0, y: safeInitialIndex * viewerViewport.height }
+                  : undefined
               }
-              getItemLayout={(_data, idx) => ({ length: windowHeight, offset: windowHeight * idx, index: idx })}
+              getItemLayout={(_data, idx) => ({
+                length: viewerViewport.height,
+                offset: viewerViewport.height * idx,
+                index: idx
+              })}
+              onLayout={() => {
+                if (viewerSurfaceReadyRef.current) return;
+                snapViewerToOpenIndex();
+                settleViewerSurface();
+              }}
               onViewableItemsChanged={onViewableItemsChangedRef.current}
               viewabilityConfig={viewabilityConfig}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               onScrollToIndexFailed={(info) => {
                 reelViewerListRef.current?.scrollToOffset({
-                  offset: info.averageItemLength * info.index,
+                  offset: viewerViewport.height * info.index,
                   animated: false
                 });
               }}
-              extraData={`${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${windowHeight}-${viewerPosts
+              extraData={`${viewerSession}-${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${viewerViewport.height}-${viewerSurfaceReady}-${viewerPosts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
-              initialNumToRender={1}
-              maxToRenderPerBatch={1}
-              windowSize={2}
+              initialNumToRender={Math.min(viewerPosts.length, 3)}
+              maxToRenderPerBatch={2}
+              windowSize={5}
               removeClippedSubviews={false}
             />
+          ) : null}
+          {visible && !viewerSurfaceReady ? (
+            <View style={[StyleSheet.absoluteFillObject, { zIndex: 3, backgroundColor: "#000" }]} pointerEvents="none">
+              {viewerOpenPosterUri ? (
+                <Image source={{ uri: viewerOpenPosterUri }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
+              ) : null}
+            </View>
           ) : null}
         </View>
       </Modal>

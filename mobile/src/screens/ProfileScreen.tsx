@@ -706,7 +706,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   const { playingPostId: profilePlayingPostId, markVideoFailed: markProfileVideoFailed } = useReelGridAutoplay(
     visiblePosts,
-    { enabled: activeGalleryTab === "Posts" || activeGalleryTab === "Reels" }
+    { enabled: !profileReelViewer && (activeGalleryTab === "Posts" || activeGalleryTab === "Reels") }
   );
 
   const handleGalleryTabPress = useCallback(

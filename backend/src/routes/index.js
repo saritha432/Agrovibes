@@ -3619,6 +3619,8 @@ router.get("/v1/users", authRequired, async (req, res) => {
       canFollowBack: reverseStatus === "accepted" && row.viewerStatus !== "accepted" && row.viewerStatus !== "pending"
     }));
     const total = Number(result.rows[0]?.totalCount || 0);
+    res.set("Cache-Control", "private, no-store");
+    res.set("Vary", "Authorization");
     res.json({ users, total, limit, offset });
   } catch (error) {
     res.status(500).json({ message: "Failed to list users", error: error.message });

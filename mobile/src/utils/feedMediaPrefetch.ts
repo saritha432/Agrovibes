@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import type { HomePost } from "../services/api";
 import { reelGridStillUri } from "./reelGrid";
 import { videoPlaybackUrl } from "./videoPlaybackUrl";
@@ -39,6 +40,10 @@ export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | n
   const clean = videoPlaybackUrl(raw || hlsUrl, hlsUrl);
   if (!clean || warmedVideos.has(clean)) return;
   if (clean.startsWith("file:") || clean.startsWith("content:") || clean.startsWith("ph:")) return;
+  // Web: Range prefetch + <video> Range requests on the same CloudFront URL race
+  // Chrome's disk cache and surface as net::ERR_CACHE_OPERATION_NOT_SUPPORTED.
+  // HTML5 video already buffers on its own — skip warm fetch in the browser.
+  if (Platform.OS === "web") return;
   warmedVideos.add(clean);
 
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -56,6 +61,7 @@ export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | n
   const isHls = /\.m3u8(\?|#|$)/i.test(clean);
   void fetch(clean, {
     method: "GET",
+    cache: "no-store",
     headers: isHls
       ? { Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*" }
       : {

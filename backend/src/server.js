@@ -11,6 +11,12 @@ const { initSocketChat } = require("./socketChat");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Authenticated JSON APIs must not be revalidated with If-None-Match.
+// Express's default ETag turns the second identical GET into 304 + empty body,
+// which browsers surface as a failed fetch (suggestions/search then go empty).
+app.set("etag", false);
+
 const rawCorsOrigins = process.env.CORS_ORIGIN || "";
 const allowedOrigins = rawCorsOrigins
   .split(",")
@@ -54,6 +60,17 @@ app.use(
 app.use(express.json({ limit: "2mb" }));
 app.use(morgan("dev"));
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+app.use("/api", (req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (!res.get("Cache-Control")) {
+      res.set("Cache-Control", "private, no-store");
+    }
+    return originalJson(body);
+  };
+  next();
+});
 
 app.use("/api", apiRoutes);
 

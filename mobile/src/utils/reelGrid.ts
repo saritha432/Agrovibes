@@ -40,8 +40,7 @@ export function reelGridStillUri(post: HomePost): string | null {
 
 /**
  * Pick cover vs contain from video AND screen/container aspect.
- * Web uses CSS object-fit and looks correct with contain; native ExoPlayer COVER
- * crops aggressively when aspects differ even slightly (looks "zoomed" on phones).
+ * Close match → cover (edge-to-edge). Mismatch → contain so the frame is not zoomed/cropped.
  */
 export function pickReelVideoFit(
   videoWidth: number,
@@ -58,15 +57,12 @@ export function pickReelVideoFit(
   const videoAspect = w / h;
 
   if (!(cw > 0 && ch > 0)) {
-    // No container — prefer contain so landscape clips aren't cropped.
     return videoAspect > 0.85 ? "contain" : "cover";
   }
 
   const containerAspect = cw / ch;
-  // Aspects close enough → edge-to-edge cover (Instagram-style reel).
   const aspectDelta = Math.abs(videoAspect - containerAspect) / containerAspect;
   if (aspectDelta <= 0.08) return "cover";
-  // Mismatch → contain (matches laptop/web — full frame, black bars).
   return "contain";
 }
 

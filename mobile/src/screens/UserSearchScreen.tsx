@@ -240,7 +240,7 @@ export function UserSearchScreen() {
   const isTyping = query.length > 0;
   const showTypeahead = isTyping;
   const { playingPostId, markVideoFailed } = useReelGridAutoplay(explorePosts, {
-    enabled: !showTypeahead && explorePosts.length > 0,
+    enabled: !exploreViewer && !showTypeahead && explorePosts.length > 0,
     intervalMs: 8000
   });
 
