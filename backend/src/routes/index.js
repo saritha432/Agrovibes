@@ -1967,6 +1967,33 @@ async function deleteLiveKitRoom(roomName) {
   }
 }
 
+/** Hard cap so abandoned lives (app kill / missed end-live) stop showing as LIVE forever. */
+const MAX_LIVE_DURATION_MS = 12 * 60 * 60 * 1000;
+
+function liveStartedAtMs(post) {
+  const raw = post?.liveStartedAt || post?.createdAt || "";
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function isLivePastMaxAge(post) {
+  const started = liveStartedAtMs(post);
+  return started > 0 && Date.now() - started > MAX_LIVE_DURATION_MS;
+}
+
+async function persistLivePostEnded(postId) {
+  const id = Number(postId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  await query(
+    `
+    UPDATE home_posts
+    SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+    WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
+    `,
+    [id]
+  );
+}
+
 async function enrichHomePostsLiveState(posts) {
   const out = [];
   for (const post of posts) {
@@ -1984,40 +2011,41 @@ async function enrichHomePostsLiveState(posts) {
       if (post.liveStatus !== "active") {
         post.liveStatus = "ended";
         post.liveViewerCount = 0;
+      } else if (isLivePastMaxAge(post)) {
+        // Rare: DB still "active" but VOD/thumb already present and stream is ancient.
+        post.liveStatus = "ended";
+        post.liveViewerCount = 0;
+        await persistLivePostEnded(post.id);
       }
       out.push(post);
       continue;
     }
-    // If DB says active, trust it — skip LiveKit check entirely.
-    // The end-live API is the single source of truth for stopping.
-    if (dbActive) {
-      post.liveStatus = "active";
-      post.liveViewerCount = Number(post.liveViewerCount || 0);
-      post.liveStartedAt = post.liveStartedAt || post.createdAt;
+    // Abandoned streams: host never hit end-live (crash / force-close) — expire by age.
+    if (isLivePastMaxAge(post)) {
+      post.liveStatus = "ended";
+      post.liveViewerCount = 0;
+      await persistLivePostEnded(post.id);
       out.push(post);
       continue;
     }
+    // DB "active" is not enough — verify the LiveKit room still exists.
+    // Previously we trusted DB forever, which left 9-day-old LIVE rings in the story bar.
     const roomName = post.liveRoomName || `agrovibes-live-${post.id}`;
     const info = await fetchLiveRoomInfo(roomName);
     if (info === null) {
-      post.liveStatus = post.liveStatus || "active";
-      post.liveViewerCount = Number(post.liveViewerCount || 0);
+      // LiveKit unreachable: keep active only while within max age (checked above).
+      post.liveStatus = dbActive || !post.liveStatus ? "active" : post.liveStatus;
+      if (post.liveStatus === "active") {
+        post.liveViewerCount = Number(post.liveViewerCount || 0);
+        post.liveStartedAt = post.liveStartedAt || post.createdAt;
+      }
       out.push(post);
       continue;
     }
     if (info.ended) {
       post.liveStatus = "ended";
       post.liveViewerCount = 0;
-      if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
-        await query(
-          `
-          UPDATE home_posts
-          SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
-          WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
-          `,
-          [post.id]
-        );
-      }
+      await persistLivePostEnded(post.id);
     } else {
       post.liveStatus = "active";
       post.liveViewerCount = info.viewerCount;
@@ -4607,6 +4635,30 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         r.type === "live_reminder" ||
         r.type === "live_host_reminder"
     );
+    // Expire abandoned live_start posts so notifications don't keep showing "Join live".
+    const staleLivePostIds = [];
+    for (const row of liveStarts) {
+      if (row.type !== "live_start") continue;
+      const status = String(row.postLiveStatus || "").toLowerCase();
+      if (status === "ended" || row.postLiveEndedAt) continue;
+      const started = Date.parse(String(row.createdAt || ""));
+      const postId = Number(row.postId);
+      if (!Number.isFinite(started) || Date.now() - started <= MAX_LIVE_DURATION_MS) continue;
+      row.postLiveStatus = "ended";
+      if (!row.postLiveEndedAt) row.postLiveEndedAt = new Date().toISOString();
+      if (Number.isFinite(postId) && postId > 0) staleLivePostIds.push(postId);
+    }
+    if (staleLivePostIds.length) {
+      await query(
+        `
+        UPDATE home_posts
+        SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+        WHERE id = ANY($1::int[]) AND COALESCE(live_status, '') <> 'ended'
+        `,
+        [staleLivePostIds]
+      );
+      await cacheIncr("home:posts:gen");
+    }
     const unreadCount = result.rows.filter((r) => {
       if (r.isRead) return false;
       if (r.type === "follow_request") return r.followStatus === "pending";

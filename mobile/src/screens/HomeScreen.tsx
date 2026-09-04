@@ -33,8 +33,14 @@ import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToMyProfile, navigateToPublicProfile, navigateToHome } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
-import { takePendingSharedPostViewer, subscribeOpenSharedPostsViewer } from "../navigation/sharedPostViewerBridge";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
+import {
+  clearReturnToNotifications,
+  consumeReturnToNotifications,
+  subscribeOpenSharedPostsViewer,
+  takePendingSharedPostViewer
+} from "../navigation/sharedPostViewerBridge";
+import { requestCloseNotificationSheet, requestOpenNotificationSheet, suppressNotificationSheet } from "../navigation/notificationSheetBridge";
 import {
   publishActiveStories,
   setStoryViewedIds,
@@ -1004,12 +1010,13 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     () => videoPlaybackUrl(playbackSources[sourceIndex] ?? uri),
     [playbackSources, sourceIndex, uri]
   );
+  const mediaIdentity = playbackKey || "feed";
 
   useEffect(() => {
     setNatural(null);
     setPlaybackBlocked(false);
     setSourceIndex(0);
-  }, [uri, playbackKey]);
+  }, [mediaIdentity]);
 
   const videoOuterStyle: ViewStyle = useMemo(
     () =>
@@ -1069,7 +1076,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       cancelled = true;
       clearTimeout(t);
     };
-  }, [shouldPlay, activeUri]);
+  }, [shouldPlay, mediaIdentity, sourceIndex]);
 
   useEffect(() => {
     return () => {
@@ -1127,6 +1134,9 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
     );
   }
 
+  // Key by session + fallback source index — NOT full URI (signed URLs change on feed refresh).
+  const playerKey = `${mediaIdentity}::src${sourceIndex}`;
+
   return (
     <View
       collapsable={false}
@@ -1138,7 +1148,7 @@ const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedE
       }}
     >
       <Video
-        key={playbackKey ? `${playbackKey}::${activeUri}` : activeUri}
+        key={playerKey}
         ref={(r) => {
           videoRef.current = r;
         }}
@@ -1411,6 +1421,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         (postUserId > 0 && postUserId === Number(user?.id)) ||
         (!postUserId && normalizedPostName.length > 0 && normalizedPostName === normalizedCurrentUserName);
       setReelViewerOpen(null);
+      clearReturnToNotifications();
+      requestCloseNotificationSheet();
       if (isOwn) {
         navigateToMyProfile();
         return;
@@ -1444,6 +1456,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (!target) return;
       const isOwn = target.userId > 0 && target.userId === Number(user?.id);
       setReelViewerOpen(null);
+      clearReturnToNotifications();
+      requestCloseNotificationSheet();
       if (isOwn) {
         navigateToMyProfile();
         return;
@@ -1558,6 +1572,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const commentsFetchSeqRef = useRef(0);
   const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
   const closeReelViewer = useCallback(() => {
+    const backToNotifs = consumeReturnToNotifications();
+    // Reveal notifications while the reel Modal is still up — Home never peeks through.
+    if (backToNotifs) {
+      suppressNotificationSheet(false);
+      requestOpenNotificationSheet();
+    }
     setReelViewerOpen(null);
     reelViewerSurfaceReadyRef.current = false;
     setReelViewerSurfaceReady(false);
@@ -1641,7 +1661,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       if (ordered.length === 0) return;
       const primary = ordered[ordered.length - 1];
       lastPlayingIndexRef.current = primary.index;
-      setPlayingPostId(primary.post.id);
+      setPlayingPostId((cur) => (cur === primary.post.id ? cur : primary.post.id));
       prefetchPostMedia(primary.post);
       prefetchUpcomingPosts(tabPostsRef.current, primary.index, 1);
     },
@@ -1785,7 +1805,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     let cancelled = false;
     void readHomeFeedCache(user?.id ?? "anon").then((cached) => {
       if (cancelled || !cached?.length) return;
-      setPosts(cached);
+      // Never overwrite a fresher network paint — that remounts the active reel (blink).
+      if (hasLoadedFeedFromNetworkRef.current) return;
+      setPosts((prev) => (prev.length > 0 ? prev : cached));
       // Warm first images immediately so scroll feels Instagram-instant.
       for (const post of cached.slice(0, 3)) prefetchPostMedia(post, { warmVideo: false });
     });
@@ -1970,8 +1992,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const openQueuedSharedPosts = useCallback((queued: { posts: HomePost[]; initialIndex: number }) => {
     if (!queued.posts.length) return;
-    const initialIndex = queued.initialIndex;
-    const post = queued.posts[initialIndex] ?? queued.posts[0];
+    let posts = queued.posts;
+    let initialIndex = queued.initialIndex;
+    // Notification / share often queues a single post — expand into the live home feed so
+    // vertical scroll keeps working (otherwise the viewer has nowhere to go after that reel).
+    if (posts.length === 1) {
+      const target = posts[0]!;
+      const fromTab = dedupePostsById(tabPosts.filter((p) => postHasViewableMedia(p)));
+      const fromAll = dedupePostsById(postsRef.current.filter((p) => postHasViewableMedia(p)));
+      const feed = fromTab.length >= 2 ? fromTab : fromAll.length >= 2 ? fromAll : fromTab.length ? fromTab : fromAll;
+      if (feed.length) {
+        const ix = feed.findIndex((p) => Number(p.id) === Number(target.id));
+        if (ix >= 0) {
+          posts = feed;
+          initialIndex = ix;
+        } else {
+          posts = dedupePostsById([target, ...feed]);
+          initialIndex = 0;
+        }
+      }
+    }
+    const post = posts[initialIndex] ?? posts[0];
     if (!post) return;
     reelViewerSessionRef.current += 1;
     setReelViewerSession(reelViewerSessionRef.current);
@@ -1982,8 +2023,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setReelViewerViewport({ width: 0, height: 0 });
     reelViewerIgnoreViewabilityUntilRef.current = Date.now() + 400;
     setPlayingPostId(Number(post.id));
-    setReelViewerOpen({ posts: queued.posts, initialIndex });
-  }, []);
+    setReelViewerOpen({ posts, initialIndex });
+  }, [tabPosts]);
 
   const handleJoinLivePost = useCallback(
     (postId: number) => {
@@ -2709,13 +2750,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const merged = applyPendingHomePost(data.posts, pending);
         const isPullRefresh = refreshPendingRef.current > 0;
         // Paint network rows immediately (IG-style); hydrate local likes after.
-        // Keep API order on create/pull and on first network load after app open.
-        // Preserve current on-screen order only for subsequent background refreshes.
+        // If cache already painted the feed, merge in place so the playing reel does not remount.
+        // Full replace only on pull-to-refresh or a newly created post.
         const shouldPreserveExistingOrder =
-          !pending &&
-          !isPullRefresh &&
-          hasLoadedFeedFromNetworkRef.current &&
-          postsRef.current.length > 0;
+          !pending && !isPullRefresh && postsRef.current.length > 0;
         const painted = shouldPreserveExistingOrder
           ? mergeHomeFeedPreservingOrder(merged, postsRef.current)
           : merged;
@@ -3181,7 +3219,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const index = Math.max(0, Math.min(tabPosts.length - 1, Math.round(offsetY / reelSlotHeight)));
       const post = tabPosts[index];
       lastPlayingIndexRef.current = index;
-      setPlayingPostId(post?.id ?? null);
+      const nextId = post?.id ?? null;
+      setPlayingPostId((cur) => (cur === nextId ? cur : nextId));
     },
     [reelSlotHeight, tabPosts]
   );
@@ -4439,13 +4478,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       // playback on appIsActive or the Video freezes on frame 0 (looks like a still image).
       const allowPlay = inModal ? true : canPlayMedia;
       const shouldPlayReel = ownsDecoder && isActiveVideo && allowPlay && !reelUserPaused;
-      // Keep the native player mounted while this page is active. Gating on canPlayMedia
-      // unmounts Video on brief Android AppState blips and the poster looks like a freeze-frame.
-      // Fullscreen: wait until the paging list has snapped onto this reel, otherwise Android
-      // plays audio on a detached SurfaceView (blank page until the user scrolls).
-      const showActiveVideo = inModal
-        ? isActiveVideo && reelViewerSurfaceReady
-        : ownsDecoder && isActiveVideo;
+      // Keep ±1 neighbors mounted (muted preload) so scroll/open does not cold-start ExoPlayer.
+      // Only the active page calls shouldPlay — avoids dual-audio and blank remount flashes.
+      const nearActive =
+        Number.isFinite(_index) &&
+        (() => {
+          const list = inModal ? reelViewerOpen?.posts || [] : tabPosts;
+          const activeIdx = list.findIndex((p) => Number(p.id) === Number(playingPostId));
+          if (activeIdx < 0) return isActiveVideo;
+          // Modal feed may include suggestion pages — _index is FlatList index for home list,
+          // and post order index for modal post pages (passed from renderReelViewerItem).
+          return Math.abs(_index - activeIdx) <= 1;
+        })();
+      const surfaceOk = inModal ? reelViewerSurfaceReady : true;
+      const mountVideo = !!post.videoUrl && ownsDecoder && surfaceOk && (isActiveVideo || nearActive);
       const postUserId = Number(post.userId);
       const normalizedPostName = normalizeIdentity(post.userName);
       const normalizedCurrentUserName = normalizeIdentity(user?.fullName || "");
@@ -4495,34 +4541,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
-          {post.videoUrl && showActiveVideo ? (
+          {post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <ContainedExpoVideo
-                ref={(r) => {
-                  reelVideoHandlesRef.current[post.id] = r;
-                }}
-                uri={post.videoUrl}
-                hlsUrl={post.hlsUrl}
-                posterUri={reelPoster || undefined}
-                playbackKey={inModal ? `rv-${reelViewerSession}-${post.id}-s` : undefined}
-                shouldPlay={shouldPlayReel}
-                containerWidth={reelContentWidth}
-                containerHeight={mediaContentH}
-                fit="auto"
-                isLooping
-                isMuted={isReelMuted || separateMusicPlaying}
-                useNativeControls={false}
-                onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
-              />
-              {reelUserPaused && isActiveVideo ? (
-                <View style={styles.reelPauseOverlay} pointerEvents="none">
-                  <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
-                  <Ionicons name="play" size={48} color="#fff" />
-                </View>
-              ) : null}
-            </Pressable>
-          ) : post.videoUrl ? (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
+              {/* Poster stays under the player so URI/source swaps never flash black. */}
               {reelPoster ? (
                 <FeedImage
                   source={{ uri: reelPoster }}
@@ -4533,6 +4554,34 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               ) : (
                 <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
               )}
+              {mountVideo ? (
+                <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+                  <ContainedExpoVideo
+                    ref={(r) => {
+                      reelVideoHandlesRef.current[post.id] = r;
+                    }}
+                    uri={post.videoUrl}
+                    hlsUrl={post.hlsUrl}
+                    posterUri={reelPoster || undefined}
+                    playbackKey={inModal ? `rv-${post.id}` : `feed-${post.id}`}
+                    shouldPlay={shouldPlayReel}
+                    preloadOnly={!isActiveVideo}
+                    containerWidth={reelContentWidth}
+                    containerHeight={mediaContentH}
+                    fit="auto"
+                    isLooping
+                    isMuted={isReelMuted || separateMusicPlaying || !isActiveVideo}
+                    useNativeControls={false}
+                    onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
+                  />
+                </View>
+              ) : null}
+              {reelUserPaused && isActiveVideo ? (
+                <View style={styles.reelPauseOverlay} pointerEvents="none">
+                  <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
+                  <Ionicons name="play" size={48} color="#fff" />
+                </View>
+              ) : null}
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -4839,6 +4888,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       reelSlotHeight,
       reelProgressByPostId,
       reelLikeBurstByPostId,
+      reelViewerOpen,
+      reelViewerSurfaceReady,
       relationships,
       saveBusyByPostId,
       tabPosts,
@@ -4855,9 +4906,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       windowWidth,
       reelViewerPageH,
       reelViewerPageW,
-      reelViewerOpen,
       reelViewerSession,
-      reelViewerSurfaceReady,
       reelUserPaused,
       onReelSurfaceTap,
       displayFeedCopy,
@@ -5280,8 +5329,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               style={styles.reelFrame}
               onLayout={(e) => {
                 const { width, height } = e.nativeEvent.layout;
-                setReelFrameWidth(width);
-                setReelSlotHeight(height);
+                if (!(width > 0 && height > 0)) return;
+                // Ignore sub-pixel / keyboard chrome jitter — height thrash remounts paging + video.
+                setReelFrameWidth((prev) => (Math.abs(prev - width) < 1 ? prev : width));
+                setReelSlotHeight((prev) => (Math.abs(prev - height) < 1 ? prev : height));
               }}
             >
             {reelSlotHeight > 0 ? (
@@ -5291,7 +5342,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <FlatList
                   style={styles.reelFrameList}
                   data={tabPosts}
-                  keyExtractor={(item, index) => `${item.feedEntryKey || item.id}#${index}`}
+                  keyExtractor={(item) => item.feedEntryKey || String(item.id)}
                   renderItem={renderFullScreenReel}
                   removeClippedSubviews={false}
                   initialNumToRender={2}
@@ -5340,7 +5391,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : (
       <FlatList
         data={tabPosts}
-        keyExtractor={(item, index) => `${item.feedEntryKey || item.id}#${index}`}
+        keyExtractor={(item) => item.feedEntryKey || String(item.id)}
         renderItem={renderPost}
         removeClippedSubviews={Platform.OS === "android"}
         nestedScrollEnabled
@@ -5660,9 +5711,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             if (!(width > 0 && height > 0)) return;
-            setReelViewerViewport((prev) =>
-              prev.width === width && prev.height === height ? prev : { width, height }
-            );
+            setReelViewerViewport((prev) => {
+              if (Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) return prev;
+              return { width, height };
+            });
             reelViewerLayoutRef.current = {
               index: reelViewerInitialFeedIndex,
               height
@@ -5698,16 +5750,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           ) : null}
           {reelViewerOpen && reelViewerFeed.length > 0 && reelViewerViewport.height > 0 ? (
             <FlatList
-              key={`reel-viewer-list-${reelViewerSession}-${reelViewerInitialFeedIndex}-${reelViewerViewport.height}`}
+              key={`reel-viewer-list-${reelViewerSession}`}
               ref={(r) => {
                 reelViewerListRef.current = r;
               }}
               style={{ flex: 1 }}
               data={reelViewerFeed}
-              keyExtractor={(item, index) =>
-                item.type === "post"
-                  ? `rv-${index}-p-${item.post.id}-${item.key}`
-                  : `rv-${index}-s-${item.pageIndex}`
+              keyExtractor={(item) =>
+                item.type === "post" ? `rv-p-${item.post.id}-${item.key}` : `rv-s-${item.pageIndex}`
               }
               renderItem={renderReelViewerItem}
               pagingEnabled
