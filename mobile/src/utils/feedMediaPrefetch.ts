@@ -16,8 +16,8 @@ try {
 const prefetchedImages = new Set<string>();
 const warmedVideos = new Set<string>();
 
-/** Warm ~512KB of each upcoming video — enough for moov + early frames, less bandwidth fight. */
-const VIDEO_WARM_BYTES = 512_000;
+/** Warm ~1MB of each upcoming video — moov + first GOP for fast-start MP4s. */
+const VIDEO_WARM_BYTES = 1_048_576;
 
 function prefetchUri(uri: string | null | undefined) {
   const clean = typeof uri === "string" ? uri.trim() : "";
@@ -30,20 +30,58 @@ function prefetchUri(uri: string | null | undefined) {
   }
 }
 
+let webPreloadEl: HTMLVideoElement | null = null;
+
+function warmWebVideo(url: string) {
+  if (typeof document === "undefined") return;
+  if (!webPreloadEl) {
+    const el = document.createElement("video");
+    el.muted = true;
+    el.defaultMuted = true;
+    el.preload = "auto";
+    el.playsInline = true;
+    el.setAttribute("playsinline", "");
+    el.setAttribute("webkit-playsinline", "");
+    el.setAttribute("muted", "");
+    Object.assign(el.style, {
+      position: "fixed",
+      width: "1px",
+      height: "1px",
+      opacity: "0",
+      pointerEvents: "none",
+      left: "-9999px"
+    });
+    document.body.appendChild(el);
+    webPreloadEl = el;
+  }
+  if (webPreloadEl.getAttribute("data-src") === url) return;
+  webPreloadEl.setAttribute("data-src", url);
+  webPreloadEl.src = url;
+  webPreloadEl.load();
+}
+
 /**
- * Warm the start of a remote video so swipe-to-next starts faster (Instagram-style).
- * Uses HTTP Range so we only pull the moov/header + early segments.
+ * Warm the start of the next reel so swipe-in does not wait on a cold HTTP start.
+ * Web: HTML5 preload=auto on the same URL the player will use (HTTP cache shared).
+ * Native: Range GET of the first megabyte (TLS + first GOP).
  */
-export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | null) {
+export function warmVideoUri(
+  uri: string | null | undefined,
+  hlsUrl?: string | null,
+  playbackUrl?: string | null
+) {
   const raw = typeof uri === "string" ? uri.trim() : "";
-  if (!raw && !hlsUrl) return;
-  const clean = videoPlaybackUrl(raw || hlsUrl, hlsUrl);
+  if (!raw && !hlsUrl && !playbackUrl) return;
+  const clean = videoPlaybackUrl(raw || playbackUrl || hlsUrl, hlsUrl, playbackUrl);
   if (!clean || warmedVideos.has(clean)) return;
   if (clean.startsWith("file:") || clean.startsWith("content:") || clean.startsWith("ph:")) return;
-  // Web: Range prefetch + <video> Range requests on the same CloudFront URL race
-  // Chrome's disk cache and surface as net::ERR_CACHE_OPERATION_NOT_SUPPORTED.
-  // HTML5 video already buffers on its own — skip warm fetch in the browser.
-  if (Platform.OS === "web") return;
+
+  if (Platform.OS === "web") {
+    warmWebVideo(clean);
+    warmedVideos.add(clean);
+    return;
+  }
+
   warmedVideos.add(clean);
 
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -61,7 +99,6 @@ export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | n
   const isHls = /\.m3u8(\?|#|$)/i.test(clean);
   void fetch(clean, {
     method: "GET",
-    cache: "no-store",
     headers: isHls
       ? { Accept: "application/vnd.apple.mpegurl,application/x-mpegURL,*/*" }
       : {
@@ -84,7 +121,7 @@ export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | n
     .catch(() => {
       warmedVideos.delete(clean);
     })
-    .finally(() => {
+    .then(() => {
       if (timer) clearTimeout(timer);
     });
 }
@@ -99,20 +136,16 @@ export function prefetchPostMedia(post: HomePost | null | undefined, options?: {
   }
   prefetchUri(post.authorAvatarUrl);
   if (options?.warmVideo !== false) {
-    warmVideoUri(post.videoUrl, post.hlsUrl);
+    warmVideoUri(post.videoUrl, post.hlsUrl, post.playbackUrl);
   }
 }
 
 /**
- * Warm only the single next post's video — no more, no less.
- * The current post is already playing so its bytes are flowing; loading more
- * ahead wastes bandwidth and makes the current video buffer slower.
+ * Warm the next reel (and its poster). One video ahead keeps the current clip's bandwidth.
  */
 export function prefetchUpcomingPosts(posts: HomePost[], anchorIndex: number, _count = 1) {
   if (!posts.length || anchorIndex < 0) return;
-  // Still-image prefetch for the current post (cheap).
   prefetchPostMedia(posts[anchorIndex], { warmVideo: false });
-  // Video warm only for the immediate next post.
   const next = posts[anchorIndex + 1];
   if (next) prefetchPostMedia(next, { warmVideo: true });
 }

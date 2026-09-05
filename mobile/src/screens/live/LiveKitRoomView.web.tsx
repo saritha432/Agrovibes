@@ -19,6 +19,7 @@ import {
   type LiveComment,
   type LiveViewer
 } from "./liveRoomData";
+import { HostContinueLivePopup, useHostContinueLivePrompt } from "./hostContinueLivePrompt";
 import { saveLiveRecordingToPost } from "./saveLiveRecordingToPost";
 
 type LiveKitRoomViewProps = {
@@ -300,6 +301,15 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
     onCloseRef.current?.();
   }, [postId, savingRecording, token]);
 
+  const handleEndLiveRef = React.useRef(handleEndLive);
+  handleEndLiveRef.current = handleEndLive;
+  const continuePrompt = useHostContinueLivePrompt(
+    isHost && visible && !liveEnded && !savingRecording,
+    () => {
+      void handleEndLiveRef.current();
+    }
+  );
+
   const watchingCount = liveViewerCount(viewers, isHost);
 
   if (!visible) return null;
@@ -413,6 +423,16 @@ export function LiveKitRoomView({ visible, roomName, isHost, title, postId, onCl
           </Pressable>
         </Pressable>
       </Modal>
+
+      <HostContinueLivePopup
+        visible={continuePrompt.visible}
+        secondsLeft={continuePrompt.secondsLeft}
+        onContinue={continuePrompt.onContinue}
+        onEndLive={() => {
+          continuePrompt.hidePrompt();
+          void handleEndLive();
+        }}
+      />
     </View>
   );
 }

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import React, { useEffect, useState } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
+import { AppVideo, type AppVideoHandle } from "./AppVideo";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
@@ -28,7 +28,7 @@ export function StoryReplyThumb({ imageUrl, videoUrl, previewUrl, onPress }: Pro
     stripLegacyCloudinaryUrl(videoUrl) ||
     (isLikelyVideoUrl(previewUrl) ? stripLegacyCloudinaryUrl(previewUrl) : null);
   const playback = video ? videoPlaybackUrl(video) : "";
-  const videoRef = React.useRef<Video | null>(null);
+  const videoRef = React.useRef<AppVideoHandle | null>(null);
   const [frameReady, setFrameReady] = useState(false);
 
   useEffect(() => {
@@ -44,25 +44,28 @@ export function StoryReplyThumb({ imageUrl, videoUrl, previewUrl, onPress }: Pro
           <Ionicons name="play" size={14} color="rgba(255,255,255,0.5)" />
         </View>
       ) : null}
-      <Video
+      <AppVideo
         ref={videoRef}
-        source={{ uri: playback }}
+        source={playback}
         style={[StyleSheet.absoluteFillObject, frameReady ? null : { opacity: 0 }]}
-        resizeMode={ResizeMode.COVER}
+        contentFit="cover"
         isMuted
         shouldPlay={false}
         isLooping={false}
-        useNativeControls={false}
-        onLoad={async () => {
-          try {
-            await videoRef.current?.setPositionAsync(350);
-            await videoRef.current?.pauseAsync();
-          } catch {
-            // ignore
-          }
-          setFrameReady(true);
+        nativeControls={false}
+        onLoad={() => {
+          void (async () => {
+            try {
+              await videoRef.current?.setPositionAsync(350);
+              await videoRef.current?.pauseAsync();
+            } catch {
+              // ignore
+            }
+            setFrameReady(true);
+          })();
         }}
         onError={() => setFrameReady(false)}
+        onFirstFrameRender={() => setFrameReady(true)}
       />
     </View>
   ) : (

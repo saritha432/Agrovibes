@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
-import React, { useCallback } from "react";
+import React, { useMemo } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import type { HomePost } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
+import { AppVideo } from "./AppVideo";
 import { reelGridStillUri } from "../utils/reelGrid";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
@@ -31,17 +31,12 @@ export function ReelGridTile({
   onVideoError
 }: ReelGridTileProps) {
   const stillUri = reelGridStillUri(post) || previewUri || null;
-  const videoUri = post.videoUrl ? videoPlaybackUrl(post.videoUrl, post.hlsUrl) : null;
+  const videoUri = post.videoUrl
+    ? videoPlaybackUrl(post.videoUrl, post.hlsUrl, post.playbackUrl)
+    : null;
   const isVideo = !!videoUri;
   const showPlayingVideo = isPlaying && isVideo;
-
-  const onPlaybackStatus = useCallback(
-    (status: AVPlaybackStatus) => {
-      if (!status.isLoaded) return;
-      if (status.error) onVideoError?.(post.id);
-    },
-    [onVideoError, post.id]
-  );
+  const playbackUri = useMemo(() => videoUri, [videoUri]);
 
   return (
     <Pressable
@@ -49,28 +44,30 @@ export function ReelGridTile({
       onPress={onPress}
       onLongPress={onLongPress}
     >
-      {showPlayingVideo ? (
-        <Video
-          source={{ uri: videoUri! }}
+      {showPlayingVideo && playbackUri ? (
+        <AppVideo
+          source={playbackUri}
           style={styles.media}
-          resizeMode={ResizeMode.COVER}
+          contentFit="cover"
           isLooping
           isMuted
           shouldPlay
-          useNativeControls={false}
-          onPlaybackStatusUpdate={onPlaybackStatus}
+          nativeControls={false}
+          onPlaybackStatusUpdate={(status) => {
+            if (!status.isLoaded && status.error) onVideoError?.(post.id);
+          }}
         />
       ) : stillUri ? (
         <Image source={{ uri: stillUri }} style={styles.media} resizeMode="cover" />
-      ) : isVideo ? (
-        <Video
-          source={{ uri: videoUri }}
+      ) : playbackUri ? (
+        <AppVideo
+          source={playbackUri}
           style={styles.media}
-          resizeMode={ResizeMode.COVER}
+          contentFit="cover"
           shouldPlay
           isMuted
           isLooping
-          useNativeControls={false}
+          nativeControls={false}
         />
       ) : (
         <View style={[styles.media, styles.placeholder, { backgroundColor }]} />

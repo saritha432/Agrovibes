@@ -70,6 +70,7 @@ export function sanitizeHomePost(post: HomePost): HomePost {
     ...post,
     videoUrl: stripLegacyCloudinaryUrl(post.videoUrl) ?? undefined,
     hlsUrl: stripLegacyCloudinaryUrl(post.hlsUrl) ?? undefined,
+    playbackUrl: stripLegacyCloudinaryUrl(post.playbackUrl) ?? undefined,
     imageUrl: resizeSupabaseImageUrl(post.imageUrl, FEED_IMAGE_WIDTH) ?? undefined,
     thumbnailUrl: resizeSupabaseImageUrl(post.thumbnailUrl, THUMB_WIDTH) ?? undefined,
     authorAvatarUrl: resizeSupabaseImageUrl(post.authorAvatarUrl, AVATAR_WIDTH),

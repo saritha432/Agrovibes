@@ -16,19 +16,18 @@ import {
   TextInput,
   useWindowDimensions,
   View,
-  type ViewStyle,
   type ViewToken
 } from "react-native";
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
-import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
-import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import { UserAvatar } from "./UserAvatar";
+import { ContainedAppVideo, type ContainedAppVideoHandle } from "./ContainedAppVideo";
+import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
 import { StoryRingAvatar } from "./StoryRingAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet, type SharePeer } from "./PostShareSheet";
@@ -37,7 +36,8 @@ import { PostOptionsSheet } from "./PostOptionsSheet";
 import { PostReportSheet } from "./PostReportSheet";
 import { PostRepostSheet } from "./PostRepostSheet";
 import { RepostAttribution } from "./RepostAttribution";
-import { ReelSeekBar } from "./ReelSeekBar";
+import { LiveReelSeekBar } from "./LiveReelSeekBar";
+import { setReelProgress } from "../utils/reelProgressStore";
 import { shownResharesCount, latestResharersForDisplay } from "../social/homeFeedCache";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -67,7 +67,7 @@ import {
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
 import { useModalTopChromeInset } from "../theme/topChromeInset";
 
-import { reelGridStillUri, pickReelVideoFit, postShowsVolumeControl } from "../utils/reelGrid";
+import { reelGridStillUri, postShowsVolumeControl } from "../utils/reelGrid";
 import { buildPostShareLink } from "../utils/postShare";
 const REEL_LIKE_COLOR = "#ffffff";
 const REEL_ACTION_ICON = 22;
@@ -189,229 +189,6 @@ function reelCreativeTextColor(textColor?: string): string {
       return "#FFFFFF";
   }
 }
-
-const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
-  Platform.OS === "web"
-    ? ({
-        position: "relative",
-        left: undefined,
-        top: undefined,
-        right: undefined,
-        bottom: undefined,
-        width: "100%",
-        height: "100%",
-        objectFit: fit
-      } as ViewStyle)
-    : ({} as ViewStyle);
-
-type ContainedExpoVideoProps = {
-  uri: string;
-  hlsUrl?: string | null;
-  shouldPlay: boolean;
-  preloadOnly?: boolean;
-  containerWidth: number;
-  containerHeight: number;
-  fit?: "contain" | "cover" | "auto";
-  isLooping?: boolean;
-  isMuted?: boolean;
-  posterUri?: string;
-  playbackKey?: string;
-  onStatusUpdate?: (status: AVPlaybackStatus) => void;
-};
-
-type ContainedExpoVideoHandle = {
-  seekToRatio: (ratio: number) => Promise<void>;
-};
-
-const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo(
-  {
-    uri,
-    hlsUrl,
-    shouldPlay,
-    preloadOnly = false,
-    containerWidth,
-    containerHeight,
-    fit = "auto",
-    isLooping = true,
-    isMuted = false,
-    posterUri,
-    playbackKey,
-    onStatusUpdate
-  },
-  ref
-) {
-  const isWeb = Platform.OS === "web";
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
-  const effectiveFit = useMemo((): "contain" | "cover" => {
-    if (fit === "cover" || fit === "contain") return fit;
-    if (!natural) return "contain";
-    return pickReelVideoFit(natural.width, natural.height, containerWidth, containerHeight);
-  }, [fit, natural, containerWidth, containerHeight]);
-  const isCover = effectiveFit === "cover";
-  const [blocked, setBlocked] = useState(false);
-  const videoRef = useRef<Video | null>(null);
-  const durationRef = useRef(0);
-  const playbackSources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = videoPlaybackUrl(playbackSources[sourceIndex] ?? uri);
-
-  useEffect(() => {
-    setSourceIndex(0);
-    setBlocked(false);
-    setNatural(null);
-  }, [uri, playbackKey]);
-
-  useEffect(() => {
-    return () => {
-      void videoRef.current?.unloadAsync().catch(() => {});
-    };
-  }, [uri]);
-
-  const videoOuterStyle: ViewStyle = useMemo(
-    () =>
-      isWeb
-        ? { width: "100%", height: "100%" }
-        : StyleSheet.absoluteFillObject,
-    [isWeb]
-  );
-
-  const resizeMode = isCover ? ResizeMode.COVER : ResizeMode.CONTAIN;
-
-  useEffect(() => {
-    if (!shouldPlay) {
-      void videoRef.current?.pauseAsync().catch(() => {});
-      return;
-    }
-    let cancelled = false;
-    let attempts = 0;
-    const tryPlay = () => {
-      if (cancelled) return;
-      const v = videoRef.current;
-      if (!v) {
-        attempts += 1;
-        if (attempts < 30) setTimeout(tryPlay, 80);
-        return;
-      }
-      void (async () => {
-        try {
-          const status = await v.getStatusAsync();
-          if (cancelled) return;
-          if (!status.isLoaded) {
-            attempts += 1;
-            if (attempts < 30) setTimeout(tryPlay, 100);
-            return;
-          }
-          if (status.isPlaying) return;
-          await v.playAsync();
-        } catch {
-          if (cancelled) return;
-          attempts += 1;
-          if (attempts < 30) setTimeout(tryPlay, 150);
-        }
-      })();
-    };
-    const t = setTimeout(tryPlay, 80);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [shouldPlay, activeUri]);
-
-  const tryNextPlaybackSource = React.useCallback(() => {
-    setSourceIndex((idx) => (idx + 1 < playbackSources.length ? idx + 1 : idx));
-  }, [playbackSources.length]);
-
-  React.useImperativeHandle(ref, () => ({
-    seekToRatio: async (ratio: number) => {
-      const target = Math.max(0, Math.min(1, ratio));
-      let dur = durationRef.current;
-      if (!dur || !Number.isFinite(dur)) {
-        const status = await videoRef.current?.getStatusAsync();
-        if (status?.isLoaded) {
-          dur = Number(status.durationMillis || 0);
-          durationRef.current = dur;
-        }
-      }
-      if (!dur || !Number.isFinite(dur)) return;
-      await videoRef.current?.setPositionAsync(Math.round(dur * target));
-    }
-  }));
-
-  if (blocked) {
-    return (
-      <View
-        style={{
-          width: containerWidth,
-          height: containerHeight,
-          backgroundColor: "#000",
-          justifyContent: "center",
-          alignItems: "center"
-        }}
-      >
-        {posterUri ? (
-          <Image source={{ uri: posterUri }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
-        ) : null}
-        <Text style={{ position: "absolute", bottom: 48, color: "rgba(255,255,255,0.75)", fontSize: 13 }}>
-          Video unavailable
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <View
-      collapsable={false}
-      style={{
-        width: containerWidth,
-        height: containerHeight,
-        overflow: "hidden",
-        backgroundColor: "#000"
-      }}
-    >
-      <Video
-        key={playbackKey ? `${playbackKey}::${activeUri}` : activeUri}
-        ref={(r) => {
-          videoRef.current = r;
-        }}
-        source={{ uri: activeUri }}
-        shouldPlay={shouldPlay}
-        isLooping={isLooping}
-        isMuted={isMuted || preloadOnly}
-        useNativeControls={false}
-        usePoster={false}
-        resizeMode={resizeMode}
-        style={videoOuterStyle}
-        videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
-        onPlaybackStatusUpdate={(status) => {
-          onStatusUpdate?.(status);
-          if (status.isLoaded) {
-            durationRef.current = Number(status.durationMillis || 0);
-            const { width, height } = readVideoSizeFromPlaybackStatus(status);
-            if (width > 0 && height > 0) {
-              setNatural((prev) =>
-                prev?.width === width && prev?.height === height ? prev : { width, height }
-              );
-            }
-            if (isOversizedFeedVideo(width, height)) {
-              setBlocked(true);
-              void videoRef.current?.pauseAsync().catch(() => {});
-              void videoRef.current?.unloadAsync().catch(() => {});
-            }
-          } else if ("error" in status && status.error) {
-            console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-            if (sourceIndex + 1 < playbackSources.length) {
-              tryNextPlaybackSource();
-              return;
-            }
-            setBlocked(true);
-            void videoRef.current?.unloadAsync().catch(() => {});
-          }
-        }}
-        progressUpdateIntervalMillis={preloadOnly ? 4000 : 750}
-      />
-    </View>
-  );
-});
 
 function ReelLikeBurst({
   postId,
@@ -560,7 +337,6 @@ export function PostsReelViewerModal({
   viewerPostsRef.current = viewerPosts;
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
   const [carouselPageByPostId, setCarouselPageByPostId] = useState<Record<number, number>>({});
-  const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -574,7 +350,7 @@ export function PostsReelViewerModal({
   const [repostTargetPost, setRepostTargetPost] = useState<HomePost | null>(null);
 
   const reelLikeBurstSeenRef = useRef<Record<number, number>>({});
-  const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
+  const reelVideoHandlesRef = useRef<Record<number, ContainedAppVideoHandle | null>>({});
   const reelTapTsRef = useRef<Record<number, number>>({});
   const reelTapTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
   const reelMuteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -846,15 +622,13 @@ export function PostsReelViewerModal({
     [applyPosts, user]
   );
 
-  const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
+  const onReelStatusUpdate = useCallback((postId: number, status: AppPlaybackStatus) => {
     if (!status.isLoaded) return;
-    const position = Number(status.positionMillis || 0);
-    const duration = Math.max(1, Number(status.durationMillis || 0));
-    setReelProgressByPostId((prev) => {
-      const cur = prev[postId];
-      if (cur && Math.abs(cur.position - position) < 120 && cur.duration === duration) return prev;
-      return { ...prev, [postId]: { position, duration } };
-    });
+    setReelProgress(
+      postId,
+      Number(status.positionMillis || 0),
+      Math.max(1, Number(status.durationMillis || 0))
+    );
   }, []);
 
   const onReelSurfaceTap = useCallback(
@@ -1148,15 +922,15 @@ export function PostsReelViewerModal({
       const pageH = viewerPageH;
       const reelContentWidth = viewerPageW;
       const isActiveVideo = Number(effectivePlayingId) === Number(post.id) && !!post.videoUrl;
-      const showActiveVideo = isActiveVideo && viewerSurfaceReady;
-      const shouldPlayVideo = showActiveVideo && !reelUserPaused;
+      const activeIdx = viewerPosts.findIndex((p) => Number(p.id) === Number(effectivePlayingId));
+      const nearActive = activeIdx >= 0 && Math.abs(index - activeIdx) <= 1;
+      const mountVideo = !!post.videoUrl && (isActiveVideo || nearActive);
+      const shouldPlayVideo = isActiveVideo && !reelUserPaused;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
       const carouselPage = carouselPageByPostId[post.id] ?? 0;
       const thumbUri = reelGridStillUri(post);
       const reelPoster = reelGridStillUri(post);
-      const reelProgress = reelProgressByPostId[post.id];
-      const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
       const creativeMeta = post.creativeMeta || {};
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
@@ -1181,22 +955,24 @@ export function PostsReelViewerModal({
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
-          {post.videoUrl && showActiveVideo ? (
+          {post.videoUrl && mountVideo ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <ContainedExpoVideo
+              <ContainedAppVideo
                 ref={(r) => {
                   reelVideoHandlesRef.current[post.id] = r;
                 }}
                 uri={post.videoUrl}
                 hlsUrl={post.hlsUrl}
+                playbackUrl={post.playbackUrl}
                 shouldPlay={shouldPlayVideo}
+                preloadOnly={!isActiveVideo}
                 playbackKey={`rv-${viewerSession}-${post.id}-s`}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
                 fit="auto"
                 posterUri={reelPoster || undefined}
                 isLooping
-                isMuted={isReelMuted}
+                isMuted={isReelMuted || !isActiveVideo}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
               {reelUserPaused ? (
@@ -1374,16 +1150,9 @@ export function PostsReelViewerModal({
           </View>
           {post.videoUrl ? (
             <View style={styles.reelSeekWrap} pointerEvents="auto">
-              <ReelSeekBar
-                progressRatio={progressRatio}
-                onSeek={(ratio) => {
-                  const duration = reelProgress?.duration;
-                  if (duration) {
-                    setReelProgressByPostId((prev) => ({
-                      ...prev,
-                      [post.id]: { position: ratio * duration, duration }
-                    }));
-                  }
+              <LiveReelSeekBar
+                postId={post.id}
+                onSeekVideo={(ratio) => {
                   void reelVideoHandlesRef.current[post.id]?.seekToRatio(ratio);
                 }}
               />
@@ -1408,9 +1177,7 @@ export function PostsReelViewerModal({
       openReposterProfile,
       effectivePlayingId,
       viewerSession,
-      viewerSurfaceReady,
       reelLikeBurstByPostId,
-      reelProgressByPostId,
       setRepostTargetPost,
       carouselPageByPostId,
       setShareTargetPost,
@@ -1430,9 +1197,6 @@ export function PostsReelViewerModal({
   const safeInitialIndex =
     visible && viewerPosts.length > 0 ? Math.max(0, Math.min(initialIndex, viewerPosts.length - 1)) : 0;
   const activePlayingPost = viewerPosts.find((p) => p.id === effectivePlayingId);
-  const viewerOpenPosterUri = viewerPosts[safeInitialIndex]
-    ? reelGridStillUri(viewerPosts[safeInitialIndex])
-    : null;
 
   const snapViewerToOpenIndex = useCallback(() => {
     if (viewerPageH <= 0) return;
@@ -1441,18 +1205,6 @@ export function PostsReelViewerModal({
       animated: false
     });
   }, [safeInitialIndex, viewerPageH]);
-
-  const settleViewerSurface = useCallback(() => {
-    if (viewerSurfaceReadyRef.current) return;
-    snapViewerToOpenIndex();
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        snapViewerToOpenIndex();
-        viewerSurfaceReadyRef.current = true;
-        setViewerSurfaceReady(true);
-      });
-    });
-  }, [snapViewerToOpenIndex]);
 
   useEffect(() => {
     if (!visible || viewerPageH <= 0) return;
@@ -1486,13 +1238,12 @@ export function PostsReelViewerModal({
     <>
       <Modal
         visible={visible}
-        animationType="fade"
+        animationType="none"
         presentationStyle="fullScreen"
         statusBarTranslucent
         onShow={() => {
           armModalPlayer();
           snapViewerToOpenIndex();
-          settleViewerSurface();
         }}
         onRequestClose={onClose}
       >
@@ -1501,9 +1252,7 @@ export function PostsReelViewerModal({
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             if (!(width > 0 && height > 0)) return;
-            setViewerViewport((prev) =>
-              prev.width === width && prev.height === height ? prev : { width, height }
-            );
+            setViewerViewport((prev) => (prev.height > 0 ? prev : { width, height }));
           }}
         >
           <View style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset, zIndex: 6 }]} pointerEvents="box-none">
@@ -1523,7 +1272,7 @@ export function PostsReelViewerModal({
           ) : null}
           {viewerPosts.length > 0 && viewerViewport.height > 0 ? (
             <FlatList
-              key={`profile-reel-viewer-${viewerSession}-${safeInitialIndex}-${viewerViewport.height}`}
+              key={`profile-reel-viewer-${viewerSession}-${safeInitialIndex}`}
               ref={(r) => {
                 reelViewerListRef.current = r;
               }}
@@ -1537,6 +1286,9 @@ export function PostsReelViewerModal({
               snapToAlignment="start"
               decelerationRate="fast"
               disableIntervalMomentum
+              initialScrollIndex={
+                safeInitialIndex > 0 && safeInitialIndex < viewerPosts.length ? safeInitialIndex : undefined
+              }
               contentOffset={
                 Platform.OS === "ios" && safeInitialIndex > 0
                   ? { x: 0, y: safeInitialIndex * viewerViewport.height }
@@ -1548,12 +1300,12 @@ export function PostsReelViewerModal({
                 index: idx
               })}
               onLayout={() => {
-                if (viewerSurfaceReadyRef.current) return;
                 snapViewerToOpenIndex();
-                settleViewerSurface();
               }}
               onViewableItemsChanged={onViewableItemsChangedRef.current}
               viewabilityConfig={viewabilityConfig}
+              scrollEventThrottle={16}
+              onScroll={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               onScrollToIndexFailed={(info) => {
                 reelViewerListRef.current?.scrollToOffset({
@@ -1561,21 +1313,14 @@ export function PostsReelViewerModal({
                   animated: false
                 });
               }}
-              extraData={`${viewerSession}-${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${viewerViewport.height}-${viewerSurfaceReady}-${viewerPosts
+              extraData={`${viewerSession}-${effectivePlayingId}-${reelUserPaused}-${isReelMuted}-${viewerPosts
                 .map((p) => `${p.id}:${p.viewerHasLiked ? 1 : 0}:${p.likesCount}`)
                 .join(",")}`}
               initialNumToRender={Math.min(viewerPosts.length, 3)}
               maxToRenderPerBatch={2}
-              windowSize={5}
+              windowSize={3}
               removeClippedSubviews={false}
             />
-          ) : null}
-          {visible && !viewerSurfaceReady ? (
-            <View style={[StyleSheet.absoluteFillObject, { zIndex: 3, backgroundColor: "#000" }]} pointerEvents="none">
-              {viewerOpenPosterUri ? (
-                <Image source={{ uri: viewerOpenPosterUri }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
-              ) : null}
-            </View>
           ) : null}
         </View>
       </Modal>

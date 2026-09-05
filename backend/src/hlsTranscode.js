@@ -45,16 +45,27 @@ function getMediaConvertClient() {
   });
 }
 
-/** Stable HLS folder for a source object: agrovibes/videos/foo.mp4 → agrovibes/hls/foo */
-function hlsOutputPrefixForSourceKey(sourceKey) {
+function safeMediaStem(sourceKey) {
   const key = String(sourceKey || "").replace(/^\/+/, "");
   const base = key.replace(/^agrovibes\/videos\//i, "").replace(/\.[^.]+$/, "");
-  const safe = base.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 180) || `clip-${Date.now()}`;
-  return `agrovibes/hls/${safe}`;
+  return base.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 180) || `clip-${Date.now()}`;
+}
+
+/** Stable HLS folder for a source object: agrovibes/videos/foo.mp4 → agrovibes/hls/foo */
+function hlsOutputPrefixForSourceKey(sourceKey) {
+  return `agrovibes/hls/${safeMediaStem(sourceKey)}`;
+}
+
+function playbackOutputKeyForSourceKey(sourceKey) {
+  return `agrovibes/playback/${safeMediaStem(sourceKey)}`;
 }
 
 function hlsMasterUrlForSourceKey(sourceKey) {
   return buildS3PublicUrl(`${hlsOutputPrefixForSourceKey(sourceKey)}/master.m3u8`);
+}
+
+function playbackMp4UrlForSourceKey(sourceKey) {
+  return buildS3PublicUrl(`${playbackOutputKeyForSourceKey(sourceKey)}.mp4`);
 }
 
 function abrLadderOutputs() {
@@ -152,9 +163,68 @@ function abrLadderOutputs() {
   }));
 }
 
+/** Small progressive MP4 so the player can show frame 1 after ~200–400KB. */
+function playbackMp4Output() {
+  return {
+    ContainerSettings: {
+      Container: "MP4",
+      Mp4Settings: {
+        CslgAtom: "INCLUDE",
+        FreeSpaceBox: "EXCLUDE",
+        MoovPlacement: "PROGRESSIVE_DOWNLOAD"
+      }
+    },
+    VideoDescription: {
+      Height: 480,
+      ScalingBehavior: "DEFAULT",
+      TimecodeInsertion: "DISABLED",
+      AntiAlias: "ENABLED",
+      Sharpness: 50,
+      CodecSettings: {
+        Codec: "H_264",
+        H264Settings: {
+          InterlaceMode: "PROGRESSIVE",
+          NumberReferenceFrames: 3,
+          Syntax: "DEFAULT",
+          GopClosedCadence: 1,
+          GopSize: 24,
+          EntropyEncoding: "CABAC",
+          Bitrate: 1_000_000,
+          FramerateControl: "INITIALIZE_FROM_SOURCE",
+          RateControlMode: "CBR",
+          CodecProfile: "MAIN",
+          Telecine: "NONE",
+          CodecLevel: "AUTO",
+          QualityTuningLevel: "SINGLE_PASS",
+          GopSizeUnits: "FRAMES",
+          ParControl: "INITIALIZE_FROM_SOURCE",
+          NumberBFramesBetweenReferenceFrames: 1
+        }
+      }
+    },
+    AudioDescriptions: [
+      {
+        AudioTypeControl: "FOLLOW_INPUT",
+        AudioSourceName: "Audio Selector 1",
+        CodecSettings: {
+          Codec: "AAC",
+          AacSettings: {
+            Bitrate: 96_000,
+            RateControlMode: "CBR",
+            CodecProfile: "LC",
+            CodingMode: "CODING_MODE_2_0",
+            SampleRate: 48_000,
+            Specification: "MPEG4"
+          }
+        }
+      }
+    ]
+  };
+}
+
 /**
  * Start MediaConvert HLS job for an uploaded MP4. No-ops when MediaConvert is not configured.
- * Returns { jobId, hlsUrl, sourceKey } or null.
+ * Returns { jobId, hlsUrl, playbackUrl, sourceKey } or null.
  */
 async function enqueueHlsTranscodeJob({ sourceKey, videoUrl }) {
   const cfg = readMediaConvertConfig();
@@ -169,6 +239,8 @@ async function enqueueHlsTranscodeJob({ sourceKey, videoUrl }) {
 
   const outputPrefix = hlsOutputPrefixForSourceKey(key);
   const hlsUrl = buildS3PublicUrl(`${outputPrefix}/master.m3u8`);
+  const playbackUrl = playbackMp4UrlForSourceKey(key);
+  const playbackDest = `s3://${cfg.s3.bucket}/${playbackOutputKeyForSourceKey(key)}`;
   const destination = `s3://${cfg.s3.bucket}/${outputPrefix}/`;
   const fileInput = `s3://${cfg.s3.bucket}/${key}`;
 
@@ -177,7 +249,8 @@ async function enqueueHlsTranscodeJob({ sourceKey, videoUrl }) {
     UserMetadata: {
       sourceKey: key,
       videoUrl: String(videoUrl || ""),
-      hlsUrl
+      hlsUrl,
+      playbackUrl
     },
     Settings: {
       TimecodeConfig: { Source: "ZEROBASED" },
@@ -200,7 +273,7 @@ async function enqueueHlsTranscodeJob({ sourceKey, videoUrl }) {
             Type: "HLS_GROUP_SETTINGS",
             HlsGroupSettings: {
               Destination: destination,
-              SegmentLength: 4,
+              SegmentLength: 2,
               MinSegmentLength: 1,
               DirectoryStructure: "SINGLE_DIRECTORY",
               ManifestDurationFormat: "INTEGER",
@@ -214,6 +287,16 @@ async function enqueueHlsTranscodeJob({ sourceKey, videoUrl }) {
             }
           },
           Outputs: abrLadderOutputs()
+        },
+        {
+          Name: "Fast-start MP4",
+          OutputGroupSettings: {
+            Type: "FILE_GROUP_SETTINGS",
+            FileGroupSettings: {
+              Destination: playbackDest
+            }
+          },
+          Outputs: [playbackMp4Output()]
         }
       ]
     },
@@ -226,7 +309,7 @@ async function enqueueHlsTranscodeJob({ sourceKey, videoUrl }) {
   if (!jobId) {
     throw new Error("MediaConvert CreateJob returned no job id");
   }
-  return { jobId, hlsUrl, sourceKey: key, status: result?.Job?.Status || "SUBMITTED" };
+  return { jobId, hlsUrl, playbackUrl, sourceKey: key, status: result?.Job?.Status || "SUBMITTED" };
 }
 
 async function getHlsJobStatus(jobId) {
@@ -247,13 +330,21 @@ async function startHlsJobForUploadedVideo(query, { sourceKey, videoUrl }) {
     if (!started) return null;
     await query(
       `
-      INSERT INTO media_hls_jobs (job_id, source_key, video_url, hls_url, status)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO media_hls_jobs (job_id, source_key, video_url, hls_url, playback_url, status)
+      VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (job_id) DO UPDATE SET
         status = EXCLUDED.status,
+        playback_url = COALESCE(EXCLUDED.playback_url, media_hls_jobs.playback_url),
         updated_at = NOW()
       `,
-      [started.jobId, started.sourceKey, String(videoUrl || ""), started.hlsUrl, started.status || "SUBMITTED"]
+      [
+        started.jobId,
+        started.sourceKey,
+        String(videoUrl || ""),
+        started.hlsUrl,
+        started.playbackUrl || "",
+        started.status || "SUBMITTED"
+      ]
     );
     return started;
   } catch (error) {
@@ -278,18 +369,26 @@ async function resolveCompletedHlsUrlForVideo(query, videoUrl) {
   return res.rows[0]?.hlsUrl || null;
 }
 
-async function attachHlsUrlToMatchingPosts(query, { videoUrl, hlsUrl }) {
+async function attachHlsUrlToMatchingPosts(query, { videoUrl, hlsUrl, playbackUrl }) {
   const url = String(videoUrl || "").trim();
   const hls = String(hlsUrl || "").trim();
-  if (!url || !hls) return 0;
+  const playback = String(playbackUrl || "").trim();
+  if (!url || (!hls && !playback)) return 0;
   const updated = await query(
     `
     UPDATE home_posts
-    SET hls_url = $1
+    SET
+      hls_url = CASE
+        WHEN $1 <> '' AND (hls_url IS NULL OR BTRIM(hls_url) = '') THEN $1
+        ELSE hls_url
+      END,
+      playback_url = CASE
+        WHEN $3 <> '' AND (playback_url IS NULL OR BTRIM(playback_url) = '') THEN $3
+        ELSE playback_url
+      END
     WHERE video_url = $2
-      AND (hls_url IS NULL OR BTRIM(hls_url) = '')
     `,
-    [hls, url]
+    [hls, url, playback]
   );
   return Number(updated.rowCount || 0);
 }
@@ -298,7 +397,7 @@ async function pollPendingHlsJobs(query) {
   if (!isHlsTranscodeConfigured()) return { checked: 0, completed: 0 };
   const pending = await query(
     `
-    SELECT job_id AS "jobId", video_url AS "videoUrl", hls_url AS "hlsUrl"
+    SELECT job_id AS "jobId", video_url AS "videoUrl", hls_url AS "hlsUrl", playback_url AS "playbackUrl"
     FROM media_hls_jobs
     WHERE status IN ('SUBMITTED', 'PROGRESSING', 'INPUT_INFORMATION')
     ORDER BY id ASC
@@ -320,7 +419,11 @@ async function pollPendingHlsJobs(query) {
           `,
           [row.jobId]
         );
-        await attachHlsUrlToMatchingPosts(query, { videoUrl: row.videoUrl, hlsUrl: row.hlsUrl });
+        await attachHlsUrlToMatchingPosts(query, {
+          videoUrl: row.videoUrl,
+          hlsUrl: row.hlsUrl,
+          playbackUrl: row.playbackUrl
+        });
         completed += 1;
       } else if (status === "ERROR" || status === "CANCELED") {
         await query(
