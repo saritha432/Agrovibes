@@ -1003,13 +1003,19 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   return (
     <NotificationPanelContext.Provider value={value}>
       {children}
-      <Modal visible={sheetOpen} animationType="none" onRequestClose={closeNotificationSheet}>
+      <Modal
+        visible={sheetOpen}
+        animationType="none"
+        presentationStyle="fullScreen"
+        statusBarTranslucent
+        onRequestClose={closeNotificationSheet}
+      >
         <View style={styles.overlay}>
           <View
             style={[
               styles.sheet,
               {
-                paddingTop: topChromeInset + 4,
+                paddingTop: topChromeInset,
                 paddingBottom: Math.max(insets.bottom, 12)
               }
             ]}
@@ -1285,7 +1291,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 8
+    minHeight: 44,
+    paddingVertical: 4
   },
   headerBackBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
   sheetTitle: { color: "#ffffff", fontWeight: "700", fontSize: 20, letterSpacing: 0.1, flex: 1, textAlign: "center" },

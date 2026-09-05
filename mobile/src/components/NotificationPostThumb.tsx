@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, View } from "react-native";
+import { AppVideo, type AppVideoHandle } from "./AppVideo";
 import { fetchHomePost, type HomePost } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
 import { reelGridStillUri } from "../utils/reelGrid";
@@ -42,7 +42,7 @@ function toPreviewPost(props: NotificationPostThumbProps): HomePost | null {
 
 /** Last-resort paused video frame (web / when no still image exists). */
 function NotificationVideoFrame({ uri }: { uri: string }) {
-  const videoRef = React.useRef<Video | null>(null);
+  const videoRef = React.useRef<AppVideoHandle | null>(null);
   const [ready, setReady] = React.useState(false);
   const playback = videoPlaybackUrl(uri);
 
@@ -77,19 +77,19 @@ function NotificationVideoFrame({ uri }: { uri: string }) {
           <Ionicons name="play" size={18} color="rgba(255,255,255,0.45)" />
         </View>
       ) : null}
-      <Video
+      <AppVideo
         ref={videoRef}
-        source={{ uri: playback }}
+        source={playback}
         style={[StyleSheet.absoluteFillObject, ready ? null : styles.hiddenVideo]}
-        resizeMode={ResizeMode.COVER}
+        contentFit="cover"
         isMuted
         shouldPlay={false}
         isLooping={false}
-        useNativeControls={false}
+        nativeControls={false}
         onLoad={() => {
           void primeFrame();
         }}
-        onReadyForDisplay={() => {
+        onFirstFrameRender={() => {
           void primeFrame();
         }}
         onError={() => setReady(false)}

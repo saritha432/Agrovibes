@@ -84,7 +84,7 @@ export function warmVideoUri(uri: string | null | undefined, hlsUrl?: string | n
     .catch(() => {
       warmedVideos.delete(clean);
     })
-    .finally(() => {
+    .then(() => {
       if (timer) clearTimeout(timer);
     });
 }

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
+import { AppVideo } from "./AppVideo";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -161,13 +161,13 @@ export function StoryViewerModal({ visible, stories, initialIndex = 0, onClose }
 
         <View style={styles.body}>
           {activeStory?.videoUrl ? (
-            <Video
-              source={{ uri: videoPlaybackUrl(activeStory.videoUrl) }}
+            <AppVideo
+              source={videoPlaybackUrl(activeStory.videoUrl)}
               style={styles.media}
-              resizeMode={ResizeMode.CONTAIN}
+              contentFit="contain"
               shouldPlay
               isLooping={false}
-              useNativeControls={false}
+              nativeControls={false}
               onPlaybackStatusUpdate={(status) => {
                 if (!status.isLoaded) return;
                 if (status.didJustFinish) goNext();

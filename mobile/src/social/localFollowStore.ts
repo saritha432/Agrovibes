@@ -210,6 +210,7 @@ export async function getLocalFollowNetworkByIdentity(current: { name: string; k
     {
       name: string;
       key?: string;
+      avatarUrl?: string | null;
       viewerStatus: "none" | "pending" | "accepted";
       canFollowBack: boolean;
     }
@@ -242,6 +243,7 @@ export async function getLocalFollowNetworkByIdentity(current: { name: string; k
     {
       name: string;
       key?: string;
+      avatarUrl?: string | null;
       viewerStatus: "accepted";
       canFollowBack: false;
     }

@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import React from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import type { DmMediaItem } from "../screens/messaging/dmMessageFormats";
 import { APP_LIME } from "../theme/appColors";
+import { AppVideo } from "./AppVideo";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
 type ChatMediaBubbleProps = {
@@ -23,13 +23,13 @@ export function ChatMediaBubble({ media, onPress, onLongPress }: ChatMediaBubble
       {media.kind === "image" ? (
         <Image source={{ uri: media.url }} style={styles.media} resizeMode="cover" />
       ) : (
-        <Video
-          source={{ uri: videoPlaybackUrl(media.url) }}
+        <AppVideo
+          source={videoPlaybackUrl(media.url)}
           style={styles.media}
-          resizeMode={ResizeMode.COVER}
+          contentFit="cover"
           shouldPlay={false}
           isMuted
-          useNativeControls={false}
+          nativeControls={false}
         />
       )}
       {media.kind === "video" ? (

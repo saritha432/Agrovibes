@@ -155,6 +155,7 @@
         }
       ],
       "expo-font",
+      "expo-video",
       [
         "react-native-full-screen-notification-incoming-call",
         {

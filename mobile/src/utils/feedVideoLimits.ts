@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import type { AVPlaybackStatus } from "expo-av";
+import type { AppPlaybackStatus } from "./videoPlaybackStatus";
 
 /**
  * Soft limit for feed playback warnings.
@@ -9,9 +9,9 @@ import type { AVPlaybackStatus } from "expo-av";
  */
 export const MAX_FEED_VIDEO_EDGE_PX = 4096;
 
-export function readVideoSizeFromPlaybackStatus(status: AVPlaybackStatus): { width: number; height: number } {
+export function readVideoSizeFromPlaybackStatus(status: AppPlaybackStatus): { width: number; height: number } {
   if (!status.isLoaded) return { width: 0, height: 0 };
-  const raw = status as AVPlaybackStatus & {
+  const raw = status as AppPlaybackStatus & {
     width?: number;
     height?: number;
     naturalSize?: { width: number; height: number };
