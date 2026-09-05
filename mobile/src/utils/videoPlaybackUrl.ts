@@ -8,6 +8,12 @@ export type ExpoAvVideoSource = {
 
 export type VideoPlayerSource = ExpoAvVideoSource;
 
+export type VideoPlaybackPost = {
+  videoUrl?: string | null;
+  hlsUrl?: string | null;
+  playbackUrl?: string | null;
+};
+
 /** Android cleartext is blocked; older rows may still store http:// URLs that work in desktop Chrome. */
 export function normalizeVideoPlaybackUri(url: string | undefined | null): string {
   const input = String(url || "").trim();
@@ -15,31 +21,45 @@ export function normalizeVideoPlaybackUri(url: string | undefined | null): strin
   return input;
 }
 
+function pushUnique(list: string[], url: string | undefined | null) {
+  const clean = normalizeVideoPlaybackUri(url);
+  if (!clean || list.includes(clean)) return;
+  list.push(clean);
+}
+
 /**
- * Playback source list.
- * Prefer progressive MP4 first — HLS start can stall for seconds (playlist + segments)
- * and a failed HLS attempt before MP4 fallback makes reels feel "slow" or blank.
- * Keep HLS as secondary on native when available.
+ * Instagram-style start order:
+ * 1. Fast-start 480p MP4 (moov at front) — first frame after a few hundred KB
+ * 2. Native HLS — adaptive 240p+ when the small MP4 is not ready yet
+ * 3. Original upload MP4 — last resort (often large)
+ * Web skips HLS (Chrome has no native HLS in the expo-av video tag).
  */
 export function videoPlaybackSources(
   url: string | undefined | null,
-  hlsUrl?: string | undefined | null
+  hlsUrl?: string | undefined | null,
+  playbackUrl?: string | undefined | null
 ): string[] {
-  const input = normalizeVideoPlaybackUri(url);
-  if (!input) return [];
+  const sources: string[] = [];
+  pushUnique(sources, playbackUrl);
   const hls = normalizeVideoPlaybackUri(hlsUrl);
-  const hlsOk = !!hls && /\.m3u8(\?|#|$)/i.test(hls);
-  if (hlsOk && Platform.OS !== "web" && input !== hls) {
-    return [input, hls];
+  if (Platform.OS !== "web" && hls && /\.m3u8(\?|#|$)/i.test(hls)) {
+    pushUnique(sources, hls);
   }
-  return [input];
+  pushUnique(sources, url);
+  return sources;
+}
+
+export function videoPlaybackSourcesForPost(post: VideoPlaybackPost | null | undefined): string[] {
+  if (!post) return [];
+  return videoPlaybackSources(post.videoUrl, post.hlsUrl, post.playbackUrl);
 }
 
 export function videoPlaybackUrl(
   url: string | undefined | null,
-  hlsUrl?: string | undefined | null
+  hlsUrl?: string | undefined | null,
+  playbackUrl?: string | undefined | null
 ): string {
-  return videoPlaybackSources(url, hlsUrl)[0] || normalizeVideoPlaybackUri(url);
+  return videoPlaybackSources(url, hlsUrl, playbackUrl)[0] || normalizeVideoPlaybackUri(url);
 }
 
 /**

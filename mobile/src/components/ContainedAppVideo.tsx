@@ -14,6 +14,7 @@ export type ContainedAppVideoHandle = {
 export type ContainedAppVideoProps = {
   uri: string;
   hlsUrl?: string | null;
+  playbackUrl?: string | null;
   shouldPlay: boolean;
   preloadOnly?: boolean;
   containerWidth: number;
@@ -32,6 +33,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
     {
       uri,
       hlsUrl,
+      playbackUrl,
       shouldPlay,
       preloadOnly = false,
       containerWidth,
@@ -55,7 +57,10 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
     const [playbackBlocked, setPlaybackBlocked] = useState(false);
     const videoRef = useRef<AppVideoHandle | null>(null);
     const durationRef = useRef(0);
-    const playbackSources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
+    const playbackSources = useMemo(
+      () => videoPlaybackSources(uri, hlsUrl, playbackUrl),
+      [uri, hlsUrl, playbackUrl]
+    );
     const [sourceIndex, setSourceIndex] = useState(0);
     const activeUri = useMemo(
       () => videoPlaybackUrl(playbackSources[sourceIndex] ?? uri),
@@ -129,7 +134,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
         }}
       >
         <AppVideo
-          key={playbackKey ? `${playbackKey}::${activeUri}` : activeUri}
+          key={playbackKey || uri}
           ref={(r) => {
             videoRef.current = r;
           }}
@@ -137,13 +142,14 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
           shouldPlay={shouldPlay}
           isLooping={isLooping}
           isMuted={isMuted || preloadOnly}
+          warmBuffer={preloadOnly}
           nativeControls={useNativeControls}
           staysActiveInBackground
           contentFit={isCover ? "cover" : "contain"}
           style={videoOuterStyle}
-          timeUpdateIntervalMs={preloadOnly ? 4000 : 500}
+          timeUpdateIntervalMs={preloadOnly ? 4000 : 800}
           onPlaybackStatusUpdate={(status) => {
-            onStatusUpdate?.(status);
+            if (!preloadOnly) onStatusUpdate?.(status);
             if (status.isLoaded) {
               durationRef.current = Number(status.durationMillis || 0);
               const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);

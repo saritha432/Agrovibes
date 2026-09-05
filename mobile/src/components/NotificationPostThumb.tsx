@@ -7,7 +7,6 @@ import { APP_LIME } from "../theme/appColors";
 import { reelGridStillUri } from "../utils/reelGrid";
 import { resolveNotificationVideoThumbnail, staticReelPreviewUri } from "../utils/reelPreviewThumb";
 import { sanitizeHomePost } from "../utils/mediaUrls";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
 type NotificationPostThumbProps = {
   postId?: number | null;
@@ -40,64 +39,6 @@ function toPreviewPost(props: NotificationPostThumbProps): HomePost | null {
   });
 }
 
-/** Last-resort paused video frame (web / when no still image exists). */
-function NotificationVideoFrame({ uri }: { uri: string }) {
-  const videoRef = React.useRef<AppVideoHandle | null>(null);
-  const [ready, setReady] = React.useState(false);
-  const playback = videoPlaybackUrl(uri);
-
-  React.useEffect(() => {
-    setReady(false);
-  }, [playback]);
-
-  const primeFrame = React.useCallback(async () => {
-    const player = videoRef.current;
-    if (!player) return;
-    try {
-      await player.setPositionAsync(400);
-      await player.pauseAsync();
-      setReady(true);
-    } catch {
-      setReady(true);
-    }
-  }, []);
-
-  if (!playback) {
-    return (
-      <View style={[styles.image, styles.placeholder]}>
-        <Ionicons name="play" size={18} color="rgba(255,255,255,0.45)" />
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.image}>
-      {!ready ? (
-        <View style={[StyleSheet.absoluteFillObject, styles.placeholder]}>
-          <Ionicons name="play" size={18} color="rgba(255,255,255,0.45)" />
-        </View>
-      ) : null}
-      <AppVideo
-        ref={videoRef}
-        source={playback}
-        style={[StyleSheet.absoluteFillObject, ready ? null : styles.hiddenVideo]}
-        contentFit="cover"
-        isMuted
-        shouldPlay={false}
-        isLooping={false}
-        nativeControls={false}
-        onLoad={() => {
-          void primeFrame();
-        }}
-        onFirstFrameRender={() => {
-          void primeFrame();
-        }}
-        onError={() => setReady(false)}
-      />
-    </View>
-  );
-}
-
 export function NotificationPostThumb(props: NotificationPostThumbProps) {
   const post = React.useMemo(() => toPreviewPost(props), [
     props.postId,
@@ -106,7 +47,7 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
     props.postVideoUrl
   ]);
   const [imageUri, setImageUri] = React.useState<string | null>(() => stillFromPost(post));
-  const [videoUri, setVideoUri] = React.useState<string | null>(() => String(post?.videoUrl || "").trim() || null);
+  const [hasVideo, setHasVideo] = React.useState(() => !!String(post?.videoUrl || "").trim());
 
   React.useEffect(() => {
     let cancelled = false;
@@ -116,7 +57,7 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
       const still = stillFromPost(next);
       const video = String(next.videoUrl || "").trim();
       if (still) setImageUri(still);
-      if (video) setVideoUri(video);
+      if (video) setHasVideo(true);
       return { still, video };
     };
 
@@ -127,7 +68,7 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
       return () => {
         cancelled = true;
       };
-    };
+    }
 
     void (async () => {
       let still = stillFromPost(post);
@@ -148,13 +89,13 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
 
       if (cancelled || still || !video) return;
 
-      // Native: extract a frame. Web falls through to NotificationVideoFrame.
+      // Native: extract a frame. Never mount a Video player in the notification list.
       if (Platform.OS === "web") return;
       try {
         const thumb = await resolveNotificationVideoThumbnail(video, id);
         if (!cancelled && thumb) setImageUri(thumb);
       } catch {
-        // keep placeholder / video frame fallback
+        // keep placeholder
       }
     })();
 
@@ -165,13 +106,12 @@ export function NotificationPostThumb(props: NotificationPostThumbProps) {
 
   if (!post) return null;
 
-  const isReel = props.postIsReel || !!videoUri;
+  const isReel = props.postIsReel || hasVideo;
+  // Never mount expo-av Video in the notification list — it makes the sheet open painfully slow.
   const content = (
     <>
       {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
-      ) : videoUri ? (
-        <NotificationVideoFrame uri={videoUri} />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <Ionicons
@@ -220,9 +160,6 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%"
   },
-  hiddenVideo: {
-    opacity: 0
-  },
   placeholder: {
     alignItems: "center",
     justifyContent: "center",
@@ -232,9 +169,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 5,
     bottom: 5,
-    width: 18,
-    height: 18,
-    borderRadius: 5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     backgroundColor: APP_LIME,
     alignItems: "center",
     justifyContent: "center"

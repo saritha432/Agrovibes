@@ -36,7 +36,8 @@ import { PostOptionsSheet } from "./PostOptionsSheet";
 import { PostReportSheet } from "./PostReportSheet";
 import { PostRepostSheet } from "./PostRepostSheet";
 import { RepostAttribution } from "./RepostAttribution";
-import { ReelSeekBar } from "./ReelSeekBar";
+import { LiveReelSeekBar } from "./LiveReelSeekBar";
+import { setReelProgress } from "../utils/reelProgressStore";
 import { shownResharesCount, latestResharersForDisplay } from "../social/homeFeedCache";
 import { useLanguage } from "../localization/LanguageContext";
 import {
@@ -336,7 +337,6 @@ export function PostsReelViewerModal({
   viewerPostsRef.current = viewerPosts;
   const [reelLikeBurstByPostId, setReelLikeBurstByPostId] = useState<Record<number, number>>({});
   const [carouselPageByPostId, setCarouselPageByPostId] = useState<Record<number, number>>({});
-  const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
   const [activeCommentsPost, setActiveCommentsPost] = useState<HomePost | null>(null);
   const [commentsByPost, setCommentsByPost] = useState<Record<number, HomeCommentRow[]>>({});
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -624,13 +624,11 @@ export function PostsReelViewerModal({
 
   const onReelStatusUpdate = useCallback((postId: number, status: AppPlaybackStatus) => {
     if (!status.isLoaded) return;
-    const position = Number(status.positionMillis || 0);
-    const duration = Math.max(1, Number(status.durationMillis || 0));
-    setReelProgressByPostId((prev) => {
-      const cur = prev[postId];
-      if (cur && Math.abs(cur.position - position) < 120 && cur.duration === duration) return prev;
-      return { ...prev, [postId]: { position, duration } };
-    });
+    setReelProgress(
+      postId,
+      Number(status.positionMillis || 0),
+      Math.max(1, Number(status.durationMillis || 0))
+    );
   }, []);
 
   const onReelSurfaceTap = useCallback(
@@ -924,15 +922,15 @@ export function PostsReelViewerModal({
       const pageH = viewerPageH;
       const reelContentWidth = viewerPageW;
       const isActiveVideo = Number(effectivePlayingId) === Number(post.id) && !!post.videoUrl;
-      const showActiveVideo = isActiveVideo;
-      const shouldPlayVideo = showActiveVideo && !reelUserPaused;
+      const activeIdx = viewerPosts.findIndex((p) => Number(p.id) === Number(effectivePlayingId));
+      const nearActive = activeIdx >= 0 && Math.abs(index - activeIdx) <= 1;
+      const mountVideo = !!post.videoUrl && (isActiveVideo || nearActive);
+      const shouldPlayVideo = isActiveVideo && !reelUserPaused;
       const gallery = postImageGallery(post);
       const isCarousel = gallery.length > 1;
       const carouselPage = carouselPageByPostId[post.id] ?? 0;
       const thumbUri = reelGridStillUri(post);
       const reelPoster = reelGridStillUri(post);
-      const reelProgress = reelProgressByPostId[post.id];
-      const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
       const creativeMeta = post.creativeMeta || {};
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
@@ -957,7 +955,7 @@ export function PostsReelViewerModal({
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
-          {post.videoUrl && showActiveVideo ? (
+          {post.videoUrl && mountVideo ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               <ContainedAppVideo
                 ref={(r) => {
@@ -965,14 +963,16 @@ export function PostsReelViewerModal({
                 }}
                 uri={post.videoUrl}
                 hlsUrl={post.hlsUrl}
+                playbackUrl={post.playbackUrl}
                 shouldPlay={shouldPlayVideo}
+                preloadOnly={!isActiveVideo}
                 playbackKey={`rv-${viewerSession}-${post.id}-s`}
                 containerWidth={reelContentWidth}
                 containerHeight={mediaContentH}
                 fit="auto"
                 posterUri={reelPoster || undefined}
                 isLooping
-                isMuted={isReelMuted}
+                isMuted={isReelMuted || !isActiveVideo}
                 onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
               />
               {reelUserPaused ? (
@@ -1150,16 +1150,9 @@ export function PostsReelViewerModal({
           </View>
           {post.videoUrl ? (
             <View style={styles.reelSeekWrap} pointerEvents="auto">
-              <ReelSeekBar
-                progressRatio={progressRatio}
-                onSeek={(ratio) => {
-                  const duration = reelProgress?.duration;
-                  if (duration) {
-                    setReelProgressByPostId((prev) => ({
-                      ...prev,
-                      [post.id]: { position: ratio * duration, duration }
-                    }));
-                  }
+              <LiveReelSeekBar
+                postId={post.id}
+                onSeekVideo={(ratio) => {
                   void reelVideoHandlesRef.current[post.id]?.seekToRatio(ratio);
                 }}
               />
@@ -1185,7 +1178,6 @@ export function PostsReelViewerModal({
       effectivePlayingId,
       viewerSession,
       reelLikeBurstByPostId,
-      reelProgressByPostId,
       setRepostTargetPost,
       carouselPageByPostId,
       setShareTargetPost,
@@ -1312,6 +1304,8 @@ export function PostsReelViewerModal({
               }}
               onViewableItemsChanged={onViewableItemsChangedRef.current}
               viewabilityConfig={viewabilityConfig}
+              scrollEventThrottle={16}
+              onScroll={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               onScrollToIndexFailed={(info) => {
                 reelViewerListRef.current?.scrollToOffset({

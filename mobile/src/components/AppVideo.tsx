@@ -21,6 +21,8 @@ export type AppVideoProps = {
   isMuted?: boolean;
   nativeControls?: boolean;
   staysActiveInBackground?: boolean;
+  /** Play muted until the first frame, then pause at 0 so swipe-in is instant. */
+  warmBuffer?: boolean;
   timeUpdateIntervalMs?: number;
   onPlaybackStatusUpdate?: (status: AppPlaybackStatus) => void;
   onLoad?: () => void;
@@ -64,6 +66,8 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
     isLooping = false,
     isMuted = false,
     nativeControls = false,
+    staysActiveInBackground = false,
+    warmBuffer = false,
     timeUpdateIntervalMs = 500,
     onPlaybackStatusUpdate,
     onLoad,
@@ -82,12 +86,60 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
   onStatusRef.current = onPlaybackStatusUpdate;
   const onFirstFrameRef = useRef(onFirstFrameRender);
   onFirstFrameRef.current = onFirstFrameRender;
+  const shouldPlayRef = useRef(shouldPlay);
+  shouldPlayRef.current = shouldPlay;
+  const warmBufferRef = useRef(warmBuffer);
+  warmBufferRef.current = warmBuffer;
+  const warmedRef = useRef(false);
   const uri = sourceUri(source);
   const avSource = useMemo(() => expoAvVideoSource(uri), [uri]);
 
   useEffect(() => {
     loadedRef.current = false;
+    warmedRef.current = false;
   }, [uri]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const kick = () => {
+      if (cancelled) return;
+      if (shouldPlay || warmBuffer) {
+        void videoRef.current?.playAsync().catch(() => {});
+      }
+    };
+    const t = setTimeout(kick, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [shouldPlay, warmBuffer, uri]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined" || !uri) return;
+    const hint = () => {
+      const videos = document.querySelectorAll("video");
+      videos.forEach((node) => {
+        const src = String(node.currentSrc || node.src || "");
+        if (!src || !uri || !src.includes(uri.slice(0, 48))) return;
+        node.preload = "auto";
+        node.setAttribute("preload", "auto");
+      });
+    };
+    const t = setTimeout(hint, 30);
+    return () => clearTimeout(t);
+  }, [uri]);
+
+  useEffect(() => {
+    if (!warmBuffer || shouldPlay) return;
+    const t = setTimeout(() => {
+      if (shouldPlayRef.current || warmedRef.current) return;
+      warmedRef.current = true;
+      void videoRef.current?.pauseAsync().catch(() => {});
+      void videoRef.current?.setPositionAsync(0).catch(() => {});
+    }, 1400);
+    return () => clearTimeout(t);
+  }, [warmBuffer, shouldPlay, uri]);
+
   const isWeb = Platform.OS === "web";
   const isCover = contentFit === "cover";
   const webVideoStyle: ViewStyle | undefined = isWeb
@@ -138,11 +190,20 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
       shouldPlay={shouldPlay}
       isLooping={isLooping}
       isMuted={isMuted}
+      rate={1}
+      shouldCorrectPitch
+      staysActiveInBackground={staysActiveInBackground}
       useNativeControls={nativeControls}
       usePoster={false}
       resizeMode={resizeModeForFit(contentFit)}
-      progressUpdateIntervalMillis={Math.max(250, timeUpdateIntervalMs)}
-      onReadyForDisplay={() => onFirstFrameRef.current?.()}
+      progressUpdateIntervalMillis={Math.max(400, timeUpdateIntervalMs)}
+      onReadyForDisplay={() => {
+        onFirstFrameRef.current?.();
+        if (shouldPlayRef.current || !warmBufferRef.current || warmedRef.current) return;
+        warmedRef.current = true;
+        void videoRef.current?.pauseAsync().catch(() => {});
+        void videoRef.current?.setPositionAsync(0).catch(() => {});
+      }}
       onPlaybackStatusUpdate={(status) => {
         const mapped = mapStatus(status);
         onStatusRef.current?.(mapped);

@@ -771,8 +771,10 @@ export interface HomePost {
   /** Total reposts/reshares of this post. */
   resharesCount?: number;
   videoUrl?: string | null;
-  /** Adaptive HLS master playlist (CloudFront .m3u8). Prefer over videoUrl when present. */
+  /** Adaptive HLS master playlist (CloudFront .m3u8). Used on native when the fast-start MP4 is not ready. */
   hlsUrl?: string | null;
+  /** Small fast-start 480p MP4 (moov at front). Play this first when present. */
+  playbackUrl?: string | null;
   imageUrl?: string | null;
   /** Present when the post is a multi-image carousel (2+ photos). */
   imageUrls?: string[];
