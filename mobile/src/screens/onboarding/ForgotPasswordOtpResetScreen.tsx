@@ -122,7 +122,11 @@ export function ForgotPasswordOtpResetScreen() {
       setShowSuccessPopup(true);
     } catch (e: any) {
       const message = String(e?.message || "Failed to reset password");
-      if (/otp expired/i.test(message) && digits === STATIC_OTP_HINT) {
+      if (/invalid otp/i.test(message) && digits === STATIC_OTP_HINT) {
+        setErrorText(
+          "Static OTP 525252 was rejected by the server. Redeploy the latest backend on Railway, or set STATIC_OTP_ENABLED=true in Railway env vars."
+        );
+      } else if (/otp expired/i.test(message) && digits === STATIC_OTP_HINT) {
         setErrorText(
           "Static OTP was rejected by the server. Deploy the latest backend to Render, or set STATIC_OTP_CODE=525252 in Render env."
         );

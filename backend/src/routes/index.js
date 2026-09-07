@@ -1091,7 +1091,11 @@ function hashOtp(phone, otp) {
 }
 
 function allowDevOtpFallback() {
-  return String(process.env.OTP_STRICT_PROVIDER || "").trim().toLowerCase() !== "true";
+  const strict = String(process.env.OTP_STRICT_PROVIDER || "").trim().toLowerCase() === "true";
+  if (strict) return false;
+  const env = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  // Never pretend SMS was sent in production when the provider is missing.
+  return env !== "production";
 }
 
 function otpProvider() {
@@ -1201,7 +1205,12 @@ async function sendSmsOtp(phone, otp) {
     if (allowDevOtpFallback()) {
       // eslint-disable-next-line no-console
       console.log(`[DEV OTP] ${phone} => ${otp}`);
-      return { channel: "sms", providerRequestId: null };
+      return {
+        channel: "sms",
+        providerRequestId: null,
+        providerStatus: "dev-console",
+        providerMessage: "SMS provider not configured; OTP logged on server only"
+      };
     }
     throw new Error("SMS provider is not configured");
   }
