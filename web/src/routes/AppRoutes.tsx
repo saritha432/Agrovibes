@@ -15,6 +15,8 @@ import { ReelsPage } from "../pages/ReelsPage";
 import { ReelWatchPage } from "../pages/ReelWatchPage";
 import { PublicProfilePage } from "../pages/PublicProfilePage";
 import { SearchPage } from "../pages/SearchPage";
+import { SettingsMenuPage } from "../pages/settings/SettingsMenuPage";
+import { AboutSettingsPage, AccountCenterPage } from "../pages/settings/SettingsSubpages";
 import { PrivacyPolicy } from "../pages/PrivacyPolicy";
 import { DeleteAccount } from "../pages/DeleteAccount";
 import { ChildSafety } from "../pages/ChildSafety";
@@ -78,6 +80,39 @@ export function AppRoutes() {
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="profile/edit" element={<EditProfilePage />} />
+        <Route path="settings" element={<SettingsMenuPage />} />
+        <Route path="settings/account" element={<AccountCenterPage />} />
+        <Route path="settings/about" element={<AboutSettingsPage />} />
+        <Route
+          path="settings/activity"
+          element={
+            <PlaceholderPage title="Your Activity" description="Likes, comments, and history — coming soon on web." />
+          }
+        />
+        <Route
+          path="settings/privacy"
+          element={
+            <PlaceholderPage
+              title="Account Privacy"
+              description="Private account and visibility controls — coming soon on web."
+            />
+          }
+        />
+        <Route
+          path="settings/blocked"
+          element={
+            <PlaceholderPage title="Blocked" description="Manage blocked accounts — coming soon on web." />
+          }
+        />
+        <Route
+          path="settings/language"
+          element={
+            <PlaceholderPage
+              title="Language And Translations"
+              description="Language preferences — coming soon on web."
+            />
+          }
+        />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

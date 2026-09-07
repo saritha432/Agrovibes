@@ -43,6 +43,10 @@ export interface HomePost {
   commentsCount: number;
   resharesCount?: number;
   videoUrl?: string | null;
+  /** Adaptive HLS master playlist (CloudFront .m3u8). */
+  hlsUrl?: string | null;
+  /** Small fast-start 480p MP4 (moov at front). */
+  playbackUrl?: string | null;
   imageUrl?: string | null;
   imageUrls?: string[];
   thumbnailUrl?: string;

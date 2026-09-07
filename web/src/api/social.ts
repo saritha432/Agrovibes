@@ -57,3 +57,13 @@ export async function respondToFollowRequestById(token: string, followId: number
     body: JSON.stringify({ action })
   })) as { ok: boolean };
 }
+
+/** Same as mobile `respondToFollowRequest` — uses follow row id, not target user id. */
+export const respondToFollowRequest = respondToFollowRequestById;
+
+export async function findIncomingFollowId(token: string, actorUserId: number): Promise<number | null> {
+  const data = await fetchSocialNotifications(token);
+  const match = data.followRequests.find((n) => Number(n.actorId) === Number(actorUserId));
+  const followId = Number(match?.followId);
+  return Number.isFinite(followId) && followId > 0 ? followId : null;
+}
