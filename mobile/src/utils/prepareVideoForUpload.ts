@@ -6,7 +6,7 @@ export const MAX_UPLOAD_VIDEO_EDGE_PX = 720;
 /** Target bitrate ~2 Mbps — feed-friendly without looking heavily compressed. */
 export const UPLOAD_VIDEO_BITRATE = 2_000_000;
 /** Skip compression for already-small clips (bytes). */
-export const MIN_BYTES_TO_COMPRESS = 3 * 1024 * 1024;
+export const MIN_BYTES_TO_COMPRESS = 1 * 1024 * 1024;
 /**
  * Incomplete compressor outputs on Android are often just an MP4 `ftyp` box (~28 bytes).
  * Reject anything below this and keep the original file.
@@ -63,8 +63,11 @@ export async function prepareVideoForUpload(
 
   const originalBytes = await fileSizeBytes(trimmed);
   const longEdge = Math.max(Number(options?.width) || 0, Number(options?.height) || 0);
+  const needsDownscale = longEdge > MAX_UPLOAD_VIDEO_EDGE_PX;
   const alreadySmall =
-    (originalBytes > 0 && originalBytes <= MIN_BYTES_TO_COMPRESS) &&
+    !needsDownscale &&
+    originalBytes > 0 &&
+    originalBytes <= MIN_BYTES_TO_COMPRESS &&
     (longEdge <= 0 || longEdge <= MAX_UPLOAD_VIDEO_EDGE_PX);
   if (alreadySmall) return fallback;
 

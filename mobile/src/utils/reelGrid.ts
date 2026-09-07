@@ -38,32 +38,41 @@ export function reelGridStillUri(post: HomePost): string | null {
   return null;
 }
 
+export type ReelVideoFrame = {
+  width: number;
+  height: number;
+};
+
 /**
- * Pick cover vs contain from video AND screen/container aspect.
- * Close match → cover (edge-to-edge). Mismatch → contain so the frame is not zoomed/cropped.
+ * Reel feed sizing: always span the full container width (no side pillarboxing).
+ * Landscape clips top/bottom only when taller than the slot; portrait may clip slightly
+ * at top/bottom rather than shrinking width.
  */
-export function pickReelVideoFit(
+export function computeReelVideoFrame(
   videoWidth: number,
   videoHeight: number,
-  containerWidth?: number,
-  containerHeight?: number
+  containerWidth: number,
+  _containerHeight?: number
+): ReelVideoFrame {
+  const vw = videoWidth > 0 ? videoWidth : 9;
+  const vh = videoHeight > 0 ? videoHeight : 16;
+  const aspect = vw / vh;
+  const cw = Math.max(1, containerWidth);
+
+  return {
+    width: cw,
+    height: cw / aspect
+  };
+}
+
+/** Reels in the home/profile feed always width-fill. */
+export function pickReelVideoFit(
+  _videoWidth: number,
+  _videoHeight: number,
+  _containerWidth?: number,
+  _containerHeight?: number
 ): "cover" | "contain" {
-  const w = Number(videoWidth);
-  const h = Number(videoHeight);
-  if (!(w > 0 && h > 0)) return "contain";
-
-  const cw = Number(containerWidth);
-  const ch = Number(containerHeight);
-  const videoAspect = w / h;
-
-  if (!(cw > 0 && ch > 0)) {
-    return videoAspect > 0.85 ? "contain" : "cover";
-  }
-
-  const containerAspect = cw / ch;
-  const aspectDelta = Math.abs(videoAspect - containerAspect) / containerAspect;
-  if (aspectDelta <= 0.08) return "cover";
-  return "contain";
+  return "cover";
 }
 
 export function postMatchesExploreQuery(post: HomePost, query: string): boolean {

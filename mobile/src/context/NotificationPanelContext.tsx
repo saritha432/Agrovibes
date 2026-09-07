@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Alert, InteractionManager, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, BackHandler, InteractionManager, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useTopChromeInset } from "../theme/topChromeInset";
@@ -10,6 +10,7 @@ import {
   blockUser,
   fetchActiveHomeStories,
   fetchHomePost,
+  fetchHomePostsPage,
   fetchMessageThreads,
   fetchRelationships,
   markSocialNotificationRead,
@@ -37,7 +38,18 @@ import { SwipeActionsRow, type SwipeAction } from "../components/SwipeActionsRow
 import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
-import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
+import {
+  hasSharedPostViewerListener,
+  queueOpenSharedPostViewer,
+  queueOpenSharedPostsViewer
+} from "../navigation/sharedPostViewerBridge";
+import {
+  registerNotificationSheetCloser,
+  registerNotificationSheetOpener,
+  registerNotificationSheetSuppress,
+  suppressNotificationSheet
+} from "../navigation/notificationSheetBridge";
+import { setFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenLiveCreate } from "../navigation/liveCreateBridge";
 import { publishActiveStories } from "../navigation/storyActivityBridge";
@@ -68,6 +80,8 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const topChromeInset = useTopChromeInset();
   const appIsActive = useAppIsActive();
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** Keep sheet mounted but invisible while a fullscreen reel opened from notifications is showing. */
+  const [sheetSuppressed, setSheetSuppressed] = useState(false);
   const [pending, setPending] = useState<any[]>([]);
   const [accepted, setAccepted] = useState<any[]>([]);
   const [declined, setDeclined] = useState<any[]>([]);
@@ -87,6 +101,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   const [followRequestsExpanded, setFollowRequestsExpanded] = useState(false);
   const [listScrollEnabled, setListScrollEnabled] = useState(true);
+  const [dismissedReady, setDismissedReady] = useState(false);
 
   const viewerUserId = useMemo(() => {
     const parsed = Number(user?.id);
@@ -108,12 +123,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const lastSeenMsRef = useRef(0);
   lastSeenMsRef.current = lastSeenMs;
   const dismissedIdsRef = useRef<Set<string>>(new Set());
-  const [dismissedReady, setDismissedReady] = useState(false);
 
   const persistLastSeenMs = useCallback(
     async (ms: number) => {
       setLastSeenMs(ms);
-      lastSeenMsRef.current = ms;
+      lastSeenMsRef.current = ms; 
       try {
         await AsyncStorage.setItem(notificationSeenKey, String(ms));
       } catch {
@@ -440,16 +454,47 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 
   const openNotificationSheet = useCallback(() => {
     setFollowRequestsExpanded(false);
+    // Paint the sheet immediately with whatever we already have — refresh after interactions.
+    setSheetSuppressed(false);
+    setFeedPlaybackSuspended(true);
     setSheetOpen(true);
-    void loadNotifications({ enrich: true });
+    InteractionManager.runAfterInteractions(() => {
+      void loadNotifications({ enrich: true });
+    });
   }, [loadNotifications]);
 
   const closeNotificationSheet = useCallback(() => {
     const now = Date.now();
     void persistLastSeenMs(now);
     setFollowRequestsExpanded(false);
+    setSheetSuppressed(false);
     setSheetOpen(false);
+    setFeedPlaybackSuspended(false);
   }, [persistLastSeenMs]);
+
+  useEffect(() => {
+    registerNotificationSheetOpener(openNotificationSheet);
+    registerNotificationSheetCloser(closeNotificationSheet);
+    registerNotificationSheetSuppress(setSheetSuppressed);
+    return () => {
+      registerNotificationSheetOpener(null);
+      registerNotificationSheetCloser(null);
+      registerNotificationSheetSuppress(null);
+    };
+  }, [closeNotificationSheet, openNotificationSheet]);
+
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (followRequestsExpanded) {
+        setFollowRequestsExpanded(false);
+        return true;
+      }
+      closeNotificationSheet();
+      return true;
+    });
+    return () => sub.remove();
+  }, [closeNotificationSheet, followRequestsExpanded, sheetOpen]);
 
   const onRespond = async (entry: any, action: "accept" | "decline") => {
     if (action === "accept") {
@@ -550,12 +595,39 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       const postId = Number(entry?.postId);
       if (!Number.isFinite(postId) || postId <= 0) return;
       bumpLastSeenFromEntry(entry);
-      setSheetOpen(false);
-      navigateToJoinLive();
       void (async () => {
         try {
           const { post } = await fetchHomePost(token ?? null, postId);
-          queueOpenSharedPostViewer(post, true);
+          // Prefer opening inside a real feed so the user can keep scrolling more reels/posts.
+          let feed: typeof post[] = [];
+          try {
+            const page = await fetchHomePostsPage(token ?? null, { limit: 40 });
+            feed = (page.posts || []).filter(
+              (p) =>
+                !!String(p.videoUrl || "").trim() ||
+                !!String(p.imageUrl || "").trim() ||
+                !!(p.imageUrls && p.imageUrls.length)
+            );
+          } catch {
+            feed = [];
+          }
+          // Keep notifications mounted under the reel; only hide visually so Back is instant.
+          suppressNotificationSheet(true);
+          const returnOpts = { returnToNotifications: true as const };
+          if (feed.length > 0) {
+            const ix = feed.findIndex((p) => Number(p.id) === Number(post.id));
+            if (ix >= 0) {
+              queueOpenSharedPostsViewer(feed, ix, returnOpts);
+            } else {
+              queueOpenSharedPostsViewer([post, ...feed], 0, returnOpts);
+            }
+          } else {
+            queueOpenSharedPostViewer(post, true, returnOpts);
+          }
+          // Home's Modal portals above the app — only navigate if Home never mounted (lazy tab).
+          if (!hasSharedPostViewerListener()) {
+            navigateToJoinLive();
+          }
         } catch {
           // Post may have been removed.
         }
@@ -731,7 +803,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     if (!Number.isFinite(postId) || postId <= 0) return;
     if (String(entry?.postLiveStatus || "").toLowerCase() === "ended" || entry?.postLiveEndedAt) return;
     queueJoinLive(postId);
-    setSheetOpen(false);
+    closeNotificationSheet();
     navigateToJoinLive();
   };
 
@@ -750,7 +822,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       scheduledLiveId: Number.isFinite(scheduleId) && scheduleId > 0 ? scheduleId : undefined,
       autoStartLive: true
     });
-    setSheetOpen(false);
+    closeNotificationSheet();
     navigateToJoinLive();
   };
 
@@ -765,8 +837,19 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     return meta;
   };
 
-  const isLivePostEnded = (n: any) =>
-    String(n?.postLiveStatus || "").toLowerCase() === "ended" || !!String(n?.postLiveEndedAt || "").trim();
+  const MAX_LIVE_DURATION_MS = 12 * 60 * 60 * 1000;
+
+  const isLivePostEnded = (n: any) => {
+    if (String(n?.postLiveStatus || "").toLowerCase() === "ended" || !!String(n?.postLiveEndedAt || "").trim()) {
+      return true;
+    }
+    // Match backend/client max live age so abandoned streams don't keep a "Join live" CTA.
+    const started = Date.parse(String(n?.createdAt || ""));
+    if (Number.isFinite(started) && Date.now() - started > MAX_LIVE_DURATION_MS) {
+      return true;
+    }
+    return false;
+  };
 
   const postActivityLabel = (n: any) => {
     const kind = n.postIsReel ? t("postKindReel") : t("postKindPost");
@@ -923,7 +1006,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       const actorName = String(entry?.actorName || "").trim() || "User";
       if (!actorId && !actorName) return;
       bumpLastSeenFromEntry(entry);
-      setSheetOpen(false);
+      closeNotificationSheet();
       InteractionManager.runAfterInteractions(() => {
         if (actorId && actorId === Number(user?.id)) {
           navigateToMyProfile();
@@ -936,7 +1019,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         });
       });
     },
-    [actorAvatarUri, bumpLastSeenFromEntry, user?.id]
+    [actorAvatarUri, bumpLastSeenFromEntry, closeNotificationSheet, user?.id]
   );
 
   const actorDisplayName = useCallback((entry: any) => String(entry?.actorName || "User"), []);
@@ -1002,18 +1085,23 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 
   return (
     <NotificationPanelContext.Provider value={value}>
-      {children}
-      <Modal visible={sheetOpen} animationType="none" onRequestClose={closeNotificationSheet}>
-        <View style={styles.overlay}>
+      <View style={styles.root}>
+        {children}
+        {sheetOpen ? (
           <View
-            style={[
-              styles.sheet,
-              {
-                paddingTop: topChromeInset + 4,
-                paddingBottom: Math.max(insets.bottom, 12)
-              }
-            ]}
+            style={[styles.portal, sheetSuppressed ? styles.portalSuppressed : null]}
+            pointerEvents={sheetSuppressed ? "none" : "auto"}
           >
+            <View style={styles.overlay}>
+              <View
+                style={[
+                  styles.sheet,
+                  {
+                    paddingTop: topChromeInset + 4,
+                    paddingBottom: Math.max(insets.bottom, 12)
+                  }
+                ]}
+              >
             <View style={styles.sheetHeader}>
               <Pressable
                 style={styles.headerBackBtn}
@@ -1266,17 +1354,33 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                 </View>
               ))}
             </ScrollView>
+              </View>
+            </View>
           </View>
-        </View>
-      </Modal>
+        ) : null}
+      </View>
     </NotificationPanelContext.Provider>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "#262626" },
+  root: { flex: 1 },
+  /** Full-screen overlay — avoids Android Modal dialog enter animation (half-screen flash). */
+  portal: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+    elevation: 1000
+  },
+  portalSuppressed: {
+    opacity: 0
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#262626"
+  },
   sheet: {
     flex: 1,
+    width: "100%",
     backgroundColor: "#262626",
     paddingHorizontal: 14,
     borderTopWidth: 0
@@ -1285,7 +1389,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 8
+    minHeight: 44,
+    paddingVertical: 4
   },
   headerBackBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
   sheetTitle: { color: "#ffffff", fontWeight: "700", fontSize: 20, letterSpacing: 0.1, flex: 1, textAlign: "center" },

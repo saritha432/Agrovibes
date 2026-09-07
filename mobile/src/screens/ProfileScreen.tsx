@@ -869,6 +869,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             backgroundColor={profileTileBackground(index)}
             previewUri={previewUriByPostId[post.id]}
             isPlaying={profilePlayingPostId === post.id}
+            suspendVideo={!!profileReelViewer}
             onPress={() => openProfilePostsViewer(post)}
             onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
             onVideoError={markProfileVideoFailed}
@@ -910,6 +911,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       openProfilePostsViewer,
       previewUriByPostId,
       profilePlayingPostId,
+      profileReelViewer,
       markProfileVideoFailed,
       reelTileHeight
     ]

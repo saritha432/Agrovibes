@@ -1500,6 +1500,7 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS report_count INT NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS feed_hidden_at TIMESTAMPTZ`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS hls_url TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS playback_url TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
@@ -1523,6 +1524,7 @@ async function ensureMediaHlsJobsTable() {
       completed_at TIMESTAMPTZ
     )
   `);
+  await query(`ALTER TABLE media_hls_jobs ADD COLUMN IF NOT EXISTS playback_url TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS media_hls_jobs_status_idx ON media_hls_jobs (status)`);
   await query(`CREATE INDEX IF NOT EXISTS media_hls_jobs_video_url_idx ON media_hls_jobs (video_url)`);
 }
@@ -1863,6 +1865,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       ${HOME_POST_RECENT_RESHARERS_SQL},
       p.video_url AS "videoUrl",
       p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
       p.image_url AS "imageUrl",
       p.image_urls AS "image_urls",
       p.thumbnail_url AS "thumbnailUrl",
@@ -1967,6 +1970,33 @@ async function deleteLiveKitRoom(roomName) {
   }
 }
 
+/** Hard cap so abandoned lives (app kill / missed end-live) stop showing as LIVE forever. */
+const MAX_LIVE_DURATION_MS = 12 * 60 * 60 * 1000;
+
+function liveStartedAtMs(post) {
+  const raw = post?.liveStartedAt || post?.createdAt || "";
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function isLivePastMaxAge(post) {
+  const started = liveStartedAtMs(post);
+  return started > 0 && Date.now() - started > MAX_LIVE_DURATION_MS;
+}
+
+async function persistLivePostEnded(postId) {
+  const id = Number(postId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  await query(
+    `
+    UPDATE home_posts
+    SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+    WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
+    `,
+    [id]
+  );
+}
+
 async function enrichHomePostsLiveState(posts) {
   const out = [];
   for (const post of posts) {
@@ -1984,40 +2014,41 @@ async function enrichHomePostsLiveState(posts) {
       if (post.liveStatus !== "active") {
         post.liveStatus = "ended";
         post.liveViewerCount = 0;
+      } else if (isLivePastMaxAge(post)) {
+        // Rare: DB still "active" but VOD/thumb already present and stream is ancient.
+        post.liveStatus = "ended";
+        post.liveViewerCount = 0;
+        await persistLivePostEnded(post.id);
       }
       out.push(post);
       continue;
     }
-    // If DB says active, trust it — skip LiveKit check entirely.
-    // The end-live API is the single source of truth for stopping.
-    if (dbActive) {
-      post.liveStatus = "active";
-      post.liveViewerCount = Number(post.liveViewerCount || 0);
-      post.liveStartedAt = post.liveStartedAt || post.createdAt;
+    // Abandoned streams: host never hit end-live (crash / force-close) — expire by age.
+    if (isLivePastMaxAge(post)) {
+      post.liveStatus = "ended";
+      post.liveViewerCount = 0;
+      await persistLivePostEnded(post.id);
       out.push(post);
       continue;
     }
+    // DB "active" is not enough — verify the LiveKit room still exists.
+    // Previously we trusted DB forever, which left 9-day-old LIVE rings in the story bar.
     const roomName = post.liveRoomName || `agrovibes-live-${post.id}`;
     const info = await fetchLiveRoomInfo(roomName);
     if (info === null) {
-      post.liveStatus = post.liveStatus || "active";
-      post.liveViewerCount = Number(post.liveViewerCount || 0);
+      // LiveKit unreachable: keep active only while within max age (checked above).
+      post.liveStatus = dbActive || !post.liveStatus ? "active" : post.liveStatus;
+      if (post.liveStatus === "active") {
+        post.liveViewerCount = Number(post.liveViewerCount || 0);
+        post.liveStartedAt = post.liveStartedAt || post.createdAt;
+      }
       out.push(post);
       continue;
     }
     if (info.ended) {
       post.liveStatus = "ended";
       post.liveViewerCount = 0;
-      if (Number.isFinite(Number(post.id)) && Number(post.id) > 0) {
-        await query(
-          `
-          UPDATE home_posts
-          SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
-          WHERE id = $1 AND COALESCE(live_status, '') <> 'ended'
-          `,
-          [post.id]
-        );
-      }
+      await persistLivePostEnded(post.id);
     } else {
       post.liveStatus = "active";
       post.liveViewerCount = info.viewerCount;
@@ -4607,6 +4638,30 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         r.type === "live_reminder" ||
         r.type === "live_host_reminder"
     );
+    // Expire abandoned live_start posts so notifications don't keep showing "Join live".
+    const staleLivePostIds = [];
+    for (const row of liveStarts) {
+      if (row.type !== "live_start") continue;
+      const status = String(row.postLiveStatus || "").toLowerCase();
+      if (status === "ended" || row.postLiveEndedAt) continue;
+      const started = Date.parse(String(row.createdAt || ""));
+      const postId = Number(row.postId);
+      if (!Number.isFinite(started) || Date.now() - started <= MAX_LIVE_DURATION_MS) continue;
+      row.postLiveStatus = "ended";
+      if (!row.postLiveEndedAt) row.postLiveEndedAt = new Date().toISOString();
+      if (Number.isFinite(postId) && postId > 0) staleLivePostIds.push(postId);
+    }
+    if (staleLivePostIds.length) {
+      await query(
+        `
+        UPDATE home_posts
+        SET live_status = 'ended', live_ended_at = COALESCE(live_ended_at, NOW())
+        WHERE id = ANY($1::int[]) AND COALESCE(live_status, '') <> 'ended'
+        `,
+        [staleLivePostIds]
+      );
+      await cacheIncr("home:posts:gen");
+    }
     const unreadCount = result.rows.filter((r) => {
       if (r.isRead) return false;
       if (r.type === "follow_request") return r.followStatus === "pending";
@@ -5997,6 +6052,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         hls_url AS "hlsUrl",
+        playback_url AS "playbackUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6110,6 +6166,7 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         hls_url AS "hlsUrl",
+        playback_url AS "playbackUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6227,6 +6284,7 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         hls_url AS "hlsUrl",
+        playback_url AS "playbackUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6662,6 +6720,7 @@ router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => 
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7015,6 +7074,7 @@ router.get("/v1/admin/reports/posts", authRequired, async (req, res) => {
         p.caption,
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.thumbnail_url AS "thumbnailUrl",
         p.report_count AS "reportCount",
@@ -7085,6 +7145,7 @@ router.get("/v1/admin/reports/posts/:postId", authRequired, async (req, res) => 
         p.caption,
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.thumbnail_url AS "thumbnailUrl",
         p.report_count AS "reportCount",
@@ -7360,6 +7421,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7437,6 +7499,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7499,6 +7562,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7558,6 +7622,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7662,6 +7727,7 @@ router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7789,6 +7855,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7962,6 +8029,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -8056,6 +8124,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -9080,6 +9149,7 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
         p.caption,
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",

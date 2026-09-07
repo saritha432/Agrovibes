@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
+import { AppVideo } from "../../components/AppVideo";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { Suspense } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, TextStyle, View } from "react-native";
@@ -128,14 +128,14 @@ export function LiveStreamViewerModal({ post, onClose, canDeletePost, onDeletePo
             </Pressable>
           ) : null}
           {post.videoUrl ? (
-            <Video
-              source={{ uri: videoPlaybackUrl(post.videoUrl, post.hlsUrl) }}
+            <AppVideo
+              source={videoPlaybackUrl(post.videoUrl, post.hlsUrl)}
               style={styles.viewerVideo}
-              resizeMode={ResizeMode.CONTAIN}
+              contentFit="contain"
               shouldPlay
               isLooping={false}
               isMuted={false}
-              useNativeControls
+              nativeControls
             />
           ) : livePosterUri(post) ? (
             <Image source={{ uri: livePosterUri(post)! }} style={styles.viewerVideo} resizeMode="contain" />

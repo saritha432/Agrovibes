@@ -57,6 +57,7 @@ import {
   type LiveComment,
   type LiveViewer
 } from "./liveRoomData";
+import { HostContinueLivePopup, useHostContinueLivePrompt } from "./hostContinueLivePrompt";
 import { setActiveHostRoomName } from "./liveSessionState";
 
 type LiveCameraFacing = "front" | "back";
@@ -600,6 +601,15 @@ function LiveRoomContent({
     handleLiveEnded();
   }, [handleLiveEnded, isHost, onLiveEnded, postId, room, savingRecording, token]);
 
+  const handleEndLiveRef = React.useRef(handleEndLive);
+  handleEndLiveRef.current = handleEndLive;
+  const continuePrompt = useHostContinueLivePrompt(
+    isHost && !liveEnded && !savingRecording,
+    () => {
+      void handleEndLiveRef.current();
+    }
+  );
+
   const cameraRefs = tracks.filter((track): track is TrackReference => isTrackReference(track));
   void mediaTick;
   const cameraTrack = pickLiveCameraTrack(cameraRefs, isHost, localSid);
@@ -746,6 +756,16 @@ function LiveRoomContent({
           </Pressable>
         </Pressable>
       </Modal>
+
+      <HostContinueLivePopup
+        visible={continuePrompt.visible}
+        secondsLeft={continuePrompt.secondsLeft}
+        onContinue={continuePrompt.onContinue}
+        onEndLive={() => {
+          continuePrompt.hidePrompt();
+          void handleEndLive();
+        }}
+      />
     </View>
   );
 }

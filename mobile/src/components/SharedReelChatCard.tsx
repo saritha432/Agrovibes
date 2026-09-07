@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { AppVideo } from "./AppVideo";
 import type { AppLanguage } from "../localization/translations";
 import { formatDisplayName, sharedReelCardCaption } from "../localization/feedDisplay";
 import type { HomePost } from "../services/api";
@@ -56,14 +56,14 @@ export function SharedReelChatCard({ post, onPress, onLongPress, language, t }: 
         {previewUri ? (
           <Image source={{ uri: previewUri }} style={styles.media} resizeMode="cover" />
         ) : videoUrl ? (
-          <Video
-            source={{ uri: videoPlaybackUrl(videoUrl) }}
+          <AppVideo
+            source={videoPlaybackUrl(videoUrl)}
             style={styles.media}
-            resizeMode={ResizeMode.COVER}
+            contentFit="cover"
             shouldPlay={false}
             isMuted
             isLooping={false}
-            useNativeControls={false}
+            nativeControls={false}
           />
         ) : (
           <View style={[styles.media, styles.placeholder]}>
