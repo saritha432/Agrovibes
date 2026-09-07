@@ -479,7 +479,6 @@ export function PostsReelViewerModal({
     ignoreViewabilityUntilRef.current = Date.now() + 400;
     viewerSurfaceReadyRef.current = false;
     setViewerSurfaceReady(false);
-    setViewerViewport({ width: 0, height: 0 });
     setViewerSession((s) => s + 1);
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -489,7 +488,7 @@ export function PostsReelViewerModal({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [visible, initialIndex]);
+  }, [visible, initialIndex, posts]);
 
   const armModalPlayer = useCallback(() => {
     setModalPlayerReady(true);
@@ -955,36 +954,40 @@ export function PostsReelViewerModal({
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
-          {post.videoUrl && mountVideo ? (
+          {post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <ContainedAppVideo
-                ref={(r) => {
-                  reelVideoHandlesRef.current[post.id] = r;
-                }}
-                uri={post.videoUrl}
-                hlsUrl={post.hlsUrl}
-                playbackUrl={post.playbackUrl}
-                shouldPlay={shouldPlayVideo}
-                preloadOnly={!isActiveVideo}
-                playbackKey={`rv-${viewerSession}-${post.id}-s`}
-                containerWidth={reelContentWidth}
-                containerHeight={mediaContentH}
-                fit="auto"
-                posterUri={reelPoster || undefined}
-                isLooping
-                isMuted={isReelMuted || !isActiveVideo}
-                onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
-              />
-              {reelUserPaused ? (
+              {mountVideo ? (
+                <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+                  <ContainedAppVideo
+                    ref={(r) => {
+                      reelVideoHandlesRef.current[post.id] = r;
+                    }}
+                    uri={post.videoUrl}
+                    hlsUrl={post.hlsUrl}
+                    playbackUrl={post.playbackUrl}
+                    shouldPlay={shouldPlayVideo}
+                    preloadOnly={!isActiveVideo}
+                    playbackKey={`rv-${viewerSession}-${post.id}-s`}
+                    containerWidth={reelContentWidth}
+                    containerHeight={mediaContentH}
+                    fit="auto"
+                    posterUri={reelPoster || undefined}
+                    isLooping
+                    isMuted={isReelMuted || !isActiveVideo}
+                    onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
+                  />
+                </View>
+              ) : reelPoster ? (
+                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+              ) : (
+                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+              )}
+              {reelUserPaused && isActiveVideo ? (
                 <View style={styles.reelPauseOverlay} pointerEvents="none">
                   <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
                   <Ionicons name="play" size={48} color="#fff" />
                 </View>
               ) : null}
-            </Pressable>
-          ) : post.videoUrl && reelPoster ? (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
             </Pressable>
           ) : isCarousel ? (
             <ScrollView
@@ -1014,7 +1017,7 @@ export function PostsReelViewerModal({
             </ScrollView>
           ) : reelPoster ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="contain" />
+              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
             </Pressable>
           ) : (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
@@ -1252,7 +1255,10 @@ export function PostsReelViewerModal({
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
             if (!(width > 0 && height > 0)) return;
-            setViewerViewport((prev) => (prev.height > 0 ? prev : { width, height }));
+            setViewerViewport((prev) => {
+              if (Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1) return prev;
+              return { width, height };
+            });
           }}
         >
           <View style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset, zIndex: 6 }]} pointerEvents="box-none">
@@ -1270,7 +1276,7 @@ export function PostsReelViewerModal({
               </View>
             </View>
           ) : null}
-          {viewerPosts.length > 0 && viewerViewport.height > 0 ? (
+          {viewerPosts.length > 0 && viewerPageH > 0 ? (
             <FlatList
               key={`profile-reel-viewer-${viewerSession}-${safeInitialIndex}`}
               ref={(r) => {
@@ -1282,7 +1288,7 @@ export function PostsReelViewerModal({
               renderItem={renderReelPage}
               pagingEnabled
               showsVerticalScrollIndicator={false}
-              snapToInterval={viewerViewport.height}
+              snapToInterval={viewerPageH}
               snapToAlignment="start"
               decelerationRate="fast"
               disableIntervalMomentum
@@ -1291,12 +1297,12 @@ export function PostsReelViewerModal({
               }
               contentOffset={
                 Platform.OS === "ios" && safeInitialIndex > 0
-                  ? { x: 0, y: safeInitialIndex * viewerViewport.height }
+                  ? { x: 0, y: safeInitialIndex * viewerPageH }
                   : undefined
               }
               getItemLayout={(_data, idx) => ({
-                length: viewerViewport.height,
-                offset: viewerViewport.height * idx,
+                length: viewerPageH,
+                offset: viewerPageH * idx,
                 index: idx
               })}
               onLayout={() => {
@@ -1309,7 +1315,7 @@ export function PostsReelViewerModal({
               onMomentumScrollEnd={(e) => onReelViewerMomentumEnd(e.nativeEvent.contentOffset.y)}
               onScrollToIndexFailed={(info) => {
                 reelViewerListRef.current?.scrollToOffset({
-                  offset: viewerViewport.height * info.index,
+                  offset: viewerPageH * info.index,
                   animated: false
                 });
               }}

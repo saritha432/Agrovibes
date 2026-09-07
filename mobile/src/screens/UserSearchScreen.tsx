@@ -163,16 +163,56 @@ function accountSecondaryLabel(person: SearchUser, language: AppLanguage, t: (ke
   if (username) return formatDisplayName(person.name, language, t);
   return "Farmer";
 }
-function dedupeUsers(list: SearchUser[]) {
-  const seen = new Set<string>();
-  const out: SearchUser[] = [];
-  for (const person of list) {
+
+/** Merge duplicate rows; earlier lists win for follow status (API search should be first). */
+function mergeSearchUsers(...lists: SearchUser[][]): SearchUser[] {
+  const byKey = new Map<string, SearchUser>();
+  const nameToKey = new Map<string, string>();
+
+  const resolveKey = (person: SearchUser) => {
     const key = userRowKey(person);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(person);
+    const nameKey = normalizeName(person.name);
+    if (byKey.has(key)) return key;
+    if (nameKey && nameToKey.has(nameKey)) return nameToKey.get(nameKey)!;
+    return key;
+  };
+
+  const upsert = (person: SearchUser) => {
+    const key = resolveKey(person);
+    if (!key) return;
+    const nameKey = normalizeName(person.name);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, person);
+      if (nameKey) nameToKey.set(nameKey, key);
+      return;
+    }
+    const merged: SearchUser = {
+      ...existing,
+      ...person,
+      id: person.id ?? existing.id,
+      key: person.key || existing.key,
+      name: person.name || existing.name,
+      username: person.username || existing.username,
+      avatarUrl: person.avatarUrl || existing.avatarUrl,
+      viewerStatus: existing.viewerStatus ?? person.viewerStatus,
+      reverseStatus: existing.reverseStatus ?? person.reverseStatus
+    };
+    const mergedKey = userRowKey(merged);
+    if (mergedKey !== key) {
+      byKey.delete(key);
+      byKey.set(mergedKey, merged);
+      if (nameKey) nameToKey.set(nameKey, mergedKey);
+    } else {
+      byKey.set(key, merged);
+      if (nameKey) nameToKey.set(nameKey, key);
+    }
+  };
+
+  for (const list of lists) {
+    for (const person of list) upsert(person);
   }
-  return out;
+  return [...byKey.values()];
 }
 
 function HighlightedQueryText({
@@ -306,12 +346,28 @@ export function UserSearchScreen() {
 
         const { followers, following } = await getLocalFollowNetworkByIdentity(identity);
         const q = normalizeName(needle);
-        for (const person of [...following, ...followers]) {
+        for (const person of following) {
           const key = normalizeName(person.name);
           if (!key || key === selfName || seen.has(key)) continue;
           if (!key.includes(q)) continue;
           seen.add(key);
-          list.push({ name: person.name, key: person.key });
+          list.push({
+            name: person.name,
+            key: person.key,
+            viewerStatus: person.viewerStatus ?? "accepted"
+          });
+        }
+        for (const person of followers) {
+          const key = normalizeName(person.name);
+          if (!key || key === selfName || seen.has(key)) continue;
+          if (!key.includes(q)) continue;
+          seen.add(key);
+          list.push({
+            name: person.name,
+            key: person.key,
+            viewerStatus: person.viewerStatus,
+            reverseStatus: "accepted"
+          });
         }
         setUsers(sortUsersForSearch(list, needle));
       } catch {
@@ -475,11 +531,12 @@ export function UserSearchScreen() {
 
   const searchResults = useMemo(() => {
     if (!trimmedQuery) return [];
-    const localMatches = dedupeUsers([...recentUsers, ...userDirectory, ...suggestedUsers, ...exploreAuthors]).filter(
-      (person) => personMatchesQuery(person, trimmedQuery)
+    const localMatches = [...recentUsers, ...userDirectory, ...suggestedUsers, ...exploreAuthors].filter((person) =>
+      personMatchesQuery(person, trimmedQuery)
     );
     const remoteMatches = users.filter((person) => personMatchesQuery(person, trimmedQuery));
-    return sortUsersForSearch(dedupeUsers([...localMatches, ...remoteMatches]), trimmedQuery);
+    // API results first so viewerStatus (Following / Requested) is not overwritten by local cache rows.
+    return sortUsersForSearch(mergeSearchUsers(remoteMatches, localMatches), trimmedQuery);
   }, [exploreAuthors, recentUsers, suggestedUsers, trimmedQuery, userDirectory, users]);
 
   useEffect(() => {
@@ -543,6 +600,7 @@ export function UserSearchScreen() {
         setUsers(patch);
         setSuggestedUsers(patch);
         setUserDirectory(patch);
+        setRecentUsers(patch);
       } catch {
         /* ignore */
       } finally {

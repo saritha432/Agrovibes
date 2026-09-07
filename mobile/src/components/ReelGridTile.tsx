@@ -1,11 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo } from "react";
+import React from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import type { HomePost } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
-import { AppVideo } from "./AppVideo";
+import { ContainedAppVideo } from "./ContainedAppVideo";
 import { reelGridStillUri } from "../utils/reelGrid";
-import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 
 type ReelGridTileProps = {
   post: HomePost;
@@ -14,6 +13,8 @@ type ReelGridTileProps = {
   backgroundColor: string;
   previewUri?: string | null;
   isPlaying?: boolean;
+  /** When true, never mount inline video (e.g. fullscreen reel viewer is open). */
+  suspendVideo?: boolean;
   onPress: () => void;
   onLongPress?: () => void;
   onVideoError?: (postId: number) => void;
@@ -26,17 +27,14 @@ export function ReelGridTile({
   backgroundColor,
   previewUri,
   isPlaying = false,
+  suspendVideo = false,
   onPress,
   onLongPress,
   onVideoError
 }: ReelGridTileProps) {
   const stillUri = reelGridStillUri(post) || previewUri || null;
-  const videoUri = post.videoUrl
-    ? videoPlaybackUrl(post.videoUrl, post.hlsUrl, post.playbackUrl)
-    : null;
-  const isVideo = !!videoUri;
-  const showPlayingVideo = isPlaying && isVideo;
-  const playbackUri = useMemo(() => videoUri, [videoUri]);
+  const isVideo = !!String(post.videoUrl || "").trim();
+  const showPlayingVideo = !suspendVideo && isPlaying && isVideo;
 
   return (
     <Pressable
@@ -44,31 +42,27 @@ export function ReelGridTile({
       onPress={onPress}
       onLongPress={onLongPress}
     >
-      {showPlayingVideo && playbackUri ? (
-        <AppVideo
-          source={playbackUri}
-          style={styles.media}
-          contentFit="cover"
+      {showPlayingVideo ? (
+        <ContainedAppVideo
+          uri={post.videoUrl!}
+          hlsUrl={post.hlsUrl}
+          playbackUrl={post.playbackUrl}
+          containerWidth={width}
+          containerHeight={height}
+          fit="cover"
+          shouldPlay
           isLooping
           isMuted
-          shouldPlay
-          nativeControls={false}
-          onPlaybackStatusUpdate={(status) => {
+          posterUri={stillUri || undefined}
+          playbackKey={`grid-${post.id}`}
+          onStatusUpdate={(status) => {
             if (!status.isLoaded && status.error) onVideoError?.(post.id);
           }}
         />
       ) : stillUri ? (
         <Image source={{ uri: stillUri }} style={styles.media} resizeMode="cover" />
-      ) : playbackUri ? (
-        <AppVideo
-          source={playbackUri}
-          style={styles.media}
-          contentFit="cover"
-          shouldPlay
-          isMuted
-          isLooping
-          nativeControls={false}
-        />
+      ) : isVideo && !suspendVideo ? (
+        <View style={[styles.media, styles.placeholder, { backgroundColor }]} />
       ) : (
         <View style={[styles.media, styles.placeholder, { backgroundColor }]} />
       )}

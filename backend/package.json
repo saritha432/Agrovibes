@@ -10,7 +10,9 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "cleanup:live-storage": "node scripts/delete-supabase-live-recordings.js",
-    "cleanup:live-storage:all": "node scripts/delete-supabase-live-recordings.js --include-live-post-videos"
+    "cleanup:live-storage:all": "node scripts/delete-supabase-live-recordings.js --include-live-post-videos",
+    "hls:requeue": "node scripts/requeue-hls-transcode.js",
+    "hls:requeue:dry-run": "node scripts/requeue-hls-transcode.js --dry-run"
   },
   "dependencies": {
     "@aws-sdk/client-mediaconvert": "^3.1069.0",

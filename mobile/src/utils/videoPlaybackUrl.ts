@@ -27,25 +27,55 @@ function pushUnique(list: string[], url: string | undefined | null) {
   list.push(clean);
 }
 
+/** Derive MediaConvert outputs from the original S3/CloudFront upload URL when API rows are stale. */
+export function inferTranscodedUrlsFromVideoUrl(videoUrl: string | undefined | null): {
+  playbackUrl?: string;
+  hlsUrl?: string;
+} {
+  const uri = normalizeVideoPlaybackUri(videoUrl);
+  const match = uri.match(/^(https?:\/\/[^/]+)\/agrovibes\/videos\/([^/?#]+)\.(mp4|mov|m4v|webm)$/i);
+  if (!match) return {};
+  const origin = match[1];
+  const stem = match[2];
+  return {
+    playbackUrl: `${origin}/agrovibes/playback/${stem}.mp4`,
+    hlsUrl: `${origin}/agrovibes/hls/${stem}/master.m3u8`
+  };
+}
+
+function isRawUploadUrl(url: string | undefined | null) {
+  return /\/agrovibes\/videos\//i.test(normalizeVideoPlaybackUri(url));
+}
+
 /**
  * Instagram-style start order:
  * 1. Fast-start 480p MP4 (moov at front) — first frame after a few hundred KB
- * 2. Native HLS — adaptive 240p+ when the small MP4 is not ready yet
- * 3. Original upload MP4 — last resort (often large)
- * Web skips HLS (Chrome has no native HLS in the expo-av video tag).
+ * 2. Native HLS — adaptive 240p–720p (Main profile, device-friendly)
+ * 3. Original upload MP4 — last resort (often 1080p High Profile; can fail on Android HW decoder)
+ *
+ * On Android, skip the original when HLS exists — Qualcomm MediaCodec often fails on 1080p uploads.
  */
 export function videoPlaybackSources(
   url: string | undefined | null,
   hlsUrl?: string | undefined | null,
   playbackUrl?: string | undefined | null
 ): string[] {
+  const inferred = inferTranscodedUrlsFromVideoUrl(url);
   const sources: string[] = [];
   pushUnique(sources, playbackUrl);
-  const hls = normalizeVideoPlaybackUri(hlsUrl);
-  if (Platform.OS !== "web" && hls && /\.m3u8(\?|#|$)/i.test(hls)) {
+  pushUnique(sources, inferred.playbackUrl);
+  const hls = normalizeVideoPlaybackUri(hlsUrl) || normalizeVideoPlaybackUri(inferred.hlsUrl);
+  const hasHls = Platform.OS !== "web" && !!hls && /\.m3u8(\?|#|$)/i.test(hls);
+  if (hasHls) {
     pushUnique(sources, hls);
   }
-  pushUnique(sources, url);
+  // On Android, raw 60fps High-Profile uploads often crash the HW decoder — only use them when
+  // there is no transcoded URL to try (playback/HLS from API or inferred CloudFront paths).
+  const androidSkipRaw =
+    Platform.OS === "android" && isRawUploadUrl(url) && sources.length > 0;
+  if (!androidSkipRaw) {
+    pushUnique(sources, url);
+  }
   return sources;
 }
 
@@ -89,13 +119,19 @@ export function isTransientVideoPlaybackError(error: unknown): boolean {
   );
 }
 
+/** ExoPlayer hardware H.264 decoder failed (common on 1080p High Profile uploads). */
+export function isHardwareDecoderError(error: unknown): boolean {
+  const msg = String(error ?? "");
+  return /MediaCodec|DecoderInitialization|Decoder init failed|c2\.qti\.avc|OMX\.|avc1\.|HEVC|h264/i.test(msg);
+}
+
 export function nextVideoErrorAction(
   error: unknown,
   sourceIndex: number,
   sourceCount: number
 ): "ignore" | "next-source" {
-  if (isTransientVideoPlaybackError(error)) return "ignore";
+  // Try every fallback URL before giving up (480p MP4 → HLS → original).
   if (sourceIndex + 1 < sourceCount) return "next-source";
-  // Keep the same native player mounted — remounting during load is what flickers.
+  if (isTransientVideoPlaybackError(error)) return "ignore";
   return "ignore";
 }

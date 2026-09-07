@@ -2,9 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, StyleSheet, Text, View, type ImageStyle, type ViewStyle } from "react-native";
 import { FeedImage } from "./FeedImage";
 import { AppVideo, type AppVideoHandle } from "./AppVideo";
-import { pickReelVideoFit } from "../utils/reelGrid";
+import { computeReelVideoFrame } from "../utils/reelGrid";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
-import { nextVideoErrorAction, videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import {
+  isHardwareDecoderError,
+  nextVideoErrorAction,
+  normalizeVideoPlaybackUri,
+  videoPlaybackSources
+} from "../utils/videoPlaybackUrl";
 import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
 
 export type ContainedAppVideoHandle = {
@@ -49,33 +54,58 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
     ref
   ) {
     const isWeb = Platform.OS === "web";
-    const effectiveFit = useMemo((): "contain" | "cover" => {
-      if (fit === "cover" || fit === "contain") return fit;
-      return pickReelVideoFit(9, 16, containerWidth, containerHeight);
-    }, [fit, containerWidth, containerHeight]);
-    const isCover = effectiveFit === "cover";
+    const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
     const [playbackBlocked, setPlaybackBlocked] = useState(false);
     const videoRef = useRef<AppVideoHandle | null>(null);
+    const sourceIndexRef = useRef(0);
     const durationRef = useRef(0);
     const playbackSources = useMemo(
       () => videoPlaybackSources(uri, hlsUrl, playbackUrl),
       [uri, hlsUrl, playbackUrl]
     );
     const [sourceIndex, setSourceIndex] = useState(0);
-    const activeUri = useMemo(
-      () => videoPlaybackUrl(playbackSources[sourceIndex] ?? uri),
-      [playbackSources, sourceIndex, uri]
-    );
+    sourceIndexRef.current = sourceIndex;
+
+    const activeUri = useMemo(() => {
+      const picked = playbackSources[sourceIndex] ?? uri;
+      return normalizeVideoPlaybackUri(picked);
+    }, [playbackSources, sourceIndex, uri]);
+
+    const videoFrame = useMemo(() => {
+      if (fit === "cover") {
+        return { width: containerWidth, height: containerHeight };
+      }
+      if (fit === "contain") {
+        const vw = videoSize.width > 0 ? videoSize.width : 9;
+        const vh = videoSize.height > 0 ? videoSize.height : 16;
+        const aspect = vw / vh;
+        const cw = Math.max(1, containerWidth);
+        const ch = Math.max(1, containerHeight);
+        const heightAtFullWidth = cw / aspect;
+        if (heightAtFullWidth <= ch) {
+          return { width: cw, height: heightAtFullWidth };
+        }
+        return { width: ch * aspect, height: ch };
+      }
+      const vw = videoSize.width > 0 ? videoSize.width : 9;
+      const vh = videoSize.height > 0 ? videoSize.height : 16;
+      return computeReelVideoFrame(vw, vh, containerWidth, containerHeight);
+    }, [containerHeight, containerWidth, fit, videoSize.height, videoSize.width]);
+
+    const contentFit = fit === "contain" ? "contain" : "cover";
 
     useEffect(() => {
       setPlaybackBlocked(false);
       setSourceIndex(0);
-    }, [uri, playbackKey]);
+      sourceIndexRef.current = 0;
+      setVideoSize({ width: 0, height: 0 });
+    }, [uri, hlsUrl, playbackUrl, playbackKey]);
 
-    const videoOuterStyle: ViewStyle = useMemo(
-      () => (isWeb ? { width: "100%", height: "100%" } : StyleSheet.absoluteFillObject),
-      [isWeb]
-    );
+    useEffect(() => {
+      if (playbackSources.length === 0) {
+        setPlaybackBlocked(true);
+      }
+    }, [playbackSources.length]);
 
     React.useImperativeHandle(
       ref,
@@ -111,8 +141,8 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
           {posterUri ? (
             <FeedImage
               source={{ uri: posterUri }}
-              style={{ width: containerWidth, height: containerHeight } as ImageStyle}
-              contentFit="contain"
+              style={{ width: videoFrame.width, height: videoFrame.height } as ImageStyle}
+              contentFit="cover"
               recyclingKey={posterUri}
             />
           ) : null}
@@ -123,6 +153,8 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
       );
     }
 
+    const videoStyle: ViewStyle = { width: videoFrame.width, height: videoFrame.height };
+
     return (
       <View
         collapsable={false}
@@ -130,11 +162,21 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
           width: containerWidth,
           height: containerHeight,
           overflow: "hidden",
-          backgroundColor: "#000"
+          backgroundColor: "#000",
+          justifyContent: "center",
+          alignItems: "center"
         }}
       >
+        {posterUri ? (
+          <FeedImage
+            source={{ uri: posterUri }}
+            style={{ width: videoFrame.width, height: videoFrame.height, position: "absolute" } as ImageStyle}
+            contentFit="cover"
+            recyclingKey={posterUri}
+          />
+        ) : null}
         <AppVideo
-          key={playbackKey || uri}
+          key={`${playbackKey || uri}-${sourceIndex}`}
           ref={(r) => {
             videoRef.current = r;
           }}
@@ -145,14 +187,19 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
           warmBuffer={preloadOnly}
           nativeControls={useNativeControls}
           staysActiveInBackground
-          contentFit={isCover ? "cover" : "contain"}
-          style={videoOuterStyle}
+          contentFit={contentFit}
+          style={videoStyle}
           timeUpdateIntervalMs={preloadOnly ? 4000 : 800}
           onPlaybackStatusUpdate={(status) => {
             if (!preloadOnly) onStatusUpdate?.(status);
             if (status.isLoaded) {
               durationRef.current = Number(status.durationMillis || 0);
               const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
+              if (w > 0 && h > 0) {
+                setVideoSize((prev) =>
+                  prev.width === w && prev.height === h ? prev : { width: w, height: h }
+                );
+              }
               if (isOversizedFeedVideo(w, h)) {
                 setPlaybackBlocked(true);
                 void videoRef.current?.pauseAsync().catch(() => {});
@@ -161,9 +208,32 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
               return;
             }
             if (status.error) {
-              console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-              const action = nextVideoErrorAction(status.error, sourceIndex, playbackSources.length);
-              if (action === "next-source") setSourceIndex((i) => i + 1);
+              const idx = sourceIndexRef.current;
+              const decoderIssue = isHardwareDecoderError(status.error);
+              console.warn(
+                "[Cropvibe Video]",
+                activeUri.slice(0, 160),
+                status.error,
+                decoderIssue ? "(hardware decoder — trying fallback URL)" : ""
+              );
+              const action = nextVideoErrorAction(status.error, idx, playbackSources.length);
+              if (action === "next-source") {
+                const next = idx + 1;
+                if (next < playbackSources.length) {
+                  const nextUri = playbackSources[next];
+                  console.warn("[Cropvibe Video] switching fallback →", nextUri?.slice(0, 160) || "(none)");
+                  sourceIndexRef.current = next;
+                  setSourceIndex(next);
+                } else {
+                  setPlaybackBlocked(true);
+                  void videoRef.current?.pauseAsync().catch(() => {});
+                  void videoRef.current?.unloadAsync().catch(() => {});
+                }
+              } else if (idx >= playbackSources.length - 1) {
+                setPlaybackBlocked(true);
+                void videoRef.current?.pauseAsync().catch(() => {});
+                void videoRef.current?.unloadAsync().catch(() => {});
+              }
             }
           }}
         />

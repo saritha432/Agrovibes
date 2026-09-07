@@ -393,6 +393,146 @@ async function attachHlsUrlToMatchingPosts(query, { videoUrl, hlsUrl, playbackUr
   return Number(updated.rowCount || 0);
 }
 
+/** Copy hls_url / playback_url from completed jobs onto posts that never received them. */
+async function syncCompletedHlsUrlsToPosts(query) {
+  const updated = await query(
+    `
+    UPDATE home_posts AS p
+    SET
+      hls_url = COALESCE(NULLIF(BTRIM(p.hls_url), ''), NULLIF(BTRIM(j.hls_url), '')),
+      playback_url = COALESCE(NULLIF(BTRIM(p.playback_url), ''), NULLIF(BTRIM(j.playback_url), ''))
+    FROM media_hls_jobs AS j
+    WHERE j.status = 'COMPLETE'
+      AND p.video_url = j.video_url
+      AND (
+        p.hls_url IS NULL OR BTRIM(p.hls_url) = ''
+        OR p.playback_url IS NULL OR BTRIM(p.playback_url) = ''
+      )
+    `
+  );
+  return Number(updated.rowCount || 0);
+}
+
+async function hasActiveHlsJobForVideo(query, videoUrl) {
+  const url = String(videoUrl || "").trim();
+  if (!url) return false;
+  const res = await query(
+    `
+    SELECT 1
+    FROM media_hls_jobs
+    WHERE video_url = $1
+      AND status IN ('SUBMITTED', 'PROGRESSING', 'INPUT_INFORMATION')
+    LIMIT 1
+    `,
+    [url]
+  );
+  return res.rows.length > 0;
+}
+
+async function listVideosNeedingHlsTranscode(query, { limit = 50 } = {}) {
+  const capped = Math.min(Math.max(1, Number(limit) || 50), 500);
+  const res = await query(
+    `
+    SELECT DISTINCT ON (p.video_url)
+      p.id AS "postId",
+      p.video_url AS "videoUrl",
+      p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl"
+    FROM home_posts p
+    WHERE p.video_url IS NOT NULL
+      AND BTRIM(p.video_url) <> ''
+      AND (
+        p.hls_url IS NULL OR BTRIM(p.hls_url) = ''
+        OR p.playback_url IS NULL OR BTRIM(p.playback_url) = ''
+      )
+    ORDER BY p.video_url, p.id DESC
+    LIMIT $1
+    `,
+    [capped]
+  );
+  return res.rows;
+}
+
+/**
+ * Enqueue MediaConvert for posts missing HLS / playback URLs.
+ * Skips videos that already have an in-flight job unless retryFailed is true.
+ */
+async function requeueMissingHlsTranscodes(query, options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const retryFailed = Boolean(options.retryFailed);
+  const limit = options.limit ?? 50;
+
+  if (!isHlsTranscodeConfigured()) {
+    throw new Error(
+      "MediaConvert is not configured. Set AWS_MEDIA_CONVERT_ROLE_ARN, AWS_MEDIA_CONVERT_ENDPOINT, and S3 credentials."
+    );
+  }
+
+  const syncedPosts = await syncCompletedHlsUrlsToPosts(query);
+  const candidates = await listVideosNeedingHlsTranscode(query, { limit });
+  const results = {
+    syncedPosts,
+    scanned: candidates.length,
+    queued: 0,
+    skipped: 0,
+    dryRun,
+    items: [],
+    errors: []
+  };
+
+  for (const row of candidates) {
+    const videoUrl = String(row.videoUrl || "").trim();
+    const sourceKey = extractS3ObjectKeyFromUrl(videoUrl);
+    if (!sourceKey) {
+      results.skipped += 1;
+      results.errors.push({ postId: row.postId, videoUrl, error: "Could not resolve S3 object key from video URL" });
+      continue;
+    }
+    if (!/\.(mp4|mov|m4v|webm)$/i.test(sourceKey)) {
+      results.skipped += 1;
+      results.errors.push({ postId: row.postId, videoUrl, error: `Unsupported source key: ${sourceKey}` });
+      continue;
+    }
+
+    const active = await hasActiveHlsJobForVideo(query, videoUrl);
+    if (active && !retryFailed) {
+      results.skipped += 1;
+      results.items.push({ postId: row.postId, videoUrl, action: "skipped-active-job" });
+      continue;
+    }
+
+    if (dryRun) {
+      results.queued += 1;
+      results.items.push({ postId: row.postId, videoUrl, sourceKey, action: "would-queue" });
+      continue;
+    }
+
+    try {
+      const started = await startHlsJobForUploadedVideo(query, { sourceKey, videoUrl });
+      if (started?.jobId) {
+        results.queued += 1;
+        results.items.push({
+          postId: row.postId,
+          videoUrl,
+          sourceKey,
+          jobId: started.jobId,
+          hlsUrl: started.hlsUrl,
+          playbackUrl: started.playbackUrl,
+          action: "queued"
+        });
+      } else {
+        results.skipped += 1;
+        results.items.push({ postId: row.postId, videoUrl, action: "skipped-enqueue-failed" });
+      }
+    } catch (error) {
+      results.skipped += 1;
+      results.errors.push({ postId: row.postId, videoUrl, error: error?.message || String(error) });
+    }
+  }
+
+  return results;
+}
+
 async function pollPendingHlsJobs(query) {
   if (!isHlsTranscodeConfigured()) return { checked: 0, completed: 0 };
   const pending = await query(
@@ -475,6 +615,9 @@ module.exports = {
   startHlsJobForUploadedVideo,
   resolveCompletedHlsUrlForVideo,
   attachHlsUrlToMatchingPosts,
+  syncCompletedHlsUrlsToPosts,
+  listVideosNeedingHlsTranscode,
+  requeueMissingHlsTranscodes,
   pollPendingHlsJobs,
   startHlsJobPolling
 };

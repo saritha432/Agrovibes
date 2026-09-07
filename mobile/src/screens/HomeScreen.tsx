@@ -51,7 +51,7 @@ import {
   type OpenUserStoriesRequest
 } from "../navigation/storyActivityBridge";
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
-import { videoPlaybackUrl, videoPlaybackSources, nextVideoErrorAction } from "../utils/videoPlaybackUrl";
+import { videoPlaybackUrl, videoPlaybackSources, nextVideoErrorAction, normalizeVideoPlaybackUri } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
@@ -884,13 +884,16 @@ function FeedPostVideo({
 }) {
   const sources = useMemo(() => videoPlaybackSources(uri, hlsUrl, playbackUrl), [uri, hlsUrl, playbackUrl]);
   const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = videoPlaybackUrl(sources[sourceIndex] ?? uri);
+  const sourceIndexRef = useRef(0);
+  sourceIndexRef.current = sourceIndex;
+  const activeUri = normalizeVideoPlaybackUri(sources[sourceIndex] ?? uri);
   const videoRef = useRef<AppVideoHandle | null>(null);
   const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     setBlocked(false);
     setSourceIndex(0);
+    sourceIndexRef.current = 0;
   }, [uri, hlsUrl, playbackUrl]);
 
   const onStatus = useCallback((status: AppPlaybackStatus) => {
@@ -904,11 +907,22 @@ function FeedPostVideo({
       return;
     }
     if (status.error) {
+      const idx = sourceIndexRef.current;
       console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-      const action = nextVideoErrorAction(status.error, sourceIndex, sources.length);
-      if (action === "next-source") setSourceIndex((i) => i + 1);
+      const action = nextVideoErrorAction(status.error, idx, sources.length);
+      if (action === "next-source") {
+        const next = idx + 1;
+        if (next < sources.length) {
+          sourceIndexRef.current = next;
+          setSourceIndex(next);
+        } else {
+          setBlocked(true);
+        }
+      } else if (idx >= sources.length - 1) {
+        setBlocked(true);
+      }
     }
-  }, [activeUri, sourceIndex, sources.length]);
+  }, [activeUri, sources.length]);
 
   if (blocked) {
     return posterUri ? (
@@ -920,7 +934,7 @@ function FeedPostVideo({
 
   return (
     <AppVideo
-      key={uri}
+      key={`${uri}-${sourceIndex}`}
       ref={(r) => {
         videoRef.current = r;
       }}
@@ -4222,17 +4236,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
           {post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              {/* Poster stays under the player so URI/source swaps never flash black. */}
-              {reelPoster ? (
-                <FeedImage
-                  source={{ uri: reelPoster }}
-                  style={styles.reelVideoFull}
-                  contentFit="contain"
-                  recyclingKey={reelPoster}
-                />
-              ) : (
-                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
-              )}
               {mountVideo ? (
                 <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
                   <ContainedAppVideo
@@ -4255,7 +4258,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
                   />
                 </View>
-              ) : null}
+              ) : reelPoster ? (
+                <FeedImage
+                  source={{ uri: reelPoster }}
+                  style={styles.reelVideoFull}
+                  contentFit="cover"
+                  recyclingKey={reelPoster}
+                />
+              ) : (
+                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+              )}
               {reelUserPaused && isActiveVideo ? (
                 <View style={styles.reelPauseOverlay} pointerEvents="none">
                   <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
@@ -4318,7 +4330,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <FeedImage
                 source={{ uri: reelPoster }}
                 style={styles.reelVideoFull}
-                contentFit="contain"
+                contentFit="cover"
                 recyclingKey={reelPoster}
               />
             </Pressable>
