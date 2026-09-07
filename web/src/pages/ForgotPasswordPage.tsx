@@ -116,9 +116,7 @@ export function ForgotPasswordPage() {
         </h1>
         {step === "reset" ? (
           <p className="login-card__subtitle">
-            Reset password for {phone}
-            <br />
-            Use static OTP: 525252
+            Enter the 6-digit code sent to {phone}
           </p>
         ) : (
           <p className="login-card__subtitle">We will send an OTP to your mobile number.</p>

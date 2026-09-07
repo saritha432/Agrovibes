@@ -1104,19 +1104,23 @@ function msg91Mode() {
   return mode === "widget" ? "widget" : "sendotp";
 }
 
+function isStaticOtpEnabled() {
+  const enabled = String(process.env.STATIC_OTP_ENABLED || "").trim().toLowerCase();
+  return enabled === "true" || enabled === "1" || enabled === "yes";
+}
+
 function staticOtpCode() {
+  if (!isStaticOtpEnabled()) return "";
   const fromEnv = String(process.env.STATIC_OTP_CODE || "").trim();
-  const disabledValues = new Set(["false", "0", "no", "off", "disabled"]);
-  if (fromEnv && !disabledValues.has(fromEnv.toLowerCase())) return fromEnv;
+  if (fromEnv) return fromEnv;
   return "525252";
 }
 
 function matchesStaticOtp(code) {
+  if (!isStaticOtpEnabled()) return false;
   const digits = String(code || "").replace(/\D/g, "");
   if (digits.length !== 6) return false;
-  const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
-  if (disabled === "true" || disabled === "1" || disabled === "yes") return false;
-  return digits === staticOtpCode() || digits === "525252";
+  return digits === staticOtpCode();
 }
 
 async function sendTwilioVerifyOtp(phone) {
@@ -2869,13 +2873,12 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
   try {
     const provider = otpProvider();
     const phone = normalizeIndiaPhone(req.body?.phone);
-    const staticCode = staticOtpCode();
     if (!phone) {
       res.status(400).json({ message: "Enter a valid phone number" });
       return;
     }
 
-    if (staticCode) {
+    if (isStaticOtpEnabled()) {
       res.json({
         success: true,
         phone,
