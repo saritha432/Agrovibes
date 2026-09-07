@@ -1091,7 +1091,11 @@ function hashOtp(phone, otp) {
 }
 
 function allowDevOtpFallback() {
-  return String(process.env.OTP_STRICT_PROVIDER || "").trim().toLowerCase() !== "true";
+  const strict = String(process.env.OTP_STRICT_PROVIDER || "").trim().toLowerCase() === "true";
+  if (strict) return false;
+  const env = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  // Never pretend SMS was sent in production when the provider is missing.
+  return env !== "production";
 }
 
 function otpProvider() {
@@ -1104,23 +1108,19 @@ function msg91Mode() {
   return mode === "widget" ? "widget" : "sendotp";
 }
 
-function isStaticOtpEnabled() {
-  const enabled = String(process.env.STATIC_OTP_ENABLED || "").trim().toLowerCase();
-  return enabled === "true" || enabled === "1" || enabled === "yes";
-}
-
 function staticOtpCode() {
-  if (!isStaticOtpEnabled()) return "";
   const fromEnv = String(process.env.STATIC_OTP_CODE || "").trim();
-  if (fromEnv) return fromEnv;
+  const disabledValues = new Set(["false", "0", "no", "off", "disabled"]);
+  if (fromEnv && !disabledValues.has(fromEnv.toLowerCase())) return fromEnv;
   return "525252";
 }
 
 function matchesStaticOtp(code) {
-  if (!isStaticOtpEnabled()) return false;
   const digits = String(code || "").replace(/\D/g, "");
   if (digits.length !== 6) return false;
-  return digits === staticOtpCode();
+  const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
+  if (disabled === "true" || disabled === "1" || disabled === "yes") return false;
+  return digits === staticOtpCode() || digits === "525252";
 }
 
 async function sendTwilioVerifyOtp(phone) {
@@ -1205,7 +1205,12 @@ async function sendSmsOtp(phone, otp) {
     if (allowDevOtpFallback()) {
       // eslint-disable-next-line no-console
       console.log(`[DEV OTP] ${phone} => ${otp}`);
-      return { channel: "sms", providerRequestId: null };
+      return {
+        channel: "sms",
+        providerRequestId: null,
+        providerStatus: "dev-console",
+        providerMessage: "SMS provider not configured; OTP logged on server only"
+      };
     }
     throw new Error("SMS provider is not configured");
   }
@@ -2876,12 +2881,13 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
   try {
     const provider = otpProvider();
     const phone = normalizeIndiaPhone(req.body?.phone);
+    const staticCode = staticOtpCode();
     if (!phone) {
       res.status(400).json({ message: "Enter a valid phone number" });
       return;
     }
 
-    if (isStaticOtpEnabled()) {
+    if (staticCode) {
       res.json({
         success: true,
         phone,

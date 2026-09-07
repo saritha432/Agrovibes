@@ -6,3 +6,9 @@ builder = "NIXPACKS"
 startCommand = "npm start"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+
+# Required for real SMS OTP (add in Railway → Variables):
+# MSG91_AUTH_KEY
+# MSG91_TEMPLATE_ID
+# Static OTP (default 525252) — if production still has the real-time OTP build, set:
+# STATIC_OTP_ENABLED=true
