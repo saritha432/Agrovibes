@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
+import { SettingsIconBack, SettingsIconChevron } from "../../components/settings/SettingsIcons";
 import "./SettingsMenuPage.css";
 
 function SettingsSubTopbar({ title, backTo = "/settings" }: { title: string; backTo?: string }) {
@@ -11,7 +12,7 @@ function SettingsSubTopbar({ title, backTo = "/settings" }: { title: string; bac
         onClick={() => navigate(backTo)}
         aria-label="Back"
       >
-        ‹
+        <SettingsIconBack />
       </button>
       <h1 className="settings-topbar__title">{title}</h1>
       <span className="settings-topbar__spacer" aria-hidden />
@@ -27,7 +28,9 @@ function SettingsLinkRow({ title, to, icon, external }: { title: string; to: str
       <span className="settings-row__body">
         <span className="settings-row__title">{title}</span>
       </span>
-      <span className="settings-row__chevron" aria-hidden>›</span>
+      <span className="settings-row__chevron">
+        <SettingsIconChevron />
+      </span>
     </>
   );
 

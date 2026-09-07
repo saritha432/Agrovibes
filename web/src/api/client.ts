@@ -27,13 +27,8 @@ function resolveApiBaseUrl(): string {
     return trimmed;
   }
 
-  if (import.meta.env.DEV && typeof window !== "undefined") {
-    const host = window.location.hostname;
-    if (host === "localhost" || host === "127.0.0.1") {
-      return "http://localhost:5000/api";
-    }
-  }
-
+  // Default: production API (works on localhost:5173 without a local backend).
+  // For local backend: create web/.env.local with VITE_API_BASE_URL=http://localhost:5000/api
   return PRODUCTION_API_BASE_URL;
 }
 

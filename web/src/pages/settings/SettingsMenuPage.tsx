@@ -1,11 +1,26 @@
+import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import {
+  SettingsIconActivity,
+  SettingsIconBack,
+  SettingsIconBan,
+  SettingsIconBell,
+  SettingsIconBookmark,
+  SettingsIconChevron,
+  SettingsIconInfo,
+  SettingsIconLanguage,
+  SettingsIconLock,
+  SettingsIconLogout,
+  SettingsIconPerson,
+  SettingsIconStore
+} from "../../components/settings/SettingsIcons";
 import "./SettingsMenuPage.css";
 
 type SettingsRowProps = {
   title: string;
   subtitle?: string;
-  icon: string;
+  icon: ReactNode;
   to?: string;
   onClick?: () => void;
   showDivider?: boolean;
@@ -14,12 +29,14 @@ type SettingsRowProps = {
 function SettingsRow({ title, subtitle, icon, to, onClick, showDivider = true }: SettingsRowProps) {
   const content = (
     <>
-      <span className="settings-row__icon" aria-hidden>{icon}</span>
+      <span className="settings-row__icon">{icon}</span>
       <span className="settings-row__body">
         <span className="settings-row__title">{title}</span>
         {subtitle ? <span className="settings-row__subtitle">{subtitle}</span> : null}
       </span>
-      <span className="settings-row__chevron" aria-hidden>›</span>
+      <span className="settings-row__chevron">
+        <SettingsIconChevron />
+      </span>
     </>
   );
 
@@ -79,7 +96,7 @@ export function SettingsMenuPage() {
     <div className="settings-page">
       <header className="settings-topbar">
         <button type="button" className="settings-topbar__back" onClick={() => navigate("/profile")} aria-label="Back">
-          ‹
+          <SettingsIconBack />
         </button>
         <h1 className="settings-topbar__title">Settings &amp; Privacy</h1>
         <span className="settings-topbar__spacer" aria-hidden />
@@ -88,7 +105,7 @@ export function SettingsMenuPage() {
       <div className="settings-page__scroll">
         <SettingsSection title="Your Account">
           <SettingsRow
-            icon="👤"
+            icon={<SettingsIconPerson />}
             title="Account Center"
             subtitle="Manage accounts, personal details, connected experiences, & preferences"
             to="/settings/account"
@@ -100,7 +117,7 @@ export function SettingsMenuPage() {
 
         <SettingsSection title="Provider">
           <SettingsRow
-            icon="🏪"
+            icon={<SettingsIconStore />}
             title="Open provider dashboard"
             subtitle="Overview, rental, listings, and services"
             to="/learn"
@@ -109,22 +126,27 @@ export function SettingsMenuPage() {
         </SettingsSection>
 
         <SettingsSection title="How You Use Cropvibe">
-          <SettingsRow icon="🔖" title="Saved" to="/profile?tab=Saved" />
-          <SettingsRow icon="📊" title="Your Activity" to="/settings/activity" />
-          <SettingsRow icon="🔔" title="Notifications" to="/notifications" showDivider={false} />
+          <SettingsRow icon={<SettingsIconBookmark />} title="Saved" to="/profile?tab=Saved" />
+          <SettingsRow icon={<SettingsIconActivity />} title="Your Activity" to="/settings/activity" />
+          <SettingsRow icon={<SettingsIconBell />} title="Notifications" to="/notifications" showDivider={false} />
         </SettingsSection>
 
         <SettingsSection title="Who Can See Your Content">
-          <SettingsRow icon="🔒" title="Account Privacy" to="/settings/privacy" />
-          <SettingsRow icon="🚫" title="Blocked" to="/settings/blocked" showDivider={false} />
+          <SettingsRow icon={<SettingsIconLock />} title="Account Privacy" to="/settings/privacy" />
+          <SettingsRow icon={<SettingsIconBan />} title="Blocked" to="/settings/blocked" showDivider={false} />
         </SettingsSection>
 
         <SettingsSection title="App, Media & Accessibility Settings">
-          <SettingsRow icon="🌐" title="Language And Translations" to="/settings/language" showDivider={false} />
+          <SettingsRow
+            icon={<SettingsIconLanguage />}
+            title="Language And Translations"
+            to="/settings/language"
+            showDivider={false}
+          />
         </SettingsSection>
 
         <SettingsSection title="More Info And Support">
-          <SettingsRow icon="ℹ️" title="About" to="/settings/about" showDivider={false} />
+          <SettingsRow icon={<SettingsIconInfo />} title="About" to="/settings/about" showDivider={false} />
         </SettingsSection>
 
         <div className="settings-logout-wrap">
@@ -136,6 +158,7 @@ export function SettingsMenuPage() {
               navigate("/login");
             }}
           >
+            <SettingsIconLogout size={22} />
             Log Out
           </button>
         </div>
