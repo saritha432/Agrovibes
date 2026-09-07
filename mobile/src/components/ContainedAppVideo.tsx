@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View, type ImageStyle, type ViewStyle } from "react-native";
+import { Platform, StyleSheet, View, type ImageStyle, type ViewStyle } from "react-native";
 import { FeedImage } from "./FeedImage";
 import { AppVideo, type AppVideoHandle } from "./AppVideo";
 import { computeReelVideoFrame } from "../utils/reelGrid";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 import {
-  isHardwareDecoderError,
   nextVideoErrorAction,
   normalizeVideoPlaybackUri,
   videoPlaybackSources
@@ -53,7 +52,6 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
     },
     ref
   ) {
-    const isWeb = Platform.OS === "web";
     const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
     const [playbackBlocked, setPlaybackBlocked] = useState(false);
     const videoRef = useRef<AppVideoHandle | null>(null);
@@ -146,13 +144,10 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
               recyclingKey={posterUri}
             />
           ) : null}
-          <Text style={{ position: "absolute", bottom: 48, color: "rgba(255,255,255,0.75)", fontSize: 13 }}>
-            Video unavailable
-          </Text>
         </View>
       );
     }
-
+    
     const videoStyle: ViewStyle = { width: videoFrame.width, height: videoFrame.height };
 
     return (
@@ -209,19 +204,10 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
             }
             if (status.error) {
               const idx = sourceIndexRef.current;
-              const decoderIssue = isHardwareDecoderError(status.error);
-              console.warn(
-                "[Cropvibe Video]",
-                activeUri.slice(0, 160),
-                status.error,
-                decoderIssue ? "(hardware decoder — trying fallback URL)" : ""
-              );
               const action = nextVideoErrorAction(status.error, idx, playbackSources.length);
               if (action === "next-source") {
                 const next = idx + 1;
                 if (next < playbackSources.length) {
-                  const nextUri = playbackSources[next];
-                  console.warn("[Cropvibe Video] switching fallback →", nextUri?.slice(0, 160) || "(none)");
                   sourceIndexRef.current = next;
                   setSourceIndex(next);
                 } else {

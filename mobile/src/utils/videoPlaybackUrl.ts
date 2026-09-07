@@ -43,39 +43,35 @@ export function inferTranscodedUrlsFromVideoUrl(videoUrl: string | undefined | n
   };
 }
 
-function isRawUploadUrl(url: string | undefined | null) {
-  return /\/agrovibes\/videos\//i.test(normalizeVideoPlaybackUri(url));
-}
-
 /**
  * Instagram-style start order:
- * 1. Fast-start 480p MP4 (moov at front) — first frame after a few hundred KB
- * 2. Native HLS — adaptive 240p–720p (Main profile, device-friendly)
- * 3. Original upload MP4 — last resort (often 1080p High Profile; can fail on Android HW decoder)
+ * 1. Fast-start 480p MP4 (moov at front)
+ * 2. Native HLS — adaptive ladder (Main profile, device-friendly)
+ * 3. Original upload MP4 — last resort
  *
- * On Android, skip the original when HLS exists — Qualcomm MediaCodec often fails on 1080p uploads.
+ * Inferred playback/HLS paths are only added when the API already has at least one
+ * transcode URL (job completed). Otherwise we play the original directly — guessing
+ * CloudFront paths that were never created causes 403 loops and blocks playback.
  */
 export function videoPlaybackSources(
   url: string | undefined | null,
   hlsUrl?: string | undefined | null,
   playbackUrl?: string | undefined | null
 ): string[] {
-  const inferred = inferTranscodedUrlsFromVideoUrl(url);
+  const apiPlayback = normalizeVideoPlaybackUri(playbackUrl);
+  const apiHls = normalizeVideoPlaybackUri(hlsUrl);
+  const hasApiTranscode = Boolean(apiPlayback || apiHls);
+  const inferred = hasApiTranscode ? inferTranscodedUrlsFromVideoUrl(url) : {};
+
   const sources: string[] = [];
-  pushUnique(sources, playbackUrl);
+  pushUnique(sources, apiPlayback);
   pushUnique(sources, inferred.playbackUrl);
-  const hls = normalizeVideoPlaybackUri(hlsUrl) || normalizeVideoPlaybackUri(inferred.hlsUrl);
+  const hls = apiHls || normalizeVideoPlaybackUri(inferred.hlsUrl);
   const hasHls = Platform.OS !== "web" && !!hls && /\.m3u8(\?|#|$)/i.test(hls);
   if (hasHls) {
     pushUnique(sources, hls);
   }
-  // On Android, raw 60fps High-Profile uploads often crash the HW decoder — only use them when
-  // there is no transcoded URL to try (playback/HLS from API or inferred CloudFront paths).
-  const androidSkipRaw =
-    Platform.OS === "android" && isRawUploadUrl(url) && sources.length > 0;
-  if (!androidSkipRaw) {
-    pushUnique(sources, url);
-  }
+  pushUnique(sources, url);
   return sources;
 }
 
@@ -117,6 +113,12 @@ export function isTransientVideoPlaybackError(error: unknown): boolean {
   return /AudioFocusNotAcquired|audio.?focus|staysActiveInBackground|background|not yet loaded|Player is not loaded|Trying to play a sound|INTERRUPTION|timeout|TIMED_OUT|HttpDataSource|Unable to connect|UnknownHost|NETWORK|socket|ECONNRESET|ENETUNREACH|502|503|429/i.test(
     msg
   );
+}
+
+/** HTTP 403/404 on a CDN URL — transcoded file likely missing or not public yet. */
+export function isMissingMediaUrlError(error: unknown): boolean {
+  const msg = String(error ?? "");
+  return /InvalidResponseCodeException|Response code: 403|Response code: 404|404|403 Forbidden/i.test(msg);
 }
 
 /** ExoPlayer hardware H.264 decoder failed (common on 1080p High Profile uploads). */
