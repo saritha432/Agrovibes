@@ -268,16 +268,9 @@ export function ProfilePage() {
       <header className="profile-topbar">
         <span className="profile-topbar__spacer" aria-hidden />
         <h1 className="profile-topbar__title">{headerTitle}</h1>
-        <div className="profile-topbar__menu-wrap">
-          <button
-            type="button"
-            className="profile-topbar__menu"
-            aria-label="Menu"
-            onClick={() => navigate("/settings")}
-          >
-            <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
-          </button>
-        </div>
+        <Link to="/settings" className="profile-topbar__menu" aria-label="Menu">
+          <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
+        </Link>
       </header>
 
       <section className="profile-card">
