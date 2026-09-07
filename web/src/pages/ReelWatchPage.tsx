@@ -5,7 +5,7 @@ import type { HomePost } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { getWebAppOrigin } from "../api/client";
 import { buildReelDeepLinkUrls, openReelInApp, pickReelAppOpenUrl, pickStoreUrl } from "../utils/appDeepLink";
-import { resolveWebVideoUrl } from "../utils/videoUrl";
+import { resolveWebPostVideoUrl } from "../utils/videoUrl";
 import "./ReelWatchPage.css";
 
 function stripCaption(caption?: string | null) {
@@ -110,7 +110,7 @@ export function ReelWatchPage() {
             {post.videoUrl ? (
               <video
                 key={post.id}
-                src={resolveWebVideoUrl(post.videoUrl) || post.videoUrl}
+                src={resolveWebPostVideoUrl(post) || post.videoUrl || undefined}
                 poster={posterFor(post) || undefined}
                 className="reel-watch__video"
                 controls

@@ -4,7 +4,7 @@ import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { dropCaption, dropMusicLabel, isDropPost, postShowsMusicRow } from "../../utils/feedOrder";
 import { ProfileReelViewer } from "../profile/ProfileReelViewer";
-import { resolveWebVideoUrl } from "../../utils/videoUrl";
+import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
 import { PostMediaCarousel } from "./PostMediaCarousel";
@@ -48,7 +48,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   const [likesOpen, setLikesOpen] = useState(false);
 
   const images = galleryUrls(post);
-  const videoSrc = resolveWebVideoUrl(post.videoUrl);
+  const videoSrc = resolveWebPostVideoUrl(post);
   const reel = isReel(post);
   const caption = dropCaption(post.caption);
   const musicLabel = dropMusicLabel(post);

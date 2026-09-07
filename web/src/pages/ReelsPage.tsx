@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchHomePosts } from "../api/home";
+import { fetchHomeReelsExplore } from "../api/home";
 import type { HomePost } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { DropVideoSlide, useDropFeedAutoplay } from "../components/feed/DropsFeed";
-import { isDropPost, orderPostsForFeed } from "../utils/feedOrder";
+import { orderPostsForFeed } from "../utils/feedOrder";
 import "./ReelsPage.css";
 
 export function ReelsPage() {
@@ -18,9 +18,8 @@ export function ReelsPage() {
     const seed = Date.now();
     setShuffleSeed(seed);
     try {
-      const { posts } = await fetchHomePosts(token);
-      const videos = posts.filter(isDropPost);
-      const ordered = orderPostsForFeed(videos, seed, Date.now(), user?.id);
+      const page = await fetchHomeReelsExplore(token, { limit: 24 });
+      const ordered = orderPostsForFeed(page.posts, seed, Date.now(), user?.id);
       setDrops(ordered);
       setActiveIndex(0);
     } catch {

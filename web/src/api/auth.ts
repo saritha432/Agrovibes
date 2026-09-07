@@ -47,6 +47,22 @@ export async function sendPhoneOtp(payload: { phone: string }) {
   };
 }
 
+export async function verifyPhoneOtp(payload: {
+  phone: string;
+  code: string;
+  deviceName?: string;
+  platform?: string;
+  locationLabel?: string;
+  deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
+}) {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  return (await parseJsonOrThrow(response)) as AuthResponse;
+}
+
 export async function resetPasswordWithOtp(payload: {
   phone: string;
   code: string;

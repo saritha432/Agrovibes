@@ -1,5 +1,6 @@
-import { API_BASE_URL, fetchWithAuth, parseJsonOrThrow } from "./client";
+import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
 import type { AuthResponse, HomePost } from "./types";
+import { sanitizeHomePost } from "../utils/mediaUrls";
 
 export type FollowStatus = "none" | "pending" | "accepted";
 
@@ -15,6 +16,10 @@ export interface ProfileStats {
   reelsCount: number;
   followersCount: number;
   followingCount: number;
+  viewerStatus?: FollowStatus;
+  reverseStatus?: FollowStatus;
+  canFollowBack?: boolean;
+  incomingFollowId?: number | null;
 }
 
 export interface NetworkPerson {
@@ -26,14 +31,24 @@ export interface NetworkPerson {
 }
 
 export async function fetchSavedHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 export async function fetchTaggedHomePosts(token: string) {
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-  const response = await fetch(`${API_BASE_URL}/v1/home/posts/tagged`, { headers });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/tagged`, { headers });
   if (response.status === 404) return { posts: [] as HomePost[] };
-  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
+export async function fetchResharedHomePosts(token: string) {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/reshared`, { headers });
+  if (response.status === 404) return { posts: [] as HomePost[] };
+  const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
 }
 
 export async function fetchProfileStats(token: string, userId: number) {
@@ -56,14 +71,6 @@ export async function removeFollower(token: string, targetUserId: number) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ targetUserId })
-  })) as { ok: boolean };
-}
-
-export async function respondToFollowRequest(token: string, targetUserId: number, action: "accept" | "decline") {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/social/follow/respond`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ targetUserId, action })
   })) as { ok: boolean };
 }
 
