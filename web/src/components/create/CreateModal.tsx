@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { createHomePost, createHomeStory } from "../../api/posts";
 import { shouldUseImageUpload, uploadPickedMedia } from "../../api/uploads";
 import { useAuth } from "../../auth/AuthContext";
+import {
+  evaluateFarmingPostPolicy,
+  FARMING_TOPICS,
+  type FarmingTopicId
+} from "../../social/farmingContentPolicy";
 import "./CreateModal.css";
 
 export type CreateEntryType = "post" | "reel" | "story";
@@ -18,6 +23,8 @@ export function CreateModal({ open, onClose }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [caption, setCaption] = useState("");
+  const [farmingTopicId, setFarmingTopicId] = useState<FarmingTopicId | null>(null);
+  const [farmingConfirmed, setFarmingConfirmed] = useState(false);
   const [step, setStep] = useState<"pick-type" | "compose">("pick-type");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +38,8 @@ export function CreateModal({ open, onClose }: Props) {
         return [];
       });
       setCaption("");
+      setFarmingTopicId(null);
+      setFarmingConfirmed(false);
       setStep("pick-type");
       setSubmitting(false);
       setError(null);
@@ -96,6 +105,18 @@ export function CreateModal({ open, onClose }: Props) {
         );
       } else {
         const isReel = entryType === "reel";
+        const prefix = isReel ? "[REEL]" : "[POST]";
+        const cap = caption.trim() ? `${prefix} ${caption.trim()}` : prefix;
+        const farmingPolicy = evaluateFarmingPostPolicy({
+          caption: cap,
+          farmingTopicId,
+          farmingConfirmed
+        });
+        if (!farmingPolicy.ok) {
+          setError(farmingPolicy.message);
+          setSubmitting(false);
+          return;
+        }
         const file = files[0];
         const { url } = await uploadPickedMedia(file);
         let imageUrl: string | undefined;
@@ -116,8 +137,6 @@ export function CreateModal({ open, onClose }: Props) {
         } else {
           videoUrl = url;
         }
-        const prefix = isReel ? "[REEL]" : "[POST]";
-        const cap = caption.trim() ? `${prefix} ${caption.trim()}` : prefix;
         await createHomePost(
           {
             userId: user.id,
@@ -126,7 +145,9 @@ export function CreateModal({ open, onClose }: Props) {
             caption: cap,
             videoUrl,
             imageUrl,
-            imageUrls
+            imageUrls,
+            farmingTopic: farmingTopicId ?? undefined,
+            farmingConfirmed: true
           },
           token
         );
@@ -197,13 +218,49 @@ export function CreateModal({ open, onClose }: Props) {
               )}
             </div>
             {entryType !== "story" ? (
-              <textarea
-                value={caption}
-                onChange={(e) => setCaption(e.target.value)}
-                placeholder="Write a caption…"
-                rows={3}
-                maxLength={2200}
-              />
+              <>
+                <textarea
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  placeholder="Write about your farm, crop, or agri tip…"
+                  rows={3}
+                  maxLength={2200}
+                />
+                <div className="create-modal__farming">
+                  <p className="create-modal__farming-title">Farming content only</p>
+                  <p className="create-modal__farming-body">
+                    Cropvibe is for farming and agriculture. Posts and drops should relate to crops, livestock, farm
+                    work, agri market, or the farming community.
+                  </p>
+                  <p className="create-modal__farming-label">Select farming topic</p>
+                  <div className="create-modal__topics" role="group" aria-label="Farming topic">
+                    {FARMING_TOPICS.map((topic) => (
+                      <button
+                        key={topic.id}
+                        type="button"
+                        className={`create-modal__topic${farmingTopicId === topic.id ? " create-modal__topic--on" : ""}`}
+                        onClick={() => {
+                          setFarmingTopicId(topic.id);
+                          setError(null);
+                        }}
+                      >
+                        {topic.label}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="create-modal__confirm">
+                    <input
+                      type="checkbox"
+                      checked={farmingConfirmed}
+                      onChange={(e) => {
+                        setFarmingConfirmed(e.target.checked);
+                        setError(null);
+                      }}
+                    />
+                    I confirm this is farming / agriculture content
+                  </label>
+                </div>
+              </>
             ) : null}
             <div className="create-modal__actions">
               <button type="button" onClick={() => setStep("pick-type")}>

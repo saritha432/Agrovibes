@@ -13,6 +13,8 @@ export async function createHomePost(
     thumbnailUrl?: string;
     taggedUserIds?: number[];
     musicLabel?: string;
+    farmingTopic?: string;
+    farmingConfirmed?: boolean;
   },
   token?: string | null
 ) {
