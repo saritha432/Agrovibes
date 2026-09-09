@@ -14,6 +14,7 @@ import { MarketAllTabContent } from "../components/market/all/MarketAllTabConten
 import { MarketPlaceholderTab } from "../components/market/MarketPlaceholderTab";
 import { MarketSvgIcon, type SvgModule } from "../components/market/shared/marketAssetUtils";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
+import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
 import { AppTopBar } from "../components/AppTopBar";
 import {
   APP_BLACK,
@@ -42,6 +43,7 @@ const SEARCH_ICON = require("../../assets/bottom-icons/search.svg");
 const MIC_ICON = require("../../assets/market/mic-icon.svg");
 
 export function MarketHomeScreen() {
+  useAndroidTabBackToHome();
   const navigation = useNavigation<Nav>();
   const [activeTab, setActiveTab] = useState<MarketTabId>("All");
   const [search, setSearch] = useState("");

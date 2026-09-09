@@ -27,6 +27,7 @@ import { formatDisplayName, resolvePersonDisplayName } from "../localization/fee
 import { useLanguage } from "../localization/LanguageContext";
 import type { AppLanguage } from "../localization/LanguageContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
 import {
   fetchHomePostsPage,
   fetchUsers,
@@ -216,6 +217,7 @@ function HighlightedQueryText({
 
 export function UserSearchScreen() {
   const { t, language } = useLanguage();
+  useAndroidTabBackToHome();
   const { token, user } = useAuth();
   const isAccountDeactivated = useIsAccountDeactivated();
   const { width } = useWindowDimensions();

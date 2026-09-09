@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
+import { subscribeHomeReelImmersive } from "../navigation/homeReelImmersiveBridge";
 import { UserAvatar } from "../components/UserAvatar";
 import { DEACTIVATED_CHROME_OPACITY, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
@@ -239,6 +240,11 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
   const isAccountDeactivated = useIsAccountDeactivated();
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
   const { messageUnreadCount } = useNotificationPanel();
+  const [reelImmersiveActive, setReelImmersiveActive] = React.useState(false);
+
+  React.useEffect(() => subscribeHomeReelImmersive(setReelImmersiveActive), []);
+
+  if (reelImmersiveActive) return null;
 
   const isRouteFocused = (routeName: string) => {
     const route = state.routes.find((r) => r.name === routeName);

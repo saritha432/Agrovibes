@@ -6,6 +6,7 @@ import {
   Animated,
   FlatList,
   Image,
+  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -25,6 +26,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { registerPostsReelModalBack } from "../navigation/postsReelModalBridge";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
@@ -89,6 +91,8 @@ export type PostsReelViewerModalProps = {
   initialIndex: number;
   initialCommentsPostId?: number | null;
   onClose: () => void;
+  /** Active reel when the viewer closes — lets the home feed resume scroll/playback. */
+  onExit?: (postId: number | null) => void;
   onPostsChange: (posts: HomePost[]) => void;
   /** When true, viewer can delete posts owned by the signed-in user (profile Posts/Reels tabs). */
   canDeleteOwnPosts?: boolean;
@@ -531,6 +535,7 @@ export function PostsReelViewerModal({
   initialIndex,
   initialCommentsPostId = null,
   onClose,
+  onExit,
   onPostsChange,
   canDeleteOwnPosts = false,
   followingPeers,
@@ -580,6 +585,21 @@ export function PostsReelViewerModal({
   const reelMuteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commentsFetchSeqRef = useRef(0);
   const reelViewerListRef = useRef<FlatList<HomePost> | null>(null);
+  const playingPostIdRef = useRef(playingPostId);
+  playingPostIdRef.current = playingPostId;
+
+  const requestClose = useCallback(() => {
+    const exitPostId = playingPostIdRef.current;
+    onClose();
+    InteractionManager.runAfterInteractions(() => {
+      onExit?.(exitPostId);
+    });
+  }, [onClose, onExit]);
+
+  useEffect(() => {
+    registerPostsReelModalBack(visible, visible ? requestClose : null);
+    return () => registerPostsReelModalBack(false, null);
+  }, [requestClose, visible]);
 
   useEffect(() => {
     for (const p of viewerPosts) {
@@ -617,7 +637,7 @@ export function PostsReelViewerModal({
     (post: HomePost) => {
       const postUserId = Number(post.userId);
       const isOwn = viewerOwnsPost(post, user ? { id: user.id, fullName: user.fullName } : null);
-      onClose();
+      requestClose();
       if (isOwn) {
         navigateToMyProfile();
         return;
@@ -628,7 +648,7 @@ export function PostsReelViewerModal({
         avatarUrl: post.authorAvatarUrl ?? null
       });
     },
-    [onClose, user]
+    [requestClose, user]
   );
 
   const openReposterProfile = useCallback(
@@ -650,7 +670,7 @@ export function PostsReelViewerModal({
       const target = fromPerson || fromRepost;
       if (!target) return;
       const isOwn = target.userId > 0 && target.userId === Number(user?.id);
-      onClose();
+      requestClose();
       if (isOwn) {
         navigateToMyProfile();
         return;
@@ -661,7 +681,7 @@ export function PostsReelViewerModal({
         avatarUrl: target.avatarUrl
       });
     },
-    [onClose, user?.id]
+    [requestClose, user?.id]
   );
 
   const applyPosts = useCallback(
@@ -996,7 +1016,7 @@ export function PostsReelViewerModal({
             const deletedIx = prev.findIndex((p) => p.id === post.id);
             const next = prev.filter((p) => p.id !== post.id);
             if (next.length === 0) {
-              onClose();
+              requestClose();
             } else {
               setPlayingPostId((cur) => {
                 if (cur !== post.id) return cur;
@@ -1027,7 +1047,7 @@ export function PostsReelViewerModal({
         { text: t("deleteConfirm"), style: "destructive", onPress: () => void runDelete() }
       ]);
     },
-    [applyPosts, canDeleteOwnPosts, onClose, t, token, user]
+    [applyPosts, canDeleteOwnPosts, onClose, requestClose, t, token, user]
   );
 
   const togglePostSave = useCallback(
@@ -1069,7 +1089,7 @@ export function PostsReelViewerModal({
         const deletedIx = prev.findIndex((p) => p.id === post.id);
         const next = prev.filter((p) => p.id !== post.id);
         if (next.length === 0) {
-          onClose();
+          requestClose();
         } else {
           setPlayingPostId((cur) => {
             if (cur !== post.id) return cur;
@@ -1082,7 +1102,7 @@ export function PostsReelViewerModal({
       setOptionsPost(null);
       Alert.alert(t("gotItHidePost"), t("gotItHidePostMsg"));
     },
-    [applyPosts, onClose, t]
+    [applyPosts, requestClose, t]
   );
 
   const onReportPost = useCallback(
@@ -1494,7 +1514,7 @@ export function PostsReelViewerModal({
           snapViewerToOpenIndex();
           settleViewerSurface();
         }}
-        onRequestClose={onClose}
+        onRequestClose={requestClose}
       >
         <View
           style={{ flex: 1, backgroundColor: APP_DARK_BG, overflow: "hidden" }}
@@ -1507,7 +1527,7 @@ export function PostsReelViewerModal({
           }}
         >
           <View style={[styles.reelViewerTopChrome, { paddingTop: modalTopInset, zIndex: 6 }]} pointerEvents="box-none">
-            <Pressable onPress={onClose} hitSlop={14} style={styles.reelViewerBackBtn} accessibilityRole="button" accessibilityLabel="Go back">
+            <Pressable onPress={requestClose} hitSlop={14} style={styles.reelViewerBackBtn} accessibilityRole="button" accessibilityLabel="Go back">
               <Ionicons name="arrow-back-outline" size={28} color="#fff" />
             </Pressable>
           </View>

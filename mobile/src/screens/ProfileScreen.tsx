@@ -76,7 +76,8 @@ import {
   subscribeBlockedUsersChanged
 } from "../social/blockedUsers";
 import type { BlockedUser } from "../services/api";
-import { navigateToEditProfile, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { navigateToEditProfile, navigateToHome, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { useAndroidScreenBack } from "../navigation/useAndroidScreenBack";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { UserReportSheet } from "../components/UserReportSheet";
 import { ReelGridTile } from "../components/ReelGridTile";
@@ -161,6 +162,20 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const navRoute = useRoute();
   const route = routeProp ?? navRoute;
   const isPublicProfileView = navRoute.name === "PublicProfile";
+  useAndroidScreenBack(
+    useCallback(() => {
+      if (isPublicProfileView) {
+        if (navigation.canGoBack()) navigation.goBack();
+        return true;
+      }
+      const parent = navigation.getParent();
+      if (parent) {
+        navigateToHome();
+        return true;
+      }
+      return false;
+    }, [navigation, isPublicProfileView])
+  );
   const publicUserId = isPublicProfileView ? (route.params?.userId as number | undefined) : undefined;
   const publicUserName = isPublicProfileView ? String(route.params?.userName || "") : "";
   const publicUserKey = isPublicProfileView ? (route.params?.userKey as string | undefined) : undefined;

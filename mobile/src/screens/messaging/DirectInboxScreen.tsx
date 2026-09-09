@@ -15,6 +15,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
+import { useAndroidTabBackToHome } from "../../navigation/useAndroidScreenBack";
 import { fetchMessageThreads, type MessageThread } from "../../services/api";
 import {
   isSocketChatConnected,
@@ -55,6 +56,7 @@ function previewMessage(body: string, t: (key: string) => string) {
 
 export function DirectInboxScreen() {
   const { t } = useLanguage();
+  useAndroidTabBackToHome();
   const topChromeInset = useTopChromeInset();
   const { user, token } = useAuth();
   const isAccountDeactivated = useIsAccountDeactivated();

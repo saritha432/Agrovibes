@@ -2,10 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
+import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
 import { useLanguage } from "../localization/LanguageContext";
 import { APP_LIME } from "../theme/appColors";
 
 export function ServicesScreen() {
+  useAndroidTabBackToHome();
   const { t } = useLanguage();
 
   const cards = useMemo(

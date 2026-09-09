@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { CheckoutBill, MarketStackParamList } from "../navigation/MarketStackNavigator";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { useCart } from "../cart/CartContext";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { APP_LIME } from "../theme/appColors";
@@ -82,6 +83,7 @@ function payablePaiseFromTotal(totalRupees: number): number {
 }
 
 export function CartScreen() {
+  useAndroidNestedStackBack();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { items, itemCount, setQuantity, removeLine } = useCart();

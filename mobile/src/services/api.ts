@@ -12,10 +12,21 @@ const PRODUCTION_API_BASE_URL = "https://cropvibe-api-production.up.railway.app/
 
 const API_FETCH_TIMEOUT_MS = 15_000;
 const API_FETCH_RETRIES = 1;
+const AUTH_FETCH_TIMEOUT_MS = 25_000;
+const AUTH_FETCH_RETRIES = 3;
 
 /** Fire-and-forget ping to warm the API before the user taps Login/Register. */
 export function warmUpServer(): void {
   void fetch(`${PRODUCTION_API_BASE_URL}/v1/ping`, { method: "GET" }).catch(() => {});
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const name = error instanceof Error ? error.name : "";
+  return (
+    name === "AbortError" ||
+    /network request failed|failed to fetch|network error|econnreset|etimedout|socket|abort/i.test(message)
+  );
 }
 
 function isPrivateOrLocalHost(hostname: string): boolean {
@@ -84,6 +95,38 @@ async function fetchWithRetry(url: string, init: RequestInit = {}, timeoutMs = A
         await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
         continue;
       }
+    }
+  }
+  if (lastError instanceof Error) throw lastError;
+  throw new Error("Network request failed");
+}
+
+async function fetchAuthWithRetry(url: string, init: RequestInit = {}): Promise<Response> {
+  let lastError: unknown;
+  const headers = {
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    ...(init.headers as Record<string, string> | undefined)
+  };
+  for (let attempt = 0; attempt <= AUTH_FETCH_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AUTH_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...init, headers, signal: controller.signal });
+      clearTimeout(timer);
+      if (attempt < AUTH_FETCH_RETRIES && [502, 503, 504].includes(response.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      clearTimeout(timer);
+      lastError = error;
+      if (attempt < AUTH_FETCH_RETRIES && isTransientNetworkError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        continue;
+      }
+      break;
     }
   }
   if (lastError instanceof Error) throw lastError;
@@ -215,8 +258,8 @@ export function formatAuthError(error: unknown, fallback = "Something went wrong
   if (status === 502 || status === 503 || status === 504) {
     return "Server is temporarily unavailable. Please try again in a moment.";
   }
-  if (/network request failed|failed to fetch|aborted|timed out|network error/i.test(msg)) {
-    return "No internet connection. Turn on mobile data or Wi‑Fi and try again.";
+  if (/network request failed|failed to fetch|aborted|timed out|network error|abort/i.test(msg)) {
+    return "Connection dropped before the server responded. Check Wi‑Fi or mobile data and tap Send OTP again.";
   }
   if (status != null && status >= 500) {
     return "Something went wrong on our side. Please try again.";
@@ -244,7 +287,7 @@ export async function authRegister(payload: {
   locationLabel?: string;
   deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/register`, {
+  const response = await fetchAuthWithRetry(`${API_BASE_URL}/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -261,7 +304,7 @@ export async function authLogin(payload: {
   locationLabel?: string;
   deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/login`, {
+  const response = await fetchAuthWithRetry(`${API_BASE_URL}/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -270,7 +313,8 @@ export async function authLogin(payload: {
 }
 
 export async function sendPhoneOtp(payload: { phone: string }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
+  warmUpServer();
+  const response = await fetchAuthWithRetry(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -286,7 +330,7 @@ export async function verifyPhoneOtp(payload: {
   locationLabel?: string;
   deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
+  const response = await fetchAuthWithRetry(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -706,7 +750,7 @@ export async function fetchUsers(token: string, params: { search?: string; limit
 }
 
 export async function resetPasswordWithOtp(payload: { phone: string; code: string; newPassword: string }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
+  const response = await fetchAuthWithRetry(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)

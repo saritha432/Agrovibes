@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { Video, ResizeMode } from "expo-av";
 import type { LearnStackParamList } from "../navigation/LearnStackNavigator";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { fetchLearnCourseById } from "../services/api";
 import type { Course, CourseLesson } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
@@ -25,6 +26,7 @@ function isProbablyMp4Url(url: string) {
 }
 
 export function LessonVideoScreen() {
+  useAndroidNestedStackBack();
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
   const { token } = useAuth();

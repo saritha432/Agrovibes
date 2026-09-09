@@ -36,6 +36,7 @@ import { SharedReelChatCard } from "../../components/SharedReelChatCard";
 import { StoryReplyThumb } from "../../components/StoryReplyThumb";
 import { StoryViewerModal } from "../../components/StoryViewerModal";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
+import { useAndroidScreenBack } from "../../navigation/useAndroidScreenBack";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
@@ -487,6 +488,12 @@ export function DirectChatScreen() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "DirectChat">>();
+  useAndroidScreenBack(
+    useCallback(() => {
+      navigation.goBack();
+      return true;
+    }, [navigation])
+  );
   const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall, autoStartCall } =
     route.params;
   const { t, language } = useLanguage();
@@ -576,14 +583,19 @@ export function DirectChatScreen() {
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
-  /** Android IME: some devices resize, some overlay, some do both partially.
-   * Pad the chat root and correct from composer measureInWindow until it clears Gboard. */
+  /** Android IME: pad the composer above overlay/partial-resize keyboards (varies by OEM). */
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardScreenY, setKeyboardScreenY] = useState(0);
-  const [androidImePad, setAndroidImePad] = useState(0);
-  const windowHeightWhenKeyboardClosedRef = useRef(Dimensions.get("window").height);
+  const [composerKeyboardOffset, setComposerKeyboardOffset] = useState(0);
+  const windowHeightWhenKeyboardClosedRef = useRef(windowHeight);
   const composerWrapRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (!keyboardOpen) {
+      windowHeightWhenKeyboardClosedRef.current = windowHeight;
+    }
+  }, [keyboardOpen, windowHeight]);
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -599,7 +611,7 @@ export function DirectChatScreen() {
       setKeyboardOpen(false);
       setKeyboardHeight(0);
       setKeyboardScreenY(0);
-      setAndroidImePad(0);
+      setComposerKeyboardOffset(0);
       windowHeightWhenKeyboardClosedRef.current = Dimensions.get("window").height;
     });
     return () => {
@@ -609,52 +621,43 @@ export function DirectChatScreen() {
   }, []);
 
   useEffect(() => {
-    if (Platform.OS !== "android") return;
+    if (Platform.OS !== "android") {
+      setComposerKeyboardOffset(0);
+      return;
+    }
     if (!keyboardOpen || keyboardHeight <= 0) {
-      setAndroidImePad(0);
+      setComposerKeyboardOffset(0);
       return;
     }
 
-    const closedH = windowHeightWhenKeyboardClosedRef.current || Dimensions.get("window").height;
-    const winH = Dimensions.get("window").height;
+    const closedH = windowHeightWhenKeyboardClosedRef.current || windowHeight;
     const screenH = Dimensions.get("screen").height;
-    const resizedBy = Math.max(0, closedH - winH);
+    const resizedBy = Math.max(0, closedH - windowHeight);
     const coveredByScreenY =
-      keyboardScreenY > 0 ? Math.max(0, Math.round(screenH - keyboardScreenY)) : keyboardHeight;
+      keyboardScreenY > 0 ? Math.max(0, Math.round(screenH - keyboardScreenY)) : keyboardHeight + 48;
     const imeCover = Math.max(keyboardHeight, coveredByScreenY);
+    const estimate = Math.max(0, imeCover - resizedBy);
 
-    // If the window clearly resized for the IME, start at 0 and only correct from measure.
-    // Otherwise pad by the covered height so overlay OEMs clear the composer.
-    const baseline = resizedBy >= imeCover * 0.85 ? 0 : Math.max(0, imeCover - resizedBy);
-    setAndroidImePad(baseline);
-
-    let cancelled = false;
-    const bumpUntilClear = () => {
-      if (cancelled) return;
-      const kbTop = keyboardScreenY > 0 ? keyboardScreenY : screenH - imeCover;
+    const measureComposerClearance = () => {
+      const kbTop =
+        keyboardScreenY > 0 ? keyboardScreenY : Math.max(0, screenH - imeCover);
       composerWrapRef.current?.measureInWindow((_x, y, _w, h) => {
-        if (cancelled || !(h > 0)) return;
+        if (!(h > 0)) return;
         const composerBottom = y + h;
-        const need = Math.ceil(composerBottom - (kbTop - 10));
-        if (need > 0) {
-          setAndroidImePad((prev) => Math.min(prev + need, imeCover + 160));
-        }
+        const need = Math.ceil(composerBottom - (kbTop - 12));
+        const next = Math.max(estimate, need > 0 ? need : 0);
+        setComposerKeyboardOffset(Math.min(next, imeCover + 180));
       });
     };
 
-    // Wait for padding layout to apply before measuring; avoid stacking pad on stale frames.
-    const t1 = setTimeout(bumpUntilClear, 50);
-    const t2 = setTimeout(bumpUntilClear, 160);
-    const t3 = setTimeout(bumpUntilClear, 320);
-    const t4 = setTimeout(bumpUntilClear, 520);
+    setComposerKeyboardOffset(estimate);
+    requestAnimationFrame(measureComposerClearance);
+    const timers = [40, 120, 260, 420, 640].map((ms) => setTimeout(measureComposerClearance, ms));
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
     return () => {
-      cancelled = true;
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
+      timers.forEach(clearTimeout);
     };
-  }, [keyboardOpen, keyboardHeight, keyboardScreenY]);
+  }, [keyboardOpen, keyboardHeight, keyboardScreenY, windowHeight]);
 
   useEffect(() => {
     if (peerUsernameParam) {
@@ -1327,12 +1330,7 @@ export function DirectChatScreen() {
   );
 
   return (
-    <View
-      style={[
-        styles.flex,
-        Platform.OS === "android" && androidImePad > 0 ? { paddingBottom: androidImePad } : null
-      ]}
-    >
+    <View style={styles.flex}>
       <View style={[styles.header, { paddingTop: topChromeInset }]}>
         <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={28} color={TEXT} />
@@ -1617,7 +1615,12 @@ export function DirectChatScreen() {
       />
 
       <KeyboardAvoidingView
-        style={styles.composerKeyboardWrap}
+        style={[
+          styles.composerKeyboardWrap,
+          Platform.OS === "android" && composerKeyboardOffset > 0
+            ? { marginBottom: composerKeyboardOffset }
+            : null
+        ]}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         enabled={Platform.OS === "ios"}
         keyboardVerticalOffset={Platform.OS === "ios" ? topChromeInset : 0}
