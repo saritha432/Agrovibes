@@ -7,6 +7,8 @@ type Suppress = (hidden: boolean) => void;
 let opener: Opener | null = null;
 let closer: Closer | null = null;
 let suppressHandler: Suppress | null = null;
+let sheetOpen = false;
+let sheetBackHandler: (() => boolean) | null = null;
 
 export function registerNotificationSheetOpener(fn: Opener | null) {
   opener = fn;
@@ -18,6 +20,19 @@ export function registerNotificationSheetCloser(fn: Closer | null) {
 
 export function registerNotificationSheetSuppress(fn: Suppress | null) {
   suppressHandler = fn;
+}
+
+export function setNotificationSheetOpen(open: boolean) {
+  sheetOpen = open;
+}
+
+export function registerNotificationSheetBackHandler(fn: (() => boolean) | null) {
+  sheetBackHandler = fn;
+}
+
+export function tryHandleNotificationSheetBack(): boolean {
+  if (!sheetOpen || !sheetBackHandler) return false;
+  return sheetBackHandler();
 }
 
 export function requestOpenNotificationSheet() {

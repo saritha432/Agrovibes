@@ -7,6 +7,7 @@ import { MainTabBar } from "./MainTabBar";
 import type { CreateType } from "../components/CreateModal";
 import type { OpenCreateOptions } from "../screens/HomeScreen";
 import { NotificationPanelProvider } from "../context/NotificationPanelContext";
+import { setCreateModalOpen } from "./createModalBridge";
 import { subscribeOpenLiveCreate } from "./liveCreateBridge";
 import { setFeedPlaybackSuspended } from "./feedPlaybackBridge";
 import { runPendingNotificationNavigation } from "../push/notificationNavigation";
@@ -74,6 +75,17 @@ export function AppNavigator() {
     return () => setFeedPlaybackSuspended(false);
   }, [isCreateOpen]);
 
+  const closeCreateModal = useCallback(() => {
+    setCreatePresetType(null);
+    setCreateLiveOptions(null);
+    setCreateOpen(false);
+  }, []);
+
+  useEffect(() => {
+    setCreateModalOpen(isCreateOpen, closeCreateModal);
+    return () => setCreateModalOpen(false);
+  }, [closeCreateModal, isCreateOpen]);
+
   useEffect(() => {
     runPendingNotificationNavigation();
     void (async () => {
@@ -92,13 +104,14 @@ export function AppNavigator() {
     <NotificationPanelProvider>
       <View style={styles.root}>
         <Tab.Navigator
+          initialRouteName="Home"
+          backBehavior="initialRoute"
           screenOptions={{
             headerShown: false,
             tabBarShowLabel: false,
             lazy: true,
-            freezeOnBlur: true
+            freezeOnBlur: false
           }}
-          detachInactiveScreens
           tabBar={(props) => (
             <MainTabBar
               {...props}
@@ -113,6 +126,7 @@ export function AppNavigator() {
         >
           <Tab.Screen
             name="Home"
+            options={{ freezeOnBlur: false }}
             children={() => (
               <HomeScreen
                 refreshToken={homeRefreshToken}
@@ -161,9 +175,7 @@ export function AppNavigator() {
               scheduledLiveId={createLiveOptions?.scheduledLiveId}
               autoStartLive={!!createLiveOptions?.autoStartLive}
               onClose={() => {
-                setCreatePresetType(null);
-                setCreateLiveOptions(null);
-                setCreateOpen(false);
+                closeCreateModal();
               }}
               onVideoPosted={(post) => {
                 if (post) pendingFeedPostRef.current = post;

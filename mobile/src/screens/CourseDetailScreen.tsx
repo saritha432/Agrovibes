@@ -6,6 +6,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { LearnStackParamList } from "../navigation/LearnStackNavigator";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { ActivityIndicator } from "react-native";
 import type { Course } from "../services/api";
 import { fetchLearnCourseById } from "../services/api";
@@ -38,6 +39,7 @@ function Stars({ value }: { value: number }) {
 }
 
 export function CourseDetailScreen() {
+  useAndroidNestedStackBack();
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
   const { user, token } = useAuth();

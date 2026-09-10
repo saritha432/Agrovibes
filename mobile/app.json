@@ -30,11 +30,9 @@
 
     "android": {
       "package": "com.cropvibe.app",
-
       "versionCode": 27,
-
       "softwareKeyboardLayoutMode": "resize",
-
+      "predictiveBackGestureEnabled": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-adaptive-foreground.png",
         "backgroundColor": "#262626"
@@ -163,8 +161,7 @@
         {
           "android": {
             "compileSdkVersion": 36,
-            "targetSdkVersion": 36,
-
+            "targetSdkVersion": 35,
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
 
@@ -250,7 +247,8 @@
 
       "./scripts/withAndroidLargeHeap.js",
       "./plugins/withFcmManifestMergeFix.js",
-      "./plugins/withAndroid16KbPageSize.js"
+      "./plugins/withAndroid16KbPageSize.js",
+      "./plugins/withAndroidLegacyBackHandler.js"
     ],
 
     "extra": {

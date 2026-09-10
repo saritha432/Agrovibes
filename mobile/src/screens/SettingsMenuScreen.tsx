@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useLanguage } from "../localization/LanguageContext";
 import { APP_BLACK, APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 import { AccountCenterBottomSheet } from "../components/accountCenter/AccountCenterBottomSheet";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 
 const BG = APP_BLACK;
 const CARD = "#303132";
@@ -135,6 +136,7 @@ function PromoCard({ onPress }: { onPress?: () => void }) {
 }
 
 export function SettingsMenuScreen() {
+  useAndroidNestedStackBack();
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { signOut } = useAuth();
   const { t, language } = useLanguage();

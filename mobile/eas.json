@@ -5,7 +5,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "cache": {
-        "key": "development-dev-client-v2-call-notifications"
+        "key": "development-dev-client-v3-legacy-android-back"
       },
       "ios": {
         "simulator": false
@@ -22,7 +22,7 @@
       "distribution": "internal",
       "channel": "preview",
       "cache": {
-        "key": "preview-v1.0.10-call-push-hybrid"
+        "key": "preview-v1.0.22-legacy-android-back"
       },
       "env": {
         "NODE_ENV": "production",
@@ -44,7 +44,7 @@
     "production": {
       "channel": "production",
       "cache": {
-        "key": "production-android-v1.0.21-video-proguard"
+        "key": "production-android-v1.0.22-legacy-back"
       },
       "env": {
         "NODE_ENV": "production",

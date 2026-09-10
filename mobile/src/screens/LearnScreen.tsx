@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ActivityIndicator, RefreshControl } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
 import type { LearnStackParamList } from "../navigation/LearnStackNavigator";
+import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
 import type { Course } from "../services/api";
 import { fetchLearnCourses } from "../services/api";
 import { useLanguage } from "../localization/LanguageContext";
@@ -32,6 +33,7 @@ function formatCompact(n: number) {
 }
 
 export function LearnScreen() {
+  useAndroidTabBackToHome();
   const { t } = useLanguage();
   const navigation = useNavigation<Nav>();
   const [segment, setSegment] = useState<SegmentId>("courses");

@@ -336,7 +336,45 @@ async function ensureSocialNotificationsTable() {
   await query(
     `CREATE INDEX IF NOT EXISTS social_notifications_user_created_idx ON social_notifications (user_id, created_at DESC)`
   );
+  await query(
+    `CREATE INDEX IF NOT EXISTS social_notifications_post_like_actor_idx ON social_notifications (user_id, actor_id, post_id) WHERE type = 'post_like'`
+  );
   socialNotificationsTableReady = true;
+}
+
+async function upsertPostLikeNotification(recipientUserId, actorUserId, postId) {
+  await ensureSocialNotificationsTable();
+  await query(
+    `
+    DELETE FROM social_notifications
+    WHERE user_id = $1
+      AND actor_id = $2
+      AND post_id = $3
+      AND type = 'post_like'
+    `,
+    [recipientUserId, actorUserId, postId]
+  );
+  await query(
+    `
+    INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
+    VALUES ($1, $2, NULL, 'post_like', false, $3, NULL)
+    `,
+    [recipientUserId, actorUserId, postId]
+  );
+}
+
+async function removePostLikeNotification(recipientUserId, actorUserId, postId) {
+  await ensureSocialNotificationsTable();
+  await query(
+    `
+    DELETE FROM social_notifications
+    WHERE user_id = $1
+      AND actor_id = $2
+      AND post_id = $3
+      AND type = 'post_like'
+    `,
+    [recipientUserId, actorUserId, postId]
+  );
 }
 
 async function ensureProviderKycTable() {
@@ -4595,6 +4633,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     await ensureSocialNotificationsTable();
     const currentUserId = Number(req.user.userId);
     await ensureHomePostsTable();
+    await ensureHomePostLikesTable();
     const result = await query(
       `
       SELECT
@@ -4627,6 +4666,15 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       LEFT JOIN home_posts p ON p.id = n.post_id
       WHERE n.user_id = $1
         AND n.created_at <= NOW()
+        AND (
+          n.type <> 'post_like'
+          OR EXISTS (
+            SELECT 1
+            FROM home_post_likes hpl
+            WHERE hpl.post_id = n.post_id
+              AND hpl.user_id = n.actor_id
+          )
+        )
       ORDER BY n.created_at DESC
       LIMIT 50
       `,
@@ -8283,11 +8331,7 @@ router.post("/v1/home/posts/:postId/like", authRequired, async (req, res) => {
     );
     const authorUserId = await resolveHomePostAuthorUserId(post);
     if (authorUserId && authorUserId !== actorUserId) {
-      await query(
-        `INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read, post_id, comment_excerpt)
-         VALUES ($1, $2, NULL, 'post_like', false, $3, NULL)`,
-        [authorUserId, actorUserId, postId]
-      );
+      await upsertPostLikeNotification(authorUserId, actorUserId, postId);
       fireSocialPush({
         userId: authorUserId,
         type: "post_like",
@@ -8311,12 +8355,23 @@ router.post("/v1/home/posts/:postId/unlike", authRequired, async (req, res) => {
       return;
     }
     const actorUserId = Number(req.user.userId);
+    const postRes = await query(
+      `SELECT id, user_id, user_name FROM home_posts WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
+      [postId]
+    );
     const del = await query(`DELETE FROM home_post_likes WHERE post_id = $1 AND user_id = $2 RETURNING post_id`, [
       postId,
       actorUserId
     ]);
     if (del.rows[0]) {
       await query(`UPDATE home_posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = $1`, [postId]);
+      const post = postRes.rows[0];
+      if (post) {
+        const authorUserId = await resolveHomePostAuthorUserId(post);
+        if (authorUserId) {
+          await removePostLikeNotification(authorUserId, actorUserId, postId);
+        }
+      }
     }
     const cur = await query(`SELECT likes_count AS "likesCount" FROM home_posts WHERE id = $1 AND deleted_at IS NULL`, [postId]);
     await cacheIncr("home:posts:gen");

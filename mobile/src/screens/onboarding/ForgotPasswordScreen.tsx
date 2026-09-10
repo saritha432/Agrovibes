@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
-import { sendPhoneOtp } from "../../services/api";
+import { formatAuthError, sendPhoneOtp, warmUpServer } from "../../services/api";
 import { useLanguage } from "../../localization/LanguageContext";
 import { APP_LIME } from "../../theme/appColors";
 
@@ -24,25 +24,50 @@ export function ForgotPasswordScreen() {
   const { t } = useLanguage();
   const [phone, setPhone] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  const [retrying, setRetrying] = React.useState(false);
   const [errorText, setErrorText] = React.useState("");
+  const submitInFlightRef = React.useRef(false);
 
   const digits = phone.replace(/\D/g, "");
 
+  React.useEffect(() => {
+    warmUpServer();
+  }, []);
+
   const submit = async () => {
-    if (loading) return;
+    if (loading || submitInFlightRef.current) return;
     setErrorText("");
     if (digits.length < 10) {
       setErrorText("Enter a valid mobile number");
       return;
     }
+    submitInFlightRef.current = true;
     setLoading(true);
+    const local = digits.length > 10 ? digits.slice(-10) : digits;
+    const apiPhone = `+91${local}`;
     try {
-      const local = digits.length > 10 ? digits.slice(-10) : digits;
-      await sendPhoneOtp({ phone: `+91${local}` });
-      navigation.navigate("ForgotPasswordOtp", { phone: `+91${local}` });
+      await sendPhoneOtp({ phone: apiPhone });
+      navigation.navigate("ForgotPasswordOtp", { phone: apiPhone });
     } catch (e: any) {
-      setErrorText(e?.message || "Failed to send OTP");
+      const message = formatAuthError(e, "Failed to send OTP. Please try again.");
+      const transient = /connection dropped|network request failed|failed to fetch|temporarily unavailable/i.test(message);
+      if (transient) {
+        setRetrying(true);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          await sendPhoneOtp({ phone: apiPhone });
+          navigation.navigate("ForgotPasswordOtp", { phone: apiPhone });
+          return;
+        } catch (retryError: any) {
+          setErrorText(formatAuthError(retryError, "Failed to send OTP. Please try again."));
+        } finally {
+          setRetrying(false);
+        }
+      } else {
+        setErrorText(message);
+      }
     } finally {
+      submitInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -70,7 +95,9 @@ export function ForgotPasswordScreen() {
         />
 
         <Pressable style={[styles.primaryBtn, loading ? styles.disabled : null]} onPress={submit} disabled={loading}>
-          <Text style={styles.primaryBtnText}>{loading ? "Sending..." : t("sendOtp")}</Text>
+          <Text style={styles.primaryBtnText}>
+            {retrying ? "Retrying..." : loading ? "Sending..." : t("sendOtp")}
+          </Text>
         </Pressable>
 
         {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}

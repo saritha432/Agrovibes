@@ -14,6 +14,7 @@ import { useAppFonts } from "./src/hooks/useAppFonts";
 import { EnsureIosSafeAreaInsets } from "./src/safeArea/EnsureIosSafeAreaInsets";
 import { APP_BLACK } from "./src/theme/appColors";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
+import { installAndroidHardwareBackHandler } from "./src/navigation/androidHardwareBack";
 import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
 import { OtaUpdateBanner } from "./src/components/OtaUpdateBanner";
 import { warmUpServer } from "./src/services/api";
@@ -147,6 +148,7 @@ function AppShell() {
       <NavigationContainer
         ref={navigationRef}
         onReady={() => {
+          installAndroidHardwareBackHandler();
           trackNavigationScreen();
           runPendingNotificationNavigation();
         }}
