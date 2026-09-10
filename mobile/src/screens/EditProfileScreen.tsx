@@ -30,6 +30,7 @@ import { UserAvatar, avatarColorForName } from "../components/UserAvatar";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
 import { isChosenUsername } from "../localization/feedDisplay";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 const BG = APP_BLACK;
 const CARD = APP_SURFACE;
 const BORDER = "#3a3a3a";
@@ -121,6 +122,7 @@ function ProfileBannerBackground() {
 }
 
 export function EditProfileScreen() {
+  useAndroidNestedStackBack();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { t } = useLanguage();

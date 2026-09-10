@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { createRazorpayOrder, verifyRazorpayPayment } from "../services/api";
 import { useCart } from "../cart/CartContext";
 import { APP_LIME } from "../theme/appColors";
@@ -79,6 +80,7 @@ function buildRazorpayHtml(keyId: string, orderId: string, amountPaise: number) 
 }
 
 export function CheckoutScreen() {
+  useAndroidNestedStackBack();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const route = useRoute<RRoute>();

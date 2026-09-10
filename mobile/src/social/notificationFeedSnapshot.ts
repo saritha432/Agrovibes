@@ -13,6 +13,31 @@ export type NotificationFeedSnapshot = {
   liveStarts: any[];
 };
 
+function dedupePostLikeNotifications(rows: any[]) {
+  const byKey = new Map<string, any>();
+  for (const row of rows) {
+    const actorId = Number(row.actorId);
+    const postId = Number(row.postId);
+    const key =
+      Number.isFinite(actorId) && actorId > 0 && Number.isFinite(postId) && postId > 0
+        ? `${actorId}:${postId}`
+        : `row:${String(row.id ?? "")}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, row);
+      continue;
+    }
+    const existingTs = Date.parse(String(existing.createdAt || "")) || 0;
+    const rowTs = Date.parse(String(row.createdAt || "")) || 0;
+    if (rowTs >= existingTs) byKey.set(key, row);
+  }
+  return [...byKey.values()].sort((a, b) => {
+    const ta = Date.parse(String(a?.createdAt || "")) || 0;
+    const tb = Date.parse(String(b?.createdAt || "")) || 0;
+    return tb - ta;
+  });
+}
+
 export async function fetchNotificationFeedSnapshot(params: {
   token: string | null;
   userFullName: string;
@@ -47,7 +72,7 @@ export async function fetchNotificationFeedSnapshot(params: {
   ];
   const declined = [...(local.declinedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))];
   const newFollows = [...remoteNewFollows];
-  const postLikes = [
+  const postLikes = dedupePostLikeNotifications([
     ...remotePostLikes,
     ...localEng.postLikes.map((n) => ({
       ...n,
@@ -60,7 +85,7 @@ export async function fetchNotificationFeedSnapshot(params: {
       postImageUrl: n.postImageUrl,
       postVideoUrl: n.postVideoUrl
     }))
-  ];
+  ]);
   const postComments = [
     ...remotePostComments,
     ...localEng.postComments.map((n) => ({

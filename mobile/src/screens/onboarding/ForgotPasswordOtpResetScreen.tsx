@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { resetToLoginAfterPasswordReset } from "../../navigation/navigationRef";
-import { resetPasswordWithOtp, sendPhoneOtp } from "../../services/api";
+import { formatAuthError, resetPasswordWithOtp, sendPhoneOtp } from "../../services/api";
 import { useLanguage } from "../../localization/LanguageContext";
 import { APP_LIME } from "../../theme/appColors";
 
@@ -146,7 +146,7 @@ export function ForgotPasswordOtpResetScreen() {
       await sendPhoneOtp({ phone: apiPhone });
       setCountdown(30);
     } catch (e: any) {
-      setErrorText(e?.message || "Failed to resend OTP");
+      setErrorText(formatAuthError(e, "Failed to resend OTP"));
     } finally {
       setResending(false);
     }

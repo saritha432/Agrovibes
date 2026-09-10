@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Alert, BackHandler, InteractionManager, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, InteractionManager, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useTopChromeInset } from "../theme/topChromeInset";
@@ -47,6 +47,8 @@ import {
   registerNotificationSheetCloser,
   registerNotificationSheetOpener,
   registerNotificationSheetSuppress,
+  registerNotificationSheetBackHandler,
+  setNotificationSheetOpen,
   suppressNotificationSheet
 } from "../navigation/notificationSheetBridge";
 import { setFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
@@ -100,6 +102,8 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [lastSeenReady, setLastSeenReady] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   const [followRequestsExpanded, setFollowRequestsExpanded] = useState(false);
+  const followRequestsExpandedRef = useRef(followRequestsExpanded);
+  followRequestsExpandedRef.current = followRequestsExpanded;
   const [listScrollEnabled, setListScrollEnabled] = useState(true);
   const [dismissedReady, setDismissedReady] = useState(false);
 
@@ -484,17 +488,20 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   }, [closeNotificationSheet, openNotificationSheet]);
 
   useEffect(() => {
-    if (!sheetOpen) return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (followRequestsExpanded) {
+    setNotificationSheetOpen(sheetOpen);
+  }, [sheetOpen]);
+
+  useEffect(() => {
+    registerNotificationSheetBackHandler(() => {
+      if (followRequestsExpandedRef.current) {
         setFollowRequestsExpanded(false);
         return true;
       }
       closeNotificationSheet();
       return true;
     });
-    return () => sub.remove();
-  }, [closeNotificationSheet, followRequestsExpanded, sheetOpen]);
+    return () => registerNotificationSheetBackHandler(null);
+  }, [closeNotificationSheet]);
 
   const onRespond = async (entry: any, action: "accept" | "decline") => {
     if (action === "accept") {
