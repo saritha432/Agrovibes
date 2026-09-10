@@ -496,19 +496,12 @@ export function PostsReelViewerModal({
     setIsReelMuted(Platform.OS === "web");
     setReelUserPaused(false);
     setReelMuteFeedback(null);
-    ignoreViewabilityUntilRef.current = Date.now() + 400;
+    ignoreViewabilityUntilRef.current = Date.now() + 250;
     viewerSurfaceReadyRef.current = false;
     setViewerSurfaceReady(false);
     setViewerSession((s) => s + 1);
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      if (!cancelled) setModalPlayerReady(true);
-    }, Platform.OS === "android" ? 80 : 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [visible, initialIndex, posts]);
+    setModalPlayerReady(true);
+  }, [visible, initialIndex]);
 
   const armModalPlayer = useCallback(() => {
     setModalPlayerReady(true);
@@ -963,17 +956,22 @@ export function PostsReelViewerModal({
       const postComments = commentsByPost[post.id] ?? [];
       const shownCommentsCount = Math.max(Number(post.commentsCount ?? 0), postComments.length);
       const shownRepostsCount = shownResharesCount(post);
-      const mediaContentH = pageH;
+      // Fullscreen: same top safe inset for photos + reels; back overlays media.
+      const statusSafeTop = Math.max(modalTopInset, insets.top, 0);
+      const mediaContentH = Math.max(1, pageH - statusSafeTop);
       const mediaFrameStyle = {
         position: "absolute" as const,
         left: 0,
         right: 0,
-        top: 0,
+        top: statusSafeTop,
         bottom: 0
       };
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
+          {statusSafeTop > 0 ? (
+            <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: statusSafeTop, backgroundColor: "#000" }} />
+          ) : null}
           {post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {mountVideo ? (
@@ -990,7 +988,7 @@ export function PostsReelViewerModal({
                     playbackKey={`rv-${viewerSession}-${post.id}-s`}
                     containerWidth={reelContentWidth}
                     containerHeight={mediaContentH}
-                    fit="auto"
+                    fit="cover"
                     posterUri={reelPoster || undefined}
                     isLooping
                     isMuted={isReelMuted || !isActiveVideo}
@@ -1190,6 +1188,7 @@ export function PostsReelViewerModal({
       displayPersonName,
       displayPostCaption,
       insets.bottom,
+      insets.top,
       isReelMuted,
       reelUserPaused,
       likeBusyByPostId,
@@ -1232,28 +1231,25 @@ export function PostsReelViewerModal({
   useEffect(() => {
     if (!visible || viewerPageH <= 0) return;
     const snap = () => {
-      if (viewerSurfaceReadyRef.current) return;
       reelViewerListRef.current?.scrollToOffset({
         offset: Math.max(0, safeInitialIndex) * viewerPageH,
         animated: false
       });
     };
     snap();
-    const t1 = setTimeout(snap, 50);
-    const t2 = setTimeout(snap, 140);
-    const fallback = setTimeout(() => {
+    const t1 = setTimeout(snap, 32);
+    const ready = setTimeout(() => {
       snap();
       if (!viewerSurfaceReadyRef.current) {
         viewerSurfaceReadyRef.current = true;
         setViewerSurfaceReady(true);
       }
-    }, 280);
+    }, 80);
     return () => {
       clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(fallback);
+      clearTimeout(ready);
     };
-  }, [safeInitialIndex, visible, viewerPageH, viewerPosts.length, viewerSession]);
+  }, [safeInitialIndex, visible, viewerPageH, viewerSession]);
 
   if (!visible) return null;
 
@@ -1298,13 +1294,13 @@ export function PostsReelViewerModal({
           ) : null}
           {viewerPosts.length > 0 && viewerPageH > 0 ? (
             <FlatList
-              key={`profile-reel-viewer-${viewerSession}-${safeInitialIndex}`}
+              key={`profile-reel-viewer-${viewerSession}`}
               ref={(r) => {
                 reelViewerListRef.current = r;
               }}
               style={{ flex: 1 }}
               data={viewerPosts}
-              keyExtractor={(item, index) => `profile-reel-viewer-${item.id}-${index}`}
+              keyExtractor={(item, index) => `profile-reel-viewer-${item.feedEntryKey || item.id}-${index}`}
               renderItem={renderReelPage}
               pagingEnabled
               showsVerticalScrollIndicator={false}

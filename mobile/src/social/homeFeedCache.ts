@@ -161,15 +161,21 @@ export function mergeRepostFeedItems(basePosts: HomePost[], repostItems: HomePos
     return {
       ...post,
       repost: repostRow.repost,
+      feedEntryKey: repostRow.feedEntryKey || post.feedEntryKey,
       resharesCount: Math.max(Number(post.resharesCount ?? 0), Number(repostRow.resharesCount ?? 0)),
       viewerHasReshared: post.viewerHasReshared ?? repostRow.viewerHasReshared
     };
   });
 
   // Append repost-only rows without re-sorting the whole feed (avoids jump-to-top).
+  const presentKeys = new Set(out.map((post) => String(post.feedEntryKey || "").trim() || `post:${post.id}`));
   const presentIds = new Set(out.map((post) => post.id));
   for (const repostPost of repostItems) {
-    if (!presentIds.has(repostPost.id)) out.push(repostPost);
+    const key = String(repostPost.feedEntryKey || "").trim() || `post:${repostPost.id}`;
+    if (presentKeys.has(key) || presentIds.has(repostPost.id)) continue;
+    out.push(repostPost);
+    presentKeys.add(key);
+    presentIds.add(repostPost.id);
   }
   return out;
 }

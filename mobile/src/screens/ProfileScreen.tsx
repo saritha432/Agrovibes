@@ -600,6 +600,13 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     void refreshMergedFollowStats();
   }, [isPublicProfileView, refreshMergedFollowStats]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (isPublicProfileView) return;
+      void refreshMergedFollowStats();
+    }, [isPublicProfileView, refreshMergedFollowStats])
+  );
+
   useEffect(() => {
     if (!token) return;
     const targetId = isPublicProfileView ? Number(publicUserId) : Number(user?.id);

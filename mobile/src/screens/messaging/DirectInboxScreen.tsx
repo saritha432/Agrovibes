@@ -25,6 +25,7 @@ import {
 } from "../../services/socketChat";
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
+import { useNotificationPanel } from "../../context/NotificationPanelContext";
 import { formatDmInboxPreview } from "./dmMessageFormats";
 import { NewMessageComposerModal } from "./NewMessageComposerModal";
 
@@ -59,6 +60,7 @@ export function DirectInboxScreen() {
   useAndroidTabBackToHome();
   const topChromeInset = useTopChromeInset();
   const { user, token } = useAuth();
+  const { refreshMessageUnread, syncMessageUnreadFromThreads } = useNotificationPanel();
   const isAccountDeactivated = useIsAccountDeactivated();
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
@@ -70,15 +72,19 @@ export function DirectInboxScreen() {
   const load = useCallback(async () => {
     if (!token) {
       setThreads([]);
+      syncMessageUnreadFromThreads([]);
       return;
     }
     try {
       const list = await fetchMessageThreads(token);
-      setThreads(list.threads || []);
+      const next = list.threads || [];
+      setThreads(next);
+      // Keep Chat tab badge aligned with what the inbox shows (clears stale "3").
+      syncMessageUnreadFromThreads(next);
     } catch {
       setThreads([]);
     }
-  }, [token]);
+  }, [syncMessageUnreadFromThreads, token]);
 
   useFocusEffect(
     useCallback(() => {
@@ -115,16 +121,18 @@ export function DirectInboxScreen() {
           unreadCount: Math.max(0, Number(current.unreadCount || 0) + unreadDelta)
         };
         next.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+        syncMessageUnreadFromThreads(next);
         return next;
       });
     });
-  }, [load]);
+  }, [load, syncMessageUnreadFromThreads]);
 
   useEffect(() => {
     return onDirectRead(() => {
       void load();
+      void refreshMessageUnread();
     });
-  }, [load]);
+  }, [load, refreshMessageUnread]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const filtered = trimmedQuery
