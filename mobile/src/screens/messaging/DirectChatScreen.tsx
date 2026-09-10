@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { ensureMediaLibraryAccess } from "../../utils/mediaLibraryPermission";
 import { LinearGradient } from "expo-linear-gradient";
@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   FlatList,
   Image,
   Keyboard,
@@ -30,6 +29,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { CallHistoryBubble } from "../../components/CallHistoryBubble";
 import { ChatMediaAlbumBubble } from "../../components/ChatMediaAlbumBubble";
 import { ChatMediaBubble } from "../../components/ChatMediaBubble";
+import { AppVideo } from "../../components/AppVideo";
 import { ChatVoiceNoteBubble } from "../../components/ChatVoiceNoteBubble";
 import { PostsReelViewerModal } from "../../components/PostsReelViewerModal";
 import { SharedReelChatCard } from "../../components/SharedReelChatCard";
@@ -1282,13 +1282,9 @@ export function DirectChatScreen() {
     [peerUserId, token, user?.id]
   );
 
-  // Gesture/nav inset only when keyboard is closed. Never apply IME height as padding —
-  // Android adjustResize already shrinks the window (and some devices report IME as insets.bottom).
-  const bottomPad = keyboardOpen
-    ? Platform.OS === "ios"
-      ? 6
-      : 4
-    : Math.min(Math.max(insets.bottom, 8), 34);
+  // Nav/home-indicator only when the keyboard is closed. With Android resize, the
+  // window already sits on the IME — extra padding leaves a gap above the keyboard.
+  const bottomPad = keyboardOpen ? 0 : Math.min(Math.max(insets.bottom, 8), 34);
 
   const openSharedCropvibeCard = useCallback(
     async (body: string) => {
@@ -1625,11 +1621,7 @@ export function DirectChatScreen() {
         enabled={Platform.OS === "ios"}
         keyboardVerticalOffset={Platform.OS === "ios" ? topChromeInset : 0}
       >
-        <View
-          ref={composerWrapRef}
-          collapsable={false}
-          style={[styles.composerWrap, { paddingBottom: bottomPad }]}
-        >
+        <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
             <View style={styles.replyComposerMeta}>
@@ -1677,9 +1669,6 @@ export function DirectChatScreen() {
                 placeholder="Message"
                 placeholderTextColor={MUTED}
                 showSoftInputOnFocus
-                onFocus={() => {
-                  windowHeightWhenKeyboardClosedRef.current = Dimensions.get("window").height;
-                }}
                 style={[
                   styles.input,
                   {
@@ -1861,12 +1850,12 @@ export function DirectChatScreen() {
                         resizeMode="contain"
                       />
                     ) : (
-                      <Video
-                        source={{ uri: videoPlaybackUrl(item.url) }}
+                      <AppVideo
+                        source={videoPlaybackUrl(item.url)}
                         style={styles.chatMediaViewerMedia}
-                        resizeMode={ResizeMode.CONTAIN}
+                        contentFit="contain"
                         shouldPlay
-                        useNativeControls
+                        nativeControls
                       />
                     )}
                   </View>
@@ -1882,12 +1871,12 @@ export function DirectChatScreen() {
                 resizeMode="contain"
               />
             ) : chatMediaViewer?.items[0]?.kind === "video" ? (
-              <Video
-                source={{ uri: videoPlaybackUrl(chatMediaViewer.items[0].url) }}
+              <AppVideo
+                source={videoPlaybackUrl(chatMediaViewer.items[0].url)}
                 style={[styles.chatMediaViewerMedia, { width: windowWidth, height: windowHeight }]}
-                resizeMode={ResizeMode.CONTAIN}
+                contentFit="contain"
                 shouldPlay
-                useNativeControls
+                nativeControls
               />
             ) : null}
           </View>

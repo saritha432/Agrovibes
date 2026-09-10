@@ -1,0 +1,253 @@
+.settings-page {
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100%;
+  padding-bottom: 48px;
+}
+
+.settings-topbar {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 12px;
+  min-height: 48px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-topbar__back {
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: none;
+  color: #c9ff35;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.settings-topbar__title {
+  margin: 0;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+
+.settings-topbar__spacer {
+  width: 44px;
+}
+
+.settings-page__scroll {
+  padding: 16px 16px 24px;
+}
+
+.settings-section {
+  margin-bottom: 16px;
+}
+
+.settings-section__card {
+  background: #303132;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.settings-section__header {
+  padding: 12px;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.settings-section__header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: capitalize;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 63px;
+  padding: 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-row--tall {
+  align-items: flex-start;
+  min-height: 78px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.settings-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-row__icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.settings-row__body {
+  flex: 1;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.settings-row__title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.settings-row__subtitle {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #97a0a8;
+  font-weight: 500;
+}
+
+.settings-row__chevron {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.settings-row__divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.settings-promo {
+  display: block;
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 20px 18px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(201, 255, 53, 0.12);
+  background: linear-gradient(135deg, rgba(201, 255, 53, 0.12), #1a1b1c 55%);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-promo__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.4px;
+}
+
+.settings-promo__title span {
+  color: #c9ff35;
+}
+
+.settings-promo__subtitle {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #97a0a8;
+  font-weight: 500;
+}
+
+.settings-promo__cta {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(201, 255, 53, 0.28);
+  background: #0d0d0d;
+  color: #c9ff35;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-logout-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.settings-logout {
+  border: none;
+  background: none;
+  color: #ff6b6b;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 16px 20px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-subpage {
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  padding-bottom: 48px;
+}
+
+.settings-subpage__content {
+  padding: 16px 0 24px;
+}
+
+.settings-about-logo {
+  text-align: center;
+  padding: 24px 16px 8px;
+}
+
+.settings-about-logo__mark {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: #303132;
+  display: grid;
+  place-items: center;
+  font-size: 36px;
+}
+
+.settings-about-logo h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.settings-about-logo p {
+  margin: 6px 0 0;
+  color: #97a0a8;
+  font-size: 13px;
+}
+
+.settings-about-text {
+  margin: 0;
+  padding: 16px;
+  color: #d5dbe0;
+  line-height: 1.55;
+  font-size: 14px;
+}

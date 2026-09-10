@@ -105,6 +105,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const followRequestsExpandedRef = useRef(followRequestsExpanded);
   followRequestsExpandedRef.current = followRequestsExpanded;
   const [listScrollEnabled, setListScrollEnabled] = useState(true);
+  const [dismissedReady, setDismissedReady] = useState(false);
 
   const viewerUserId = useMemo(() => {
     const parsed = Number(user?.id);
@@ -126,12 +127,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const lastSeenMsRef = useRef(0);
   lastSeenMsRef.current = lastSeenMs;
   const dismissedIdsRef = useRef<Set<string>>(new Set());
-  const [dismissedReady, setDismissedReady] = useState(false);
 
   const persistLastSeenMs = useCallback(
     async (ms: number) => {
       setLastSeenMs(ms);
-      lastSeenMsRef.current = ms;
+      lastSeenMsRef.current = ms; 
       try {
         await AsyncStorage.setItem(notificationSeenKey, String(ms));
       } catch {
@@ -1396,7 +1396,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 8
+    minHeight: 44,
+    paddingVertical: 4
   },
   headerBackBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
   sheetTitle: { color: "#ffffff", fontWeight: "700", fontSize: 20, letterSpacing: 0.1, flex: 1, textAlign: "center" },

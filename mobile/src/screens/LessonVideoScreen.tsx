@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import { Video, ResizeMode } from "expo-av";
+import { AppVideo } from "../components/AppVideo";
 import type { LearnStackParamList } from "../navigation/LearnStackNavigator";
 import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { fetchLearnCourseById } from "../services/api";
@@ -106,13 +106,13 @@ export function LessonVideoScreen() {
         {lesson?.videoUrl && !lesson.locked ? (
           isProbablyMp4Url(lesson.videoUrl) ? (
           <View style={styles.videoCard}>
-            <Video
-              source={{ uri: videoPlaybackUrl(lesson.videoUrl) }}
+            <AppVideo
+              source={videoPlaybackUrl(lesson.videoUrl)}
               style={styles.video}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
+              nativeControls
+              contentFit="contain"
               shouldPlay={playRequested}
-              onPlaybackStatusUpdate={(status: any) => {
+              onPlaybackStatusUpdate={(status) => {
                 if (!token) return;
                 if (!status?.isLoaded) return;
                 const seconds = Math.floor((status.positionMillis || 0) / 1000);

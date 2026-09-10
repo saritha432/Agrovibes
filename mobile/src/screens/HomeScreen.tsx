@@ -24,7 +24,7 @@ import {
   type ImageStyle,
   type ViewToken
 } from "react-native";
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video, type AVPlaybackStatus } from "expo-av";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
@@ -55,7 +55,7 @@ import {
   registerHomeReelImmersiveExit,
   setHomeReelImmersiveActive
 } from "../navigation/homeReelImmersiveBridge";
-import { videoPlaybackSources, videoPlaybackUrl } from "../utils/videoPlaybackUrl";
+import { videoPlaybackUrl, videoPlaybackSources, nextVideoErrorAction, normalizeVideoPlaybackUri } from "../utils/videoPlaybackUrl";
 import { buildPostShareLink } from "../utils/postShare";
 import { AppTopBar, useModalTopChromeInset } from "../components/AppTopBar";
 import { PostShareSheet } from "../components/PostShareSheet";
@@ -66,7 +66,11 @@ import { RepostAttribution } from "../components/RepostAttribution";
 import { UserAvatar } from "../components/UserAvatar";
 import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "../components/CommentComposerBar";
-import { ReelSeekBar } from "../components/ReelSeekBar";
+import { LiveReelSeekBar } from "../components/LiveReelSeekBar";
+import { getReelProgress, pruneReelProgress, setReelProgress } from "../utils/reelProgressStore";
+import { AppVideo, type AppVideoHandle } from "../components/AppVideo";
+import { ContainedAppVideo, type ContainedAppVideoHandle } from "../components/ContainedAppVideo";
+import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
@@ -164,7 +168,7 @@ import {
   stripInternalCaptionPrefix
 } from "../localization/feedDisplay";
 import { APP_DARK_BG, APP_LIME } from "../theme/appColors";
-import { reelGridStillUri, pickReelVideoFit, postHasAttachedMusic, postShowsVolumeControl } from "../utils/reelGrid";
+import { reelGridStillUri, postHasAttachedMusic, postShowsVolumeControl } from "../utils/reelGrid";
 import { dedupePostsById } from "../utils/reelViewerFeed";
 import { isOversizedFeedVideo, readVideoSizeFromPlaybackStatus } from "../utils/feedVideoLimits";
 
@@ -838,21 +842,6 @@ function commentInteractionKey(postId: number, commentId: string) {
   return `${postId}:${commentId}`;
 }
 
-/** Web: expo-av pins the video absolute-fill; relax so object-fit matches resizeMode. */
-const webVideoObjectFitStyle = (fit: "contain" | "cover"): ViewStyle =>
-  Platform.OS === "web"
-    ? ({
-        position: "relative",
-        left: undefined,
-        top: undefined,
-        right: undefined,
-        bottom: undefined,
-        width: "100%",
-        height: "100%",
-        objectFit: fit
-      } as ViewStyle)
-    : ({} as ViewStyle);
-
 /** Cached feed stills — prefers disk cache over RN Image for scroll performance. */
 const FeedMediaImage = React.memo(function FeedMediaImage({
   uri,
@@ -882,32 +871,31 @@ const FeedMediaImage = React.memo(function FeedMediaImage({
 function FeedPostVideo({
   uri,
   hlsUrl,
+  playbackUrl,
   style,
   posterUri
 }: {
   uri: string;
   hlsUrl?: string | null;
+  playbackUrl?: string | null;
   style: ViewStyle;
   posterUri?: string;
 }) {
-  const sources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
+  const sources = useMemo(() => videoPlaybackSources(uri, hlsUrl, playbackUrl), [uri, hlsUrl, playbackUrl]);
   const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = videoPlaybackUrl(sources[sourceIndex] ?? uri);
-  const videoRef = useRef<Video | null>(null);
+  const sourceIndexRef = useRef(0);
+  sourceIndexRef.current = sourceIndex;
+  const activeUri = normalizeVideoPlaybackUri(sources[sourceIndex] ?? uri);
+  const videoRef = useRef<AppVideoHandle | null>(null);
   const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     setBlocked(false);
     setSourceIndex(0);
-  }, [uri, hlsUrl]);
+    sourceIndexRef.current = 0;
+  }, [uri, hlsUrl, playbackUrl]);
 
-  useEffect(() => {
-    return () => {
-      void videoRef.current?.unloadAsync().catch(() => {});
-    };
-  }, []);
-
-  const onStatus = useCallback((status: AVPlaybackStatus) => {
+  const onStatus = useCallback((status: AppPlaybackStatus) => {
     if (status.isLoaded) {
       const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
       if (isOversizedFeedVideo(w, h)) {
@@ -917,16 +905,23 @@ function FeedPostVideo({
       }
       return;
     }
-    if ("error" in status && status.error) {
+    if (status.error) {
+      const idx = sourceIndexRef.current;
       console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-      if (sourceIndex + 1 < sources.length) {
-        setSourceIndex((i) => i + 1);
-        return;
+      const action = nextVideoErrorAction(status.error, idx, sources.length);
+      if (action === "next-source") {
+        const next = idx + 1;
+        if (next < sources.length) {
+          sourceIndexRef.current = next;
+          setSourceIndex(next);
+        } else {
+          setBlocked(true);
+        }
+      } else if (idx >= sources.length - 1) {
+        setBlocked(true);
       }
-      setBlocked(true);
-      void videoRef.current?.unloadAsync().catch(() => {});
     }
-  }, [activeUri, sourceIndex, sources.length]);
+  }, [activeUri, sources.length]);
 
   if (blocked) {
     return posterUri ? (
@@ -937,258 +932,22 @@ function FeedPostVideo({
   }
 
   return (
-    <Video
-      key={activeUri}
+    <AppVideo
+      key={`${uri}-${sourceIndex}`}
       ref={(r) => {
         videoRef.current = r;
       }}
       style={style}
-      source={{ uri: activeUri }}
-      resizeMode={ResizeMode.COVER}
+      source={activeUri}
+      contentFit="cover"
       shouldPlay
       isLooping
       isMuted
-      useNativeControls={false}
+      nativeControls={false}
       onPlaybackStatusUpdate={onStatus}
     />
   );
 }
-
-type ContainedExpoVideoProps = {
-  uri: string;
-  hlsUrl?: string | null;
-  shouldPlay: boolean;
-  preloadOnly?: boolean;
-  containerWidth: number;
-  containerHeight: number;
-  /** `cover` = full bleed. `contain` = full frame visible. `auto` = match video to container aspect. */
-  fit?: "contain" | "cover" | "auto";
-  isLooping?: boolean;
-  isMuted?: boolean;
-  posterUri?: string;
-  useNativeControls?: boolean;
-  /** Bust native player cache when reopening fullscreen (same uri otherwise reuses a dead surface). */
-  playbackKey?: string;
-  onStatusUpdate?: (status: AVPlaybackStatus) => void;
-};
-
-type ContainedExpoVideoHandle = {
-  seekToRatio: (ratio: number) => Promise<void>;
-};
-
-const ContainedExpoVideo = React.forwardRef<ContainedExpoVideoHandle, ContainedExpoVideoProps>(function ContainedExpoVideo({
-  uri,
-  hlsUrl,
-  shouldPlay,
-  preloadOnly = false,
-  containerWidth,
-  containerHeight,
-  fit = "auto",
-  isLooping = true,
-  isMuted = false,
-  posterUri,
-  useNativeControls = false,
-  playbackKey,
-  onStatusUpdate
-}: ContainedExpoVideoProps, ref) {
-  const isWeb = Platform.OS === "web";
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
-  const effectiveFit = useMemo((): "contain" | "cover" => {
-    if (fit === "cover" || fit === "contain") return fit;
-    // Contain until size is known so COVER does not flash a zoomed crop.
-    if (!natural) return "contain";
-    return pickReelVideoFit(natural.width, natural.height, containerWidth, containerHeight);
-  }, [fit, natural, containerWidth, containerHeight]);
-  const isCover = effectiveFit === "cover";
-  const [playbackBlocked, setPlaybackBlocked] = useState(false);
-  const videoRef = useRef<Video | null>(null);
-  const durationRef = useRef(0);
-  const playbackSources = useMemo(() => videoPlaybackSources(uri, hlsUrl), [uri, hlsUrl]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const activeUri = useMemo(
-    () => videoPlaybackUrl(playbackSources[sourceIndex] ?? uri),
-    [playbackSources, sourceIndex, uri]
-  );
-  const mediaIdentity = playbackKey || "feed";
-
-  useEffect(() => {
-    setNatural(null);
-    setPlaybackBlocked(false);
-    setSourceIndex(0);
-  }, [mediaIdentity]);
-
-  const videoOuterStyle: ViewStyle = useMemo(
-    () =>
-      isWeb
-        ? { width: "100%", height: "100%" }
-        : StyleSheet.absoluteFillObject,
-    [isWeb]
-  );
-
-  const resizeMode = isCover ? ResizeMode.COVER : ResizeMode.CONTAIN;
-
-  // Rely on `source` + `shouldPlay`. Light retries only for load/scroll races.
-  // AudioFocus "background" is fixed via staysActiveInBackground (Android Modal pauses Activity).
-  useEffect(() => {
-    if (!shouldPlay) {
-      void videoRef.current?.pauseAsync().catch(() => {});
-      return;
-    }
-    let cancelled = false;
-    let attempts = 0;
-    const tryPlay = () => {
-      if (cancelled) return;
-      const v = videoRef.current;
-      if (!v) {
-        attempts += 1;
-        if (attempts < 30) setTimeout(tryPlay, 80);
-        return;
-      }
-      void (async () => {
-        try {
-          const status = await v.getStatusAsync();
-          if (cancelled) return;
-          if (!status.isLoaded) {
-            attempts += 1;
-            if (attempts < 30) setTimeout(tryPlay, 100);
-            return;
-          }
-          if (status.isPlaying) return;
-          await v.playAsync();
-        } catch (error: unknown) {
-          if (cancelled) return;
-          attempts += 1;
-          if (attempts < 30) {
-            setTimeout(tryPlay, 150);
-            return;
-          }
-          // Avoid spamming AudioFocus warnings — usually means audio mode / Activity pause race.
-          const msg = error instanceof Error ? error.message : String(error);
-          if (!/AudioFocusNotAcquired|background/i.test(msg)) {
-            console.warn("[Cropvibe Video] play failed", activeUri.slice(0, 160), error);
-          }
-        }
-      })();
-    };
-    const t = setTimeout(tryPlay, 80);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [shouldPlay, mediaIdentity, sourceIndex]);
-
-  useEffect(() => {
-    return () => {
-      const v = videoRef.current;
-      videoRef.current = null;
-      if (!v) return;
-      void v.pauseAsync().catch(() => {});
-      void v.unloadAsync().catch(() => {});
-    };
-  }, []);
-
-  React.useImperativeHandle(
-    ref,
-    () => ({
-      seekToRatio: async (ratio: number) => {
-        const target = Math.max(0, Math.min(1, ratio));
-        let dur = durationRef.current;
-        if (!dur || !Number.isFinite(dur)) {
-          const status = await videoRef.current?.getStatusAsync();
-          if (status?.isLoaded) {
-            dur = Number(status.durationMillis || 0);
-            durationRef.current = dur;
-          }
-        }
-        if (!dur || !Number.isFinite(dur)) return;
-        await videoRef.current?.setPositionAsync(Math.round(dur * target));
-      }
-    }),
-    []
-  );
-
-  if (playbackBlocked) {
-    return (
-      <View
-        style={{
-          width: containerWidth,
-          height: containerHeight,
-          backgroundColor: "#000",
-          justifyContent: "center",
-          alignItems: "center"
-        }}
-      >
-        {posterUri ? (
-          <FeedImage
-            source={{ uri: posterUri }}
-            style={{ width: containerWidth, height: containerHeight } as ImageStyle}
-            contentFit="contain"
-            recyclingKey={posterUri}
-          />
-        ) : null}
-        <Text style={{ position: "absolute", bottom: 48, color: "rgba(255,255,255,0.75)", fontSize: 13 }}>
-          Video unavailable
-        </Text>
-      </View>
-    );
-  }
-
-  // Key by session + fallback source index — NOT full URI (signed URLs change on feed refresh).
-  const playerKey = `${mediaIdentity}::src${sourceIndex}`;
-
-  return (
-    <View
-      collapsable={false}
-      style={{
-        width: containerWidth,
-        height: containerHeight,
-        overflow: "hidden",
-        backgroundColor: "#000"
-      }}
-    >
-      <Video
-        key={playerKey}
-        ref={(r) => {
-          videoRef.current = r;
-        }}
-        source={{ uri: activeUri }}
-        shouldPlay={shouldPlay}
-        isLooping={isLooping}
-        isMuted={isMuted || preloadOnly}
-        useNativeControls={useNativeControls}
-        usePoster={false}
-        resizeMode={resizeMode}
-        style={videoOuterStyle}
-        videoStyle={isWeb ? webVideoObjectFitStyle(isCover ? "cover" : "contain") : undefined}
-        onPlaybackStatusUpdate={(status) => {
-          onStatusUpdate?.(status);
-          if (status.isLoaded) {
-            durationRef.current = Number(status.durationMillis || 0);
-            const { width: w, height: h } = readVideoSizeFromPlaybackStatus(status);
-            if (w > 0 && h > 0) {
-              setNatural((prev) => (prev?.width === w && prev?.height === h ? prev : { width: w, height: h }));
-            }
-            if (isOversizedFeedVideo(w, h)) {
-              setPlaybackBlocked(true);
-              void videoRef.current?.pauseAsync().catch(() => {});
-              void videoRef.current?.unloadAsync().catch(() => {});
-              return;
-            }
-          } else if ("error" in status && status.error) {
-            console.warn("[Cropvibe Video]", activeUri.slice(0, 160), status.error);
-            if (sourceIndex + 1 < playbackSources.length) {
-              setSourceIndex((i) => i + 1);
-              return;
-            }
-            setPlaybackBlocked(true);
-            void videoRef.current?.unloadAsync().catch(() => {});
-          }
-        }}
-        progressUpdateIntervalMillis={preloadOnly ? 4000 : 500}
-      />
-    </View>
-  );
-});
 
 type ReelLikeBurstProps = {
   postId: number;
@@ -1548,7 +1307,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   /** Ephemeral center icon in full-screen reel viewer after tap mute/unmute (Instagram-style). */
   const [reelMuteFeedback, setReelMuteFeedback] = useState<"muted" | "unmuted" | null>(null);
   const [saveBusyByPostId, setSaveBusyByPostId] = useState<Record<number, boolean>>({});
-  const [reelProgressByPostId, setReelProgressByPostId] = useState<Record<number, { position: number; duration: number }>>({});
   const [reelSlotHeight, setReelSlotHeight] = useState(0);
   const [reelFrameWidth, setReelFrameWidth] = useState(0);
   const [storyViewport, setStoryViewport] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -1560,7 +1318,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const nextStoryRef = useRef<() => void>(() => {});
   const commentsFetchSeqRef = useRef(0);
   const [feedResumeToken, setFeedResumeToken] = useState(0);
-  const reelVideoHandlesRef = useRef<Record<number, ContainedExpoVideoHandle | null>>({});
+  const reelVideoHandlesRef = useRef<Record<number, ContainedAppVideoHandle | null>>({});
   const reelTapTsRef = useRef<Record<number, number>>({});
   const reelTapTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
 
@@ -1636,7 +1394,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     []
   );
   const reelViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 70, minimumViewTime: 80 }),
+    () => ({ itemVisiblePercentThreshold: 40, minimumViewTime: 0 }),
     []
   );
 
@@ -2130,7 +1888,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             });
           })
           .catch(() => {})
-          .finally(() => {
+          .then(() => {
             feedPollInFlightRef.current = false;
           });
       };
@@ -3172,6 +2930,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     [followerUserIds, followingUserIds]
   );
 
+
   const openSuggestedProfile = useCallback((person: UserSearchRecord) => {
     navigateToPublicProfile({
       userId: person.id,
@@ -3226,34 +2985,30 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       lastPlayingIndexRef.current = index;
       const nextId = post?.id ?? null;
       setPlayingPostId((cur) => (cur === nextId ? cur : nextId));
+      if (post) {
+        prefetchPostMedia(post);
+        prefetchUpcomingPosts(tabPosts, index, 1);
+      }
     },
     [reelImmersiveMode, reelSlotHeight, tabPosts, windowHeight]
   );
 
-  const onReelStatusUpdate = useCallback((postId: number, status: AVPlaybackStatus) => {
+  const onReelStatusUpdate = useCallback((postId: number, status: AppPlaybackStatus) => {
     if (!status.isLoaded) return;
-    const position = Number(status.positionMillis || 0);
-    const duration = Math.max(1, Number(status.durationMillis || 0));
-    setReelProgressByPostId((prev) => {
-      const cur = prev[postId];
-      if (cur && Math.abs(cur.position - position) < 120 && cur.duration === duration) return prev;
-      return { ...prev, [postId]: { position, duration } };
-    });
+    setReelProgress(
+      postId,
+      Number(status.positionMillis || 0),
+      Math.max(1, Number(status.durationMillis || 0))
+    );
   }, []);
 
   useEffect(() => {
     if (playingPostId == null) return;
-    setReelProgressByPostId((prev) => {
-      const keep = new Set<number>([playingPostId]);
-      const activeIdx = tabPosts.findIndex((p) => p.id === playingPostId);
-      if (activeIdx > 0) keep.add(tabPosts[activeIdx - 1]!.id);
-      if (activeIdx >= 0 && activeIdx < tabPosts.length - 1) keep.add(tabPosts[activeIdx + 1]!.id);
-      const next: Record<number, { position: number; duration: number }> = {};
-      for (const id of keep) {
-        if (prev[id]) next[id] = prev[id];
-      }
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
-    });
+    const keep = new Set<number>([playingPostId]);
+    const activeIdx = tabPosts.findIndex((p) => p.id === playingPostId);
+    if (activeIdx > 0) keep.add(tabPosts[activeIdx - 1]!.id);
+    if (activeIdx >= 0 && activeIdx < tabPosts.length - 1) keep.add(tabPosts[activeIdx + 1]!.id);
+    pruneReelProgress(keep);
     const activeIds = new Set(tabPosts.map((p) => p.id));
     activeIds.add(playingPostId);
     for (const id of Object.keys(reelVideoHandlesRef.current)) {
@@ -3322,12 +3077,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const prev = lastActiveReelIdRef.current;
     const next = playingPostId;
     if (prev != null && prev !== next) {
-      setReelProgressByPostId((state) => {
-        const cur = state[prev];
-        if (!cur) return state;
-        if (cur.position === 0) return state;
-        return { ...state, [prev]: { ...cur, position: 0 } };
-      });
+      const cur = getReelProgress(prev);
+      if (cur && cur.position !== 0) setReelProgress(prev, 0, cur.duration);
       void reelVideoHandlesRef.current[prev]?.seekToRatio(0);
     }
     lastActiveReelIdRef.current = next ?? null;
@@ -4383,8 +4134,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const isCarousel = gallery.length > 1;
       const thumbUri = reelGridStillUri(post);
       const reelPoster = reelGridStillUri(post);
-      const reelProgress = reelProgressByPostId[post.id];
-      const progressRatio = reelProgress?.duration ? reelProgress.position / reelProgress.duration : 0;
       const creativeMeta = post.creativeMeta || {};
       const creativeTint = reelCreativeFilterTint(creativeMeta.filter);
       const creativeOverlayTextRaw = String(creativeMeta.overlayText || "").trim();
@@ -4404,25 +4153,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
           {post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              {/* Poster stays under the player so URI/source swaps never flash black. */}
-              {reelPoster ? (
-                <FeedImage
-                  source={{ uri: reelPoster }}
-                  style={styles.reelVideoFull}
-                  contentFit="contain"
-                  recyclingKey={reelPoster}
-                />
-              ) : (
-                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
-              )}
               {mountVideo ? (
                 <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-                  <ContainedExpoVideo
+                  <ContainedAppVideo
                     ref={(r) => {
                       reelVideoHandlesRef.current[post.id] = r;
                     }}
                     uri={post.videoUrl}
                     hlsUrl={post.hlsUrl}
+                    playbackUrl={post.playbackUrl}
                     posterUri={reelPoster || undefined}
                     playbackKey={`feed-${post.id}-r${feedResumeToken}`}
                     shouldPlay={shouldPlayReel}
@@ -4436,7 +4175,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
                   />
                 </View>
-              ) : null}
+              ) : reelPoster ? (
+                <FeedImage
+                  source={{ uri: reelPoster }}
+                  style={styles.reelVideoFull}
+                  contentFit="cover"
+                  recyclingKey={reelPoster}
+                />
+              ) : (
+                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+              )}
               {reelUserPaused && isActiveVideo ? (
                 <View style={styles.reelPauseOverlay} pointerEvents="none">
                   <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
@@ -4499,7 +4247,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <FeedImage
                 source={{ uri: reelPoster }}
                 style={styles.reelVideoFull}
-                contentFit="contain"
+                contentFit="cover"
                 recyclingKey={reelPoster}
               />
             </Pressable>
@@ -4710,16 +4458,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
           {post.videoUrl ? (
             <View style={styles.reelSeekWrap} pointerEvents="auto">
-              <ReelSeekBar
-                progressRatio={progressRatio}
-                onSeek={(ratio) => {
-                  const duration = reelProgress?.duration;
-                  if (duration) {
-                    setReelProgressByPostId((prev) => ({
-                      ...prev,
-                      [post.id]: { position: ratio * duration, duration }
-                    }));
-                  }
+              <LiveReelSeekBar
+                postId={post.id}
+                onSeekVideo={(ratio) => {
                   void reelVideoHandlesRef.current[post.id]?.seekToRatio(ratio);
                 }}
               />
@@ -4746,7 +4487,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       activeReelMusicPostId,
       reelFrameWidth,
       reelSlotHeightForPaging,
-      reelProgressByPostId,
       reelLikeBurstByPostId,
       reelImmersiveMode,
       reelUserPaused,
@@ -4872,6 +4612,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   <FeedPostVideo
                     uri={post.videoUrl}
                     hlsUrl={post.hlsUrl}
+                    playbackUrl={post.playbackUrl}
                     style={styles.video}
                     posterUri={post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined}
                   />
@@ -5206,6 +4947,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   })}
                   onViewableItemsChanged={onViewableItemsChangedRef.current}
                   viewabilityConfig={reelViewabilityConfig}
+                  onScroll={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
                   onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
                   extraData={`${playingPostId}-${effectiveReelSlotHeight}-${reelFrameWidth}-${reelUserPaused}-${canPlayReelFeed}-${isReelMuted}-${feedResumeToken}-${reelImmersiveMode ? 1 : 0}`}
                   onEndReached={onFeedEndReached}
@@ -5347,7 +5089,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             }
           >
             {activeStory?.videoUrl ? (
-              <ContainedExpoVideo
+              <ContainedAppVideo
                 uri={activeStory.videoUrl}
                 shouldPlay={!storyHoldPaused && !storyViewersOpen}
                 containerWidth={storyViewport.width || windowWidth}
@@ -5498,9 +5240,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </Pressable>
           </View>
           {activePost?.videoUrl ? (
-            <ContainedExpoVideo
+            <ContainedAppVideo
               uri={activePost.videoUrl}
               hlsUrl={activePost.hlsUrl}
+              playbackUrl={activePost.playbackUrl}
               shouldPlay
               containerWidth={windowWidth}
               containerHeight={windowHeight}

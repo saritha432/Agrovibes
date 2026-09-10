@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { HomePost } from "../../api/types";
 import { reelGridStillUri } from "../../pages/profileUtils";
-import { resolveWebVideoUrl } from "../../utils/videoUrl";
+import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 
 function GridPlayBadge() {
   return (
@@ -31,7 +31,7 @@ export function ProfileGridTile({
   const still = reelGridStillUri(post);
   const isVideo = !!post.videoUrl;
   const cover = post.imageUrl || post.imageUrls?.[0] || post.thumbnailUrl || still || null;
-  const videoSrc = useMemo(() => resolveWebVideoUrl(post.videoUrl), [post.videoUrl]);
+  const videoSrc = useMemo(() => resolveWebPostVideoUrl(post), [post.playbackUrl, post.hlsUrl, post.videoUrl]);
 
   const tileClass = `profile-grid__tile${isReelTab ? " profile-grid__tile--reel" : ""}`;
 

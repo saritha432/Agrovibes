@@ -1547,6 +1547,7 @@ async function ensureHomePostsTable() {
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS report_count INT NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS feed_hidden_at TIMESTAMPTZ`);
   await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS hls_url TEXT`);
+  await query(`ALTER TABLE home_posts ADD COLUMN IF NOT EXISTS playback_url TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_id_desc_idx ON home_posts (id DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_created_at_desc_idx ON home_posts (created_at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS home_posts_deleted_at_idx ON home_posts (deleted_at DESC)`);
@@ -1570,6 +1571,7 @@ async function ensureMediaHlsJobsTable() {
       completed_at TIMESTAMPTZ
     )
   `);
+  await query(`ALTER TABLE media_hls_jobs ADD COLUMN IF NOT EXISTS playback_url TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS media_hls_jobs_status_idx ON media_hls_jobs (status)`);
   await query(`CREATE INDEX IF NOT EXISTS media_hls_jobs_video_url_idx ON media_hls_jobs (video_url)`);
 }
@@ -1910,6 +1912,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
       ${HOME_POST_RECENT_RESHARERS_SQL},
       p.video_url AS "videoUrl",
       p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
       p.image_url AS "imageUrl",
       p.image_urls AS "image_urls",
       p.thumbnail_url AS "thumbnailUrl",
@@ -6106,6 +6109,7 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         hls_url AS "hlsUrl",
+        playback_url AS "playbackUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6219,6 +6223,7 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         hls_url AS "hlsUrl",
+        playback_url AS "playbackUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6336,6 +6341,7 @@ router.post("/v1/home/posts/:postId/end-live", authRequired, async (req, res) =>
         comments_count AS "commentsCount",
         video_url AS "videoUrl",
         hls_url AS "hlsUrl",
+        playback_url AS "playbackUrl",
         image_url AS "imageUrl",
         image_urls AS "image_urls",
         thumbnail_url AS "thumbnailUrl",
@@ -6771,6 +6777,7 @@ router.get("/v1/home/posts/recently-deleted", authRequired, async (req, res) => 
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7124,6 +7131,7 @@ router.get("/v1/admin/reports/posts", authRequired, async (req, res) => {
         p.caption,
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.thumbnail_url AS "thumbnailUrl",
         p.report_count AS "reportCount",
@@ -7194,6 +7202,7 @@ router.get("/v1/admin/reports/posts/:postId", authRequired, async (req, res) => 
         p.caption,
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.thumbnail_url AS "thumbnailUrl",
         p.report_count AS "reportCount",
@@ -7469,6 +7478,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7546,6 +7556,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7608,6 +7619,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7667,6 +7679,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7771,6 +7784,7 @@ router.get("/v1/home/posts/reshared", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -7898,6 +7912,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -8071,6 +8086,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -8165,6 +8181,7 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
         ${HOME_POST_RECENT_RESHARERS_SQL},
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",
@@ -9196,6 +9213,7 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
         p.caption,
         p.video_url AS "videoUrl",
         p.hls_url AS "hlsUrl",
+      p.playback_url AS "playbackUrl",
         p.image_url AS "imageUrl",
         p.image_urls AS "image_urls",
         p.thumbnail_url AS "thumbnailUrl",

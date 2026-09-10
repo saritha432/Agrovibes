@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { fetchMyHomePosts, fetchSocialNetwork, sendFollowRequest } from "../api/home";
 import type { HomePost } from "../api/types";
 import {
@@ -7,10 +7,10 @@ import {
   fetchSavedHomePosts,
   fetchTaggedHomePosts,
   removeFollower,
-  respondToFollowRequest,
   unfollowUser,
   type NetworkPerson
 } from "../api/profile";
+import { findIncomingFollowId, fetchSocialNotifications, respondToFollowRequestById } from "../api/social";
 import { deleteHomePost } from "../api/posts";
 import { getWebAppOrigin } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -30,7 +30,7 @@ import "./ProfilePage.css";
 
 export function ProfilePage() {
   const navigate = useNavigate();
-  const { user, token, signOut } = useAuth();
+  const { user, token } = useAuth();
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
@@ -38,6 +38,7 @@ export function ProfilePage() {
   const [followingCount, setFollowingCount] = useState(0);
   const [followersList, setFollowersList] = useState<NetworkPerson[]>([]);
   const [followingList, setFollowingList] = useState<NetworkPerson[]>([]);
+  const [incomingFollowActorIds, setIncomingFollowActorIds] = useState<Set<number>>(() => new Set());
   const [activeListType, setActiveListType] = useState<"followers" | "following" | null>(null);
   const [followingMenuFor, setFollowingMenuFor] = useState<string | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<NetworkPerson | null>(null);
@@ -47,7 +48,7 @@ export function ProfilePage() {
   const [reelViewerIndex, setReelViewerIndex] = useState<number | null>(null);
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
   const [loading, setLoading] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [searchParams] = useSearchParams();
 
   const loadPosts = useCallback(async () => {
     if (!token) {
@@ -82,15 +83,23 @@ export function ProfilePage() {
     }
     try {
       const uid = Number(user.id);
-      const [stats, network] = await Promise.all([
+      const [stats, network, notifs] = await Promise.all([
         fetchProfileStats(token, uid),
-        fetchSocialNetwork(token, uid)
+        fetchSocialNetwork(token, uid),
+        fetchSocialNotifications(token)
       ]);
       setFollowersCount(Number(stats.followersCount || 0));
       setFollowingCount(Number(stats.followingCount || 0));
       setPostsStat(Number(stats.postsCount || 0));
       setFollowersList(network.followers || []);
       setFollowingList(network.following || []);
+      setIncomingFollowActorIds(
+        new Set(
+          (notifs.followRequests || [])
+            .map((n) => Number(n.actorId))
+            .filter((id) => Number.isFinite(id) && id > 0)
+        )
+      );
     } catch {
       setFollowersCount(0);
       setFollowingCount(0);
@@ -98,6 +107,13 @@ export function ProfilePage() {
       setFollowingList([]);
     }
   }, [token, user?.id]);
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "Posts" || tab === "Reels" || tab === "Saved" || tab === "Tagged") {
+      setActiveGalleryTab(tab);
+    }
+  }, [searchParams]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -208,7 +224,9 @@ export function ProfilePage() {
     const targetId = parsePersonUserId(person);
     if (!token || !targetId) return;
     try {
-      await respondToFollowRequest(token, targetId, "accept");
+      const followId = await findIncomingFollowId(token, targetId);
+      if (!followId) return;
+      await respondToFollowRequestById(token, followId, "accept");
       await refreshStats();
     } catch {
       // ignore
@@ -219,7 +237,9 @@ export function ProfilePage() {
     const targetId = parsePersonUserId(person);
     if (!token || !targetId) return;
     try {
-      await respondToFollowRequest(token, targetId, "decline");
+      const followId = await findIncomingFollowId(token, targetId);
+      if (!followId) return;
+      await respondToFollowRequestById(token, followId, "decline");
       await refreshStats();
     } catch {
       // ignore
@@ -241,13 +261,6 @@ export function ProfilePage() {
     }
   };
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = () => setMenuOpen(false);
-    document.addEventListener("click", onDocClick);
-    return () => document.removeEventListener("click", onDocClick);
-  }, [menuOpen]);
-
   const activeList = activeListType === "followers" ? followersList : followingList;
 
   return (
@@ -255,30 +268,9 @@ export function ProfilePage() {
       <header className="profile-topbar">
         <span className="profile-topbar__spacer" aria-hidden />
         <h1 className="profile-topbar__title">{headerTitle}</h1>
-        <div className="profile-topbar__menu-wrap">
-          <button
-            type="button"
-            className="profile-topbar__menu"
-            aria-label="Menu"
-            aria-expanded={menuOpen}
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen((v) => !v);
-            }}
-          >
-            <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
-          </button>
-          {menuOpen ? (
-            <div className="profile-topbar__dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
-              <Link to="/profile/edit" role="menuitem" onClick={() => setMenuOpen(false)}>
-                Edit profile
-              </Link>
-              <button type="button" role="menuitem" onClick={() => void signOut()}>
-                Log out
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <Link to="/settings" className="profile-topbar__menu" aria-label="Menu">
+          <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
+        </Link>
       </header>
 
       <section className="profile-card">
@@ -445,7 +437,9 @@ export function ProfilePage() {
                                 Message
                               </button>
                             ) : null}
-                            {person.viewerStatus === "pending" && activeListType === "followers" ? (
+                            {(() => {
+                              const actorId = parsePersonUserId(person);
+                              return actorId && incomingFollowActorIds.has(actorId) ? (
                               <>
                                 <button type="button" onClick={() => void onAcceptFollow(person)}>
                                   Confirm
@@ -454,7 +448,8 @@ export function ProfilePage() {
                                   Delete
                                 </button>
                               </>
-                            ) : null}
+                              ) : null;
+                            })()}
                             {person.canFollowBack && person.viewerStatus === "none" ? (
                               <button type="button" onClick={() => void onFollowBack(person)}>
                                 Follow back

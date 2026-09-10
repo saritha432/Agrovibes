@@ -5,7 +5,7 @@ import type { HomePost, UserSearchRecord } from "../api/types";
 import { ProfileReelViewer } from "../components/profile/ProfileReelViewer";
 import { useAuth } from "../auth/AuthContext";
 import { isDropPost, orderPostsForFeed, reelGridStillUri, reelGridTileBackground } from "../utils/feedOrder";
-import { resolveWebVideoUrl } from "../utils/videoUrl";
+import { resolveWebPostVideoUrl } from "../utils/videoUrl";
 import "./SearchPage.css";
 import "./ReelsPage.css";
 
@@ -155,7 +155,7 @@ export function SearchPage() {
             ) : null}
             {explorePosts.map((post, index) => {
               const cover = reelGridStillUri(post);
-              const videoSrc = !cover ? resolveWebVideoUrl(post.videoUrl) : null;
+              const videoSrc = !cover ? resolveWebPostVideoUrl(post) : null;
               return (
                 <button
                   key={post.id}

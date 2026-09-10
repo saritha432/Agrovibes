@@ -204,10 +204,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
+  const [postsFetchSettled, setPostsFetchSettled] = useState(false);
   const [previewUriByPostId, setPreviewUriByPostId] = useState<Record<number, string>>({});
   const [resharedLoading, setResharedLoading] = useState(false);
+  const [resharedFetchSettled, setResharedFetchSettled] = useState(false);
   const [savedLoading, setSavedLoading] = useState(false);
+  const [savedFetchSettled, setSavedFetchSettled] = useState(false);
   const [taggedLoading, setTaggedLoading] = useState(false);
+  const [taggedFetchSettled, setTaggedFetchSettled] = useState(false);
   const resharedLoadedRef = useRef(false);
   const savedLoadedRef = useRef(false);
   const taggedLoadedRef = useRef(false);
@@ -316,12 +320,15 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         if (!isMountedRef.current) return;
         setUserPosts([]);
       } finally {
-        if (isMountedRef.current) setPostsLoading(false);
+        setPostsLoading(false);
+        setPostsFetchSettled(true);
       }
       return;
     }
     if (!token || !user?.id) {
       setUserPosts([]);
+      setPostsLoading(false);
+      setPostsFetchSettled(true);
       return;
     }
     setPostsLoading(true);
@@ -349,14 +356,16 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       if (!isMountedRef.current) return;
       setUserPosts([]);
     } finally {
-      if (isMountedRef.current) setPostsLoading(false);
+      setPostsLoading(false);
+      setPostsFetchSettled(true);
     }
-  }, [isPublicProfileView, publicUserId, publicUserName, publicUsername, token, user]);
+  }, [isPublicProfileView, publicUserId, publicUserName, publicUsername, token, user?.email, user?.fullName, user?.id, user?.username]);
 
   const loadResharedPosts = useCallback(async () => {
     if (!token || !user?.id) {
       setResharedPosts([]);
       resharedLoadedRef.current = false;
+      setResharedFetchSettled(true);
       return;
     }
     setResharedLoading(true);
@@ -372,7 +381,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       setResharedPosts([]);
       resharedLoadedRef.current = false;
     } finally {
-      if (isMountedRef.current) setResharedLoading(false);
+      setResharedLoading(false);
+      setResharedFetchSettled(true);
     }
   }, [token, user?.id]);
 
@@ -380,6 +390,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (!token || !user?.id) {
       setSavedPosts([]);
       savedLoadedRef.current = false;
+      setSavedFetchSettled(true);
       return;
     }
     setSavedLoading(true);
@@ -395,7 +406,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       setSavedPosts([]);
       savedLoadedRef.current = false;
     } finally {
-      if (isMountedRef.current) setSavedLoading(false);
+      setSavedLoading(false);
+      setSavedFetchSettled(true);
     }
   }, [token, user?.id]);
 
@@ -403,6 +415,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     if (!token || !user?.id) {
       setTaggedPosts([]);
       taggedLoadedRef.current = false;
+      setTaggedFetchSettled(true);
       return;
     }
     setTaggedLoading(true);
@@ -418,7 +431,8 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       setTaggedPosts([]);
       taggedLoadedRef.current = false;
     } finally {
-      if (isMountedRef.current) setTaggedLoading(false);
+      setTaggedLoading(false);
+      setTaggedFetchSettled(true);
     }
   }, [token, user?.id]);
 
@@ -460,32 +474,33 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     }, [isPublicProfileView, route?.params?.initialTab])
   );
 
+  const loadUserPostsRef = useRef(loadUserPosts);
+  loadUserPostsRef.current = loadUserPosts;
+  const loadResharedPostsRef = useRef(loadResharedPosts);
+  loadResharedPostsRef.current = loadResharedPosts;
+  const loadSavedPostsRef = useRef(loadSavedPosts);
+  loadSavedPostsRef.current = loadSavedPosts;
+  const loadTaggedPostsRef = useRef(loadTaggedPosts);
+  loadTaggedPostsRef.current = loadTaggedPosts;
+
   useFocusEffect(
     useCallback(() => {
       if (isPublicProfileView) {
-        void loadUserPosts();
+        void loadUserPostsRef.current();
         return;
       }
       if (!user?.id) return;
       void refreshUser().catch(() => {});
       const hadCache = hydrateProfilePostsFromCache();
-      void loadUserPosts();
-      if (resharedLoadedRef.current) void loadResharedPosts();
-      if (savedLoadedRef.current) void loadSavedPosts();
-      if (taggedLoadedRef.current) void loadTaggedPosts();
+      if (hadCache) setPostsFetchSettled(true);
+      void loadUserPostsRef.current();
+      if (resharedLoadedRef.current) void loadResharedPostsRef.current();
+      if (savedLoadedRef.current) void loadSavedPostsRef.current();
+      if (taggedLoadedRef.current) void loadTaggedPostsRef.current();
       if (!hadCache && !resharedLoadedRef.current && !savedLoadedRef.current && !taggedLoadedRef.current) {
-        void loadResharedPosts();
+        void loadResharedPostsRef.current();
       }
-    }, [
-      hydrateProfilePostsFromCache,
-      isPublicProfileView,
-      loadResharedPosts,
-      loadSavedPosts,
-      loadTaggedPosts,
-      loadUserPosts,
-      refreshUser,
-      user?.id
-    ])
+    }, [hydrateProfilePostsFromCache, isPublicProfileView, refreshUser, user?.id])
   );
 
   useEffect(() => {
@@ -508,11 +523,15 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   }, []);
 
   useEffect(() => {
+    setPostsFetchSettled(false);
+    setResharedFetchSettled(false);
+    setSavedFetchSettled(false);
+    setTaggedFetchSettled(false);
     resharedLoadedRef.current = false;
     savedLoadedRef.current = false;
     taggedLoadedRef.current = false;
     clearProfilePostsCache();
-  }, [user?.id]);
+  }, [user?.id, publicUserId, isPublicProfileView]);
 
   const refreshMergedFollowStats = useCallback(async () => {
     if (!user?.fullName) {
@@ -747,20 +766,16 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   );
 
   const galleryLoading = useMemo(() => {
-    if (activeGalleryTab === "Reshared") return resharedLoading && resharedPosts.length === 0;
-    if (activeGalleryTab === "Bookmarks") return savedLoading && savedPosts.length === 0;
-    if (activeGalleryTab === "Tagged") return taggedLoading && taggedPosts.length === 0;
-    return postsLoading && userPosts.length === 0;
+    if (activeGalleryTab === "Reshared") return !resharedFetchSettled;
+    if (activeGalleryTab === "Bookmarks") return !savedFetchSettled;
+    if (activeGalleryTab === "Tagged") return !taggedFetchSettled;
+    return !postsFetchSettled;
   }, [
     activeGalleryTab,
-    postsLoading,
-    resharedLoading,
-    resharedPosts.length,
-    savedLoading,
-    savedPosts.length,
-    taggedLoading,
-    taggedPosts.length,
-    userPosts.length
+    postsFetchSettled,
+    resharedFetchSettled,
+    savedFetchSettled,
+    taggedFetchSettled
   ]);
 
   const previewHydrationKey = useMemo(
@@ -884,6 +899,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             backgroundColor={profileTileBackground(index)}
             previewUri={previewUriByPostId[post.id]}
             isPlaying={profilePlayingPostId === post.id}
+            suspendVideo={!!profileReelViewer}
             onPress={() => openProfilePostsViewer(post)}
             onLongPress={canDeleteFromProfileGallery ? () => confirmDeleteProfilePost(post) : undefined}
             onVideoError={markProfileVideoFailed}
@@ -925,6 +941,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       openProfilePostsViewer,
       previewUriByPostId,
       profilePlayingPostId,
+      profileReelViewer,
       markProfileVideoFailed,
       reelTileHeight
     ]

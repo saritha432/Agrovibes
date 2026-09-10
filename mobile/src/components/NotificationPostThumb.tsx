@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, View } from "react-native";
+import { AppVideo, type AppVideoHandle } from "./AppVideo";
 import { fetchHomePost, type HomePost } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
 import { reelGridStillUri } from "../utils/reelGrid";

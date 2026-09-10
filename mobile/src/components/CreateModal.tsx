@@ -19,16 +19,16 @@ import {
   Text,
   TextInput,
   TextStyle,
-  useWindowDimensions,
   View
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS, ResizeMode, Video } from "expo-av";
-import { initialWindowMetrics, useSafeAreaInsets } from "react-native-safe-area-context";
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from "expo-av";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as FileSystem from "expo-file-system";
 import { uploadVideoThumbnailFromUri } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
 import { FeedImage } from "./FeedImage";
+import { AppVideo } from "./AppVideo";
 import {
   createHomePost,
   createHomeStory,
@@ -438,12 +438,12 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
     <View ref={ref} collapsable={false} style={{ flex: 1, width: "100%" }}>
       <View style={StyleSheet.absoluteFillObject}>
         {isVideo ? (
-          <Video
+          <AppVideo
             style={{ width: "100%", height: "100%" }}
-            source={{ uri }}
+            source={uri}
             shouldPlay={shouldPlay}
             isLooping
-            resizeMode={ResizeMode.CONTAIN}
+            contentFit="contain"
           />
         ) : (
           <Image style={{ width: "100%", height: "100%" }} source={{ uri }} resizeMode="contain" />
@@ -521,15 +521,14 @@ export function CreateModal({
     [t]
   );
   const insets = useSafeAreaInsets();
-  /** Fullscreen camera Modals often report insets.bottom = 0 on Android while the
-   * gesture/nav bar still covers POST/STORY/REEL + gallery. Prefer real metrics,
-   * then a floor tall enough for the mode strip (~44) + gesture bar. */
-  const cameraBottomInset = React.useMemo(() => {
-    const reported = Math.max(insets.bottom, initialWindowMetrics?.insets.bottom ?? 0);
-    if (Platform.OS === "android") return Math.max(reported, 56);
-    return Math.max(reported, 20);
-  }, [insets.bottom]);
-  const { height: windowHeight } = useWindowDimensions();
+  /**
+   * Android RN Modals already sit between the status bar and the nav bar.
+   * Re-applying the app-window safe-area insets (or a StatusBar floor) adds a
+   * second gap that stays the same on short and tall phones. iOS fullscreen
+   * modals are edge-to-edge, so they still need the notch / home-indicator.
+   */
+  const cameraTopPad = Platform.OS === "ios" ? insets.top : 6;
+  const cameraBottomPad = Platform.OS === "ios" ? insets.bottom : 0;
   const [liveCameraLayoutKey, setLiveCameraLayoutKey] = useState(0);
   const bumpLiveCameraLayout = React.useCallback(() => {
     setLiveCameraLayoutKey((n) => n + 1);
@@ -2330,11 +2329,13 @@ export function CreateModal({
       visible={visible}
       transparent={false}
       animationType={createType && createType !== "live" ? "fade" : "slide"}
+      presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
+      <View style={styles.createModalFill}>
       {visible && !createType ? (
         entryType === "post" && captureEntryView === "gallery" ? (
-          <View style={[styles.igPostEntryRoot, { paddingTop: insets.top + 4, paddingBottom: cameraBottomInset }]}>
+          <View style={[styles.igPostEntryRoot, { paddingTop: cameraTopPad, paddingBottom: cameraBottomPad }]}>
             <View style={styles.igPostEntryTop}>
               <Pressable style={styles.igPostEntryTopBtn} onPress={handleClose}>
                 <Ionicons name="close" size={24} color="#fff" />
@@ -2470,7 +2471,7 @@ export function CreateModal({
           <View
             style={[
               styles.igCaptureGalleryRoot,
-              { paddingTop: insets.top + 4, paddingBottom: cameraBottomInset }
+              { paddingTop: cameraTopPad, paddingBottom: cameraBottomPad }
             ]}
           >
             <View style={styles.igCaptureGalleryHeader}>
@@ -2559,8 +2560,7 @@ export function CreateModal({
             key={`live-cam-root-${liveCameraLayoutKey}`}
             style={[
               styles.igCaptureCameraRoot,
-              Platform.OS === "web" ? styles.igCameraEntryRootWeb : null,
-              Platform.OS === "android" ? { height: windowHeight, minHeight: windowHeight } : null
+              Platform.OS === "web" ? styles.igCameraEntryRootWeb : styles.createModalFill
             ]}
           >
             <StoryCameraPreview
@@ -2580,7 +2580,7 @@ export function CreateModal({
             <View
               style={[
                 styles.igCaptureOverlay,
-                { paddingTop: Math.max(insets.top - 10, 0) }
+                { paddingTop: cameraTopPad }
               ]}
               pointerEvents="box-none"
             >
@@ -2760,7 +2760,7 @@ export function CreateModal({
               ) : null}
 
               <View
-                style={[styles.igCamBottomChrome, { paddingBottom: cameraBottomInset }]}
+                style={[styles.igCamBottomChrome, { paddingBottom: cameraBottomPad }]}
                 pointerEvents="box-none"
               >
               <View style={styles.igCamCaptureRow} pointerEvents="box-none">
@@ -3201,7 +3201,7 @@ export function CreateModal({
       ) : (
       createType !== "live" ? (
       createType === "post" && createStep === "compose" ? (
-          <View style={[styles.igPostComposeRoot, { paddingTop: insets.top + 4, paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <View style={[styles.igPostComposeRoot, { paddingTop: cameraTopPad, paddingBottom: Platform.OS === "ios" ? Math.max(insets.bottom, 12) : 12 }]}>
             <View style={styles.igPostComposeTop}>
               <Pressable
                 style={styles.igPostEntryTopBtn}
@@ -3387,7 +3387,7 @@ export function CreateModal({
             </Pressable>
           </View>
       ) : (
-      <View style={[styles.igFullScreen, { paddingTop: Math.max(insets.top, 4) }]}>
+      <View style={[styles.igFullScreen, { paddingTop: cameraTopPad }]}>
         {createStep === "preview" ? (
           <>
             {createType === "story" ? (
@@ -3704,7 +3704,7 @@ export function CreateModal({
                 <View style={styles.igComposeCaptionRow}>
                   {selectedUri ? (
                     isSelectedVideo ? (
-                      <Video style={styles.igComposeThumb} source={{ uri: selectedUri }} shouldPlay={false} resizeMode={ResizeMode.COVER} />
+                      <AppVideo style={styles.igComposeThumb} source={selectedUri} shouldPlay={false} contentFit="cover" />
                     ) : (
                       <Image style={styles.igComposeThumb} source={{ uri: selectedUri }} resizeMode="cover" />
                     )
@@ -3987,6 +3987,7 @@ export function CreateModal({
           </View>
         </View>
       ) : null}
+      </View>
     </Modal>
 
     <Modal visible={liveKitHostOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={handleClose}>
@@ -4895,8 +4896,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: 0.3
   },
+  createModalFill: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#000"
+  },
   igCaptureCameraRoot: {
     flex: 1,
+    width: "100%",
+    height: "100%",
     backgroundColor: "#000"
   },
   igCaptureOverlay: {
@@ -5653,7 +5662,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 4,
     marginTop: 4,
-    marginBottom: 6,
+    marginBottom: 0,
     gap: 4,
     minHeight: 44
   },

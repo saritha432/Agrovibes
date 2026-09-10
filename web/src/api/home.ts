@@ -1,6 +1,7 @@
 import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
 import type { NetworkPerson } from "./profile";
 import type { HomePost, HomeStory, UserSearchRecord } from "./types";
+import { sanitizeHomePost } from "../utils/mediaUrls";
 
 export type HomeComment = {
   id: string;
@@ -12,6 +13,20 @@ export type HomeComment = {
   parentCommentId?: string;
   userId?: number;
 };
+
+export const HOME_FEED_PAGE_SIZE = 10;
+
+export type HomeFeedPage = {
+  posts: HomePost[];
+  nextCursor: number | null;
+  hasMore: boolean;
+};
+
+function homeFeedQuery(limit: number, cursor?: number | null) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor != null && cursor > 0) params.set("cursor", String(cursor));
+  return params.toString();
+}
 
 export async function fetchHomeStories(token?: string | null) {
   const headers: Record<string, string> = {};
@@ -28,15 +43,96 @@ export async function markHomeStoryViewed(token: string, storyId: number) {
   )) as { ok: boolean; viewed?: boolean; own?: boolean };
 }
 
-export async function fetchHomePosts(token?: string | null) {
+export async function fetchHomePostsPage(
+  token?: string | null,
+  options?: { limit?: number; cursor?: number | null }
+): Promise<HomeFeedPage> {
+  const limit = options?.limit ?? HOME_FEED_PAGE_SIZE;
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts`, { headers });
-  return (await parseJsonOrThrow(response)) as { posts: HomePost[] };
+  const qs = homeFeedQuery(limit, options?.cursor);
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts?${qs}`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to load home posts");
+  }
+  const data = (await response.json()) as {
+    posts?: HomePost[];
+    nextCursor?: number | null;
+    hasMore?: boolean;
+  };
+  const posts = Array.isArray(data.posts) ? data.posts.map(sanitizeHomePost) : [];
+  return {
+    posts,
+    nextCursor: data.nextCursor ?? (posts.length ? posts[posts.length - 1]?.id ?? null : null),
+    hasMore: Boolean(data.hasMore)
+  };
+}
+
+export async function fetchHomeReelsExplore(
+  token?: string | null,
+  options?: { limit?: number; cursor?: number | null }
+): Promise<HomeFeedPage> {
+  const limit = options?.limit ?? 24;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (options?.cursor != null && options.cursor > 0) params.set("cursor", String(options.cursor));
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/reels?${params}`, { headers });
+  if (!response.ok) {
+    throw new Error("Failed to load reels");
+  }
+  const data = (await response.json()) as {
+    posts?: HomePost[];
+    nextCursor?: number | null;
+    hasMore?: boolean;
+  };
+  const posts = Array.isArray(data.posts) ? data.posts.map(sanitizeHomePost) : [];
+  return {
+    posts,
+    nextCursor: data.nextCursor ?? (posts.length ? posts[posts.length - 1]?.id ?? null : null),
+    hasMore: Boolean(data.hasMore)
+  };
+}
+
+/** First page only — used where a small snapshot is enough. */
+export async function fetchHomePosts(token?: string | null) {
+  const page = await fetchHomePostsPage(token, { limit: 50 });
+  return { posts: page.posts };
 }
 
 export async function fetchMyHomePosts(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
+  return { posts: data.posts.map(sanitizeHomePost) };
+}
+
+/** Any user's profile posts (public profile view). */
+export async function fetchUserHomePosts(
+  token: string | null | undefined,
+  userId: number,
+  userName?: string
+) {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const qs = userName?.trim() ? `?userName=${encodeURIComponent(userName.trim())}` : "";
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/home/posts/user/${encodeURIComponent(String(userId))}${qs}`,
+    { headers }
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load user posts");
+  }
+  const data = (await response.json()) as {
+    posts: HomePost[];
+    restricted?: boolean;
+    postsCount?: number;
+    reelsCount?: number;
+  };
+  return {
+    posts: (data.posts || []).map(sanitizeHomePost),
+    restricted: Boolean(data.restricted),
+    postsCount: Number.isFinite(Number(data.postsCount)) ? Number(data.postsCount) : undefined,
+    reelsCount: Number.isFinite(Number(data.reelsCount)) ? Number(data.reelsCount) : undefined
+  };
 }
 
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
@@ -46,7 +142,8 @@ export async function fetchHomePost(token: string | null | undefined, postId: nu
     `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`,
     { headers }
   );
-  return (await parseJsonOrThrow(response)) as { post: HomePost };
+  const data = (await parseJsonOrThrow(response)) as { post: HomePost };
+  return { post: sanitizeHomePost(data.post) };
 }
 
 export async function fetchHomePostComments(postId: number, token?: string | null) {

@@ -3,7 +3,7 @@ import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../.
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { dropCaption, dropMusicLabel, postShowsMusicRow } from "../../utils/feedOrder";
-import { resolveWebVideoUrl } from "../../utils/videoUrl";
+import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
 import { ReelActionsRail } from "./ReelActionsRail";
@@ -29,7 +29,7 @@ export function ReelSlideShell({
   const videoRef = useRef<HTMLVideoElement>(null);
   const tapTimeoutRef = useRef<number | null>(null);
   const lastTapRef = useRef(0);
-  const src = resolveWebVideoUrl(post.videoUrl);
+  const src = resolveWebPostVideoUrl(post);
   const [muted, setMuted] = useState(true);
   const [liked, setLiked] = useState(!!post.viewerHasLiked);
   const [likes, setLikes] = useState(post.likesCount);
