@@ -120,6 +120,57 @@ export async function sendLocalFollowRequestByIdentity(
   return created;
 }
 
+/** Persist an API-accepted follow so Profile following count/list can merge it immediately. */
+export async function upsertLocalAcceptedFollowByIdentity(
+  actor: { name: string; key?: string },
+  target: { name: string; key?: string; avatarUrl?: string | null }
+) {
+  const actorName = normalizeName(actor.name);
+  const targetName = normalizeName(target.name);
+  const actorKey = String(actor.key || "").trim().toLowerCase();
+  const targetKey = String(target.key || "").trim().toLowerCase();
+  if (!actorName || !targetName) return null;
+  if (actorKey && targetKey && actorKey === targetKey) return null;
+
+  const records = await readAll();
+  const existingIdx = records.findIndex((r) => {
+    const sameActor = actorKey ? String(r.actorKey || "").toLowerCase() === actorKey : normalizeName(r.actorName) === actorName;
+    const sameTarget = targetKey ? String(r.targetKey || "").toLowerCase() === targetKey : normalizeName(r.targetName) === targetName;
+    return sameActor && sameTarget;
+  });
+  const now = new Date().toISOString();
+  if (existingIdx >= 0) {
+    records[existingIdx] = {
+      ...records[existingIdx],
+      actorName: actor.name.trim() || records[existingIdx].actorName,
+      targetName: target.name.trim() || records[existingIdx].targetName,
+      actorKey: actorKey || records[existingIdx].actorKey,
+      targetKey: targetKey || records[existingIdx].targetKey,
+      status: "accepted",
+      respondedAt: now,
+      acceptedSeenByActor: true,
+      declinedSeenByActor: false
+    };
+    await writeAll(records);
+    return records[existingIdx];
+  }
+  const created: LocalFollowRecord = {
+    id: `lf-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+    actorName: actor.name.trim(),
+    actorKey: actorKey || undefined,
+    targetName: target.name.trim(),
+    targetKey: targetKey || undefined,
+    status: "accepted",
+    createdAt: now,
+    respondedAt: now,
+    acceptedSeenByActor: true,
+    declinedSeenByActor: false
+  };
+  records.push(created);
+  await writeAll(records);
+  return created;
+}
+
 export async function getLocalFollowNotificationsByIdentity(current: { name: string; key?: string }) {
   const currentName = normalizeName(current.name);
   const currentKey = String(current.key || "").trim().toLowerCase();

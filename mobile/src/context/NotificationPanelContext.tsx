@@ -10,7 +10,6 @@ import {
   blockUser,
   fetchActiveHomeStories,
   fetchHomePost,
-  fetchHomePostsPage,
   fetchMessageThreads,
   fetchRelationships,
   markSocialNotificationRead,
@@ -40,9 +39,9 @@ import { useLanguage } from "../localization/LanguageContext";
 import { navigateToJoinLive, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import {
   hasSharedPostViewerListener,
-  queueOpenSharedPostViewer,
-  queueOpenSharedPostsViewer
+  queueOpenSharedPostViewer
 } from "../navigation/sharedPostViewerBridge";
+import { onDirectRead, onDirectThreadUpdate } from "../services/socketChat";
 import {
   registerNotificationSheetCloser,
   registerNotificationSheetOpener,
@@ -63,6 +62,10 @@ type NotificationPanelContextValue = {
   closeNotificationSheet: () => void;
   notificationUnreadCount: number;
   messageUnreadCount: number;
+  /** Recompute chat tab badge from the server (call when inbox focuses / messages are read). */
+  refreshMessageUnread: () => Promise<void>;
+  /** Apply badge from an already-loaded thread list (avoids a second fetch). */
+  syncMessageUnreadFromThreads: (threads: Array<{ unreadCount?: number | null }>) => void;
 };
 
 const NotificationPanelContext = createContext<NotificationPanelContextValue | null>(null);
@@ -248,22 +251,24 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     }
     try {
       const threads = await fetchMessageThreads(token);
+      // Match inbox UI: only count explicit unreadCount > 0 (no last-sender heuristic).
       const remoteMessageUnread = (threads.threads || []).reduce((sum, t) => {
-        const hasUnreadCount = t.unreadCount != null;
-        const unreadCount = Number(t.unreadCount || 0);
-        if (Number.isFinite(unreadCount) && unreadCount > 0) {
-          return sum + unreadCount;
-        }
-        if (!hasUnreadCount && viewerUserId && Number(t.lastSenderId) > 0 && Number(t.lastSenderId) !== viewerUserId) {
-          return sum + 1;
-        }
-        return sum;
+        const unreadCount = Math.max(0, Number(t.unreadCount || 0));
+        return Number.isFinite(unreadCount) ? sum + unreadCount : sum;
       }, 0);
       setMessageUnreadCount(remoteMessageUnread);
     } catch {
       /* keep previous badge */
     }
-  }, [token, viewerUserId]);
+  }, [token]);
+
+  const syncMessageUnreadFromThreads = useCallback((threads: Array<{ unreadCount?: number | null }>) => {
+    const next = (threads || []).reduce((sum, t) => {
+      const unreadCount = Math.max(0, Number(t.unreadCount || 0));
+      return Number.isFinite(unreadCount) ? sum + unreadCount : sum;
+    }, 0);
+    setMessageUnreadCount(next);
+  }, []);
 
   const loadNotifications = useCallback(async (opts?: { enrich?: boolean }) => {
     if (!user?.fullName) return;
@@ -390,6 +395,19 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       clearInterval(timer);
     };
   }, [appIsActive, loadMessageUnread]);
+
+  useEffect(() => {
+    const unsubRead = onDirectRead(() => {
+      void loadMessageUnread();
+    });
+    const unsubThread = onDirectThreadUpdate(() => {
+      void loadMessageUnread();
+    });
+    return () => {
+      unsubRead();
+      unsubThread();
+    };
+  }, [loadMessageUnread]);
 
   useEffect(() => {
     let mounted = true;
@@ -604,34 +622,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       bumpLastSeenFromEntry(entry);
       void (async () => {
         try {
+          // Open the target reel immediately — do not wait for a full feed page (that was the lag).
           const { post } = await fetchHomePost(token ?? null, postId);
-          // Prefer opening inside a real feed so the user can keep scrolling more reels/posts.
-          let feed: typeof post[] = [];
-          try {
-            const page = await fetchHomePostsPage(token ?? null, { limit: 40 });
-            feed = (page.posts || []).filter(
-              (p) =>
-                !!String(p.videoUrl || "").trim() ||
-                !!String(p.imageUrl || "").trim() ||
-                !!(p.imageUrls && p.imageUrls.length)
-            );
-          } catch {
-            feed = [];
-          }
-          // Keep notifications mounted under the reel; only hide visually so Back is instant.
           suppressNotificationSheet(true);
           const returnOpts = { returnToNotifications: true as const };
-          if (feed.length > 0) {
-            const ix = feed.findIndex((p) => Number(p.id) === Number(post.id));
-            if (ix >= 0) {
-              queueOpenSharedPostsViewer(feed, ix, returnOpts);
-            } else {
-              queueOpenSharedPostsViewer([post, ...feed], 0, returnOpts);
-            }
-          } else {
-            queueOpenSharedPostViewer(post, true, returnOpts);
-          }
-          // Home's Modal portals above the app — only navigate if Home never mounted (lazy tab).
+          queueOpenSharedPostViewer(post, true, returnOpts);
           if (!hasSharedPostViewerListener()) {
             navigateToJoinLive();
           }
@@ -1085,9 +1080,19 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
       openNotificationSheet,
       closeNotificationSheet,
       notificationUnreadCount,
-      messageUnreadCount
+      messageUnreadCount,
+      refreshMessageUnread: loadMessageUnread,
+      syncMessageUnreadFromThreads
     }),
-    [closeNotificationSheet, messageUnreadCount, notificationUnreadCount, openNotificationSheet, sheetOpen]
+    [
+      closeNotificationSheet,
+      loadMessageUnread,
+      messageUnreadCount,
+      notificationUnreadCount,
+      openNotificationSheet,
+      sheetOpen,
+      syncMessageUnreadFromThreads
+    ]
   );
 
   return (

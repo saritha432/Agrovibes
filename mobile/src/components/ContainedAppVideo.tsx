@@ -29,6 +29,8 @@ export type ContainedAppVideoProps = {
   posterUri?: string;
   useNativeControls?: boolean;
   playbackKey?: string;
+  /** Resume near the last known position after a remount (ms). */
+  resumePositionMillis?: number;
   onStatusUpdate?: (status: AppPlaybackStatus) => void;
 };
 
@@ -48,6 +50,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
       posterUri,
       useNativeControls = false,
       playbackKey,
+      resumePositionMillis = 0,
       onStatusUpdate
     },
     ref
@@ -57,6 +60,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
     const videoRef = useRef<AppVideoHandle | null>(null);
     const sourceIndexRef = useRef(0);
     const durationRef = useRef(0);
+    const didResumeRef = useRef(false);
     const playbackSources = useMemo(
       () => videoPlaybackSources(uri, hlsUrl, playbackUrl),
       [uri, hlsUrl, playbackUrl]
@@ -97,6 +101,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
       setSourceIndex(0);
       sourceIndexRef.current = 0;
       setVideoSize({ width: 0, height: 0 });
+      didResumeRef.current = false;
     }, [uri, hlsUrl, playbackUrl, playbackKey]);
 
     useEffect(() => {
@@ -104,6 +109,17 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
         setPlaybackBlocked(true);
       }
     }, [playbackSources.length]);
+
+    useEffect(() => {
+      if (!shouldPlay || preloadOnly || didResumeRef.current) return;
+      const pos = Math.max(0, Math.round(resumePositionMillis || 0));
+      if (pos < 400) return;
+      didResumeRef.current = true;
+      const t = setTimeout(() => {
+        void videoRef.current?.setPositionAsync(pos).catch(() => {});
+      }, 40);
+      return () => clearTimeout(t);
+    }, [shouldPlay, preloadOnly, resumePositionMillis, uri, playbackKey]);
 
     React.useImperativeHandle(
       ref,

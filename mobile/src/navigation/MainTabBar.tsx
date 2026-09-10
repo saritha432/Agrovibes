@@ -4,6 +4,7 @@ import { Asset } from "expo-asset";
 import React from "react";
 import {
   Image,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -241,10 +242,22 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
   const bottomPad = Platform.OS === "web" ? 0 : Math.max(insets.bottom, 10);
   const { messageUnreadCount } = useNotificationPanel();
   const [reelImmersiveActive, setReelImmersiveActive] = React.useState(false);
+  const [keyboardVisible, setKeyboardVisible] = React.useState(false);
 
   React.useEffect(() => subscribeHomeReelImmersive(setReelImmersiveActive), []);
 
-  if (reelImmersiveActive) return null;
+  React.useEffect(() => {
+    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvt, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  if (reelImmersiveActive || keyboardVisible) return null;
 
   const isRouteFocused = (routeName: string) => {
     const route = state.routes.find((r) => r.name === routeName);

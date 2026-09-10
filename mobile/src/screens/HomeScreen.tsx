@@ -129,7 +129,8 @@ import {
   getLocalFollowNetworkByIdentity,
   getLocalRelationshipMapByNames,
   removeLocalFollowByIdentity,
-  sendLocalFollowRequestByIdentity
+  sendLocalFollowRequestByIdentity,
+  upsertLocalAcceptedFollowByIdentity
 } from "../social/localFollowStore";
 import {
   clearHomeFeedCache,
@@ -319,20 +320,43 @@ function orderPostsForFeed(list: HomePost[], seed: number, nowMs: number, viewer
 }
 
 /** Keep the current on-screen sequence; only append posts that are not already present. */
+function feedEntryIdentity(post: HomePost): string {
+  const key = String(post.feedEntryKey || "").trim();
+  if (key) return key;
+  return `post:${post.id}`;
+}
+
+function dedupeFeedEntries(list: HomePost[]): HomePost[] {
+  const seen = new Set<string>();
+  const out: HomePost[] = [];
+  for (const post of list) {
+    const key = feedEntryIdentity(post);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(post);
+  }
+  return out;
+}
+
 function stabilizeFeedOrder(previousOrdered: HomePost[], nextList: HomePost[]): HomePost[] {
-  if (!previousOrdered.length) return nextList;
+  if (!previousOrdered.length) return dedupeFeedEntries(nextList);
   if (!nextList.length) return [];
-  const nextById = new Map(nextList.map((p) => [p.id, p]));
-  const seen = new Set<number>();
+  const nextByKey = new Map(nextList.map((p) => [feedEntryIdentity(p), p]));
+  const seen = new Set<string>();
   const out: HomePost[] = [];
   for (const prev of previousOrdered) {
-    const updated = nextById.get(prev.id);
+    const key = feedEntryIdentity(prev);
+    const updated = nextByKey.get(key);
     if (!updated) continue;
+    if (seen.has(key)) continue;
     out.push(updated);
-    seen.add(prev.id);
+    seen.add(key);
   }
   for (const post of nextList) {
-    if (!seen.has(post.id)) out.push(post);
+    const key = feedEntryIdentity(post);
+    if (seen.has(key)) continue;
+    out.push(post);
+    seen.add(key);
   }
   return out;
 }
@@ -1152,6 +1176,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [viewedStoryIds, setViewedStoryIds] = useState<Set<number>>(new Set());
   const [viewedStoriesHydrated, setViewedStoriesHydrated] = useState(false);
   const [playingPostId, setPlayingPostId] = useState<number | null>(null);
+  const playingPostIdRef = useRef<number | null>(null);
+  playingPostIdRef.current = playingPostId;
+  /** Pin the reel across immersive enter/exit so layout thrash cannot jump the feed. */
+  const restoreFeedPostIdRef = useRef<number | null>(null);
   const [activePost, setActivePost] = useState<HomePost | null>(null);
   /** Immersive reel mode — expands the feed list in-place (no Modal / second video player). */
   const [reelImmersiveMode, setReelImmersiveMode] = useState(false);
@@ -1326,6 +1354,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return reelSlotHeight > 0 ? reelSlotHeight : Math.max(420, Math.round(windowHeight * 0.62));
   }, [reelSlotHeight, windowHeight]);
 
+  /** Feed uses measured frame height. Immersive fills the screen immediately (stale short height = black gap + next reel peek). */
+  const effectiveReelSlotHeight = useMemo(() => {
+    const feedFallback = Math.max(420, Math.round(windowHeight * 0.62));
+    if (reelImmersiveMode) {
+      if (reelSlotHeight >= Math.round(windowHeight * 0.88)) return reelSlotHeight;
+      return Math.max(windowHeight, reelSlotHeight || 0, 1);
+    }
+    return reelSlotHeight > 0 ? reelSlotHeight : feedFallback;
+  }, [reelImmersiveMode, reelSlotHeight, windowHeight]);
+
   const clearReelTapTimeouts = useCallback(() => {
     for (const key of Object.keys(reelTapTimeoutRef.current)) {
       const id = Number(key);
@@ -1351,7 +1389,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     for (const p of reelModalViewer.posts) {
       postLikedByIdRef.current[p.id] = !!p.viewerHasLiked;
     }
-  }, [reelModalViewer?.posts]);
+    const start = Math.max(0, reelModalViewer.initialIndex);
+    for (const p of reelModalViewer.posts.slice(start, start + 2)) {
+      prefetchPostMedia(p, { warmVideo: true });
+    }
+  }, [reelModalViewer?.posts, reelModalViewer?.initialIndex]);
 
   useEffect(() => {
     return subscribeFeedPlaybackSuspended((suspended) => {
@@ -1539,8 +1581,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     lastHomeTabRef.current = activeHomeTab;
     lastFeedShuffleSeedRef.current = feedShuffleSeed;
     if (tabChanged || reshuffled || !stableTabPostsRef.current.length) {
-      stableTabPostsRef.current = rawTabPosts;
-      return rawTabPosts;
+      const fresh = dedupeFeedEntries(rawTabPosts);
+      stableTabPostsRef.current = fresh;
+      return fresh;
     }
     const stabilized = stabilizeFeedOrder(stableTabPostsRef.current, rawTabPosts);
     stableTabPostsRef.current = stabilized;
@@ -1554,15 +1597,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     lastPlayingIndexRef.current = index;
     const post = tabPostsRef.current[index];
     if (post) setPlayingPostId(post.id);
+    const slotH = effectiveReelSlotHeight;
     requestAnimationFrame(() => {
       try {
-        reelFeedListRef.current?.scrollToIndex({ index, animated, viewPosition: 0 });
+        reelFeedListRef.current?.scrollToOffset({
+          offset: index * slotH,
+          animated
+        });
       } catch {
-        const slotH = reelSlotHeight > 0 ? reelSlotHeight : Math.max(420, Math.round(windowHeight * 0.62));
-        reelFeedListRef.current?.scrollToOffset({ offset: index * slotH, animated });
+        try {
+          reelFeedListRef.current?.scrollToIndex({ index, animated, viewPosition: 0 });
+        } catch {
+          // ignore — layout may not be ready yet
+        }
       }
     });
-  }, [reelSlotHeight, windowHeight]);
+  }, [effectiveReelSlotHeight]);
+
+  /** Slot height before immersive — restore on exit so feed paging matches chrome again. */
+  const feedSlotHeightBeforeImmersiveRef = useRef(0);
 
   const exitReelImmersive = useCallback(() => {
     const backToNotifs = consumeReturnToNotifications();
@@ -1572,27 +1625,49 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     }
     clearReelTapTimeouts();
     setReelUserPaused(false);
-    setReelImmersiveMode(false);
-    const index = lastPlayingIndexRef.current;
-    if (index >= 0) {
-      setTimeout(() => scrollReelFeedToIndex(index, false), 80);
+    // Pin the exact reel the user was watching so exit layout/scroll thrash cannot jump the feed.
+    const idx = lastPlayingIndexRef.current;
+    const pinned =
+      tabPostsRef.current[idx]?.id ??
+      playingPostIdRef.current ??
+      null;
+    restoreFeedPostIdRef.current = pinned != null ? Number(pinned) : null;
+    feedIgnoreViewabilityUntilRef.current = Date.now() + 450;
+    const savedFeedH = feedSlotHeightBeforeImmersiveRef.current;
+    if (savedFeedH > 0) {
+      setReelSlotHeight(savedFeedH);
     }
-  }, [clearReelTapTimeouts, scrollReelFeedToIndex]);
+    setHomeReelImmersiveActive(false);
+    setReelImmersiveMode(false);
+  }, [clearReelTapTimeouts]);
 
   const enterReelImmersiveAtPost = useCallback(
     (post: HomePost) => {
       if (!postHasViewableMedia(post)) return;
       const postId = Number(post.id);
-      const feedIx = tabPostsRef.current.findIndex((p) => Number(p.id) === postId);
+      const targetKey = feedEntryIdentity(post);
+      const feedIx = tabPostsRef.current.findIndex(
+        (p) => feedEntryIdentity(p) === targetKey || Number(p.id) === postId
+      );
       clearReelTapTimeouts();
+      // Keep the already-mounted feed player going — unmute/play sync (no Audio mode reset here).
       setReelUserPaused(false);
+      setIsReelMuted(false);
       setPlayingPostId(postId);
-      if (feedIx >= 0) {
-        scrollReelFeedToIndex(feedIx, false);
+      if (feedIx >= 0) lastPlayingIndexRef.current = feedIx;
+      restoreFeedPostIdRef.current = postId;
+      prefetchPostMedia(post, { warmVideo: true });
+      if (reelSlotHeight > 0) {
+        feedSlotHeightBeforeImmersiveRef.current = reelSlotHeight;
       }
+      // Optimistic fullscreen height so the first immersive frame fills the screen (no next-reel peek).
+      setReelSlotHeight((prev) => Math.max(prev, windowHeight));
+      feedIgnoreViewabilityUntilRef.current = Date.now() + 350;
+      // Hide tab bar immediately so onLayout measures the full viewport on the same transition.
+      setHomeReelImmersiveActive(true);
       setReelImmersiveMode(true);
     },
-    [clearReelTapTimeouts, scrollReelFeedToIndex]
+    [clearReelTapTimeouts, reelSlotHeight, windowHeight]
   );
 
   useEffect(() => {
@@ -1760,7 +1835,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const openPostFromFeed = useCallback(
     (post: HomePost, opts?: { isolated?: boolean }) => {
       if (!postHasViewableMedia(post)) return;
-      const feedIx = tabPosts.findIndex((p) => Number(p.id) === Number(post.id));
+      const targetKey = feedEntryIdentity(post);
+      const feedIx = tabPosts.findIndex(
+        (p) => feedEntryIdentity(p) === targetKey || Number(p.id) === Number(post.id)
+      );
       if (opts?.isolated || feedIx < 0) {
         const list = dedupePostsById(tabPosts.filter((p) => postHasViewableMedia(p)));
         const ordered = list.length ? list : [post];
@@ -1774,8 +1852,16 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const openQueuedSharedPosts = useCallback(
-    (queued: { posts: HomePost[]; initialIndex: number }) => {
+    (queued: { posts: HomePost[]; initialIndex: number; returnToNotifications?: boolean }) => {
       if (!queued.posts.length) return;
+      // Notifications / deep links: open in modal so the home feed players stay mounted (no reload on back).
+      if (queued.returnToNotifications) {
+        setReelModalViewer({
+          posts: queued.posts,
+          initialIndex: queued.initialIndex
+        });
+        return;
+      }
       let posts = queued.posts;
       let initialIndex = queued.initialIndex;
       if (posts.length === 1) {
@@ -2842,6 +2928,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               canFollowBack: !!prev[targetUserId]?.canFollowBack
             }
           }));
+          void removeLocalFollowByIdentity(
+            { name: user?.fullName || "Farmer", key: user?.email || String(user?.id || "") },
+            { name: postUserName || "Farmer", key: String(targetUserId) }
+          );
         } catch {
           // If backend route is unavailable on hosted env, keep UI stable.
           setRelationships((prev) => ({
@@ -2873,6 +2963,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           data.follow.status === "accepted" ? "accepted" : data.follow.status === "pending" ? "pending" : "none";
         if (nextStatus === "accepted") {
           setFollowingUserIds((prev) => new Set(prev).add(targetUserId));
+          void upsertLocalAcceptedFollowByIdentity(
+            { name: user?.fullName || "Farmer", key: user?.email || String(user?.id || "") },
+            { name: postUserName || "Farmer", key: String(targetUserId) }
+          );
         }
         setRelationships((prev) => ({
           ...prev,
@@ -2974,11 +3068,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
 
   const onReelMomentumEnd = useCallback(
     (offsetY: number) => {
-      const slotH = reelImmersiveMode
-        ? windowHeight
-        : reelSlotHeight > 0
-          ? reelSlotHeight
-          : Math.max(420, Math.round(windowHeight * 0.62));
+      // Ignore scroll math while chrome/slot height is settling after immersive enter/exit.
+      if (Date.now() < feedIgnoreViewabilityUntilRef.current) return;
+      const slotH = effectiveReelSlotHeight;
       if (slotH <= 0 || tabPosts.length === 0) return;
       const index = Math.max(0, Math.min(tabPosts.length - 1, Math.round(offsetY / slotH)));
       const post = tabPosts[index];
@@ -2990,7 +3082,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         prefetchUpcomingPosts(tabPosts, index, 1);
       }
     },
-    [reelImmersiveMode, reelSlotHeight, tabPosts, windowHeight]
+    [effectiveReelSlotHeight, tabPosts]
   );
 
   const onReelStatusUpdate = useCallback((postId: number, status: AppPlaybackStatus) => {
@@ -3350,17 +3442,6 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     if (reelImmersiveMode) {
       setIsReelMuted(false);
       setReelUserPaused(false);
-      if (Platform.OS !== "web") {
-        void Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-          interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-          shouldDuckAndroid: true,
-          interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-          playThroughEarpieceAndroid: false
-        });
-      }
     } else {
       setIsReelMuted(true);
       setReelUserPaused(false);
@@ -4092,11 +4173,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const renderFullScreenReel = useCallback(
     ({ item: post, index: _index }: { item: HomePost; index: number }) => {
       const reelContentWidth = reelFrameWidth > 0 ? reelFrameWidth : windowWidth;
-      const pageH = reelImmersiveMode
-        ? windowHeight
-        : reelSlotHeight > 0
-          ? reelSlotHeight
-          : reelSlotHeightForPaging();
+      const pageH = effectiveReelSlotHeight;
       const isActiveVideo = Number(playingPostId) === Number(post.id) && !!post.videoUrl;
       const shouldPlayReel = isActiveVideo && canPlayReelFeed && !reelUserPaused;
       const nearActive =
@@ -4146,11 +4223,20 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const hasMusicTrack = postHasAttachedMusic(post);
       const showVolumeControl = postShowsVolumeControl(post);
       const separateMusicPlaying = hasMusicTrack && activeReelMusicPostId === post.id;
-      const mediaContentH = pageH;
-      const mediaFrameStyle = StyleSheet.absoluteFillObject;
+      // Immersive: same top safe inset for photos + reels so back overlays media (no extra letterbox gap).
+      const statusSafeTop = reelImmersiveMode ? Math.max(modalTopInset, insets.top, 0) : 0;
+      const mediaContentH = Math.max(1, pageH - statusSafeTop);
+      const mediaFrameStyle =
+        statusSafeTop > 0
+          ? ({ position: "absolute" as const, left: 0, right: 0, top: statusSafeTop, bottom: 0 } as const)
+          : StyleSheet.absoluteFillObject;
+      const immersiveVideoFit = reelImmersiveMode ? "cover" : "auto";
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
+          {statusSafeTop > 0 ? (
+            <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: statusSafeTop, backgroundColor: "#000" }} />
+          ) : null}
           {post.videoUrl ? (
             <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
               {mountVideo ? (
@@ -4166,9 +4252,10 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                     playbackKey={`feed-${post.id}-r${feedResumeToken}`}
                     shouldPlay={shouldPlayReel}
                     preloadOnly={!isActiveVideo}
+                    resumePositionMillis={isActiveVideo ? Number(getReelProgress(post.id)?.position || 0) : 0}
                     containerWidth={reelContentWidth}
                     containerHeight={mediaContentH}
-                    fit="auto"
+                    fit={immersiveVideoFit}
                     isLooping
                     isMuted={isReelMuted || separateMusicPlaying || !isActiveVideo}
                     useNativeControls={false}
@@ -4476,17 +4563,19 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       commentsByPost,
       followBusyByUserId,
       insets.bottom,
+      insets.top,
       isReelMuted,
       legacyFollowStateByName,
       legacyRelationshipByName,
       likeBusyByPostId,
+      modalTopInset,
       openCommentsForPost,
       openPostLikesSheet,
       onAddReelToStory,
       playingPostId,
       activeReelMusicPostId,
       reelFrameWidth,
-      reelSlotHeightForPaging,
+      effectiveReelSlotHeight,
       reelLikeBurstByPostId,
       reelImmersiveMode,
       reelUserPaused,
@@ -4816,19 +4905,55 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         : t("emptyDefaultSub");
 
   const useFullScreenReelLayout = activeHomeTab === "Feed" || activeHomeTab === "Friends";
-  const measuredReelSlotHeight = reelSlotHeight > 0 ? reelSlotHeight : 0;
-  const effectiveReelSlotHeight = reelImmersiveMode
-    ? windowHeight
-    : measuredReelSlotHeight > 0
-      ? measuredReelSlotHeight
-      : Math.max(420, Math.round(windowHeight * 0.62));
 
+  // Align the pinned reel whenever immersive height changes (enter needs fullscreen offset; exit needs feed offset).
+  const prevImmersiveForAlignRef = useRef(reelImmersiveMode);
+  const pendingImmersiveRestoreRef = useRef(false);
   useEffect(() => {
-    if (!reelImmersiveMode) return;
-    const index = lastPlayingIndexRef.current;
-    const timer = setTimeout(() => scrollReelFeedToIndex(index, false), 60);
-    return () => clearTimeout(timer);
-  }, [reelImmersiveMode, scrollReelFeedToIndex, windowHeight]);
+    const immersiveToggled = prevImmersiveForAlignRef.current !== reelImmersiveMode;
+    prevImmersiveForAlignRef.current = reelImmersiveMode;
+    if (immersiveToggled) pendingImmersiveRestoreRef.current = true;
+    if (!pendingImmersiveRestoreRef.current) return;
+
+    const slotH = effectiveReelSlotHeight;
+    if (slotH <= 0) return;
+    // Entering: wait until slot is near-fullscreen so we don't lock in the short feed height.
+    if (reelImmersiveMode && slotH < Math.round(windowHeight * 0.85)) return;
+
+    let cancelled = false;
+    const restorePinnedReel = () => {
+      if (cancelled) return;
+      const pinnedId = restoreFeedPostIdRef.current;
+      let index = lastPlayingIndexRef.current;
+      if (pinnedId != null) {
+        const ix = tabPostsRef.current.findIndex((p) => Number(p.id) === Number(pinnedId));
+        if (ix >= 0) index = ix;
+      }
+      index = Math.max(0, Math.min(Math.max(tabPostsRef.current.length - 1, 0), index));
+      lastPlayingIndexRef.current = index;
+      const post = tabPostsRef.current[index];
+      if (post) {
+        setPlayingPostId((cur) => (cur === post.id ? cur : post.id));
+      }
+      reelFeedListRef.current?.scrollToOffset({
+        offset: index * slotH,
+        animated: false
+      });
+    };
+
+    const t0 = requestAnimationFrame(restorePinnedReel);
+    const done = setTimeout(() => {
+      if (cancelled) return;
+      restorePinnedReel();
+      pendingImmersiveRestoreRef.current = false;
+      feedIgnoreViewabilityUntilRef.current = Date.now() + 80;
+    }, 180);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(t0);
+      clearTimeout(done);
+    };
+  }, [reelImmersiveMode, effectiveReelSlotHeight, windowHeight]);
 
   const feedListFooter = useMemo(() => {
     if (!feedLoadingMore) return null;
@@ -4916,7 +5041,18 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 if (!(width > 0 && height > 0)) return;
                 // Ignore sub-pixel / keyboard chrome jitter — height thrash remounts paging + video.
                 setReelFrameWidth((prev) => (Math.abs(prev - width) < 1 ? prev : width));
-                setReelSlotHeight((prev) => (Math.abs(prev - height) < 1 ? prev : height));
+                setReelSlotHeight((prev) => {
+                  if (Math.abs(prev - height) < 1) return prev;
+                  // Immersive: ignore short measurements while tab bar/header are still hiding.
+                  if (
+                    reelImmersiveMode &&
+                    prev >= Math.round(windowHeight * 0.85) &&
+                    height < Math.round(windowHeight * 0.85)
+                  ) {
+                    return prev;
+                  }
+                  return height;
+                });
               }}
             >
             {effectiveReelSlotHeight > 0 ? (
@@ -4925,7 +5061,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   style={styles.reelFrameList}
                   nestedScrollEnabled
                   data={tabPosts}
-                  keyExtractor={(item) => item.feedEntryKey || String(item.id)}
+                  keyExtractor={(item) => feedEntryIdentity(item)}
                   renderItem={renderFullScreenReel}
                   removeClippedSubviews={false}
                   initialNumToRender={2}
@@ -4949,7 +5085,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   viewabilityConfig={reelViewabilityConfig}
                   onScroll={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
                   onMomentumScrollEnd={(e) => onReelMomentumEnd(e.nativeEvent.contentOffset.y)}
-                  extraData={`${playingPostId}-${effectiveReelSlotHeight}-${reelFrameWidth}-${reelUserPaused}-${canPlayReelFeed}-${isReelMuted}-${feedResumeToken}-${reelImmersiveMode ? 1 : 0}`}
+                  extraData={`${playingPostId}-${reelFrameWidth}-${reelUserPaused}-${canPlayReelFeed}-${isReelMuted}-${feedResumeToken}`}
                   onEndReached={onFeedEndReached}
                   onEndReachedThreshold={0.65}
                   ListFooterComponent={feedListFooter}
@@ -4974,7 +5110,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       ) : (
       <FlatList
         data={tabPosts}
-        keyExtractor={(item) => item.feedEntryKey || String(item.id)}
+        keyExtractor={(item) => feedEntryIdentity(item)}
         renderItem={renderPost}
         removeClippedSubviews={Platform.OS === "android"}
         nestedScrollEnabled
@@ -5281,7 +5417,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         visible={!!reelModalViewer}
         posts={reelModalViewer?.posts ?? []}
         initialIndex={reelModalViewer?.initialIndex ?? 0}
-        onClose={() => setReelModalViewer(null)}
+        onClose={() => {
+          setReelModalViewer(null);
+          if (consumeReturnToNotifications()) {
+            suppressNotificationSheet(false);
+            requestOpenNotificationSheet();
+          }
+        }}
         onPostsChange={(nextPosts) => {
           const byId = new Map(nextPosts.map((p) => [p.id, p]));
           setPosts((prev) => prev.map((p) => byId.get(p.id) ?? p));
