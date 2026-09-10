@@ -1,4 +1,4 @@
-import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
+import { API_BASE_URL, AUTH_FETCH_TIMEOUT_MS, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
 import type { AuthResponse } from "./types";
 
 export async function authLogin(payload: {
@@ -6,11 +6,15 @@ export async function authLogin(payload: {
   identifier?: string;
   password: string;
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/auth/login`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    AUTH_FETCH_TIMEOUT_MS
+  );
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
@@ -22,24 +26,34 @@ export async function authRegister(payload: {
   phone?: string;
   role?: string;
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/auth/register`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    AUTH_FETCH_TIMEOUT_MS
+  );
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
 export async function fetchAuthMe(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token)) as { user: AuthResponse["user"] };
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token, {}, AUTH_FETCH_TIMEOUT_MS)) as {
+    user: AuthResponse["user"];
+  };
 }
 
 export async function sendPhoneOtp(payload: { phone: string }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/auth/phone/send-otp`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    AUTH_FETCH_TIMEOUT_MS
+  );
   return (await parseJsonOrThrow(response)) as {
     success: boolean;
     phone: string;
@@ -55,11 +69,15 @@ export async function verifyPhoneOtp(payload: {
   locationLabel?: string;
   deviceInfo?: { deviceName?: string; platform?: string; locationLabel?: string };
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/verify-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/auth/phone/verify-otp`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    AUTH_FETCH_TIMEOUT_MS
+  );
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
@@ -68,10 +86,14 @@ export async function resetPasswordWithOtp(payload: {
   code: string;
   newPassword: string;
 }) {
-  const response = await fetchWithRetry(`${API_BASE_URL}/v1/auth/phone/reset-password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/auth/phone/reset-password`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    AUTH_FETCH_TIMEOUT_MS
+  );
   return (await parseJsonOrThrow(response)) as { success: boolean };
 }

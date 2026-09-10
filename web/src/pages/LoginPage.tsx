@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { authLogin, authRegister } from "../api/auth";
+import { warmUpApi } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import "./LoginPage.css";
 
@@ -26,6 +27,10 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    warmUpApi();
+  }, []);
 
   if (!loading && token) return <Navigate to="/" replace />;
 

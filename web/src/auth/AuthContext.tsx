@@ -8,6 +8,7 @@ import {
   type ReactNode
 } from "react";
 import { fetchAuthMe } from "../api/auth";
+import { warmUpApi } from "../api/client";
 import type { AuthUser } from "../api/types";
 import { connectSocketChat, disconnectSocketChat } from "../services/socketChat";
 
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    warmUpApi();
     let cancelled = false;
     (async () => {
       try {
