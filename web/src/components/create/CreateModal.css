@@ -107,6 +107,71 @@
   background: #111;
 }
 
+.create-modal__farming {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #404040;
+  border-radius: 10px;
+  background: #262626;
+}
+
+.create-modal__farming-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #c9ff35;
+}
+
+.create-modal__farming-body {
+  margin: 6px 0 12px;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.create-modal__farming-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.create-modal__topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.create-modal__topic {
+  border-radius: 999px;
+  border: 1px solid #404040;
+  background: #303030;
+  color: rgba(255, 255, 255, 0.85);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.create-modal__topic--on {
+  background: #c9ff35;
+  border-color: #c9ff35;
+  color: #111;
+}
+
+.create-modal__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.create-modal__confirm input {
+  margin-top: 2px;
+  accent-color: #c9ff35;
+}
+
 .create-modal__actions {
   display: flex;
   justify-content: flex-end;

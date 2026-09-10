@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { resetPasswordWithOtp, sendPhoneOtp } from "../api/auth";
+import { warmUpApi } from "../api/client";
 import "./LoginPage.css";
 
 function sanitizePhone(raw: string) {
@@ -29,6 +30,10 @@ export function ForgotPasswordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    warmUpApi();
+  }, []);
 
   useEffect(() => {
     if (countdown <= 0) return;
