@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ForwardMessageModal } from "../messages/ForwardMessageModal";
 import { dropCaption, dropMusicLabel, postShowsMusicRow } from "../../utils/feedOrder";
+import { buildPostChatMessage } from "../../utils/postShare";
 import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
@@ -41,6 +43,7 @@ export function ReelSlideShell({
   const [saveBusy, setSaveBusy] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [likesOpen, setLikesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
   const caption = dropCaption(post.caption);
@@ -52,7 +55,7 @@ export function ReelSlideShell({
     setLikes(post.likesCount);
     setCommentsCount(post.commentsCount);
     setSaved(!!post.viewerHasSaved);
-  }, [post.viewerHasLiked, post.likesCount, post.commentsCount]);
+  }, [post.id, post.viewerHasLiked, post.likesCount, post.commentsCount, post.viewerHasSaved]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -101,32 +104,20 @@ export function ReelSlideShell({
     }
   };
 
-  const sharePost = async () => {
-    const url = `${window.location.origin}/watch/${post.id}`;
-    const text = caption ? `${post.userName}: ${caption}` : post.userName;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "Cropvibe", text, url });
-      } else {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
-          window.alert("Link copied.");
-        } else {
-          window.prompt("Copy this link:", url);
-        }
-      }
-    } catch {
+  const sharePost = () => {
+    if (!token) {
+      const url = `${window.location.origin}/watch/${post.id}`;
       if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(url);
-          window.alert("Link copied.");
-        } catch {
-          window.prompt("Copy this link:", url);
-        }
+        void navigator.clipboard.writeText(url).then(
+          () => window.alert("Link copied."),
+          () => window.prompt("Copy this link:", url)
+        );
       } else {
         window.prompt("Copy this link:", url);
       }
+      return;
     }
+    setShareOpen(true);
   };
 
   const toggleMute = () => {
@@ -137,7 +128,11 @@ export function ReelSlideShell({
   };
 
   const toggleSave = async () => {
-    if (!token || saveBusy) return;
+    if (!token) {
+      window.alert("Log in to save drops.");
+      return;
+    }
+    if (saveBusy) return;
     const next = !saved;
     setSaved(next);
     setSaveBusy(true);
@@ -219,14 +214,17 @@ export function ReelSlideShell({
             likes={likes}
             commentsCount={commentsCount}
             muted={muted}
+            saved={saved}
             likeBusy={likeBusy || !token}
+            saveBusy={saveBusy}
             discUrl={poster}
             onLike={() => void toggleLike()}
             onLikesPress={() => {
               if (likes || liked) setLikesOpen(true);
             }}
             onComment={() => setCommentsOpen(true)}
-            onShare={() => void sharePost()}
+            onShare={sharePost}
+            onSave={() => void toggleSave()}
             onMore={() => setOptionsOpen(true)}
             onMute={toggleMute}
           />
@@ -255,6 +253,16 @@ export function ReelSlideShell({
           onCountChange={setCommentsCount}
           portal={!sideComments}
           sidecar={sideComments}
+        />
+      ) : null}
+
+      {shareOpen ? (
+        <ForwardMessageModal
+          visible={shareOpen}
+          title="Share drop"
+          messageBody={buildPostChatMessage(post)}
+          onClose={() => setShareOpen(false)}
+          onSent={() => window.alert("Sent.")}
         />
       ) : null}
 

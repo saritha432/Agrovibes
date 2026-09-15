@@ -110,9 +110,34 @@ function emitDirectMessage({ senderId, receiverId, message }) {
 
 function emitMessagesRead({ readerId, peerUserId }) {
   if (!io) return;
+  // Sender: read receipts / ticks.
   io.to(userRoom(peerUserId)).emit("dm:read", {
     readerId,
-    peerUserId
+    peerUserId: readerId
+  });
+  // Reader's other devices: clear this thread's unread badge.
+  io.to(userRoom(readerId)).emit("dm:read", {
+    readerId,
+    peerUserId,
+    selfRead: true
+  });
+}
+
+function emitNotificationSync(userId, payload = {}) {
+  if (!io) return;
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  io.to(userRoom(id)).emit("notif:sync", payload);
+}
+
+function emitStoryViewed({ viewerId, storyId, storyUserId }) {
+  if (!io) return;
+  const id = Number(viewerId);
+  const sid = Number(storyId);
+  if (!Number.isFinite(id) || id <= 0 || !Number.isFinite(sid) || sid <= 0) return;
+  io.to(userRoom(id)).emit("story:viewed", {
+    storyId: sid,
+    storyUserId: Number(storyUserId) || null
   });
 }
 
@@ -128,5 +153,7 @@ module.exports = {
   getSocketIo,
   emitDirectMessage,
   emitMessagesRead,
-  emitDirectMessageDeleted
+  emitDirectMessageDeleted,
+  emitNotificationSync,
+  emitStoryViewed
 };

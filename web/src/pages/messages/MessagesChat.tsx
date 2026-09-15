@@ -32,6 +32,9 @@ import {
   parseDmReactMessage,
   parseDmReplyMessage,
   parseDmVoiceMessage,
+  parseStoryDmMessage,
+  dmMediaIsAlbum,
+  dmMediaItems,
   type DmReplyPayload
 } from "../../utils/dmMessageFormats";
 import { formatMsgTime, parseSharedReel } from "./messagesUtils";
@@ -153,13 +156,16 @@ export function MessagesChat() {
         if (prev.some((m) => m.id === payload.message.id)) return prev;
         return [...prev, payload.message];
       });
+      if (token) {
+        void fetchMessageThread(token, peerUserId).catch(() => {});
+      }
       requestAnimationFrame(scrollToEnd);
     });
     return () => {
       unsub();
       leaveDirectThread(peerUserId);
     };
-  }, [peerUserId]);
+  }, [peerUserId, token]);
 
   useEffect(() => {
     scrollToEnd();
@@ -240,7 +246,9 @@ export function MessagesChat() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordStreamRef.current = stream;
       voiceCancelledRef.current = false;
-      const recorder = new MediaRecorder(stream);
+      const mimeCandidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+      const mimeType = mimeCandidates.find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recordChunksRef.current = [];
       recordStartedRef.current = Date.now();
       setVoiceRecordingMs(0);
@@ -262,13 +270,17 @@ export function MessagesChat() {
         }
 
         const durationMs = Date.now() - recordStartedRef.current;
-        const blob = new Blob(recordChunksRef.current, { type: "audio/webm" });
+        const blobType = (recorder.mimeType || mimeType || "audio/webm").split(";")[0] || "audio/webm";
+        const blob = new Blob(recordChunksRef.current, { type: blobType });
         recordChunksRef.current = [];
         if (blob.size < 100 || durationMs < 400) return;
 
+        const ext = blobType.includes("mp4") ? ".m4a" : blobType.includes("ogg") ? ".ogg" : ".webm";
+        const file = new File([blob], `voice-${Date.now()}${ext}`, { type: blobType });
+
         setSending(true);
         try {
-          const { url } = await uploadAudioFile(blob, ".webm");
+          const { url } = await uploadAudioFile(file, ext);
           await sendDirectMessage(token, peerUserId, buildDmVoiceMessage({ url, durationMs }));
           await reload();
         } catch {
@@ -278,7 +290,7 @@ export function MessagesChat() {
         }
       };
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(200);
       setRecording(true);
       clearVoiceTimer();
       voiceTimerRef.current = setInterval(() => {
@@ -400,11 +412,52 @@ export function MessagesChat() {
     }
     const media = parseDmMediaMessage(item.body);
     if (media) {
-      const src = resolveWebVideoUrl(media.url) || media.url;
-      return media.kind === "video" ? (
+      const items = dmMediaItems(media);
+      if (dmMediaIsAlbum(media) || items.length > 1) {
+        return (
+          <div className="messages-chat__album">
+            {items.map((entry) => {
+              const src = resolveWebVideoUrl(entry.url) || entry.url;
+              return entry.kind === "video" ? (
+                <video key={src} src={src} controls playsInline className="messages-chat__album-item" />
+              ) : (
+                <img key={src} src={src} alt="" className="messages-chat__album-item" />
+              );
+            })}
+          </div>
+        );
+      }
+      const src = resolveWebVideoUrl(items[0]?.url || "") || items[0]?.url || "";
+      if (!src || !items[0]) return <p>Photo</p>;
+      return items[0].kind === "video" ? (
         <video src={src} controls playsInline className="messages-chat__media" />
       ) : (
         <img src={src} alt="" className="messages-chat__media" />
+      );
+    }
+    const storyDm = parseStoryDmMessage(item.body);
+    if (storyDm) {
+      const thumb = storyDm.imageUrl || storyDm.previewUrl;
+      const label =
+        storyDm.kind === "like"
+          ? `Liked story${storyDm.userName ? ` · ${storyDm.userName}` : ""}`
+          : `Replied to story${storyDm.userName ? ` · ${storyDm.userName}` : ""}`;
+      return (
+        <div className="messages-chat__story">
+          <div className="messages-chat__story-card">
+            {thumb ? (
+              <img src={thumb} alt="" className="messages-chat__story-thumb" />
+            ) : (
+              <span className="messages-chat__reel-ph">Story</span>
+            )}
+            <p className="messages-chat__story-label">{label}</p>
+          </div>
+          {storyDm.kind === "like" ? (
+            <p className="messages-chat__story-heart">❤️</p>
+          ) : storyDm.text ? (
+            <p className="messages-chat__story-text">{storyDm.text}</p>
+          ) : null}
+        </div>
       );
     }
     const sharedReel = parseSharedReel(item.body);
@@ -466,6 +519,8 @@ export function MessagesChat() {
         {threadMessages.map(({ message: item, reactions }) => {
           const isSelf = Number(item.senderId) === Number(user?.id);
           const sharedReel = parseSharedReel(item.body);
+          const storyDm = parseStoryDmMessage(item.body);
+          const richCard = Boolean(sharedReel || storyDm || parseDmMediaMessage(item.body));
 
           return (
             <div
@@ -474,7 +529,7 @@ export function MessagesChat() {
             >
               <div className="messages-chat__bubble-stack">
                 <div
-                  className={`messages-chat__bubble${isSelf ? " messages-chat__bubble--self" : ""}${sharedReel ? " messages-chat__bubble--reel" : ""}`}
+                  className={`messages-chat__bubble${isSelf ? " messages-chat__bubble--self" : ""}${richCard ? " messages-chat__bubble--reel" : ""}`}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     openMessageActions(item);

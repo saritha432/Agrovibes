@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { fetchMessageThreads } from "../api/messages";
 import {
@@ -12,6 +12,11 @@ import {
 import { sendFollowRequest } from "../api/home";
 import { useAuth } from "../auth/AuthContext";
 import { countMessageUnread } from "../utils/messageUnread";
+import {
+  onDirectRead,
+  onDirectThreadUpdate,
+  onNotificationSync
+} from "../services/socketChat";
 import type { NotificationFeedItem } from "../components/notifications/NotificationList";
 
 type NotificationPanelValue = {
@@ -44,10 +49,21 @@ function activityLabel(entry: SocialPostActivityNotification) {
   return `${name} liked your ${kind}`;
 }
 
+function latestCreatedAtMs(entries: Array<{ createdAt?: string }>): number {
+  let max = 0;
+  for (const entry of entries) {
+    const ts = Date.parse(entry.createdAt || "");
+    if (Number.isFinite(ts) && ts > max) max = ts;
+  }
+  return max;
+}
+
 export function NotificationPanelProvider({ children }: { children: ReactNode }) {
   const { token, user } = useAuth();
   const { pathname } = useLocation();
   const onNotificationsPage = pathname === "/notifications";
+  const onNotificationsPageRef = useRef(onNotificationsPage);
+  onNotificationsPageRef.current = onNotificationsPage;
 
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   const [followRequests, setFollowRequests] = useState<SocialNotificationItem[]>([]);
@@ -56,11 +72,58 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
   const [postComments, setPostComments] = useState<SocialPostActivityNotification[]>([]);
   const [liveStarts, setLiveStarts] = useState<SocialPostActivityNotification[]>([]);
   const [followBackIds, setFollowBackIds] = useState<Record<number, "none" | "pending" | "accepted">>({});
+  const [serverUnreadCount, setServerUnreadCount] = useState(0);
+  const [lastSeenMs, setLastSeenMs] = useState(0);
+  const [lastSeenReady, setLastSeenReady] = useState(false);
+  const lastSeenMsRef = useRef(0);
+  lastSeenMsRef.current = lastSeenMs;
+  const wasOnNotificationsPageRef = useRef(false);
 
   const viewerUserId = useMemo(() => {
     const id = Number(user?.id);
     return Number.isFinite(id) && id > 0 ? id : null;
   }, [user?.id]);
+
+  const lastSeenStorageKey = useMemo(() => {
+    if (!viewerUserId) return "";
+    return `cropvibe.notifications.lastSeen.${viewerUserId}`;
+  }, [viewerUserId]);
+
+  const persistLastSeenMs = useCallback(
+    (ms: number) => {
+      if (!Number.isFinite(ms) || ms <= lastSeenMsRef.current) return;
+      lastSeenMsRef.current = ms;
+      setLastSeenMs(ms);
+      if (!lastSeenStorageKey) return;
+      try {
+        localStorage.setItem(lastSeenStorageKey, String(ms));
+      } catch {
+        // ignore quota / private mode
+      }
+    },
+    [lastSeenStorageKey]
+  );
+
+  useEffect(() => {
+    if (!lastSeenStorageKey) {
+      lastSeenMsRef.current = 0;
+      setLastSeenMs(0);
+      setLastSeenReady(true);
+      return;
+    }
+    setLastSeenReady(false);
+    try {
+      const parsed = Number(localStorage.getItem(lastSeenStorageKey) || 0);
+      const next = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+      lastSeenMsRef.current = next;
+      setLastSeenMs(next);
+    } catch {
+      lastSeenMsRef.current = 0;
+      setLastSeenMs(0);
+    } finally {
+      setLastSeenReady(true);
+    }
+  }, [lastSeenStorageKey]);
 
   const loadCounts = useCallback(async () => {
     if (!token) {
@@ -82,20 +145,52 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
       setPostLikes([]);
       setPostComments([]);
       setLiveStarts([]);
+      setServerUnreadCount(0);
       return;
     }
     await loadCounts();
     try {
       const data = await fetchSocialNotifications(token);
-      setFollowRequests(data.followRequests || []);
-      setFollowAccepted(data.followAccepted || []);
-      setPostLikes(data.postLikes || []);
-      setPostComments(data.postComments || []);
-      setLiveStarts(data.liveStarts || []);
+      const nextFollowRequests = data.followRequests || [];
+      const nextFollowAccepted = data.followAccepted || [];
+      const nextPostLikes = data.postLikes || [];
+      const nextPostComments = data.postComments || [];
+      const nextLiveStarts = data.liveStarts || [];
+      setFollowRequests(nextFollowRequests);
+      setFollowAccepted(nextFollowAccepted);
+      setPostLikes(nextPostLikes);
+      setPostComments(nextPostComments);
+      setLiveStarts(nextLiveStarts);
+      const remoteUnread = Math.max(0, Number(data.unreadCount || 0));
+      if (onNotificationsPageRef.current) {
+        setServerUnreadCount(0);
+        persistLastSeenMs(
+          Math.max(
+            Date.now(),
+            lastSeenMsRef.current,
+            latestCreatedAtMs([
+              ...nextFollowRequests,
+              ...nextFollowAccepted,
+              ...nextPostLikes,
+              ...nextPostComments,
+              ...nextLiveStarts
+            ])
+          )
+        );
+        if (remoteUnread > 0) {
+          try {
+            await markAllSocialNotificationsRead(token);
+          } catch {
+            // ignore
+          }
+        }
+      } else {
+        setServerUnreadCount(remoteUnread);
+      }
     } catch {
       // ignore
     }
-  }, [loadCounts, token]);
+  }, [loadCounts, persistLastSeenMs, token]);
 
   useEffect(() => {
     void loadNotifications();
@@ -104,23 +199,17 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
     return () => window.clearInterval(timer);
   }, [loadNotifications, token]);
 
+  const allEntries = useMemo(
+    () => [...followRequests, ...followAccepted, ...postLikes, ...postComments, ...liveStarts],
+    [followAccepted, followRequests, liveStarts, postComments, postLikes]
+  );
+  const allEntriesRef = useRef(allEntries);
+  allEntriesRef.current = allEntries;
+
   const notificationUnreadCount = useMemo(() => {
     if (onNotificationsPage) return 0;
-    return (
-      followRequests.length +
-      followAccepted.length +
-      postLikes.length +
-      postComments.length +
-      liveStarts.length
-    );
-  }, [
-    followAccepted.length,
-    followRequests.length,
-    liveStarts.length,
-    onNotificationsPage,
-    postComments.length,
-    postLikes.length
-  ]);
+    return Math.max(0, serverUnreadCount);
+  }, [onNotificationsPage, serverUnreadCount]);
 
   const items = useMemo<NotificationFeedItem[]>(() => {
     const rows: NotificationFeedItem[] = [];
@@ -194,14 +283,58 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
   );
 
   const markNotificationsSeen = useCallback(async () => {
+    setServerUnreadCount(0);
+    persistLastSeenMs(Math.max(Date.now(), lastSeenMsRef.current, latestCreatedAtMs(allEntriesRef.current)));
     if (!token) return;
     try {
       await markAllSocialNotificationsRead(token);
     } catch {
       // ignore
     }
-    await loadNotifications();
-  }, [loadNotifications, token]);
+  }, [persistLastSeenMs, token]);
+
+  useEffect(() => {
+    if (onNotificationsPage && !wasOnNotificationsPageRef.current) {
+      void markNotificationsSeen();
+    }
+    if (!onNotificationsPage && wasOnNotificationsPageRef.current) {
+      persistLastSeenMs(Math.max(Date.now(), lastSeenMsRef.current, latestCreatedAtMs(allEntriesRef.current)));
+    }
+    wasOnNotificationsPageRef.current = onNotificationsPage;
+  }, [markNotificationsSeen, onNotificationsPage, persistLastSeenMs]);
+
+  useEffect(() => {
+    const unsubRead = onDirectRead(() => {
+      void loadCounts();
+    });
+    const unsubThread = onDirectThreadUpdate(() => {
+      void loadCounts();
+    });
+    const unsubNotif = onNotificationSync((payload) => {
+      if (typeof payload.unreadCount === "number" && Number.isFinite(payload.unreadCount)) {
+        setServerUnreadCount(onNotificationsPageRef.current ? 0 : Math.max(0, payload.unreadCount));
+        void loadNotifications();
+        return;
+      }
+      if (payload.unreadDelta) {
+        const delta = Number(payload.unreadDelta);
+        if (Number.isFinite(delta)) {
+          if (onNotificationsPageRef.current) {
+            setServerUnreadCount(0);
+            void markNotificationsSeen();
+          } else {
+            setServerUnreadCount((count) => Math.max(0, count + delta));
+          }
+        }
+      }
+      void loadNotifications();
+    });
+    return () => {
+      unsubRead();
+      unsubThread();
+      unsubNotif();
+    };
+  }, [loadCounts, loadNotifications, markNotificationsSeen]);
 
   const value = useMemo<NotificationPanelValue>(
     () => ({

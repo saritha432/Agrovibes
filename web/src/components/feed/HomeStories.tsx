@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { HomeStory } from "../../api/types";
-import { markHomeStoryViewed } from "../../api/home";
+import { likeHomeStory, markHomeStoryViewed, replyToHomeStory } from "../../api/home";
 import { UserAvatar } from "../messages/UserAvatar";
+import { ReelIcon } from "./ReelIcon";
 import { groupHomeStories } from "../../utils/storyUtils";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
+import { onStoryViewed } from "../../services/socketChat";
 import "./HomeStories.css";
 
 type Props = {
@@ -18,11 +20,42 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   const [viewedIds, setViewedIds] = useState<Set<number>>(() => new Set());
   const [queue, setQueue] = useState<HomeStory[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
+  const [likedIds, setLikedIds] = useState<Set<number>>(() => new Set());
+  const [replyDraft, setReplyDraft] = useState("");
+  const [replyBusy, setReplyBusy] = useState(false);
+  const [likeBusy, setLikeBusy] = useState(false);
 
   const { ownStories, otherGroups } = useMemo(
     () => groupHomeStories(stories, viewerId ?? null),
     [stories, viewerId]
   );
+
+  useEffect(() => {
+    setViewedIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const story of stories) {
+        if (story.viewed && !next.has(story.id)) {
+          next.add(story.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [stories]);
+
+  useEffect(() => {
+    return onStoryViewed((payload) => {
+      const id = Number(payload?.storyId);
+      if (!Number.isFinite(id) || id <= 0) return;
+      setViewedIds((prev) => {
+        if (prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+    });
+  }, []);
 
   const active = queue[queueIndex] ?? null;
   const activeMedia = active?.imageUrl || resolveWebVideoUrl(active?.videoUrl) || null;
@@ -38,6 +71,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   const closeViewer = () => {
     setQueue([]);
     setQueueIndex(0);
+    setReplyDraft("");
   };
 
   const markViewed = (story: HomeStory) => {
@@ -77,6 +111,8 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
     markViewed(active);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeViewer();
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (typing) return;
       if (e.key === "ArrowRight") goNext();
       if (e.key === "ArrowLeft") goPrev();
     };
@@ -86,6 +122,49 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   }, [active?.id, queueIndex, queue.length]);
 
   const ownHasNew = ownStories.some((s) => !storySeen(s));
+  const isOwnActive = (() => {
+    const ownerId = Number(active?.userId);
+    const viewer = Number(viewerId);
+    if (Number.isFinite(ownerId) && Number.isFinite(viewer) && ownerId === viewer) return true;
+    return String(active?.userName || "").trim().toLowerCase() === "you";
+  })();
+
+  useEffect(() => {
+    setReplyDraft("");
+  }, [active?.id]);
+
+  const sendReply = async (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!token || !active || isOwnActive || replyBusy) return;
+    const text = replyDraft.trim();
+    if (!text) return;
+    setReplyBusy(true);
+    try {
+      await replyToHomeStory(token, active.id, text);
+      setReplyDraft("");
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Could not send reply.");
+    } finally {
+      setReplyBusy(false);
+    }
+  };
+
+  const likeStory = async () => {
+    if (!token || !active || isOwnActive || likeBusy || likedIds.has(active.id)) return;
+    setLikeBusy(true);
+    try {
+      await likeHomeStory(token, active.id);
+      setLikedIds((prev) => {
+        const next = new Set(prev);
+        next.add(active.id);
+        return next;
+      });
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Could not like story.");
+    } finally {
+      setLikeBusy(false);
+    }
+  };
 
   return (
     <>
@@ -106,6 +185,14 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
           isVideo={isVideo}
           queueIndex={queueIndex}
           queueLength={queue.length}
+          canInteract={!!token && !isOwnActive}
+          liked={likedIds.has(active.id)}
+          likeBusy={likeBusy}
+          replyDraft={replyDraft}
+          replyBusy={replyBusy}
+          onReplyDraftChange={setReplyDraft}
+          onLike={() => void likeStory()}
+          onSend={(e) => void sendReply(e)}
           onClose={closeViewer}
           onNext={goNext}
           onPrev={goPrev}
@@ -189,6 +276,14 @@ function StoryViewer({
   isVideo,
   queueIndex,
   queueLength,
+  canInteract,
+  liked,
+  likeBusy,
+  replyDraft,
+  replyBusy,
+  onReplyDraftChange,
+  onLike,
+  onSend,
   onClose,
   onNext,
   onPrev
@@ -198,6 +293,14 @@ function StoryViewer({
   isVideo: boolean;
   queueIndex: number;
   queueLength: number;
+  canInteract: boolean;
+  liked: boolean;
+  likeBusy: boolean;
+  replyDraft: string;
+  replyBusy: boolean;
+  onReplyDraftChange: (value: string) => void;
+  onLike: () => void;
+  onSend: (e?: FormEvent) => void;
   onClose: () => void;
   onNext: () => void;
   onPrev: () => void;
@@ -224,6 +327,31 @@ function StoryViewer({
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--left" onClick={onPrev} aria-label="Previous" />
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--right" onClick={onNext} aria-label="Next" />
         </div>
+        {canInteract ? (
+          <form className="story-viewer__actions" onSubmit={onSend} onClick={(e) => e.stopPropagation()}>
+            <input
+              type="text"
+              value={replyDraft}
+              onChange={(e) => onReplyDraftChange(e.target.value)}
+              placeholder="Send message"
+              maxLength={500}
+              aria-label="Send message"
+            />
+            <button type="submit" className="story-viewer__send" disabled={!replyDraft.trim() || replyBusy} aria-label="Send">
+              <ReelIcon name="share" size={18} color="#111" />
+            </button>
+            <button
+              type="button"
+              className={`story-viewer__like${liked ? " story-viewer__like--on" : ""}`}
+              onClick={onLike}
+              disabled={likeBusy || liked}
+              aria-label="Like story"
+              aria-pressed={liked}
+            >
+              <ReelIcon name="heart" filled={liked} size={26} color={liked ? "#ff2d55" : "#fff"} />
+            </button>
+          </form>
+        ) : null}
         <div className="story-viewer__progress" aria-hidden>
           {Array.from({ length: queueLength }, (_, i) => (
             <span key={i} className={`story-viewer__seg${i <= queueIndex ? " story-viewer__seg--on" : ""}`} />

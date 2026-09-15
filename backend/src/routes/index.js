@@ -58,7 +58,7 @@ const { setCallSession, clearCallSession, isUserBusy, isRoomRinging } = require(
 const { buildShareReelHtml } = require("../shareReelPage");
 const { buildShareProfileHtml } = require("../shareProfilePage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
-const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, getSocketIo } = require("../socketChat");
+const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitNotificationSync, emitStoryViewed, getSocketIo } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
 
 const router = express.Router();
@@ -87,7 +87,26 @@ let homeFeedMaintenanceRunning = false;
 let homeFeedMaintenanceLastRunAt = 0;
 const HOME_FEED_MAINTENANCE_INTERVAL_MS = 10 * 60 * 1000;
 
+const SOCIAL_NOTIF_SOCKET_TYPES = new Set([
+  "follow_request",
+  "follow_accept",
+  "new_follow",
+  "post_like",
+  "post_tag",
+  "post_comment",
+  "comment_reply",
+  "live_start",
+  "live_scheduled",
+  "live_reminder",
+  "live_host_reminder"
+]);
+
 function fireSocialPush(payload) {
+  const userId = Number(payload?.userId);
+  const type = String(payload?.type || "");
+  if (SOCIAL_NOTIF_SOCKET_TYPES.has(type) && Number.isFinite(userId) && userId > 0) {
+    emitNotificationSync(userId, { unreadDelta: 1 });
+  }
   void sendSocialPushToUser(payload).catch((error) => {
     console.warn("[push] social:", error?.message || error);
   });
@@ -97,6 +116,24 @@ function fireSocialPushToFollowers(payload) {
   void sendSocialPushToFollowers(payload).catch((error) => {
     console.warn("[push] followers:", error?.message || error);
   });
+  const hostUserId = Number(payload?.hostUserId);
+  if (!Number.isFinite(hostUserId) || hostUserId <= 0) return;
+  void query(
+    `
+    SELECT follower_id
+    FROM social_follows
+    WHERE following_id = $1
+      AND status = 'accepted'
+      AND follower_id <> $1
+    `,
+    [hostUserId]
+  )
+    .then((followers) => {
+      for (const row of followers.rows || []) {
+        emitNotificationSync(Number(row.follower_id), { unreadDelta: 1 });
+      }
+    })
+    .catch(() => {});
 }
 
 function looksLikePhoneNumber(value) {
@@ -4681,7 +4718,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       [currentUserId]
     );
 
-    const followRequests = result.rows.filter((r) => r.type === "follow_request" && !r.isRead && r.followStatus === "pending");
+    const followRequests = result.rows.filter((r) => r.type === "follow_request" && r.followStatus === "pending");
     const followAccepted = result.rows.filter((r) => r.type === "follow_accept");
     const newFollows = result.rows.filter((r) => r.type === "new_follow");
     const postLikes = result.rows.filter((r) => r.type === "post_like" || r.type === "post_tag");
@@ -4862,6 +4899,7 @@ router.post("/v1/social/notifications/:notificationId/read", authRequired, async
       res.status(404).json({ message: "Notification not found" });
       return;
     }
+    emitNotificationSync(Number(req.user.userId), { unreadDelta: -1 });
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to update notification", error: error.message });
@@ -4878,19 +4916,11 @@ router.post("/v1/social/notifications/read-all", authRequired, async (req, res) 
       SET is_read = true
       WHERE n.user_id = $1
         AND n.is_read = false
-        AND NOT (
-          n.type = 'follow_request'
-          AND EXISTS (
-            SELECT 1
-            FROM social_follows f
-            WHERE f.id = n.follow_id
-              AND f.status = 'pending'
-          )
-        )
       RETURNING n.id
       `,
       [me]
     );
+    emitNotificationSync(me, { unreadCount: 0 });
     res.json({ ok: true, marked: updated.rows.length });
   } catch (error) {
     res.status(500).json({ message: "Failed to mark notifications read", error: error.message });
@@ -5363,6 +5393,7 @@ const STORY_TTL_SQL = "24 hours";
 
 async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, authorUserId = null, limit = 40 } = {}) {
   await ensureHomeStoriesTable();
+  await ensureHomeStoryViewsTable();
   await ensureSocialFollowsTable();
   await ensureLearnUsersTable();
   await query(`DELETE FROM home_stories WHERE created_at < NOW() - INTERVAL '${STORY_TTL_SQL}'`);
@@ -5392,7 +5423,12 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
       s.district,
       s.avatar_label AS "avatarLabel",
       s.has_new AS "hasNew",
-      s.viewed,
+      EXISTS (
+        SELECT 1
+        FROM home_story_views hsv
+        WHERE hsv.story_id = s.id
+          AND hsv.viewer_id = $1::integer
+      ) AS viewed,
       s.video_url AS "videoUrl",
       s.image_url AS "imageUrl",
       s.created_at AS "createdAt",
@@ -5650,6 +5686,9 @@ router.post("/v1/home/stories/:storyId/view", authRequired, async (req, res) => 
       `,
       [storyId, me]
     );
+    const gen = await cacheGenString("home:stories:gen");
+    await cacheDel(`v2:home:stories:${gen}:${me}`);
+    emitStoryViewed({ viewerId: me, storyId, storyUserId: ownerId });
     res.json({ ok: true, viewed: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to record story view", error: error.message });
@@ -8627,10 +8666,19 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
       const mimeTypeRaw = String(req.file.mimetype || "application/octet-stream");
       const originalName = String(req.file.originalname || "");
       const nameLooksVideo = /\.(mp4|mov|webm|m4v|mkv|avi)(\?|$)/i.test(originalName);
+      const nameLooksAudio =
+        /\.(m4a|mp3|caf|aac|wav|ogg)(\?|$)/i.test(originalName) || /^audio[-_]/i.test(originalName) || /^voice[-_]/i.test(originalName);
       const nameLooksImage = /\.(jpe?g|png|gif|webp|heic|bmp|avif)(\?|$)/i.test(originalName);
       // Android FormData sometimes sends application/octet-stream — trust filename too.
       let mimeType = mimeTypeRaw;
-      let isVideo = mimeType.startsWith("video/") || (nameLooksVideo && !mimeType.startsWith("image/"));
+      const isAudio = mimeType.startsWith("audio/") || nameLooksAudio;
+      let isVideo =
+        !isAudio && (mimeType.startsWith("video/") || (nameLooksVideo && !mimeType.startsWith("image/")));
+      if (isAudio && !mimeType.startsWith("audio/")) {
+        if (/\.webm$/i.test(originalName)) mimeType = "audio/webm";
+        else if (/\.(m4a|mp4)$/i.test(originalName)) mimeType = "audio/mp4";
+        else mimeType = "audio/mpeg";
+      }
       if (isVideo && !mimeType.startsWith("video/")) {
         if (/\.webm$/i.test(originalName)) mimeType = "video/webm";
         else if (/\.mov$/i.test(originalName)) mimeType = "video/quicktime";
@@ -8651,7 +8699,8 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
         return;
       }
       const ext = mediaExtFromMime(mimeType, originalName);
-      const objectPath = `agrovibes/${isVideo ? "videos" : "images"}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+      const folder = isVideo ? "videos" : isAudio ? "audio" : "images";
+      const objectPath = `agrovibes/${folder}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
       const uploaded = await uploadMediaBuffer({
         buffer: req.file.buffer,
         mimeType,

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ForwardMessageModal } from "../messages/ForwardMessageModal";
 import { dropCaption, dropMusicLabel, isDropPost, postShowsMusicRow } from "../../utils/feedOrder";
+import { buildPostChatMessage } from "../../utils/postShare";
 import { ProfileReelViewer } from "../profile/ProfileReelViewer";
 import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
@@ -46,6 +48,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   const [saved, setSaved] = useState(!!post.viewerHasSaved);
   const [likeBurst, setLikeBurst] = useState(0);
   const [likesOpen, setLikesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const images = galleryUrls(post);
   const videoSrc = resolveWebPostVideoUrl(post);
@@ -140,32 +143,20 @@ export function PostCard({ post, reelPosts = [] }: Props) {
     }
   };
 
-  const sharePost = async () => {
-    const url = `${window.location.origin}/watch/${post.id}`;
-    const text = caption ? `${post.userName}: ${caption}` : post.userName;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "Cropvibe", text, url });
-      } else {
-        if (navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
-          window.alert("Link copied.");
-        } else {
-          window.prompt("Copy this link:", url);
-        }
-      }
-    } catch {
+  const sharePost = () => {
+    if (!token) {
+      const url = `${window.location.origin}/watch/${post.id}`;
       if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(url);
-          window.alert("Link copied.");
-        } catch {
-          window.prompt("Copy this link:", url);
-        }
+        void navigator.clipboard.writeText(url).then(
+          () => window.alert("Link copied."),
+          () => window.prompt("Copy this link:", url)
+        );
       } else {
         window.prompt("Copy this link:", url);
       }
+      return;
     }
+    setShareOpen(true);
   };
 
   const toggleSave = async () => {
@@ -306,7 +297,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
               <span className="post-card__action-count">{commentsCount}</span>
             ) : null}
           </button>
-          <button type="button" onClick={() => void sharePost()} aria-label="Share">
+          <button type="button" onClick={sharePost} aria-label="Share">
             <ReelIcon name="share" size={22} color="currentColor" />
           </button>
         </div>
@@ -365,6 +356,16 @@ export function PostCard({ post, reelPosts = [] }: Props) {
           likesCount={likes}
           viewerHasLiked={liked}
           onClose={() => setLikesOpen(false)}
+        />
+      ) : null}
+
+      {shareOpen ? (
+        <ForwardMessageModal
+          visible={shareOpen}
+          title="Share"
+          messageBody={buildPostChatMessage(post)}
+          onClose={() => setShareOpen(false)}
+          onSent={() => window.alert("Sent.")}
         />
       ) : null}
 

@@ -9,6 +9,7 @@ export type DmThreadSocketUpdate = {
   lastSenderId: number;
   lastReceiverId: number;
   unreadDelta?: number;
+  unreadCount?: number;
 };
 
 export type DmMessageSocketPayload = {
@@ -19,6 +20,17 @@ export type DmMessageSocketPayload = {
 export type DmReadSocketPayload = {
   readerId: number;
   peerUserId: number;
+  selfRead?: boolean;
+};
+
+export type NotificationSyncPayload = {
+  unreadCount?: number;
+  unreadDelta?: number;
+};
+
+export type StoryViewedSocketPayload = {
+  storyId: number;
+  storyUserId?: number | null;
 };
 
 export type DmDeletedSocketPayload = {
@@ -30,6 +42,8 @@ type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
 type DmTypingHandler = (payload: { peerUserId: number; isTyping: boolean }) => void;
 type DmReadHandler = (payload: DmReadSocketPayload) => void;
+type NotificationSyncHandler = (payload: NotificationSyncPayload) => void;
+type StoryViewedHandler = (payload: StoryViewedSocketPayload) => void;
 type DmDeletedHandler = (payload: DmDeletedSocketPayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
@@ -40,6 +54,8 @@ const messageHandlers = new Set<DmMessageHandler>();
 const threadHandlers = new Set<DmThreadHandler>();
 const typingHandlers = new Set<DmTypingHandler>();
 const readHandlers = new Set<DmReadHandler>();
+const notificationSyncHandlers = new Set<NotificationSyncHandler>();
+const storyViewedHandlers = new Set<StoryViewedHandler>();
 const deletedHandlers = new Set<DmDeletedHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
@@ -79,6 +95,12 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("dm:read", (payload: DmReadSocketPayload) => {
     readHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("notif:sync", (payload: NotificationSyncPayload) => {
+    notificationSyncHandlers.forEach((handler) => handler(payload || {}));
+  });
+  sock.on("story:viewed", (payload: StoryViewedSocketPayload) => {
+    storyViewedHandlers.forEach((handler) => handler(payload));
   });
   sock.on("dm:deleted", (payload: DmDeletedSocketPayload) => {
     deletedHandlers.forEach((handler) => handler(payload));
@@ -164,6 +186,20 @@ export function onDirectRead(handler: DmReadHandler) {
   readHandlers.add(handler);
   return () => {
     readHandlers.delete(handler);
+  };
+}
+
+export function onNotificationSync(handler: NotificationSyncHandler) {
+  notificationSyncHandlers.add(handler);
+  return () => {
+    notificationSyncHandlers.delete(handler);
+  };
+}
+
+export function onStoryViewed(handler: StoryViewedHandler) {
+  storyViewedHandlers.add(handler);
+  return () => {
+    storyViewedHandlers.delete(handler);
   };
 }
 
