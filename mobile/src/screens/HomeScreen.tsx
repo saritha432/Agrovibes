@@ -51,6 +51,7 @@ import {
   type OpenUserStoriesRequest
 } from "../navigation/storyActivityBridge";
 import { subscribeFeedPlaybackSuspended } from "../navigation/feedPlaybackBridge";
+import { onStoryViewed } from "../services/socketChat";
 import {
   registerHomeReelImmersiveExit,
   setHomeReelImmersiveActive
@@ -1796,6 +1797,35 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     const key = viewedStoriesStorageKey(user?.id);
     void AsyncStorage.setItem(key, JSON.stringify(Array.from(viewedStoryIds).slice(-500)));
   }, [user?.id, viewedStoryIds, viewedStoriesHydrated]);
+
+  useEffect(() => {
+    setViewedStoryIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const story of stories) {
+        if (story.viewed && !next.has(story.id)) {
+          next.add(story.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [stories]);
+
+  useEffect(() => {
+    return onStoryViewed((payload) => {
+      const storyId = Number(payload?.storyId);
+      if (!Number.isFinite(storyId) || storyId <= 0) return;
+      markStoryIdsViewed([storyId]);
+      setViewedStoryIds((prev) => {
+        if (prev.has(storyId)) return prev;
+        const next = new Set(prev);
+        next.add(storyId);
+        return next;
+      });
+      setStories((prev) => prev.map((story) => (story.id === storyId ? { ...story, viewed: true } : story)));
+    });
+  }, []);
 
   const showFriendsTab =
     socialNetworkHydrated && (followingUserIds.size > 0 || followerUserIds.size > 0);

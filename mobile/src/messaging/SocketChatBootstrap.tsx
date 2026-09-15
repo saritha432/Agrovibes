@@ -1,6 +1,7 @@
 import React from "react";
 import { useAuth } from "../auth/AuthContext";
-import { connectSocketChat, disconnectSocketChat } from "../services/socketChat";
+import { connectSocketChat, disconnectSocketChat, onStoryViewed } from "../services/socketChat";
+import { markStoryIdsViewed } from "../navigation/storyActivityBridge";
 
 export function SocketChatBootstrap() {
   const { token } = useAuth();
@@ -12,6 +13,14 @@ export function SocketChatBootstrap() {
     }
     connectSocketChat(token);
   }, [token]);
+
+  React.useEffect(() => {
+    return onStoryViewed((payload) => {
+      const storyId = Number(payload?.storyId);
+      if (!Number.isFinite(storyId) || storyId <= 0) return;
+      markStoryIdsViewed([storyId]);
+    });
+  }, []);
 
   return null;
 }

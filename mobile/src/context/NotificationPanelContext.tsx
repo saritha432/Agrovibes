@@ -12,6 +12,7 @@ import {
   fetchHomePost,
   fetchMessageThreads,
   fetchRelationships,
+  markAllSocialNotificationsRead,
   markSocialNotificationRead,
   removeFollower,
   respondToFollowRequest,
@@ -27,9 +28,9 @@ import {
 import { markLocalEngagementRead } from "../social/localEngagementStore";
 import { rememberBlockedUser } from "../social/blockedUsers";
 import {
-  countUnreadSocialNotifications,
   fetchNotificationFeedSnapshot,
-  flattenNotificationFeedSnapshot
+  flattenNotificationFeedSnapshot,
+  seenWatermarkMs
 } from "../social/notificationFeedSnapshot";
 import { APP_LIME } from "../theme/appColors";
 import { NotificationPostThumb } from "../components/NotificationPostThumb";
@@ -41,7 +42,7 @@ import {
   hasSharedPostViewerListener,
   queueOpenSharedPostViewer
 } from "../navigation/sharedPostViewerBridge";
-import { onDirectRead, onDirectThreadUpdate } from "../services/socketChat";
+import { onDirectRead, onDirectThreadUpdate, onNotificationSync } from "../services/socketChat";
 import {
   registerNotificationSheetCloser,
   registerNotificationSheetOpener,
@@ -101,6 +102,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   const [postComments, setPostComments] = useState<any[]>([]);
   const [liveStarts, setLiveStarts] = useState<any[]>([]);
   const [newFollows, setNewFollows] = useState<any[]>([]);
+  const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const [lastSeenMs, setLastSeenMs] = useState(0);
   const [lastSeenReady, setLastSeenReady] = useState(false);
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
@@ -129,14 +131,18 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
 
   const lastSeenMsRef = useRef(0);
   lastSeenMsRef.current = lastSeenMs;
+  const sheetOpenRef = useRef(false);
+  sheetOpenRef.current = sheetOpen;
   const dismissedIdsRef = useRef<Set<string>>(new Set());
 
   const persistLastSeenMs = useCallback(
     async (ms: number) => {
-      setLastSeenMs(ms);
-      lastSeenMsRef.current = ms; 
+      const next = Math.max(ms, lastSeenMsRef.current);
+      if (!Number.isFinite(next) || next <= 0) return;
+      lastSeenMsRef.current = next;
+      setLastSeenMs(next);
       try {
-        await AsyncStorage.setItem(notificationSeenKey, String(ms));
+        await AsyncStorage.setItem(notificationSeenKey, String(next));
       } catch {
         // no-op
       }
@@ -288,6 +294,26 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     setPostLikes((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postLikes)));
     setPostComments((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postComments)));
     setLiveStarts((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.liveStarts)));
+    const remoteUnread = Math.max(0, Number(snap.unreadCount || 0));
+    if (sheetOpenRef.current) {
+      setServerUnreadCount(0);
+      void persistLastSeenMs(
+        seenWatermarkMs(
+          flattenNotificationFeedSnapshot({
+            pending: mergedPending,
+            accepted: snap.accepted,
+            declined: snap.declined,
+            newFollows: snap.newFollows || [],
+            postLikes: snap.postLikes,
+            postComments: snap.postComments,
+            liveStarts: snap.liveStarts,
+            unreadCount: remoteUnread
+          })
+        )
+      );
+    } else {
+      setServerUnreadCount(remoteUnread);
+    }
 
     // Heavy enrichment only when the sheet is open — keep login/home feed free.
     if (!enrich) return;
@@ -350,7 +376,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
         })
         .catch(() => {});
     }
-  }, [filterDismissedNotifications, mergeNotificationEntries, token, user?.email, user?.fullName, user?.id]);
+  }, [filterDismissedNotifications, mergeNotificationEntries, persistLastSeenMs, token, user?.email, user?.fullName, user?.id]);
 
   useEffect(() => {
     if (!appIsActive || !dismissedReady) return;
@@ -460,19 +486,63 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     };
   }, [notificationSeenKey]);
 
+  const feedSnapshotRef = useRef({
+    pending,
+    accepted,
+    declined,
+    newFollows,
+    postLikes,
+    postComments,
+    liveStarts
+  });
+  feedSnapshotRef.current = {
+    pending,
+    accepted,
+    declined,
+    newFollows,
+    postLikes,
+    postComments,
+    liveStarts
+  };
+
   const notificationUnreadCount = useMemo(() => {
-    if (sheetOpen || !lastSeenReady) return 0;
-    const entries = flattenNotificationFeedSnapshot({
-      pending,
-      accepted,
-      declined,
-      newFollows,
-      postLikes,
-      postComments,
-      liveStarts
+    if (sheetOpen) return 0;
+    return Math.max(0, serverUnreadCount);
+  }, [serverUnreadCount, sheetOpen]);
+
+  const markPanelSeen = useCallback(async () => {
+    setServerUnreadCount(0);
+    const entries = flattenNotificationFeedSnapshot(feedSnapshotRef.current);
+    await persistLastSeenMs(seenWatermarkMs(entries));
+    if (!token) return;
+    try {
+      await markAllSocialNotificationsRead(token);
+    } catch {
+      // ignore
+    }
+  }, [persistLastSeenMs, token]);
+
+  useEffect(() => {
+    return onNotificationSync((payload) => {
+      if (typeof payload.unreadCount === "number" && Number.isFinite(payload.unreadCount)) {
+        setServerUnreadCount(sheetOpenRef.current ? 0 : Math.max(0, payload.unreadCount));
+        void loadNotifications({ enrich: sheetOpenRef.current });
+        return;
+      }
+      if (payload.unreadDelta) {
+        const delta = Number(payload.unreadDelta);
+        if (Number.isFinite(delta)) {
+          if (sheetOpenRef.current) {
+            setServerUnreadCount(0);
+            void markPanelSeen();
+          } else {
+            setServerUnreadCount((count) => Math.max(0, count + delta));
+          }
+        }
+      }
+      void loadNotifications({ enrich: sheetOpenRef.current });
     });
-    return countUnreadSocialNotifications(entries, lastSeenMs);
-  }, [accepted, declined, lastSeenMs, lastSeenReady, liveStarts, newFollows, sheetOpen, pending, postComments, postLikes]);
+  }, [loadNotifications, markPanelSeen]);
 
   const openNotificationSheet = useCallback(() => {
     setFollowRequestsExpanded(false);
@@ -480,14 +550,17 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     setSheetSuppressed(false);
     setFeedPlaybackSuspended(true);
     setSheetOpen(true);
+    void markPanelSeen();
     InteractionManager.runAfterInteractions(() => {
-      void loadNotifications({ enrich: true });
+      void loadNotifications({ enrich: true }).then(() => {
+        void markPanelSeen();
+      });
     });
-  }, [loadNotifications]);
+  }, [loadNotifications, markPanelSeen]);
 
   const closeNotificationSheet = useCallback(() => {
-    const now = Date.now();
-    void persistLastSeenMs(now);
+    const entries = flattenNotificationFeedSnapshot(feedSnapshotRef.current);
+    void persistLastSeenMs(seenWatermarkMs(entries));
     setFollowRequestsExpanded(false);
     setSheetSuppressed(false);
     setSheetOpen(false);

@@ -730,8 +730,11 @@ export function DirectChatScreen() {
         if (prev.some((item) => item.id === payload.message.id)) return prev;
         return [...prev, payload.message];
       });
+      if (token) {
+        void fetchMessageThread(token, peerUserId).catch(() => {});
+      }
     });
-  }, [endCallForPeerSignal, peerEndsOutgoingCall, peerUserId]);
+  }, [endCallForPeerSignal, peerEndsOutgoingCall, peerUserId, token]);
 
   useEffect(() => {
     if (!callSession || callSession.direction !== "outgoing") return;

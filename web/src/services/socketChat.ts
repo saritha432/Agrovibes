@@ -9,6 +9,7 @@ export type DmThreadSocketUpdate = {
   lastSenderId: number;
   lastReceiverId: number;
   unreadDelta?: number;
+  unreadCount?: number;
 };
 
 export type DmMessageSocketPayload = {
@@ -16,8 +17,27 @@ export type DmMessageSocketPayload = {
   peerUserId: number;
 };
 
+export type DmReadSocketPayload = {
+  readerId: number;
+  peerUserId: number;
+  selfRead?: boolean;
+};
+
+export type NotificationSyncPayload = {
+  unreadCount?: number;
+  unreadDelta?: number;
+};
+
+export type StoryViewedSocketPayload = {
+  storyId: number;
+  storyUserId?: number | null;
+};
+
 type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
+type DmReadHandler = (payload: DmReadSocketPayload) => void;
+type NotificationSyncHandler = (payload: NotificationSyncPayload) => void;
+type StoryViewedHandler = (payload: StoryViewedSocketPayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
@@ -25,6 +45,9 @@ let authToken: string | null = null;
 const joinedThreadPeers = new Set<number>();
 const messageHandlers = new Set<DmMessageHandler>();
 const threadHandlers = new Set<DmThreadHandler>();
+const readHandlers = new Set<DmReadHandler>();
+const notificationSyncHandlers = new Set<NotificationSyncHandler>();
+const storyViewedHandlers = new Set<StoryViewedHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
 export function resolveSocketBaseUrl() {
@@ -57,6 +80,15 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("dm:thread", (payload: DmThreadSocketUpdate) => {
     threadHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("dm:read", (payload: DmReadSocketPayload) => {
+    readHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("notif:sync", (payload: NotificationSyncPayload) => {
+    notificationSyncHandlers.forEach((handler) => handler(payload || {}));
+  });
+  sock.on("story:viewed", (payload: StoryViewedSocketPayload) => {
+    storyViewedHandlers.forEach((handler) => handler(payload));
   });
 }
 
@@ -114,6 +146,21 @@ export function onDirectMessage(handler: DmMessageHandler) {
 export function onDirectThreadUpdate(handler: DmThreadHandler) {
   threadHandlers.add(handler);
   return () => threadHandlers.delete(handler);
+}
+
+export function onDirectRead(handler: DmReadHandler) {
+  readHandlers.add(handler);
+  return () => readHandlers.delete(handler);
+}
+
+export function onNotificationSync(handler: NotificationSyncHandler) {
+  notificationSyncHandlers.add(handler);
+  return () => notificationSyncHandlers.delete(handler);
+}
+
+export function onStoryViewed(handler: StoryViewedHandler) {
+  storyViewedHandlers.add(handler);
+  return () => storyViewedHandlers.delete(handler);
 }
 
 export function onSocketConnectionChange(handler: ConnectionHandler) {

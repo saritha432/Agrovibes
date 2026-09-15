@@ -319,6 +319,8 @@
 .comment-panel--sidecar {
   position: relative;
   width: var(--comment-side-width, 390px);
+  flex: 1 1 var(--comment-side-width, 390px);
+  min-width: 280px;
   height: 100%;
   padding: 0;
   display: flex;

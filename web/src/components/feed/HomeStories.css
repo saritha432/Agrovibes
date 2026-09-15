@@ -152,9 +152,10 @@
 
 .story-viewer__nav {
   position: absolute;
-  inset: 48px 0 24px;
+  inset: 48px 0 88px;
   display: flex;
   pointer-events: none;
+  z-index: 2;
 }
 
 .story-viewer__nav-zone {
@@ -169,6 +170,64 @@
   display: flex;
   gap: 4px;
   padding: 8px 10px 12px;
+}
+
+.story-viewer__actions {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}
+
+.story-viewer__actions input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.story-viewer__actions input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.story-viewer__send {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: #c9ff35;
+  color: #111;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.story-viewer__send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.story-viewer__like {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.story-viewer__like:disabled {
+  cursor: default;
 }
 
 .story-viewer__seg {

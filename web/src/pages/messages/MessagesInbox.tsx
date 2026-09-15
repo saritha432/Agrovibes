@@ -3,6 +3,7 @@ import { NavLink, useParams } from "react-router-dom";
 import { fetchMessageThreads, type MessageThread } from "../../api/messages";
 import { UserAvatar } from "../../components/messages/UserAvatar";
 import { useAuth } from "../../auth/AuthContext";
+import { onDirectRead, onDirectThreadUpdate } from "../../services/socketChat";
 import { formatThreadTime, previewMessage } from "./messagesUtils";
 
 export function MessagesInbox() {
@@ -33,6 +34,46 @@ export function MessagesInbox() {
     void load();
     const timer = setInterval(() => void load(), 4000);
     return () => clearInterval(timer);
+  }, [load]);
+
+  useEffect(() => {
+    const applyThreadUpdate = (update: { peerUserId: number; lastMessage?: string; lastAt?: string; lastSenderId?: number; lastReceiverId?: number; unreadDelta?: number; unreadCount?: number }) => {
+      setThreads((prev) => {
+        const idx = prev.findIndex((thread) => thread.peerUserId === update.peerUserId);
+        if (idx < 0) {
+          void load();
+          return prev;
+        }
+        const next = [...prev];
+        const current = next[idx];
+        const unreadDelta = Number(update.unreadDelta || 0);
+        const unreadCount =
+          typeof update.unreadCount === "number" && Number.isFinite(update.unreadCount)
+            ? Math.max(0, update.unreadCount)
+            : Math.max(0, Number(current.unreadCount || 0) + unreadDelta);
+        next[idx] = {
+          ...current,
+          lastMessage: update.lastMessage ?? current.lastMessage,
+          lastAt: update.lastAt ?? current.lastAt,
+          lastSenderId: update.lastSenderId ?? current.lastSenderId,
+          lastReceiverId: update.lastReceiverId ?? current.lastReceiverId,
+          unreadCount
+        };
+        next.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+        return next;
+      });
+    };
+    const unsubThread = onDirectThreadUpdate(applyThreadUpdate);
+    const unsubRead = onDirectRead((payload) => {
+      if (payload?.selfRead && payload.peerUserId) {
+        applyThreadUpdate({ peerUserId: payload.peerUserId, unreadCount: 0, unreadDelta: 0 });
+      }
+      void load();
+    });
+    return () => {
+      unsubThread();
+      unsubRead();
+    };
   }, [load]);
 
   const filtered = query.trim()

@@ -6,7 +6,9 @@ type Props = {
   likes: number;
   commentsCount: number;
   muted: boolean;
+  saved?: boolean;
   likeBusy?: boolean;
+  saveBusy?: boolean;
   showMute?: boolean;
   showDisc?: boolean;
   discUrl?: string;
@@ -14,6 +16,7 @@ type Props = {
   onLikesPress?: () => void;
   onComment: () => void;
   onShare: () => void;
+  onSave?: () => void;
   onMore?: () => void;
   onMute?: () => void;
 };
@@ -23,7 +26,9 @@ export function ReelActionsRail({
   likes,
   commentsCount,
   muted,
+  saved = false,
   likeBusy = false,
+  saveBusy = false,
   showMute = true,
   showDisc = true,
   discUrl,
@@ -31,6 +36,7 @@ export function ReelActionsRail({
   onLikesPress,
   onComment,
   onShare,
+  onSave,
   onMore,
   onMute
 }: Props) {
@@ -69,6 +75,20 @@ export function ReelActionsRail({
           <ReelIcon name="share" size={22} />
         </span>
       </button>
+      {onSave ? (
+        <button
+          type="button"
+          className={`reel-slide__action${saved ? " reel-slide__action--liked" : ""}`}
+          disabled={saveBusy}
+          onClick={onSave}
+          aria-label={saved ? "Remove from saved" : "Save"}
+          aria-pressed={saved}
+        >
+          <span className="reel-slide__action-icon">
+            <ReelIcon name="bookmark" size={22} color={saved ? "#c9ff35" : "#fff"} />
+          </span>
+        </button>
+      ) : null}
       <button type="button" className="reel-slide__action" aria-label="More" onClick={onMore}>
         <span className="reel-slide__action-icon">
           <ReelIcon name="more" size={22} />

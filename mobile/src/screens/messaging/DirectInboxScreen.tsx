@@ -112,13 +112,17 @@ export function DirectInboxScreen() {
         const next = [...prev];
         const current = next[idx];
         const unreadDelta = Number(update.unreadDelta || 0);
+        const nextUnread =
+          typeof update.unreadCount === "number" && Number.isFinite(update.unreadCount)
+            ? Math.max(0, update.unreadCount)
+            : Math.max(0, Number(current.unreadCount || 0) + unreadDelta);
         next[idx] = {
           ...current,
           lastMessage: update.lastMessage,
           lastAt: update.lastAt,
           lastSenderId: update.lastSenderId,
           lastReceiverId: update.lastReceiverId,
-          unreadCount: Math.max(0, Number(current.unreadCount || 0) + unreadDelta)
+          unreadCount: nextUnread
         };
         next.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
         syncMessageUnreadFromThreads(next);
@@ -128,11 +132,20 @@ export function DirectInboxScreen() {
   }, [load, syncMessageUnreadFromThreads]);
 
   useEffect(() => {
-    return onDirectRead(() => {
+    return onDirectRead((payload) => {
+      if (payload?.selfRead && payload.peerUserId) {
+        setThreads((prev) => {
+          const next = prev.map((thread) =>
+            thread.peerUserId === payload.peerUserId ? { ...thread, unreadCount: 0 } : thread
+          );
+          syncMessageUnreadFromThreads(next);
+          return next;
+        });
+      }
       void load();
       void refreshMessageUnread();
     });
-  }, [load, refreshMessageUnread]);
+  }, [load, refreshMessageUnread, syncMessageUnreadFromThreads]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const filtered = trimmedQuery

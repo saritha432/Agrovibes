@@ -16,11 +16,12 @@ type Props = {
   visible: boolean;
   messageBody: string;
   excludeUserId?: number;
+  title?: string;
   onClose: () => void;
   onSent?: () => void;
 };
 
-export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClose, onSent }: Props) {
+export function ForwardMessageModal({ visible, messageBody, excludeUserId, title = "Forward", onClose, onSent }: Props) {
   const { token, user } = useAuth();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -94,7 +95,7 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClo
         onClick={(e) => e.stopPropagation()}
       >
         <header className="forward-modal__header">
-          <h2>Forward</h2>
+          <h2>{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close">
             ×
           </button>
@@ -115,7 +116,7 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClo
           <p className="forward-modal__status">Loading…</p>
         ) : filtered.length === 0 ? (
           <p className="forward-modal__status">
-            {following.length ? "No matches" : "Follow people to forward messages to them in chat."}
+            {following.length ? "No matches" : "Follow people to send this in chat."}
           </p>
         ) : (
           <ul className="forward-modal__list">

@@ -58,7 +58,9 @@ export async function uploadVideoFile(file: File) {
 }
 
 export async function uploadAudioFile(file: File | Blob, ext = ".m4a") {
-  return uploadBlob(file, `audio-${Date.now()}${ext}`);
+  const suffix = ext.startsWith(".") ? ext : `.${ext}`;
+  const name = file instanceof File && file.name ? file.name : `voice-${Date.now()}${suffix}`;
+  return uploadBlob(file, name);
 }
 
 export async function uploadPickedMedia(file: File, meta?: PickerAssetMeta | null) {

@@ -11,6 +11,7 @@ export type NotificationFeedSnapshot = {
   postLikes: any[];
   postComments: any[];
   liveStarts: any[];
+  unreadCount?: number;
 };
 
 function dedupePostLikeNotifications(rows: any[]) {
@@ -109,7 +110,8 @@ export async function fetchNotificationFeedSnapshot(params: {
     newFollows,
     postLikes,
     postComments,
-    liveStarts: remoteLiveStarts
+    liveStarts: remoteLiveStarts,
+    unreadCount: Math.max(0, Number(remote?.unreadCount || 0))
   };
 }
 
@@ -125,9 +127,22 @@ export function flattenNotificationFeedSnapshot(snap: NotificationFeedSnapshot):
   ];
 }
 
-/** Badge = notifications newer than when the user last closed the panel (not full history). */
+export function latestNotificationTimestamp(entries: Array<{ createdAt?: string }>): number {
+  let max = 0;
+  for (const entry of entries) {
+    const ts = Date.parse(String(entry?.createdAt || ""));
+    if (Number.isFinite(ts) && ts > max) max = ts;
+  }
+  return max;
+}
+
+export function seenWatermarkMs(entries: Array<{ createdAt?: string }>, now = Date.now()): number {
+  return Math.max(now, latestNotificationTimestamp(entries));
+}
+
+/** Badge = notifications newer than when the user last opened the panel (not full history). */
 export function countUnreadSocialNotifications(entries: any[], lastSeenMs: number): number {
-  if (!Number.isFinite(lastSeenMs) || lastSeenMs <= 0) return 0;
+  if (!Number.isFinite(lastSeenMs) || lastSeenMs <= 0) return entries.length;
   return entries.filter((n) => {
     const ts = Date.parse(String(n?.createdAt || ""));
     return Number.isFinite(ts) && ts > lastSeenMs;

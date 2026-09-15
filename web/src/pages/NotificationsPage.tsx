@@ -11,16 +11,12 @@ export function NotificationsPage() {
     followBack,
     dismiss,
     activityLabel,
-    loadNotifications,
-    markNotificationsSeen
+    loadNotifications
   } = useNotificationPanel();
 
   useEffect(() => {
     void loadNotifications();
-    return () => {
-      void markNotificationsSeen();
-    };
-  }, [loadNotifications, markNotificationsSeen]);
+  }, [loadNotifications]);
 
   return (
     <div className="notifications-page">

@@ -43,6 +43,26 @@ export async function markHomeStoryViewed(token: string, storyId: number) {
   )) as { ok: boolean; viewed?: boolean; own?: boolean };
 }
 
+export async function replyToHomeStory(token: string, storyId: number, text: string) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/reply`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text })
+    }
+  )) as { ok: boolean };
+}
+
+export async function likeHomeStory(token: string, storyId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/like`,
+    token,
+    { method: "POST" }
+  )) as { ok: boolean; liked: boolean };
+}
+
 export async function fetchHomePostsPage(
   token?: string | null,
   options?: { limit?: number; cursor?: number | null }

@@ -28,6 +28,12 @@
   -ms-overflow-style: none;
 }
 
+@media (min-width: 901px) {
+  .drops-feed:has(.reel-slide--with-side-comments) {
+    max-width: min(900px, calc(100vw - 88px));
+  }
+}
+
 .drops-feed::-webkit-scrollbar {
   display: none;
 }

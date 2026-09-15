@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cropvibe",
     "slug": "agrovibes",
-    "version": "1.0.23",
+    "version": "1.0.25",
     "orientation": "portrait",
     "icon": "./assets/logo-adaptive-foreground.png",
 
@@ -30,7 +30,7 @@
 
     "android": {
       "package": "com.cropvibe.app",
-      "versionCode": 27,
+      "versionCode": 29,
       "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "adaptiveIcon": {
@@ -138,7 +138,7 @@
 
       "icon": "./assets/icon-ios.png",
 
-      "buildNumber": "27"
+      "buildNumber": "28"
     },
 
     "web": {
@@ -161,7 +161,7 @@
         {
           "android": {
             "compileSdkVersion": 36,
-            "targetSdkVersion": 35,
+            "targetSdkVersion": 36,
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
 
