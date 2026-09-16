@@ -16,13 +16,17 @@
 
 .reel-slide--with-side-comments {
   display: flex;
+  flex-direction: row;
+  align-items: stretch;
   overflow: hidden;
 }
 
 .reel-slide--with-side-comments .reel-slide__stage {
+  flex: 0 0 min(480px, 100%);
   width: min(480px, 100%);
-  flex: 0 0 min(480px, 60%);
-  min-width: 0;
+  min-width: min(420px, 100%);
+  max-width: 480px;
+  height: 100%;
 }
 
 .profile-reel-viewer .reel-slide {

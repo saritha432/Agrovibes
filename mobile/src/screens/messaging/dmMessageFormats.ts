@@ -3,6 +3,7 @@ export const DM_VOICE_PREFIX = "[Cropvibe Voice]";
 export const DM_CALL_PREFIX = "[Cropvibe Call]";
 export const DM_REPLY_PREFIX = "[Cropvibe Reply]";
 export const DM_REACT_PREFIX = "[Cropvibe React]";
+export const DM_STORY_PREFIX = "[Cropvibe Story]";
 
 export type DmCallStatus = "completed" | "missed" | "declined" | "cancelled";
 export type DmCallMode = "voice" | "video";
@@ -161,6 +162,128 @@ export function parseDmReactMessage(body: string): DmReactPayload | null {
   }
 }
 
+export type StoryDmPayload = {
+  storyId?: number;
+  ownerId?: number;
+  text: string;
+  kind: "reply" | "like";
+  previewUrl?: string | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  userName?: string;
+};
+
+function asJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function messageBodyText(body: unknown): string {
+  if (typeof body === "string") return body.replace(/^\uFEFF/, "").trim();
+  const record = asJsonRecord(body);
+  if (record) {
+    try {
+      return JSON.stringify(record);
+    } catch {
+      return "";
+    }
+  }
+  return String(body ?? "").trim();
+}
+
+function parseJsonObjectFromText(raw: string): Record<string, unknown> | null {
+  const text = String(raw || "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return asJsonRecord(JSON.parse(text.slice(start, end + 1)));
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeStoryPayload(row: Record<string, unknown>): boolean {
+  const kind = String(row.kind || "").toLowerCase();
+  if (kind === "like" || kind === "reply") return true;
+  if (Number(row.storyId) > 0) return true;
+  if ((row.imageUrl || row.previewUrl || row.videoUrl) && (row.text != null || row.userName)) {
+    return kind !== "image" && kind !== "video";
+  }
+  return false;
+}
+
+function optionalUrl(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || null;
+}
+
+function storyPayloadFromRow(parsed: Record<string, unknown>): StoryDmPayload | null {
+  if (!looksLikeStoryPayload(parsed)) return null;
+  const kind = String(parsed.kind || "").toLowerCase() === "like" ? "like" : "reply";
+  const text = String(parsed.text || "").trim() || (kind === "like" ? "❤️" : "");
+  if (!text && kind !== "like") return null;
+  const imageUrl = optionalUrl(parsed.imageUrl);
+  return {
+    storyId: Number(parsed.storyId) > 0 ? Number(parsed.storyId) : undefined,
+    ownerId: Number(parsed.ownerId) > 0 ? Number(parsed.ownerId) : undefined,
+    text: text || "❤️",
+    kind,
+    previewUrl: optionalUrl(parsed.previewUrl) || imageUrl,
+    imageUrl,
+    videoUrl: optionalUrl(parsed.videoUrl),
+    userName: String(parsed.userName || "").trim() || "Story"
+  };
+}
+
+export function parseStoryDmMessage(body: unknown): StoryDmPayload | null {
+  const fromObject = asJsonRecord(body);
+  if (fromObject) {
+    const direct = storyPayloadFromRow(fromObject);
+    if (direct) return direct;
+  }
+
+  const raw = messageBodyText(body);
+  if (!raw) return null;
+
+  const prefixRe = /\[(?:Cropvibe|AgroVibe)\s+Story\]/i;
+  const prefixMatch = raw.match(prefixRe);
+  if (prefixMatch && prefixMatch.index != null) {
+    const after = raw.slice(prefixMatch.index + prefixMatch[0].length).trim();
+    const prefixed = parseJsonObjectFromText(after);
+    if (prefixed) {
+      const fromPrefix = storyPayloadFromRow(prefixed);
+      if (fromPrefix) return fromPrefix;
+    }
+  }
+
+  const loose = parseJsonObjectFromText(raw);
+  if (loose) {
+    const fromLoose = storyPayloadFromRow(loose);
+    if (fromLoose) return fromLoose;
+  }
+
+  if (!prefixRe.test(raw) && !/"storyId"\s*:/.test(raw) && !/"kind"\s*:\s*"(like|reply)"/i.test(raw)) {
+    return null;
+  }
+  const kindMatch = raw.match(/"kind"\s*:\s*"(like|reply)"/i);
+  const fallbackKind = kindMatch?.[1] === "like" ? "like" : "reply";
+  const textMatch = raw.match(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  const imgMatch = raw.match(/"(?:imageUrl|previewUrl)"\s*:\s*"((?:https?:[^"]+|[^"]+))"/);
+  const nameMatch = raw.match(/"userName"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  const fallbackText = String(textMatch?.[1] || "").replace(/\\"/g, '"').trim() || (fallbackKind === "like" ? "❤️" : "");
+  if (!fallbackText && fallbackKind !== "like") return null;
+  return {
+    text: fallbackText || "❤️",
+    kind: fallbackKind,
+    imageUrl: imgMatch?.[1] || null,
+    previewUrl: imgMatch?.[1] || null,
+    userName: String(nameMatch?.[1] || "").replace(/\\"/g, '"').trim() || "Story"
+  };
+}
+
 export function dmMessageCopyText(body: string, t: (key: string) => string): string {
   const reply = parseDmReplyMessage(body);
   if (reply) return reply.text;
@@ -263,7 +386,7 @@ export function formatDmCallLabel(call: DmCallPayload, t: (key: string) => strin
 
 /** Inbox + notification-style preview for structured chat payloads (WhatsApp / Instagram). */
 export function formatDmInboxPreview(body: string, t: (key: string) => string): string {
-  const text = String(body || "").trim();
+  const text = messageBodyText(body);
   if (!text) return "";
 
   const media = parseDmMediaMessage(text);
@@ -291,20 +414,18 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
 
   if (parseDmReactMessage(text)) return "";
 
+  const story = parseStoryDmMessage(text);
+  if (story) {
+    if (story.kind === "like") return "Liked a story";
+    return story.text && story.text !== "❤️" ? story.text : "Replied to story";
+  }
+
   if (text.startsWith("[Cropvibe Live]")) return t("sharedLive");
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return t("sharedReel");
   if (text.startsWith("[Cropvibe Post]")) return t("sharedPost");
   if (text.startsWith("[Cropvibe Profile]")) return t("sharedProfile");
-  if (text.startsWith("[Cropvibe Story]")) {
-    try {
-      const jsonText = text.slice("[Cropvibe Story]".length).trim();
-      const parsed = JSON.parse(jsonText) as { text?: string; kind?: string };
-      if (parsed?.kind === "like") return "Liked a story";
-      const reply = String(parsed?.text || "").trim();
-      return reply || "Replied to story";
-    } catch {
-      return "Replied to story";
-    }
+  if (/\[(?:Cropvibe|AgroVibe)\s+Story\]/i.test(text) || (/^\s*\{/.test(text) && /"storyId"\s*:/.test(text))) {
+    return "Replied to story";
   }
 
   return text;

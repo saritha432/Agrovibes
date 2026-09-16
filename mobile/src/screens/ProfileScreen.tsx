@@ -87,6 +87,7 @@ import { APP_LIME } from "../theme/appColors";
 import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { isReelPost, reelGridStillUri, reelGridTileBackground, REEL_GRID_TILE_A, REEL_GRID_TILE_B } from "../utils/reelGrid";
 import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
+import { isLivePost, livePostHasReplayMedia } from "./live/livePostUtils";
 
 const PAGE_BG = "#262626";
 const SURFACE = "#303132";
@@ -737,12 +738,14 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   );
 
   const visiblePosts = useMemo(() => {
-    if (activeGalleryTab === "Posts") return userPosts;
-    if (activeGalleryTab === "Reels") return userPosts.filter((p) => isReelPost(p));
-    if (activeGalleryTab === "Reshared") return resharedPosts.filter((p) => isReelPost(p));
-    if (activeGalleryTab === "Bookmarks") return savedPosts.filter((p) => isReelPost(p));
-    if (activeGalleryTab === "Tagged") return taggedPosts.filter((p) => isReelPost(p));
-    return userPosts;
+    const withoutEmptyLives = (list: HomePost[]) =>
+      list.filter((p) => !(isLivePost(p) && !livePostHasReplayMedia(p)));
+    if (activeGalleryTab === "Posts") return withoutEmptyLives(userPosts);
+    if (activeGalleryTab === "Reels") return withoutEmptyLives(userPosts.filter((p) => isReelPost(p)));
+    if (activeGalleryTab === "Reshared") return withoutEmptyLives(resharedPosts.filter((p) => isReelPost(p)));
+    if (activeGalleryTab === "Bookmarks") return withoutEmptyLives(savedPosts.filter((p) => isReelPost(p)));
+    if (activeGalleryTab === "Tagged") return withoutEmptyLives(taggedPosts.filter((p) => isReelPost(p)));
+    return withoutEmptyLives(userPosts);
   }, [activeGalleryTab, resharedPosts, savedPosts, taggedPosts, userPosts]);
 
   const { playingPostId: profilePlayingPostId, markVideoFailed: markProfileVideoFailed } = useReelGridAutoplay(

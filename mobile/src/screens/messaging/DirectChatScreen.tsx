@@ -87,6 +87,7 @@ import {
   parseDmReactMessage,
   parseDmReplyMessage,
   parseDmVoiceMessage,
+  parseStoryDmMessage,
   isPeerCallEndSignal,
   isCalleeRingCancelledSignal,
   type DmMediaItem
@@ -348,43 +349,6 @@ function parseSharedProfileContent(body: string): { userId?: number; userName: s
       handle: String(parsed.handle || "").trim() || undefined,
       bio: String(parsed.bio || "").trim() || undefined,
       avatarUrl: parsed.avatarUrl ? String(parsed.avatarUrl) : undefined
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parseStoryReplyContent(
-  body: string
-): {
-  storyId: number;
-  ownerId?: number;
-  text: string;
-  previewUrl?: string | null;
-  imageUrl?: string | null;
-  videoUrl?: string | null;
-  userName?: string;
-  kind: "reply" | "like";
-} | null {
-  const prefix = "[Cropvibe Story]";
-  if (!String(body || "").startsWith(prefix)) return null;
-  const jsonText = String(body || "").slice(prefix.length).trim();
-  if (!jsonText.startsWith("{")) return null;
-  try {
-    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
-    const storyId = Number(parsed.storyId);
-    const text = String(parsed.text || "").trim();
-    if (!Number.isFinite(storyId) || storyId <= 0 || !text) return null;
-    const ownerIdRaw = Number(parsed.ownerId);
-    return {
-      storyId,
-      ownerId: Number.isFinite(ownerIdRaw) && ownerIdRaw > 0 ? ownerIdRaw : undefined,
-      text,
-      previewUrl: parsed.previewUrl ? String(parsed.previewUrl).trim() || null : null,
-      imageUrl: parsed.imageUrl ? String(parsed.imageUrl).trim() || null : null,
-      videoUrl: parsed.videoUrl ? String(parsed.videoUrl).trim() || null : null,
-      userName: String(parsed.userName || "").trim() || undefined,
-      kind: parsed.kind === "like" ? "like" : "reply"
     };
   } catch {
     return null;
@@ -1192,7 +1156,7 @@ export function DirectChatScreen() {
   };
 
   const openStoryFromChat = useCallback(
-    async (storyReply: NonNullable<ReturnType<typeof parseStoryReplyContent>>, isSelf: boolean) => {
+    async (storyReply: NonNullable<ReturnType<typeof parseStoryDmMessage>>, isSelf: boolean) => {
       const ownerId =
         Number(storyReply.ownerId) > 0
           ? Number(storyReply.ownerId)
@@ -1350,8 +1314,16 @@ export function DirectChatScreen() {
           const sharedVoice = parseDmVoiceMessage(messageItem.body);
           const sharedCall = parseDmCallMessage(messageItem.body);
           const sharedReply = parseDmReplyMessage(messageItem.body);
-          const storyReply = parseStoryReplyContent(messageItem.body);
-          const isRichCard = !!(sharedPost || sharedProfile || sharedLive || sharedMedia || sharedVoice || sharedCall);
+          const storyReply = parseStoryDmMessage(messageItem.body);
+          const isRichCard = !!(
+            sharedPost ||
+            sharedProfile ||
+            sharedLive ||
+            sharedMedia ||
+            sharedVoice ||
+            sharedCall ||
+            storyReply
+          );
           const repliedToMessage = sharedReply ? messagesById.get(sharedReply.replyToId) : undefined;
           const replyQuotePreview = repliedToMessage
             ? dmReplyPreviewForMessage(repliedToMessage.body, t)
@@ -1527,7 +1499,9 @@ export function DirectChatScreen() {
                     </View>
                   </Pressable>
                 ) : (
-                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>{messageItem.body}</Text>
+                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
+                    {formatDmInboxPreview(messageItem.body, t)}
+                  </Text>
                 )}
                 <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, isRichCard ? styles.reelMeta : null]}>
                   {formatMsgTime(new Date(messageItem.createdAt).getTime())}

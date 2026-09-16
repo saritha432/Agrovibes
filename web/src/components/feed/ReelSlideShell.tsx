@@ -18,6 +18,7 @@ type Props = {
   showActions?: boolean;
   sideComments?: boolean;
   initialCommentsOpen?: boolean;
+  onCommentsOpenChange?: (open: boolean) => void;
 };
 
 export function ReelSlideShell({
@@ -25,7 +26,8 @@ export function ReelSlideShell({
   active,
   showActions = true,
   sideComments = false,
-  initialCommentsOpen = false
+  initialCommentsOpen = false,
+  onCommentsOpenChange
 }: Props) {
   const { token } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -82,6 +84,10 @@ export function ReelSlideShell({
     if (!initialCommentsOpen) return;
     setCommentsOpen(true);
   }, [initialCommentsOpen, post.id]);
+
+  useEffect(() => {
+    onCommentsOpenChange?.(commentsOpen);
+  }, [commentsOpen, onCommentsOpenChange]);
 
   const toggleLike = async () => {
     if (!token || likeBusy) return;

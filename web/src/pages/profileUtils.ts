@@ -1,5 +1,5 @@
-import type { HomePost } from "../api/types";
-import type { AuthUser } from "../api/types";
+import type { AuthUser, HomePost } from "../api/types";
+import { keepVisibleHomePost } from "../utils/feedOrder";
 
 export type GalleryTab = "Posts" | "Reels" | "Saved" | "Tagged";
 
@@ -54,6 +54,7 @@ export function filterUserPosts(allPosts: HomePost[], user: AuthUser) {
   const nameB = normalizeName(String(user.email || "").split("@")[0] || "");
   const nameC = normalizeName(user.username || "");
   return allPosts.filter((p) => {
+    if (!keepVisibleHomePost(p)) return false;
     if (Number.isFinite(myId) && myId > 0 && Number(p.userId) === myId) return true;
     const postName = normalizeName(p.userName || "");
     return postName === nameA || postName === nameB || postName === nameC;
@@ -66,10 +67,10 @@ export function visibleGalleryPosts(
   savedPosts: HomePost[],
   taggedPosts: HomePost[]
 ) {
-  if (tab === "Reels") return userPosts.filter((p) => !!p.videoUrl);
-  if (tab === "Saved") return savedPosts.filter((p) => !!p.videoUrl);
-  if (tab === "Tagged") return taggedPosts.filter((p) => !!p.videoUrl);
-  return userPosts.filter((p) => !p.videoUrl);
+  if (tab === "Reels") return userPosts.filter((p) => !!p.videoUrl && keepVisibleHomePost(p));
+  if (tab === "Saved") return savedPosts.filter((p) => !!p.videoUrl && keepVisibleHomePost(p));
+  if (tab === "Tagged") return taggedPosts.filter((p) => !!p.videoUrl && keepVisibleHomePost(p));
+  return userPosts.filter((p) => !p.videoUrl && keepVisibleHomePost(p));
 }
 
 export function parsePersonUserId(person: { key?: string }) {

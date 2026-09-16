@@ -40,12 +40,25 @@ export function useNotificationPanel() {
   return ctx;
 }
 
+function isLivePostEnded(entry: SocialPostActivityNotification) {
+  const status = String(entry.postLiveStatus || "").toLowerCase();
+  return status === "ended" || Boolean(entry.postLiveEndedAt);
+}
+
 function activityLabel(entry: SocialPostActivityNotification) {
   const name = entry.actorName || "Someone";
   const kind = entry.postIsReel ? "reel" : "post";
   const excerpt = entry.commentExcerpt?.trim() ? `: "${entry.commentExcerpt.trim()}"` : "";
   if (entry.type === "comment_reply") return `${name} replied to your comment${excerpt}`;
   if (entry.type === "post_comment") return `${name} commented on your ${kind}${excerpt}`;
+  if (entry.type === "post_tag") return `${name} tagged you in a ${kind}`;
+  if (entry.type === "live_host_reminder") return "It's time to start your scheduled live";
+  if (entry.type === "live_scheduled") return `${name} scheduled a live`;
+  if (entry.type === "live_reminder") return `${name} is going live in 10 minutes`;
+  if (entry.type === "live_start" && isLivePostEnded(entry)) return `${name} — Live ended`;
+  if (entry.type === "live_start" || entry.type === "live_scheduled" || entry.type === "live_reminder") {
+    return `${name} started live`;
+  }
   return `${name} liked your ${kind}`;
 }
 
@@ -68,6 +81,7 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
   const [messageUnreadCount, setMessageUnreadCount] = useState(0);
   const [followRequests, setFollowRequests] = useState<SocialNotificationItem[]>([]);
   const [followAccepted, setFollowAccepted] = useState<SocialNotificationItem[]>([]);
+  const [newFollows, setNewFollows] = useState<SocialNotificationItem[]>([]);
   const [postLikes, setPostLikes] = useState<SocialPostActivityNotification[]>([]);
   const [postComments, setPostComments] = useState<SocialPostActivityNotification[]>([]);
   const [liveStarts, setLiveStarts] = useState<SocialPostActivityNotification[]>([]);
@@ -142,6 +156,7 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
     if (!token) {
       setFollowRequests([]);
       setFollowAccepted([]);
+      setNewFollows([]);
       setPostLikes([]);
       setPostComments([]);
       setLiveStarts([]);
@@ -153,11 +168,13 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
       const data = await fetchSocialNotifications(token);
       const nextFollowRequests = data.followRequests || [];
       const nextFollowAccepted = data.followAccepted || [];
+      const nextNewFollows = data.newFollows || [];
       const nextPostLikes = data.postLikes || [];
       const nextPostComments = data.postComments || [];
       const nextLiveStarts = data.liveStarts || [];
       setFollowRequests(nextFollowRequests);
       setFollowAccepted(nextFollowAccepted);
+      setNewFollows(nextNewFollows);
       setPostLikes(nextPostLikes);
       setPostComments(nextPostComments);
       setLiveStarts(nextLiveStarts);
@@ -171,6 +188,7 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
             latestCreatedAtMs([
               ...nextFollowRequests,
               ...nextFollowAccepted,
+              ...nextNewFollows,
               ...nextPostLikes,
               ...nextPostComments,
               ...nextLiveStarts
@@ -200,8 +218,8 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
   }, [loadNotifications, token]);
 
   const allEntries = useMemo(
-    () => [...followRequests, ...followAccepted, ...postLikes, ...postComments, ...liveStarts],
-    [followAccepted, followRequests, liveStarts, postComments, postLikes]
+    () => [...followRequests, ...followAccepted, ...newFollows, ...postLikes, ...postComments, ...liveStarts],
+    [followAccepted, followRequests, liveStarts, newFollows, postComments, postLikes]
   );
   const allEntriesRef = useRef(allEntries);
   allEntriesRef.current = allEntries;
@@ -219,6 +237,9 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
     for (const n of followAccepted) {
       rows.push({ key: `acc-${n.id}`, kind: "accepted", createdAt: n.createdAt, entry: n });
     }
+    for (const n of newFollows) {
+      rows.push({ key: `nf-${n.id}`, kind: "new_follow", createdAt: n.createdAt, entry: n });
+    }
     for (const n of liveStarts) {
       rows.push({ key: `live-${n.id}`, kind: "live", createdAt: n.createdAt, entry: n });
     }
@@ -230,7 +251,7 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
     }
     rows.sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""));
     return rows;
-  }, [followAccepted, followRequests, liveStarts, postComments, postLikes]);
+  }, [followAccepted, followRequests, liveStarts, newFollows, postComments, postLikes]);
 
   const dismissOne = useCallback(
     async (id: number) => {
@@ -242,6 +263,7 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
       }
       setFollowRequests((p) => p.filter((n) => n.id !== id));
       setFollowAccepted((p) => p.filter((n) => n.id !== id));
+      setNewFollows((p) => p.filter((n) => n.id !== id));
       setPostLikes((p) => p.filter((n) => n.id !== id));
       setPostComments((p) => p.filter((n) => n.id !== id));
       setLiveStarts((p) => p.filter((n) => n.id !== id));
@@ -274,7 +296,9 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
       if (!token || !actorId) return;
       setFollowBackIds((p) => ({ ...p, [actorId]: "pending" }));
       try {
-        await sendFollowRequest(token, actorId);
+        const res = await sendFollowRequest(token, actorId);
+        const status = res.follow?.status === "accepted" ? "accepted" : res.follow?.status === "pending" ? "pending" : "pending";
+        setFollowBackIds((p) => ({ ...p, [actorId]: status }));
       } catch {
         setFollowBackIds((p) => ({ ...p, [actorId]: "none" }));
       }

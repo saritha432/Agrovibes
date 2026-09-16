@@ -1,6 +1,7 @@
 import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
 import type { AuthResponse, HomePost } from "./types";
 import { sanitizeHomePost } from "../utils/mediaUrls";
+import { keepVisibleHomePost } from "../utils/feedOrder";
 
 export type FollowStatus = "none" | "pending" | "accepted";
 
@@ -32,7 +33,7 @@ export interface NetworkPerson {
 
 export async function fetchSavedHomePosts(token: string) {
   const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/saved`, token)) as { posts: HomePost[] };
-  return { posts: data.posts.map(sanitizeHomePost) };
+  return { posts: data.posts.map(sanitizeHomePost).filter(keepVisibleHomePost) };
 }
 
 export async function fetchTaggedHomePosts(token: string) {
@@ -40,7 +41,7 @@ export async function fetchTaggedHomePosts(token: string) {
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/tagged`, { headers });
   if (response.status === 404) return { posts: [] as HomePost[] };
   const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
-  return { posts: data.posts.map(sanitizeHomePost) };
+  return { posts: data.posts.map(sanitizeHomePost).filter(keepVisibleHomePost) };
 }
 
 export async function fetchResharedHomePosts(token: string) {
@@ -48,7 +49,7 @@ export async function fetchResharedHomePosts(token: string) {
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/reshared`, { headers });
   if (response.status === 404) return { posts: [] as HomePost[] };
   const data = (await parseJsonOrThrow(response)) as { posts: HomePost[] };
-  return { posts: data.posts.map(sanitizeHomePost) };
+  return { posts: data.posts.map(sanitizeHomePost).filter(keepVisibleHomePost) };
 }
 
 export async function fetchProfileStats(token: string, userId: number) {

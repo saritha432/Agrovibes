@@ -7,6 +7,17 @@ export function isLivePost(post: HomePost) {
   return /^\[LIVE\]/i.test(String(post.caption || "").trim());
 }
 
+export function livePostHasReplayMedia(post: HomePost) {
+  return Boolean(
+    String(post.videoUrl || "").trim() ||
+      String(post.hlsUrl || "").trim() ||
+      String(post.playbackUrl || "").trim() ||
+      String(post.imageUrl || "").trim() ||
+      String(post.thumbnailUrl || "").trim() ||
+      (Array.isArray(post.imageUrls) && post.imageUrls.some((uri) => String(uri || "").trim()))
+  );
+}
+
 function liveStartedAtMs(post: HomePost) {
   const raw = post.liveStartedAt || post.createdAt || "";
   const ms = Date.parse(String(raw));
@@ -29,7 +40,7 @@ export function isActiveLiveStream(post: HomePost) {
 export function isCompletedLiveStream(post: HomePost) {
   if (!isLivePost(post)) return false;
   if (isActiveLiveStream(post)) return false;
-  return post.liveStatus === "ended" || !!String(post.videoUrl || "").trim();
+  return livePostHasReplayMedia(post);
 }
 
 export function findJoinableLivePost(posts: HomePost[], postId: number): HomePost | null {
