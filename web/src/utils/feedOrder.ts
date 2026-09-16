@@ -63,6 +63,27 @@ export function isDropPost(post: HomePost) {
   return Boolean(String(post.videoUrl || "").trim());
 }
 
+export function isLiveCaptionPost(post: Pick<HomePost, "caption">) {
+  return /^\[LIVE\]/i.test(String(post.caption || "").trim());
+}
+
+export function livePostHasReplayMedia(post: HomePost) {
+  return Boolean(
+    String(post.videoUrl || "").trim() ||
+      String(post.hlsUrl || "").trim() ||
+      String(post.playbackUrl || "").trim() ||
+      String(post.imageUrl || "").trim() ||
+      String(post.thumbnailUrl || "").trim() ||
+      (Array.isArray(post.imageUrls) && post.imageUrls.some((uri) => String(uri || "").trim()))
+  );
+}
+
+/** Ended livestreams without a recording must not render as empty Post cards. */
+export function keepVisibleHomePost(post: HomePost) {
+  if (!isLiveCaptionPost(post)) return true;
+  return livePostHasReplayMedia(post);
+}
+
 export function dropCaption(caption?: string | null) {
   return String(caption || "")
     .replace(/^\[(?:REEL|POST|LIVE|STORY)\]\s*/i, "")

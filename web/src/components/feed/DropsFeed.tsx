@@ -2,8 +2,23 @@ import { useEffect, useRef } from "react";
 import type { HomePost } from "../../api/types";
 import { ReelSlideShell } from "./ReelSlideShell";
 
-export function DropVideoSlide({ post, active }: { post: HomePost; active: boolean }) {
-  return <ReelSlideShell post={post} active={active} sideComments />;
+export function DropVideoSlide({
+  post,
+  active,
+  onCommentsOpenChange
+}: {
+  post: HomePost;
+  active: boolean;
+  onCommentsOpenChange?: (open: boolean) => void;
+}) {
+  return (
+    <ReelSlideShell
+      post={post}
+      active={active}
+      sideComments
+      onCommentsOpenChange={onCommentsOpenChange}
+    />
+  );
 }
 
 export function useDropFeedAutoplay(postCount: number, onActiveChange: (index: number) => void) {

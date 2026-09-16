@@ -2,6 +2,7 @@ import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from ".
 import type { NetworkPerson } from "./profile";
 import type { HomePost, HomeStory, UserSearchRecord } from "./types";
 import { sanitizeHomePost } from "../utils/mediaUrls";
+import { keepVisibleHomePost } from "../utils/feedOrder";
 
 export type HomeComment = {
   id: string;
@@ -15,6 +16,10 @@ export type HomeComment = {
 };
 
 export const HOME_FEED_PAGE_SIZE = 10;
+
+function mapFeedPosts(posts: HomePost[] | undefined) {
+  return (Array.isArray(posts) ? posts : []).map(sanitizeHomePost).filter(keepVisibleHomePost);
+}
 
 export type HomeFeedPage = {
   posts: HomePost[];
@@ -80,7 +85,7 @@ export async function fetchHomePostsPage(
     nextCursor?: number | null;
     hasMore?: boolean;
   };
-  const posts = Array.isArray(data.posts) ? data.posts.map(sanitizeHomePost) : [];
+  const posts = mapFeedPosts(data.posts);
   return {
     posts,
     nextCursor: data.nextCursor ?? (posts.length ? posts[posts.length - 1]?.id ?? null : null),
@@ -106,7 +111,7 @@ export async function fetchHomeReelsExplore(
     nextCursor?: number | null;
     hasMore?: boolean;
   };
-  const posts = Array.isArray(data.posts) ? data.posts.map(sanitizeHomePost) : [];
+  const posts = mapFeedPosts(data.posts);
   return {
     posts,
     nextCursor: data.nextCursor ?? (posts.length ? posts[posts.length - 1]?.id ?? null : null),
@@ -122,7 +127,7 @@ export async function fetchHomePosts(token?: string | null) {
 
 export async function fetchMyHomePosts(token: string) {
   const data = (await fetchWithAuth(`${API_BASE_URL}/v1/home/posts/mine`, token)) as { posts: HomePost[] };
-  return { posts: data.posts.map(sanitizeHomePost) };
+  return { posts: mapFeedPosts(data.posts) };
 }
 
 /** Any user's profile posts (public profile view). */
@@ -148,7 +153,7 @@ export async function fetchUserHomePosts(
     reelsCount?: number;
   };
   return {
-    posts: (data.posts || []).map(sanitizeHomePost),
+    posts: mapFeedPosts(data.posts),
     restricted: Boolean(data.restricted),
     postsCount: Number.isFinite(Number(data.postsCount)) ? Number(data.postsCount) : undefined,
     reelsCount: Number.isFinite(Number(data.reelsCount)) ? Number(data.reelsCount) : undefined
@@ -163,7 +168,11 @@ export async function fetchHomePost(token: string | null | undefined, postId: nu
     { headers }
   );
   const data = (await parseJsonOrThrow(response)) as { post: HomePost };
-  return { post: sanitizeHomePost(data.post) };
+  const post = sanitizeHomePost(data.post);
+  if (!keepVisibleHomePost(post)) {
+    throw new Error("Post not found");
+  }
+  return { post };
 }
 
 export async function fetchHomePostComments(postId: number, token?: string | null) {

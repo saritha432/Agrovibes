@@ -17,8 +17,9 @@
 }
 
 .drops-feed {
-  width: 100%;
-  max-width: 480px;
+  flex: 0 0 auto;
+  width: min(480px, 100%);
+  max-width: min(480px, 100%);
   height: 100%;
   overflow-y: auto;
   scroll-snap-type: y mandatory;
@@ -29,8 +30,11 @@
 }
 
 @media (min-width: 901px) {
+  .drops-page--comments-open .drops-feed,
+  .drops-feed--comments-open,
   .drops-feed:has(.reel-slide--with-side-comments) {
-    max-width: min(900px, calc(100vw - 88px));
+    width: min(860px, 100%);
+    max-width: min(860px, 100%);
   }
 }
 
@@ -39,6 +43,7 @@
 }
 
 .drops-feed__slide-wrap {
+  width: 100%;
   height: 100%;
   min-height: 100%;
   scroll-snap-align: start;

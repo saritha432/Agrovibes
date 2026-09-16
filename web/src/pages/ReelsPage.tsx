@@ -11,6 +11,7 @@ export function ReelsPage() {
   const [drops, setDrops] = useState<HomePost[]>([]);
   const [shuffleSeed, setShuffleSeed] = useState(() => Date.now());
   const [activeIndex, setActiveIndex] = useState(0);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -22,6 +23,7 @@ export function ReelsPage() {
       const ordered = orderPostsForFeed(page.posts, seed, Date.now(), user?.id);
       setDrops(ordered);
       setActiveIndex(0);
+      setCommentsOpen(false);
     } catch {
       setDrops([]);
     } finally {
@@ -41,21 +43,30 @@ export function ReelsPage() {
 
   const onActiveChange = useCallback((index: number) => {
     setActiveIndex(index);
+    setCommentsOpen(false);
   }, []);
 
   const scrollerRef = useDropFeedAutoplay(drops.length, onActiveChange);
 
   return (
-    <div className="drops-page">
+    <div className={`drops-page${commentsOpen ? " drops-page--comments-open" : ""}`}>
       {loading ? <p className="drops-page__status">Loading drops…</p> : null}
       {!loading && drops.length === 0 ? (
         <p className="drops-page__status">No drops yet.</p>
       ) : null}
       {!loading && drops.length > 0 ? (
-        <div ref={scrollerRef} className="drops-feed" key={shuffleSeed}>
+        <div
+          ref={scrollerRef}
+          className={`drops-feed${commentsOpen ? " drops-feed--comments-open" : ""}`}
+          key={shuffleSeed}
+        >
           {drops.map((post, index) => (
             <div key={post.id} className="drops-feed__slide-wrap" data-index={index}>
-              <DropVideoSlide post={post} active={index === activeIndex} />
+              <DropVideoSlide
+                post={post}
+                active={index === activeIndex}
+                onCommentsOpenChange={index === activeIndex ? setCommentsOpen : undefined}
+              />
             </div>
           ))}
         </div>

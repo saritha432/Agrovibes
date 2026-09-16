@@ -938,6 +938,23 @@ const hideDeactivatedPostOwnersClause = `
   )
 `;
 const hideSoftDeletedPostsClause = `AND p.deleted_at IS NULL`;
+/** Ended livestreams with no replay must not occupy feed/profile slots as empty "Post" cards. */
+const hideEndedEmptyLivePostsClause = `
+  AND NOT (
+    p.caption ILIKE '[LIVE]%'
+    AND TRIM(COALESCE(p.video_url, '')) = ''
+    AND TRIM(COALESCE(p.hls_url, '')) = ''
+    AND TRIM(COALESCE(p.playback_url, '')) = ''
+    AND TRIM(COALESCE(p.image_url, '')) = ''
+    AND TRIM(COALESCE(p.thumbnail_url, '')) = ''
+    AND TRIM(COALESCE(p.image_urls, '')) IN ('', '[]', 'null')
+    AND (
+      LOWER(COALESCE(p.live_status, '')) = 'ended'
+      OR p.live_ended_at IS NOT NULL
+      OR p.created_at < NOW() - INTERVAL '12 hours'
+    )
+  )
+`;
 /** Hide posts auto-suppressed after many reports — still visible to the uploader. */
 const hideHighReportFeedPostsClause = `
   AND (
@@ -1591,6 +1608,9 @@ async function ensureHomePostsTable() {
   await query(`CREATE INDEX IF NOT EXISTS home_posts_feed_hidden_at_idx ON home_posts (feed_hidden_at)`);
   // Speeds up the LATERAL JOIN that resolves post author by user_id (most posts set this after user_id column was added).
   await query(`CREATE INDEX IF NOT EXISTS home_posts_user_id_idx ON home_posts (user_id) WHERE user_id IS NOT NULL`);
+  await query(
+    `CREATE INDEX IF NOT EXISTS home_posts_empty_live_idx ON home_posts (id) WHERE deleted_at IS NULL AND caption ILIKE '[LIVE]%'`
+  );
   homePostsTableReady = true;
 }
 
@@ -2014,7 +2034,7 @@ function homeFeedListSql({ cursorParamIndex = null, videoOnly = false } = {}) {
         id ASC
       LIMIT 1
     ) u ON TRUE
-    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${hideSoftDeletedPostsClause} ${hideHighReportFeedPostsClause} ${hidePrivateAccountPostsClause} ${hideBlockedUsersPostsClause} ${videoClause} ${cursorClause}
+    WHERE 1=1 ${hideDeactivatedPostOwnersClause} ${hideSoftDeletedPostsClause} ${hideEndedEmptyLivePostsClause} ${hideHighReportFeedPostsClause} ${hidePrivateAccountPostsClause} ${hideBlockedUsersPostsClause} ${videoClause} ${cursorClause}
     ORDER BY p.id DESC
   `;
 }
@@ -2081,25 +2101,128 @@ async function persistLivePostEnded(postId) {
   );
 }
 
+function livePostHasReplayMedia(post) {
+  return !!(
+    (typeof post.videoUrl === "string" && post.videoUrl.trim()) ||
+    (typeof post.hlsUrl === "string" && post.hlsUrl.trim()) ||
+    (typeof post.playbackUrl === "string" && post.playbackUrl.trim()) ||
+    (typeof post.imageUrl === "string" && post.imageUrl.trim()) ||
+    (typeof post.thumbnailUrl === "string" && post.thumbnailUrl.trim()) ||
+    (Array.isArray(post.imageUrls) && post.imageUrls.some((uri) => String(uri || "").trim()))
+  );
+}
+
+function isLiveCaptionPost(post) {
+  return /^\[LIVE\]/i.test(String(post.caption || "").trim());
+}
+
+/** Wait for optional recording upload, then remove empty ended lives from the product. */
+const LIVE_REPLAY_GRACE_MS = 15 * 60 * 1000;
+
+function liveEndedAtMs(post) {
+  const raw = post?.liveEndedAt || "";
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function isEndedLiveWithoutReplay(post) {
+  if (!isLiveCaptionPost(post)) return false;
+  if (livePostHasReplayMedia(post)) return false;
+  const ended =
+    String(post.liveStatus || "").toLowerCase() === "ended" || Boolean(post.liveEndedAt) || isLivePastMaxAge(post);
+  return ended;
+}
+
+async function persistLivePostHidden(postId) {
+  const id = Number(postId);
+  if (!Number.isFinite(id) || id <= 0) return false;
+  try {
+    const updated = await query(
+      `
+      UPDATE home_posts
+      SET deleted_at = COALESCE(deleted_at, NOW()),
+          live_status = 'ended',
+          live_ended_at = COALESCE(live_ended_at, NOW())
+      WHERE id = $1 AND deleted_at IS NULL
+      RETURNING user_id AS "userId"
+      `,
+      [id]
+    );
+    const ownerId = Number(updated.rows[0]?.userId);
+    if (Number.isFinite(ownerId) && ownerId > 0) {
+      await invalidateProfilePostsCache(ownerId);
+    }
+    return Boolean(updated.rowCount);
+  } catch (error) {
+    console.warn("[live] hide empty ended live:", error?.message || error);
+    return false;
+  }
+}
+
+let lastEmptyLivePurgeAt = 0;
+async function purgeEndedLivesWithoutReplay() {
+  if (Date.now() - lastEmptyLivePurgeAt < 10 * 60 * 1000) return;
+  lastEmptyLivePurgeAt = Date.now();
+  let result;
+  try {
+    result = await query(
+    `
+    UPDATE home_posts
+    SET deleted_at = COALESCE(deleted_at, NOW()),
+        live_status = 'ended',
+        live_ended_at = COALESCE(live_ended_at, NOW())
+    WHERE deleted_at IS NULL
+      AND caption ILIKE '[LIVE]%'
+      AND COALESCE(NULLIF(TRIM(COALESCE(video_url, '')), ''), '') = ''
+      AND COALESCE(NULLIF(TRIM(COALESCE(hls_url, '')), ''), '') = ''
+      AND COALESCE(NULLIF(TRIM(COALESCE(playback_url, '')), ''), '') = ''
+      AND COALESCE(NULLIF(TRIM(COALESCE(image_url, '')), ''), '') = ''
+      AND COALESCE(NULLIF(TRIM(COALESCE(thumbnail_url, '')), ''), '') = ''
+      AND TRIM(COALESCE(image_urls, '')) IN ('', '[]', 'null')
+      AND (
+        LOWER(COALESCE(live_status, '')) = 'ended'
+        OR live_ended_at IS NOT NULL
+        OR created_at < NOW() - INTERVAL '12 hours'
+      )
+      AND COALESCE(live_ended_at, created_at) < NOW() - INTERVAL '15 minutes'
+    RETURNING id, user_id AS "userId"
+    `
+    );
+  } catch (error) {
+    console.warn("[live] purge ended lives without replay:", error?.message || error);
+    return;
+  }
+  if (!result.rowCount) return;
+  const ownerIds = [...new Set(result.rows.map((row) => Number(row.userId)).filter((id) => Number.isFinite(id) && id > 0))];
+  await cacheIncr("home:posts:gen");
+  for (const ownerId of ownerIds.slice(0, 80)) {
+    await invalidateProfilePostsCache(ownerId);
+  }
+}
+
+async function hideEndedLiveWithoutReplay(post) {
+  if (!isEndedLiveWithoutReplay(post)) return { omit: false, persisted: false };
+  const endedMs = liveEndedAtMs(post) || liveStartedAtMs(post);
+  const pastGrace = !endedMs || Date.now() - endedMs >= LIVE_REPLAY_GRACE_MS || isLivePastMaxAge(post);
+  const persisted = pastGrace ? await persistLivePostHidden(post.id) : false;
+  return { omit: true, persisted };
+}
+
 async function enrichHomePostsLiveState(posts) {
   const out = [];
+  let hidAny = false;
   for (const post of posts) {
-    if (!/^\[LIVE\]/i.test(String(post.caption || "").trim())) {
+    if (!isLiveCaptionPost(post)) {
       out.push(post);
       continue;
     }
-    const hasLiveMedia = !!(
-      (typeof post.videoUrl === "string" && post.videoUrl.trim()) ||
-      (typeof post.imageUrl === "string" && post.imageUrl.trim()) ||
-      (Array.isArray(post.imageUrls) && post.imageUrls.length)
-    );
+    const hasReplay = livePostHasReplayMedia(post);
     const dbActive = String(post.liveStatus || "").toLowerCase() === "active";
-    if (hasLiveMedia || post.liveStatus === "ended") {
-      if (post.liveStatus !== "active") {
+    if (hasReplay) {
+      if (String(post.liveStatus || "").toLowerCase() !== "active") {
         post.liveStatus = "ended";
         post.liveViewerCount = 0;
       } else if (isLivePastMaxAge(post)) {
-        // Rare: DB still "active" but VOD/thumb already present and stream is ancient.
         post.liveStatus = "ended";
         post.liveViewerCount = 0;
         await persistLivePostEnded(post.id);
@@ -2107,39 +2230,43 @@ async function enrichHomePostsLiveState(posts) {
       out.push(post);
       continue;
     }
-    // Abandoned streams: host never hit end-live (crash / force-close) — expire by age.
-    if (isLivePastMaxAge(post)) {
+    // Empty ended/abandoned lives must never appear as blank Post cards.
+    if (isEndedLiveWithoutReplay(post) || isLivePastMaxAge(post)) {
       post.liveStatus = "ended";
       post.liveViewerCount = 0;
-      await persistLivePostEnded(post.id);
-      out.push(post);
+      const hidden = await hideEndedLiveWithoutReplay(post);
+      if (hidden.persisted) hidAny = true;
       continue;
     }
-    // DB "active" is not enough — verify the LiveKit room still exists.
-    // Previously we trusted DB forever, which left 9-day-old LIVE rings in the story bar.
     const roomName = post.liveRoomName || `agrovibes-live-${post.id}`;
     const info = await fetchLiveRoomInfo(roomName);
     if (info === null) {
-      // LiveKit unreachable: keep active only while within max age (checked above).
       post.liveStatus = dbActive || !post.liveStatus ? "active" : post.liveStatus;
       if (post.liveStatus === "active") {
         post.liveViewerCount = Number(post.liveViewerCount || 0);
         post.liveStartedAt = post.liveStartedAt || post.createdAt;
+        out.push(post);
+      } else {
+        const hidden = await hideEndedLiveWithoutReplay(post);
+        if (hidden.persisted) hidAny = true;
       }
-      out.push(post);
       continue;
     }
     if (info.ended) {
       post.liveStatus = "ended";
       post.liveViewerCount = 0;
+      post.liveEndedAt = post.liveEndedAt || new Date().toISOString();
       await persistLivePostEnded(post.id);
-    } else {
-      post.liveStatus = "active";
-      post.liveViewerCount = info.viewerCount;
-      post.liveStartedAt = post.liveStartedAt || post.createdAt;
+      const hidden = await hideEndedLiveWithoutReplay(post);
+      if (hidden.persisted) hidAny = true;
+      continue;
     }
+    post.liveStatus = "active";
+    post.liveViewerCount = info.viewerCount;
+    post.liveStartedAt = post.liveStartedAt || post.createdAt;
     out.push(post);
   }
+  if (hidAny) await cacheIncr("home:posts:gen");
   return out;
 }
 
@@ -2285,6 +2412,7 @@ function scheduleHomeFeedMaintenance() {
   void (async () => {
     try {
       await purgeExpiredDeletedHomePosts();
+      await purgeEndedLivesWithoutReplay();
       await backfillHomePostUserIds();
     } catch (error) {
       console.warn("[home-feed] maintenance:", error?.message || error);
@@ -2326,6 +2454,7 @@ async function countHomePostsForUser(userId) {
     FROM home_posts p
     WHERE
       p.deleted_at IS NULL
+      ${hideEndedEmptyLivePostsClause}
       AND (
         p.user_id = $1
         OR ($2::text <> '' AND LOWER(TRIM(p.user_name)) = LOWER(TRIM($2)))
@@ -6250,7 +6379,7 @@ router.put("/v1/home/posts/:postId/live-video", authRequired, async (req, res) =
     const updated = await query(
       `
       UPDATE home_posts
-      SET video_url = $1, thumbnail_url = $2
+      SET video_url = $1, thumbnail_url = $2, deleted_at = NULL
       WHERE id = $3 AND user_id = $4 AND caption ~* '^\\[LIVE\\]'
       RETURNING
         id,
@@ -7552,6 +7681,7 @@ router.get("/v1/home/posts/mine", authRequired, async (req, res) => {
       ) nm ON TRUE
       WHERE
         p.deleted_at IS NULL
+        ${hideEndedEmptyLivePostsClause}
         AND (
         p.user_id = $1
         OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($2))
@@ -7627,6 +7757,7 @@ router.get("/v1/home/posts/tagged", authRequired, async (req, res) => {
         LIMIT 1
       ) nm ON TRUE
       WHERE p.deleted_at IS NULL
+        ${hideEndedEmptyLivePostsClause}
         AND p.tagged_user_ids @> to_jsonb($1::integer)
       ORDER BY p.created_at DESC
       LIMIT 100
@@ -7686,6 +7817,7 @@ router.get("/v1/home/posts/saved", authRequired, async (req, res) => {
       ) nm ON TRUE
       WHERE hps.user_id = $1
         AND p.deleted_at IS NULL
+        ${hideEndedEmptyLivePostsClause}
       ORDER BY hps.created_at DESC
       LIMIT 100
       `,
@@ -7746,6 +7878,7 @@ router.get("/v1/home/posts/liked", authRequired, async (req, res) => {
       ) nm ON TRUE
       WHERE hpl.user_id = $1
       AND p.deleted_at IS NULL
+      ${hideEndedEmptyLivePostsClause}
       ${hideDeactivatedPostOwnersClause}
       ORDER BY hpl.created_at DESC
       LIMIT 200
@@ -8169,6 +8302,7 @@ router.get("/v1/home/posts/user/:userId", authOptional, async (req, res) => {
       ) nm ON TRUE
       WHERE
         p.deleted_at IS NULL
+        ${hideEndedEmptyLivePostsClause}
         AND (
           p.user_id = $2
           OR LOWER(TRIM(p.user_name)) = LOWER(TRIM($3))
@@ -8296,6 +8430,10 @@ router.get("/v1/home/posts/:postId", authOptional, async (req, res) => {
       return;
     }
     const posts = await enrichHomePostsLiveState(dedupeHomePostRows(result.rows));
+    if (!posts[0]) {
+      res.status(404).json({ message: "Post not found" });
+      return;
+    }
     res.json({ post: posts[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to load post", error: error.message });

@@ -10,6 +10,7 @@ import { useAuth } from "../auth/AuthContext";
 import { fetchMyHomePosts, type HomePost } from "../services/api";
 import { ReelGridTile } from "../components/ReelGridTile";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
+import { isLivePost, livePostHasReplayMedia } from "./live/livePostUtils";
 
 const CARD = "#303132";
 const CARD_ALT = "#383b3f";
@@ -44,7 +45,7 @@ export function YourActivityPostsScreen() {
         try {
           const data = await fetchMyHomePosts(token);
           if (!mounted) return;
-          setItems((data.posts || []).filter((p) => !p.videoUrl));
+          setItems((data.posts || []).filter((p) => !p.videoUrl && !(isLivePost(p) && !livePostHasReplayMedia(p))));
         } catch {
           if (mounted) setItems([]);
         } finally {

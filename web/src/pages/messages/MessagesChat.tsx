@@ -385,7 +385,8 @@ export function MessagesChat() {
   };
 
   const renderBody = (item: DirectMessageItem) => {
-    const reply = parseDmReplyMessage(item.body);
+    const body = typeof item.body === "string" ? item.body : JSON.stringify(item.body ?? "");
+    const reply = parseDmReplyMessage(body);
     if (reply) {
       return (
         <div className="messages-chat__reply-wrap">
@@ -397,11 +398,11 @@ export function MessagesChat() {
         </div>
       );
     }
-    const call = parseDmCallMessage(item.body);
+    const call = parseDmCallMessage(body);
     if (call) {
       return <p className="messages-chat__call">{formatDmCallLabel(call)}</p>;
     }
-    const voice = parseDmVoiceMessage(item.body);
+    const voice = parseDmVoiceMessage(body);
     if (voice) {
       return (
         <div className="messages-chat__voice">
@@ -410,7 +411,7 @@ export function MessagesChat() {
         </div>
       );
     }
-    const media = parseDmMediaMessage(item.body);
+    const media = parseDmMediaMessage(body);
     if (media) {
       const items = dmMediaItems(media);
       if (dmMediaIsAlbum(media) || items.length > 1) {
@@ -435,7 +436,7 @@ export function MessagesChat() {
         <img src={src} alt="" className="messages-chat__media" />
       );
     }
-    const storyDm = parseStoryDmMessage(item.body);
+    const storyDm = parseStoryDmMessage(body);
     if (storyDm) {
       const thumb = storyDm.imageUrl || storyDm.previewUrl;
       const label =
@@ -460,7 +461,7 @@ export function MessagesChat() {
         </div>
       );
     }
-    const sharedReel = parseSharedReel(item.body);
+    const sharedReel = parseSharedReel(body);
     const videoSrc = sharedReel?.videoUrl ? resolveWebVideoUrl(sharedReel.videoUrl) : null;
     if (sharedReel) {
       return (
@@ -479,7 +480,7 @@ export function MessagesChat() {
         </div>
       );
     }
-    return <p>{item.body}</p>;
+    return <p>{formatDmInboxPreview(body) || "Message"}</p>;
   };
 
   if (!Number.isFinite(peerUserId) || peerUserId <= 0) {

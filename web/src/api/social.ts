@@ -2,24 +2,29 @@ import { API_BASE_URL, fetchWithAuth } from "./client";
 
 export interface SocialNotificationItem {
   id: number;
-  type: "follow_request" | "follow_accept";
+  type: "follow_request" | "follow_accept" | "new_follow";
   isRead: boolean;
   createdAt: string;
   followId: number;
   actorId: number;
   actorName: string;
+  actorAvatarUrl?: string | null;
   followStatus: string;
 }
 
 export interface SocialPostActivityNotification {
   id: number;
-  type: "post_like" | "post_comment" | "comment_reply" | string;
+  type: "post_like" | "post_comment" | "comment_reply" | "post_tag" | string;
   isRead: boolean;
   createdAt: string;
   actorId: number;
   actorName: string;
+  actorAvatarUrl?: string | null;
   postId: number | null;
   postIsReel?: boolean;
+  postThumbnailUrl?: string | null;
+  postImageUrl?: string | null;
+  postVideoUrl?: string | null;
   commentExcerpt?: string | null;
   postLiveStatus?: string | null;
   postLiveEndedAt?: string | null;
@@ -29,6 +34,7 @@ export async function fetchSocialNotifications(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/social/notifications`, token)) as {
     followRequests: SocialNotificationItem[];
     followAccepted: SocialNotificationItem[];
+    newFollows?: SocialNotificationItem[];
     postLikes?: SocialPostActivityNotification[];
     postComments?: SocialPostActivityNotification[];
     liveStarts?: SocialPostActivityNotification[];

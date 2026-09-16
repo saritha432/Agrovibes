@@ -318,23 +318,36 @@
 
 .comment-panel--sidecar {
   position: relative;
-  width: var(--comment-side-width, 390px);
-  flex: 1 1 var(--comment-side-width, 390px);
-  min-width: 280px;
+  inset: auto;
+  width: auto;
+  flex: 1 1 360px;
+  min-width: 0;
+  max-width: var(--comment-side-width, 420px);
   height: 100%;
   padding: 0;
   display: flex;
+  align-items: stretch;
+  justify-content: stretch;
   z-index: 4;
 }
 
 .comment-panel--sidecar .comment-panel__sheet {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   width: 100%;
+  min-width: 0;
+  min-height: 0;
   max-height: none;
   height: 100%;
   border-radius: 0;
   border: none;
   border-left: 1px solid #333;
-  background: #111318;
+  background: #16181d;
+}
+
+.comment-panel--sidecar .comment-panel__list {
+  min-height: 0;
 }
 
 @media (max-width: 900px) {
@@ -345,7 +358,10 @@
     bottom: 0;
     left: auto;
     width: min(420px, 100%);
-    display: block;
+    max-width: 100%;
+    min-width: 0;
+    flex: none;
+    display: flex;
   }
 }
 
