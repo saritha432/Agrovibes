@@ -140,31 +140,43 @@ export function leaveDirectThread(peerUserId: number) {
 
 export function onDirectMessage(handler: DmMessageHandler) {
   messageHandlers.add(handler);
-  return () => messageHandlers.delete(handler);
+  return () => {
+    messageHandlers.delete(handler);
+  };
 }
 
 export function onDirectThreadUpdate(handler: DmThreadHandler) {
   threadHandlers.add(handler);
-  return () => threadHandlers.delete(handler);
+  return () => {
+    threadHandlers.delete(handler);
+  };
 }
 
 export function onDirectRead(handler: DmReadHandler) {
   readHandlers.add(handler);
-  return () => readHandlers.delete(handler);
+  return () => {
+    readHandlers.delete(handler);
+  };
 }
 
 export function onNotificationSync(handler: NotificationSyncHandler) {
   notificationSyncHandlers.add(handler);
-  return () => notificationSyncHandlers.delete(handler);
+  return () => {
+    notificationSyncHandlers.delete(handler);
+  };
 }
 
 export function onStoryViewed(handler: StoryViewedHandler) {
   storyViewedHandlers.add(handler);
-  return () => storyViewedHandlers.delete(handler);
+  return () => {
+    storyViewedHandlers.delete(handler);
+  };
 }
 
 export function onSocketConnectionChange(handler: ConnectionHandler) {
   connectionHandlers.add(handler);
   handler(Boolean(socket?.connected));
-  return () => connectionHandlers.delete(handler);
+  return () => {
+    connectionHandlers.delete(handler);
+  };
 }

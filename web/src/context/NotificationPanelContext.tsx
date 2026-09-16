@@ -88,7 +88,6 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
   const [followBackIds, setFollowBackIds] = useState<Record<number, "none" | "pending" | "accepted">>({});
   const [serverUnreadCount, setServerUnreadCount] = useState(0);
   const [lastSeenMs, setLastSeenMs] = useState(0);
-  const [lastSeenReady, setLastSeenReady] = useState(false);
   const lastSeenMsRef = useRef(0);
   lastSeenMsRef.current = lastSeenMs;
   const wasOnNotificationsPageRef = useRef(false);
@@ -122,10 +121,8 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
     if (!lastSeenStorageKey) {
       lastSeenMsRef.current = 0;
       setLastSeenMs(0);
-      setLastSeenReady(true);
       return;
     }
-    setLastSeenReady(false);
     try {
       const parsed = Number(localStorage.getItem(lastSeenStorageKey) || 0);
       const next = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
@@ -134,8 +131,6 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
     } catch {
       lastSeenMsRef.current = 0;
       setLastSeenMs(0);
-    } finally {
-      setLastSeenReady(true);
     }
   }, [lastSeenStorageKey]);
 
