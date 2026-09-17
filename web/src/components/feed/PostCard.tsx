@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
+import { addPostToStory } from "../../api/posts";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ForwardMessageModal } from "../messages/ForwardMessageModal";
@@ -31,7 +32,7 @@ type Props = {
 };
 
 export function PostCard({ post, reelPosts = [] }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
   const reelTapTimeoutRef = useRef<number | null>(null);
@@ -364,6 +365,25 @@ export function PostCard({ post, reelPosts = [] }: Props) {
           visible={shareOpen}
           title="Share"
           messageBody={buildPostChatMessage(post)}
+          extraActionLabel={isReel(post) ? "Add to story" : undefined}
+          onExtraAction={
+            isReel(post)
+              ? async () => {
+                  if (!token) {
+                    window.alert("Log in to add this drop to your story.");
+                    return;
+                  }
+                  try {
+                    await addPostToStory(post, token, user);
+                    setShareOpen(false);
+                    window.dispatchEvent(new Event("cropvibe:feed-refresh"));
+                    window.alert("Added to your story.");
+                  } catch (err) {
+                    window.alert(err instanceof Error ? err.message : "Could not add to story.");
+                  }
+                }
+              : undefined
+          }
           onClose={() => setShareOpen(false)}
           onSent={() => window.alert("Sent.")}
         />
