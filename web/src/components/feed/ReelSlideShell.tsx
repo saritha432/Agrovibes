@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import { addPostToStory } from "../../api/posts";
 import type { HomePost } from "../../api/types";
@@ -6,6 +7,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { ForwardMessageModal } from "../messages/ForwardMessageModal";
 import { dropCaption, dropMusicLabel, postShowsMusicRow } from "../../utils/feedOrder";
 import { buildPostChatMessage } from "../../utils/postShare";
+import { webProfilePath } from "../../utils/profilePath";
 import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
@@ -53,6 +55,7 @@ export function ReelSlideShell({
   const caption = dropCaption(post.caption);
   const musicLabel = dropMusicLabel(post);
   const showMusic = postShowsMusicRow(post) && !!musicLabel;
+  const authorProfilePath = webProfilePath(post.userId, user?.id);
 
   useEffect(() => {
     setLiked(!!post.viewerHasLiked);
@@ -259,7 +262,13 @@ export function ReelSlideShell({
         ) : null}
 
         <div className="reel-slide__meta">
-          <strong>{post.userName}</strong>
+          {authorProfilePath ? (
+            <Link to={authorProfilePath} className="reel-slide__author">
+              {post.userName}
+            </Link>
+          ) : (
+            <strong>{post.userName}</strong>
+          )}
           {showMusic ? (
             <p className="reel-slide__music">
               <span className="reel-slide__music-icon" aria-hidden>

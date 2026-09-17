@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { fetchUsers, sendFollowRequest } from "../../api/home";
 import type { UserSearchRecord } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { webProfilePath } from "../../utils/profilePath";
 import { CommentPanel } from "../feed/CommentPanel";
 import "./HomeRightPanel.css";
 
@@ -170,11 +171,13 @@ export function HomeRightPanel() {
         {!loading
           ? suggestions.map((s) => (
               <li key={s.id} className="right-panel__row">
-                <UserAvatar uri={s.avatarUrl} name={s.fullName} size={32} />
-                <div className="right-panel__row-text">
-                  <strong>{displayHandle(s)}</strong>
-                  <span>{suggestionSubtitle(s)}</span>
-                </div>
+                <Link to={webProfilePath(s.id, user?.id) || "/search"} className="right-panel__person">
+                  <UserAvatar uri={s.avatarUrl} name={s.fullName} size={32} />
+                  <div className="right-panel__row-text">
+                    <strong>{displayHandle(s)}</strong>
+                    <span>{suggestionSubtitle(s)}</span>
+                  </div>
+                </Link>
                 <button
                   type="button"
                   className="right-panel__follow"

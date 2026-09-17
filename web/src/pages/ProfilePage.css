@@ -18,8 +18,20 @@
   min-height: 48px;
 }
 
-.profile-topbar__spacer {
+.profile-topbar__back {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  justify-self: start;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
   width: 34px;
+  height: 34px;
+  line-height: 1;
 }
 
 .profile-topbar__title {
@@ -42,6 +54,9 @@
   place-items: center;
   justify-self: end;
   text-decoration: none;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 700;
 }
 
 .profile-card {
