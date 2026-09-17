@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { fetchHomePostLikes, type HomePostLiker } from "../../api/home";
 import { useAuth } from "../../auth/AuthContext";
+import { webProfilePath } from "../../utils/profilePath";
 import "./PostLikesSheet.css";
 
 type Props = {
@@ -81,7 +82,7 @@ export function PostLikesSheet({ postId, likesCount, viewerHasLiked, onClose }: 
           {!loading
             ? likers.map((liker, idx) => {
                 const name = displayName(liker);
-                const profilePath = liker.userId ? `/profile/${liker.userId}` : null;
+                const profilePath = webProfilePath(liker.userId, user?.id);
                 const row = (
                   <>
                     <span className="post-likes-sheet__avatar">

@@ -79,6 +79,7 @@ export function AppRoutes() {
         </Route>
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
+        <Route path="u/:userId" element={<ProfilePage />} />
         <Route path="profile/edit" element={<EditProfilePage />} />
         <Route path="settings" element={<SettingsMenuPage />} />
         <Route path="settings/account" element={<AccountCenterPage />} />

@@ -33,8 +33,10 @@ function relativeTimeLabel(iso: string) {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function profilePath(actorId: number) {
-  return Number.isFinite(actorId) && actorId > 0 ? `/profile/${actorId}` : null;
+import { webProfilePath } from "../../utils/profilePath";
+
+function profilePath(actorId: number, viewerId?: number | null) {
+  return webProfilePath(actorId, viewerId);
 }
 
 function postPath(entry: SocialPostActivityNotification) {

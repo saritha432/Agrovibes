@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { fetchMyHomePosts, fetchSocialNetwork, sendFollowRequest } from "../api/home";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { fetchMyHomePosts, fetchSocialNetwork, fetchUserHomePosts, sendFollowRequest } from "../api/home";
 import type { HomePost } from "../api/types";
 import {
   fetchProfileStats,
@@ -8,7 +8,8 @@ import {
   fetchTaggedHomePosts,
   removeFollower,
   unfollowUser,
-  type NetworkPerson
+  type NetworkPerson,
+  type ProfileStats
 } from "../api/profile";
 import { findIncomingFollowId, fetchSocialNotifications, respondToFollowRequestById } from "../api/social";
 import { deleteHomePost } from "../api/posts";
@@ -26,11 +27,16 @@ import {
   visibleGalleryPosts,
   type GalleryTab
 } from "./profileUtils";
+import { keepVisibleHomePost } from "../utils/feedOrder";
 import "./ProfilePage.css";
 
 export function ProfilePage() {
   const navigate = useNavigate();
+  const { userId: userIdParam } = useParams();
   const { user, token } = useAuth();
+  const requestedPublicId = Number(userIdParam);
+  const isPublicView =
+    Number.isFinite(requestedPublicId) && requestedPublicId > 0 && requestedPublicId !== Number(user?.id);
   const [allPosts, setAllPosts] = useState<HomePost[]>([]);
   const [savedPosts, setSavedPosts] = useState<HomePost[]>([]);
   const [taggedPosts, setTaggedPosts] = useState<HomePost[]>([]);
@@ -49,6 +55,15 @@ export function ProfilePage() {
   const [activeImagePost, setActiveImagePost] = useState<HomePost | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchParams] = useSearchParams();
+  const [publicStats, setPublicStats] = useState<ProfileStats | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [contentRestricted, setContentRestricted] = useState(false);
+
+  useEffect(() => {
+    if (Number.isFinite(requestedPublicId) && requestedPublicId > 0 && requestedPublicId === Number(user?.id)) {
+      navigate("/profile", { replace: true });
+    }
+  }, [navigate, requestedPublicId, user?.id]);
 
   const loadPosts = useCallback(async () => {
     if (!token) {
@@ -57,6 +72,24 @@ export function ProfilePage() {
       setTaggedPosts([]);
       return;
     }
+    if (isPublicView) {
+      try {
+        const data = await fetchUserHomePosts(token, requestedPublicId);
+        setAllPosts(data.posts);
+        setSavedPosts([]);
+        setTaggedPosts([]);
+        setContentRestricted(Boolean(data.restricted));
+        if (typeof data.postsCount === "number" && Number.isFinite(data.postsCount)) {
+          setPostsStat(data.postsCount);
+        }
+      } catch {
+        setAllPosts([]);
+        setSavedPosts([]);
+        setTaggedPosts([]);
+      }
+      return;
+    }
+    setContentRestricted(false);
     try {
       const [homeData, savedData, taggedData] = await Promise.all([
         fetchMyHomePosts(token),
@@ -71,10 +104,18 @@ export function ProfilePage() {
       setSavedPosts([]);
       setTaggedPosts([]);
     }
-  }, [token]);
+  }, [isPublicView, requestedPublicId, token]);
 
   const refreshStats = useCallback(async () => {
-    if (!token || !user?.id) {
+    if (!token) {
+      setFollowersCount(0);
+      setFollowingCount(0);
+      setFollowersList([]);
+      setFollowingList([]);
+      return;
+    }
+    const uid = isPublicView ? requestedPublicId : Number(user?.id);
+    if (!Number.isFinite(uid) || uid <= 0) {
       setFollowersCount(0);
       setFollowingCount(0);
       setFollowersList([]);
@@ -82,17 +123,30 @@ export function ProfilePage() {
       return;
     }
     try {
-      const uid = Number(user.id);
-      const [stats, network, notifs] = await Promise.all([
-        fetchProfileStats(token, uid),
-        fetchSocialNetwork(token, uid),
-        fetchSocialNotifications(token)
-      ]);
+      const stats = await fetchProfileStats(token, uid);
       setFollowersCount(Number(stats.followersCount || 0));
       setFollowingCount(Number(stats.followingCount || 0));
       setPostsStat(Number(stats.postsCount || 0));
+      if (isPublicView) setPublicStats(stats);
+      else setPublicStats(null);
+    } catch {
+      setFollowersCount(0);
+      setFollowingCount(0);
+    }
+    try {
+      const network = await fetchSocialNetwork(token, uid);
       setFollowersList(network.followers || []);
       setFollowingList(network.following || []);
+    } catch {
+      setFollowersList([]);
+      setFollowingList([]);
+    }
+    if (isPublicView) {
+      setIncomingFollowActorIds(new Set());
+      return;
+    }
+    try {
+      const notifs = await fetchSocialNotifications(token);
       setIncomingFollowActorIds(
         new Set(
           (notifs.followRequests || [])
@@ -101,12 +155,9 @@ export function ProfilePage() {
         )
       );
     } catch {
-      setFollowersCount(0);
-      setFollowingCount(0);
-      setFollowersList([]);
-      setFollowingList([]);
+      setIncomingFollowActorIds(new Set());
     }
-  }, [token, user?.id]);
+  }, [isPublicView, requestedPublicId, token, user?.id]);
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -114,6 +165,13 @@ export function ProfilePage() {
       setActiveGalleryTab(tab);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!isPublicView) return;
+    if (activeGalleryTab === "Saved" || activeGalleryTab === "Tagged") {
+      setActiveGalleryTab("Posts");
+    }
+  }, [activeGalleryTab, isPublicView]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -125,10 +183,10 @@ export function ProfilePage() {
     void reload();
   }, [reload]);
 
-  const userPosts = useMemo(
-    () => (user ? filterUserPosts(allPosts, user) : []),
-    [allPosts, user]
-  );
+  const userPosts = useMemo(() => {
+    if (isPublicView) return allPosts.filter((p) => keepVisibleHomePost(p));
+    return user ? filterUserPosts(allPosts, user) : [];
+  }, [allPosts, isPublicView, user]);
 
   const visiblePosts = useMemo(
     () => visibleGalleryPosts(activeGalleryTab, userPosts, savedPosts, taggedPosts),
@@ -154,17 +212,40 @@ export function ProfilePage() {
 
   const shareProfile = async () => {
     if (!user) return;
-    const url = `${getWebAppOrigin()}/profile`;
-    const text = `Check out ${user.fullName} on Cropvibe — ${url}`;
+    const url = isPublicView
+      ? `${getWebAppOrigin()}/u/${requestedPublicId}`
+      : `${getWebAppOrigin()}/profile`;
+    const name = isPublicView ? publicStats?.fullName || "this profile" : user.fullName;
+    const text = `Check out ${name} on Cropvibe — ${url}`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: `${user.fullName} - Cropvibe`, text, url });
+        await navigator.share({ title: `${name} - Cropvibe`, text, url });
       } else {
         await navigator.clipboard.writeText(text);
         window.alert("Profile link copied.");
       }
     } catch {
       // user cancelled share
+    }
+  };
+
+  const followPublicUser = async () => {
+    if (!token || !isPublicView || followBusy) return;
+    const status = publicStats?.viewerStatus;
+    if (status === "pending") return;
+    setFollowBusy(true);
+    try {
+      if (status === "accepted") {
+        await unfollowUser(token, requestedPublicId);
+      } else {
+        await sendFollowRequest(token, requestedPublicId);
+      }
+      await refreshStats();
+      await loadPosts();
+    } catch {
+      window.alert("Could not update follow. Please try again.");
+    } finally {
+      setFollowBusy(false);
     }
   };
 
@@ -190,10 +271,26 @@ export function ProfilePage() {
     );
   }
 
-  const initials = userInitials(user.fullName);
-  const bioText = user.bio?.trim() || "";
-  const isInstructor = user.role === "instructor" || user.role === "admin";
-  const headerTitle = user.username || user.fullName;
+  const displayName = isPublicView ? publicStats?.fullName || "User" : user.fullName;
+  const displayAvatar = isPublicView ? publicStats?.avatarUrl : user.avatarUrl;
+  const initials = userInitials(displayName);
+  const bioText = (isPublicView ? publicStats?.bio : user.bio)?.trim() || "";
+  const website = isPublicView ? publicStats?.website : user.website;
+  const locationLabel = isPublicView ? publicStats?.locationLabel : user.locationLabel;
+  const isInstructor = !isPublicView && (user.role === "instructor" || user.role === "admin");
+  const headerTitle = isPublicView
+    ? publicStats?.username || publicStats?.fullName || "Profile"
+    : user.username || user.fullName;
+  const galleryTabs = isPublicView ? (["Posts", "Reels"] as GalleryTab[]) : PROFILE_GALLERY_TABS;
+  const followStatus = publicStats?.viewerStatus || "none";
+  const followLabel =
+    followStatus === "accepted"
+      ? "Following"
+      : followStatus === "pending"
+        ? "Requested"
+        : publicStats?.canFollowBack
+          ? "Follow back"
+          : "Follow";
 
   const personRowId = (p: NetworkPerson) => `${String(p.key || "").toLowerCase()}::${p.name}`;
 
@@ -266,18 +363,28 @@ export function ProfilePage() {
   return (
     <div className={`profile-page${reelViewerIndex != null ? " profile-page--reel-open" : ""}`}>
       <header className="profile-topbar">
-        <span className="profile-topbar__spacer" aria-hidden />
+        {isPublicView ? (
+          <button type="button" className="profile-topbar__back" onClick={() => navigate(-1)} aria-label="Back">
+            ←
+          </button>
+        ) : (
+          <span className="profile-topbar__spacer" aria-hidden />
+        )}
         <h1 className="profile-topbar__title">{headerTitle}</h1>
-        <Link to="/settings" className="profile-topbar__menu" aria-label="Menu">
-          <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
-        </Link>
+        {isPublicView ? (
+          <span className="profile-topbar__spacer" aria-hidden />
+        ) : (
+          <Link to="/settings" className="profile-topbar__menu" aria-label="Menu">
+            <img src="/icons/menu-icon.svg" alt="" width={34} height={34} />
+          </Link>
+        )}
       </header>
 
       <section className="profile-card">
         <div className="profile-card__mid">
           <div className="profile-card__avatar-wrap">
             <span className="profile-card__avatar">
-              {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials}
+              {displayAvatar ? <img src={displayAvatar} alt="" /> : initials}
             </span>
           </div>
 
@@ -306,18 +413,36 @@ export function ProfilePage() {
         </div>
 
         {bioText ? <p className="profile-card__bio">{bioText}</p> : null}
-        {user.website ? <p className="profile-card__website">{user.website}</p> : null}
-        {user.locationLabel?.trim() ? (
-          <p className="profile-card__location">{locationDisplay(user.locationLabel)}</p>
+        {website ? <p className="profile-card__website">{website}</p> : null}
+        {locationLabel?.trim() ? (
+          <p className="profile-card__location">{locationDisplay(locationLabel)}</p>
         ) : null}
 
         <div className="profile-card__actions">
-          <Link to="/profile/edit" className="profile-card__action-btn">
-            Edit Profile
-          </Link>
-          <button type="button" className="profile-card__action-btn" onClick={() => void shareProfile()}>
-            Share Profile
-          </button>
+          {isPublicView ? (
+            <>
+              <button
+                type="button"
+                className="profile-card__action-btn"
+                disabled={followBusy || followStatus === "pending"}
+                onClick={() => void followPublicUser()}
+              >
+                {followBusy ? "…" : followLabel}
+              </button>
+              <Link to={`/messages/${requestedPublicId}`} className="profile-card__action-btn">
+                Message
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link to="/profile/edit" className="profile-card__action-btn">
+                Edit Profile
+              </Link>
+              <button type="button" className="profile-card__action-btn" onClick={() => void shareProfile()}>
+                Share Profile
+              </button>
+            </>
+          )}
         </div>
 
         {isInstructor ? (
@@ -333,7 +458,7 @@ export function ProfilePage() {
 
       <section className="profile-gallery">
         <div className="profile-gallery__tabs" role="tablist">
-          {PROFILE_GALLERY_TABS.map((tab) => (
+          {galleryTabs.map((tab) => (
             <button
               key={tab}
               type="button"
@@ -354,11 +479,13 @@ export function ProfilePage() {
         <div className={`profile-grid${isReelTab ? " profile-grid--reels" : ""}`}>
           {!loading && visiblePosts.length === 0 ? (
             <p className="profile-grid__empty">
-              {activeGalleryTab === "Tagged"
-                ? "No tagged posts yet."
-                : activeGalleryTab === "Saved"
-                  ? "Saved drops will appear here."
-                  : "No posts in this tab yet."}
+              {contentRestricted
+                ? "This account is private. Follow to see their posts."
+                : activeGalleryTab === "Tagged"
+                  ? "No tagged posts yet."
+                  : activeGalleryTab === "Saved"
+                    ? "Saved drops will appear here."
+                    : "No posts in this tab yet."}
             </p>
           ) : null}
           {visiblePosts.map((post) => (
@@ -373,7 +500,7 @@ export function ProfilePage() {
               }}
               onOpenImage={() => setActiveImagePost(post)}
               onDelete={
-                activeGalleryTab === "Posts" || activeGalleryTab === "Reels"
+                !isPublicView && (activeGalleryTab === "Posts" || activeGalleryTab === "Reels")
                   ? () => void confirmDeletePost(post)
                   : undefined
               }
