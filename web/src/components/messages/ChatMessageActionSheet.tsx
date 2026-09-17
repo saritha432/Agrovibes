@@ -6,6 +6,7 @@ const QUICK_EMOJIS = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const
 type Props = {
   visible: boolean;
   timestampLabel?: string;
+  activeEmoji?: string | null;
   onClose: () => void;
   onReply: () => void;
   onCopy: () => void;
@@ -16,6 +17,7 @@ type Props = {
 export function ChatMessageActionSheet({
   visible,
   timestampLabel,
+  activeEmoji,
   onClose,
   onReply,
   onCopy,
@@ -42,7 +44,7 @@ export function ChatMessageActionSheet({
             <button
               key={emoji}
               type="button"
-              className="chat-action-sheet__emoji-btn"
+              className={`chat-action-sheet__emoji-btn${activeEmoji === emoji ? " chat-action-sheet__emoji-btn--on" : ""}`}
               onClick={() => run(() => onReact(emoji))}
               aria-label={`React with ${emoji}`}
             >

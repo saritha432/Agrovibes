@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { HomeStory } from "../../api/types";
-import { likeHomeStory, markHomeStoryViewed, replyToHomeStory } from "../../api/home";
+import { deleteHomeStory, likeHomeStory, markHomeStoryViewed, replyToHomeStory } from "../../api/home";
 import { UserAvatar } from "../messages/UserAvatar";
 import { ReelIcon } from "./ReelIcon";
 import { groupHomeStories } from "../../utils/storyUtils";
@@ -14,9 +14,10 @@ type Props = {
   viewerAvatarUrl?: string | null;
   viewerId?: number | null;
   token?: string | null;
+  onStoryDeleted?: (storyId: number) => void;
 };
 
-export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, token }: Props) {
+export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, token, onStoryDeleted }: Props) {
   const [viewedIds, setViewedIds] = useState<Set<number>>(() => new Set());
   const [queue, setQueue] = useState<HomeStory[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
@@ -24,11 +25,20 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   const [replyDraft, setReplyDraft] = useState("");
   const [replyBusy, setReplyBusy] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const { ownStories, otherGroups } = useMemo(
     () => groupHomeStories(stories, viewerId ?? null),
     [stories, viewerId]
   );
+
+  useEffect(() => {
+    const ids = new Set(stories.map((story) => story.id));
+    setQueue((prev) => {
+      const next = prev.filter((story) => ids.has(story.id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [stories]);
 
   useEffect(() => {
     setViewedIds((prev) => {
@@ -166,6 +176,29 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
     }
   };
 
+  const deleteStory = async () => {
+    if (!token || !active || !isOwnActive || deleteBusy) return;
+    if (!window.confirm("Delete this story?")) return;
+    setDeleteBusy(true);
+    try {
+      await deleteHomeStory(token, active.id);
+      const deletedId = active.id;
+      const remaining = queue.filter((story) => story.id !== deletedId);
+      onStoryDeleted?.(deletedId);
+      window.dispatchEvent(new Event("cropvibe:feed-refresh"));
+      if (!remaining.length) {
+        closeViewer();
+      } else {
+        setQueue(remaining);
+        setQueueIndex((index) => Math.min(index, remaining.length - 1));
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Could not delete story.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
   return (
     <>
       <StoriesRow
@@ -186,12 +219,15 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
           queueIndex={queueIndex}
           queueLength={queue.length}
           canInteract={!!token && !isOwnActive}
+          canDelete={!!token && isOwnActive}
+          deleteBusy={deleteBusy}
           liked={likedIds.has(active.id)}
           likeBusy={likeBusy}
           replyDraft={replyDraft}
           replyBusy={replyBusy}
           onReplyDraftChange={setReplyDraft}
           onLike={() => void likeStory()}
+          onDelete={() => void deleteStory()}
           onSend={(e) => void sendReply(e)}
           onClose={closeViewer}
           onNext={goNext}
@@ -277,12 +313,15 @@ function StoryViewer({
   queueIndex,
   queueLength,
   canInteract,
+  canDelete,
+  deleteBusy,
   liked,
   likeBusy,
   replyDraft,
   replyBusy,
   onReplyDraftChange,
   onLike,
+  onDelete,
   onSend,
   onClose,
   onNext,
@@ -294,12 +333,15 @@ function StoryViewer({
   queueIndex: number;
   queueLength: number;
   canInteract: boolean;
+  canDelete: boolean;
+  deleteBusy: boolean;
   liked: boolean;
   likeBusy: boolean;
   replyDraft: string;
   replyBusy: boolean;
   onReplyDraftChange: (value: string) => void;
   onLike: () => void;
+  onDelete: () => void;
   onSend: (e?: FormEvent) => void;
   onClose: () => void;
   onNext: () => void;
@@ -312,6 +354,17 @@ function StoryViewer({
         <header className="story-viewer__header">
           <UserAvatar uri={active.avatarUrl} name={active.userName} size={32} />
           <span className="story-viewer__user">{active.userName}</span>
+          {canDelete ? (
+            <button
+              type="button"
+              className="story-viewer__delete"
+              onClick={onDelete}
+              disabled={deleteBusy}
+              aria-label="Delete story"
+            >
+              Delete
+            </button>
+          ) : null}
           <button type="button" className="story-viewer__close" onClick={onClose} aria-label="Close">
             ×
           </button>

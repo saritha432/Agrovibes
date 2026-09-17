@@ -34,14 +34,9 @@ export function navigateToUserSearch() {
 
 export function navigateToPublicProfile(params: RootStackParamList["PublicProfile"]) {
   if (!navigationRef.isReady()) return;
-  // Push so opening a mutual/follower from an existing PublicProfile stacks a new screen
-  // instead of silently updating (or no-op'ing) the current route.
-  const current = navigationRef.getCurrentRoute();
-  if (current?.name === "PublicProfile") {
-    navigationRef.dispatch(StackActions.push("PublicProfile", params));
-    return;
-  }
-  navigationRef.navigate("PublicProfile", params);
+  // Always push. `navigate()` reuses an existing PublicProfile in the stack (for example
+  // after jumping back to Home via tabs) and can no-op or show the previous person.
+  navigationRef.dispatch(StackActions.push("PublicProfile", params));
 }
 
 export function navigateToJoinLive() {

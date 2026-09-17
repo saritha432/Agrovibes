@@ -80,6 +80,19 @@
   line-height: 1.4;
 }
 
+.forward-modal__extra {
+  margin: 4px 16px 10px;
+  width: calc(100% - 32px);
+  border: none;
+  border-radius: 12px;
+  background: #c8ff00;
+  color: #111;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
 .forward-modal__list {
   list-style: none;
   margin: 0;

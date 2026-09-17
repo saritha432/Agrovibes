@@ -106,6 +106,8 @@ export function StoryRingAvatar({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onPressFallback}
+      delayLongPress={280}
       style={style}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel || name}
