@@ -32,7 +32,7 @@ import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { navigateToMyProfile, navigateToPublicProfile, navigateToHome } from "../navigation/navigationRef";
-import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
+import { stripLegacyCloudinaryUrl, isVideoMediaUrl } from "../utils/mediaUrls";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import {
   clearReturnToNotifications,
@@ -4362,12 +4362,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   }}
                   onPress={() => onReelSurfaceTap(post)}
                 >
-                  <FeedImage
-                    source={{ uri }}
-                    style={{ width: reelContentWidth, height: Math.max(1, mediaContentH - overlayTouchReserve) }}
-                    contentFit="cover"
-                    recyclingKey={uri}
-                  />
+                  {isVideoMediaUrl(uri) ? (
+                    <ContainedAppVideo
+                      uri={uri}
+                      shouldPlay={isActiveVideo && (carouselPageByPostId[post.id] ?? 0) === i && !reelUserPaused}
+                      isMuted={isReelMuted}
+                      containerWidth={reelContentWidth}
+                      containerHeight={Math.max(1, mediaContentH - overlayTouchReserve)}
+                      fit="cover"
+                      isLooping
+                      useNativeControls={false}
+                    />
+                  ) : (
+                    <FeedImage
+                      source={{ uri }}
+                      style={{ width: reelContentWidth, height: Math.max(1, mediaContentH - overlayTouchReserve) }}
+                      contentFit="cover"
+                      recyclingKey={uri}
+                    />
+                  )}
                 </Pressable>
               ))}
             </ScrollView>
@@ -4813,11 +4826,24 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                       }}
                       onPress={() => onPostMediaTap(post)}
                     >
-                      <FeedMediaImage
-                        style={{ width: feedMediaWidth, height: feedMediaWidth }}
-                        uri={uri}
-                        contentFit="contain"
-                      />
+                      {isVideoMediaUrl(uri) ? (
+                        <ContainedAppVideo
+                          uri={uri}
+                          shouldPlay={(carouselPageByPostId[post.id] ?? 0) === i}
+                          isMuted
+                          containerWidth={feedMediaWidth}
+                          containerHeight={feedMediaWidth}
+                          fit="contain"
+                          isLooping
+                          useNativeControls={false}
+                        />
+                      ) : (
+                        <FeedMediaImage
+                          style={{ width: feedMediaWidth, height: feedMediaWidth }}
+                          uri={uri}
+                          contentFit="contain"
+                        />
+                      )}
                     </Pressable>
                   ))}
                 </ScrollView>

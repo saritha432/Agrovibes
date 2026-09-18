@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createHomePost, createHomeStory } from "../../api/posts";
 import { shouldUseImageUpload, uploadPickedMedia } from "../../api/uploads";
 import { useAuth } from "../../auth/AuthContext";
+import { AppEmojiPicker } from "../ui/AppEmojiPicker";
 import {
   evaluateFarmingPostPolicy,
   FARMING_TOPICS,
@@ -28,6 +29,7 @@ export function CreateModal({ open, onClose }: Props) {
   const [step, setStep] = useState<"pick-type" | "compose">("pick-type");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -43,6 +45,7 @@ export function CreateModal({ open, onClose }: Props) {
       setStep("pick-type");
       setSubmitting(false);
       setError(null);
+      setEmojiOpen(false);
     }
   }, [open]);
 
@@ -219,12 +222,29 @@ export function CreateModal({ open, onClose }: Props) {
             </div>
             {entryType !== "story" ? (
               <>
-                <textarea
-                  value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
-                  placeholder="Write about your farm, crop, or agri tip…"
-                  rows={3}
-                  maxLength={2200}
+                <div className="create-modal__caption-row">
+                  <textarea
+                    value={caption}
+                    onChange={(e) => setCaption(e.target.value)}
+                    placeholder="Write about your farm, crop, or agri tip…"
+                    rows={3}
+                    maxLength={2200}
+                  />
+                  <button
+                    type="button"
+                    className="create-modal__emoji-btn"
+                    onClick={() => setEmojiOpen((open) => !open)}
+                    aria-label="Add emoji"
+                  >
+                    😊
+                  </button>
+                </div>
+                <AppEmojiPicker
+                  open={emojiOpen}
+                  variant="overlay"
+                  closeOnSelect={false}
+                  onClose={() => setEmojiOpen(false)}
+                  onSelect={(emoji) => setCaption((text) => `${text}${emoji}`)}
                 />
                 <div className="create-modal__farming">
                   <p className="create-modal__farming-title">Farming content only</p>

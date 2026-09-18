@@ -121,7 +121,7 @@ export function NewMessageComposerModal({ visible, recentThreads = [], onClose }
   useEffect(() => {
     if (!visible || !token) return;
     const q = query.trim();
-    if (q.length < 2) {
+    if (q.length < 1) {
       setSearchHits([]);
       setSearching(false);
       return;

@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "emoji-picker-react": "^4.22.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.15.1",

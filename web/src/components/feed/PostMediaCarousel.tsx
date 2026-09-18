@@ -1,6 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import "./PostMediaCarousel.css";
 
+function isVideoMediaUrl(url: string) {
+  const cleaned = String(url || "").trim();
+  if (!cleaned) return false;
+  if (/\.(mp4|mov|webm|m3u8|m4v|mkv|avi|ts)(\?|#|$)/i.test(cleaned)) return true;
+  if (/\/agrovibes\/videos\//i.test(cleaned) || /\/videos\//i.test(cleaned)) return true;
+  return false;
+}
+
+function CarouselSlide({ url, active }: { url: string; active: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (active) {
+      void el.play().catch(() => undefined);
+      return;
+    }
+    el.pause();
+  }, [active]);
+
+  if (isVideoMediaUrl(url)) {
+    return (
+      <video ref={videoRef} className="post-carousel__img" src={url} muted loop playsInline controls={false} />
+    );
+  }
+  return <img src={url} alt="" className="post-carousel__img" />;
+}
+
 export function PostMediaCarousel({ urls }: { urls: string[] }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -35,7 +64,7 @@ export function PostMediaCarousel({ urls }: { urls: string[] }) {
   if (urls.length === 1) {
     return (
       <div className="post-carousel">
-        <img src={urls[0]} alt="" className="post-carousel__img" />
+        <CarouselSlide url={urls[0]} active />
       </div>
     );
   }
@@ -45,7 +74,7 @@ export function PostMediaCarousel({ urls }: { urls: string[] }) {
       <div ref={scrollerRef} className="post-carousel__scroller">
         {urls.map((url, index) => (
           <div key={`${url}-${index}`} className="post-carousel__slide" data-index={index}>
-            <img src={url} alt="" className="post-carousel__img" />
+            <CarouselSlide url={url} active={index === activeIndex} />
           </div>
         ))}
       </div>

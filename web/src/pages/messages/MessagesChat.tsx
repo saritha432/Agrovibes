@@ -42,6 +42,7 @@ import {
   type DmReplyPayload
 } from "../../utils/dmMessageFormats";
 import { formatMsgTime, parseSharedReel } from "./messagesUtils";
+import { AppEmojiPicker } from "../../components/ui/AppEmojiPicker";
 
 type ReplyTarget = {
   id: number;
@@ -127,6 +128,7 @@ export function MessagesChat() {
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
   const [actionMessage, setActionMessage] = useState<DirectMessageItem | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -420,6 +422,30 @@ export function MessagesChat() {
     }
   };
 
+  const isOwnMessage = (item: DirectMessageItem | null | undefined) => {
+    if (!item || user?.id == null) return false;
+    return String(item.senderId) === String(user.id);
+  };
+
+  const deleteMessage = (item: DirectMessageItem, mode: "me" | "everyone") => {
+    if (!token) return;
+    if (mode === "everyone" && !isOwnMessage(item)) return;
+    const confirmed = window.confirm(
+      mode === "everyone"
+        ? "Delete for everyone?\nThis removes the message for everyone in this chat."
+        : "Delete for me?\nThis removes the message only from your chat."
+    );
+    if (!confirmed) return;
+    void (async () => {
+      try {
+        await deleteDirectMessage(token, item.id, mode);
+        setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Could not delete this message.");
+      }
+    })();
+  };
+
   const startReplyToMessage = (item: DirectMessageItem) => {
     const isSelf = Number(item.senderId) === Number(user?.id);
     const preview = formatDmInboxPreview(item.body).slice(0, 80) || item.body.slice(0, 80);
@@ -639,6 +665,16 @@ export function MessagesChat() {
         onForward={() => {
           if (actionMessage) setForwardBody(actionMessage.body);
         }}
+        showDeleteForMe
+        showDeleteForEveryone={isOwnMessage(actionMessage)}
+        onDeleteForMe={() => {
+          const item = actionMessage;
+          if (item) deleteMessage(item, "me");
+        }}
+        onDeleteForEveryone={() => {
+          const item = actionMessage;
+          if (item) deleteMessage(item, "everyone");
+        }}
         onReact={(emoji) => {
           if (!actionMessage) return;
           const reactions =
@@ -668,6 +704,13 @@ export function MessagesChat() {
       ) : null}
 
       <footer className="messages-chat__composer-wrap">
+        <AppEmojiPicker
+          open={emojiOpen}
+          variant="overlay"
+          closeOnSelect={false}
+          onClose={() => setEmojiOpen(false)}
+          onSelect={(emoji) => setDraft((d) => `${d}${emoji}`)}
+        />
         <div className="messages-chat__composer-bar">
           <button
             type="button"
@@ -746,7 +789,13 @@ export function MessagesChat() {
                   >
                     <ChatAssetIcon name="gallery" size={24} />
                   </button>
-                  <button type="button" disabled title="Stickers" aria-label="Stickers">
+                  <button
+                    type="button"
+                    disabled={sending}
+                    onClick={() => setEmojiOpen((open) => !open)}
+                    title="Stickers"
+                    aria-label="Stickers"
+                  >
                     <ChatAssetIcon name="sticker" size={24} />
                   </button>
                   <button type="button" disabled title="More" aria-label="More">

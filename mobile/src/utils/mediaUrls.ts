@@ -9,6 +9,14 @@ export function stripLegacyCloudinaryUrl(url: string | null | undefined): string
   return u;
 }
 
+export function isVideoMediaUrl(url: string | null | undefined): boolean {
+  const cleaned = String(url || "").trim();
+  if (!cleaned) return false;
+  if (/\.(mp4|mov|webm|m3u8|m4v|mkv|avi|ts)(\?|#|$)/i.test(cleaned)) return true;
+  if (/\/agrovibes\/videos\//i.test(cleaned) || /\/videos\//i.test(cleaned)) return true;
+  return false;
+}
+
 /**
  * Resize a Supabase Storage image URL to a given pixel width using its built-in
  * image transform API. Falls back to original URL for non-Supabase or video URLs.
@@ -24,8 +32,7 @@ export function resizeSupabaseImageUrl(
   if (!cleaned) return null;
 
   // Only resize static images — skip video, HLS, audio (by extension or /videos/ path)
-  if (/\.(mp4|mov|webm|m3u8|m4v|mkv|avi|ts|mp3|aac|wav)(\?|$)/i.test(cleaned)) return cleaned;
-  if (/\/agrovibes\/videos\//i.test(cleaned) || /\/videos\//i.test(cleaned)) return cleaned;
+  if (isVideoMediaUrl(cleaned) || /\.(mp3|aac|wav)(\?|#|$)/i.test(cleaned)) return cleaned;
 
   // Supabase public storage URL pattern
   if (/\/storage\/v1\/object\/public\//i.test(cleaned)) {
