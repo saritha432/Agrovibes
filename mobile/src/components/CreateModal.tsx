@@ -29,6 +29,7 @@ import { uploadVideoThumbnailFromUri } from "../utils/safeVideoThumbnail";
 import { captureRef } from "react-native-view-shot";
 import { FeedImage } from "./FeedImage";
 import { AppVideo } from "./AppVideo";
+import { AppEmojiPicker } from "./AppEmojiPicker";
 import {
   createHomePost,
   createHomeStory,
@@ -79,6 +80,27 @@ const LiveKitRoomView = lazyScreen(
 
 const CAMERA_GRID_ID = "__camera__";
 
+function formatGalleryDuration(seconds?: number) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  if (!total) return "";
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function GalleryVideoBadge({ duration }: { duration?: number }) {
+  const label = formatGalleryDuration(duration);
+  return (
+    <View style={label ? styles.igPostVideoDurationBadge : styles.storyGalleryVideoBadge}>
+      {label ? (
+        <Text style={styles.igPostVideoDurationText}>{label}</Text>
+      ) : (
+        <Ionicons name="play" size={10} color="#fff" />
+      )}
+    </View>
+  );
+}
+
 const GalleryThumbnail = React.memo(function GalleryThumbnail({ uri }: { uri: string }) {
   return (
     <FeedImage
@@ -128,7 +150,6 @@ const FILTER_OPTIONS: { id: CreativeFilterId; label: string }[] = [
   { id: "noir", label: "Noir" }
 ];
 
-const STICKER_EMOJIS = ["🌾", "🚜", "🌿", "🍅", "☀️", "💧", "🐄", "🌻", "🌽", "🥕"];
 const POST_LOCATION_SUGGESTIONS = ["Hyderabad High-Tech City", "Vijayawada", "Pattabhipuram"];
 
 const CREATE_CAMERA_ASSETS = {
@@ -409,22 +430,31 @@ type MediaCreativeProps = {
   shouldPlay?: boolean;
 };
 
-function PostComposeThumbnail({ uri }: { uri: string }) {
+function PostComposeThumbnail({ uri, isVideo }: { uri: string; isVideo?: boolean }) {
   const [failed, setFailed] = React.useState(false);
   return (
     <View style={styles.igPostComposeThumb}>
       {uri && !failed ? (
-        <Image
-          source={{ uri }}
-          style={styles.igPostComposeThumbImage}
-          resizeMode="cover"
-          onError={() => setFailed(true)}
-        />
+        isVideo ? (
+          <AppVideo style={styles.igPostComposeThumbImage} source={uri} shouldPlay={false} isMuted contentFit="cover" />
+        ) : (
+          <Image
+            source={{ uri }}
+            style={styles.igPostComposeThumbImage}
+            resizeMode="cover"
+            onError={() => setFailed(true)}
+          />
+        )
       ) : (
         <View style={styles.igPostComposeThumbFallback}>
-          <Ionicons name="image-outline" size={30} color="rgba(255,255,255,0.35)" />
+          <Ionicons name={isVideo ? "play-circle-outline" : "image-outline"} size={30} color="rgba(255,255,255,0.35)" />
         </View>
       )}
+      {isVideo ? (
+        <View style={styles.igPostComposeThumbPlay} pointerEvents="none">
+          <Ionicons name="play" size={14} color="#fff" />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -689,7 +719,7 @@ export function CreateModal({
   const [liveKitHostOpen, setLiveKitHostOpen] = useState(false);
   const [liveHostCameraFacing, setLiveHostCameraFacing] = useState<"front" | "back">("front");
   const [entrySelectedIds, setEntrySelectedIds] = useState<string[]>([]);
-  /** Instagram-style: post flow allows multiple photos by default (up to 10). */
+  /** Instagram-style: post flow allows multiple photos and videos (up to 10). */
   const [entryMultiSelect, setEntryMultiSelect] = useState(true);
   const [postPreviewResizeMode, setPostPreviewResizeMode] = useState<"cover" | "contain">("cover");
   const [postLocation, setPostLocation] = useState("");
@@ -1144,10 +1174,6 @@ export function CreateModal({
       setErrorText(t("createErrSelectPhoto"));
       return;
     }
-    if (selected.length > 1 && selected.some((a) => a.mediaType === "video")) {
-      setErrorText(t("createErrCarouselPhotos"));
-      return;
-    }
     const assets: ImagePicker.ImagePickerAsset[] = selected.map((a) => ({
       uri: a.uri,
       fileName: a.filename,
@@ -1162,10 +1188,6 @@ export function CreateModal({
 
   const onEntryPressAsset = (asset: GalleryGridAsset) => {
     setErrorText("");
-    if (asset.mediaType === "video") {
-      setErrorText(t("createErrPostPhotosOnly"));
-      return;
-    }
     setEntrySelectedIds((prev) => {
       if (!entryMultiSelect) return [asset.id];
       if (prev.includes(asset.id)) return prev.filter((id) => id !== asset.id);
@@ -1339,13 +1361,6 @@ export function CreateModal({
       return;
     }
     if (entryType === "post") {
-      if (assets.length > 1) {
-        const allImg = assets.every((a) => shouldUseImageUpload(a.uri, a));
-        if (!allImg) {
-          setErrorText(t("createErrCarouselPhotos"));
-          return;
-        }
-      }
       const gridIds = assets
         .map((a) => recentGridAssets.find((g) => g.uri === a.uri)?.id)
         .filter((id): id is string => !!id);
@@ -2008,20 +2023,11 @@ export function CreateModal({
           setSubmitting(false);
           return;
         }
-        if (images.length && videos.length) {
-          setErrorText(t("createErrMixedMedia"));
-          setSubmitting(false);
-          return;
-        }
-        if (videos.length > 1) {
-          setErrorText(t("createErrOneVideo"));
-          setSubmitting(false);
-          return;
-        }
         const resolvedLocation =
           postLocation.trim() || user?.locationLabel?.trim() || "Unknown";
         const taggedIds = taggedPeople.map((p) => p.id);
-        if (videos.length === 1) {
+        const singleVideoPost = videos.length === 1 && images.length === 0 && assets.length === 1;
+        if (createType === "reel" || singleVideoPost) {
           const v = videos[0];
           const { url: mediaUrl } = await uploadPickedMedia(v.uri, v);
           let derivedThumb: string | undefined = thumbnailUrl.trim() || undefined;
@@ -2067,10 +2073,11 @@ export function CreateModal({
           createdFeedPost = newPost;
         } else {
           const urls: string[] = [];
-          for (let i = 0; i < images.length; i++) {
-            const im = images[i];
-            const uri = i === 0 && composedImageUri ? composedImageUri : im.uri;
-            const meta = i === 0 && composedImageUri ? { ...im, uri: composedImageUri } : im;
+          for (let i = 0; i < assets.length; i++) {
+            const item = assets[i];
+            const isImage = shouldUseImageUpload(item.uri, item);
+            const uri = isImage && i === 0 && composedImageUri ? composedImageUri : item.uri;
+            const meta = isImage && i === 0 && composedImageUri ? { ...item, uri: composedImageUri } : item;
             const { url } = await uploadPickedMedia(uri, meta);
             urls.push(url);
           }
@@ -2079,13 +2086,14 @@ export function CreateModal({
             setSubmitting(false);
             return;
           }
+          const firstImageUrl = assets.findIndex((a) => shouldUseImageUpload(a.uri, a));
           const { post: newPost } = await createHomePost(
             {
               userId: user?.id,
               userName: user?.fullName?.trim() || "Farmer",
               location: resolvedLocation,
               caption: createType ? `[${createType.toUpperCase()}] ${caption.trim()}` : caption.trim(),
-              imageUrl: urls[0],
+              imageUrl: firstImageUrl >= 0 ? urls[firstImageUrl] : urls[0],
               imageUrls: urls,
               farmingTopic: farmingTopicId || undefined,
               farmingConfirmed: true,
@@ -2121,13 +2129,14 @@ export function CreateModal({
   const previewWidth = Dimensions.get("window").width - 32;
   const selectedEntryAsset =
     recentGridAssets.find((a) => a.id === entrySelectedIds[0]) ??
-    recentGridAssets.find((a) => a.mediaType === "image") ??
+    recentGridAssets[0] ??
     (pickedPostAssets[0]?.uri
       ? {
           id: "picked-preview",
           uri: pickedPostAssets[0].uri,
-          mediaType: "image" as const,
-          filename: pickedPostAssets[0].fileName
+          mediaType: shouldUseImageUpload(pickedPostAssets[0].uri, pickedPostAssets[0]) ? ("image" as const) : ("video" as const),
+          filename: pickedPostAssets[0].fileName,
+          duration: pickedPostAssets[0].duration ?? undefined
         }
       : null);
   const canProceedFromPostEntry = entrySelectedIds.length > 0 || pickedPostAssets.length > 0;
@@ -2363,11 +2372,22 @@ export function CreateModal({
                 <View>
                   <View style={styles.igPostEntryPreview}>
                     {selectedEntryAsset ? (
-                      <Image
-                        source={{ uri: selectedEntryAsset.uri }}
-                        style={styles.igPostEntryPreviewImage}
-                        resizeMode={postPreviewResizeMode}
-                      />
+                      selectedEntryAsset.mediaType === "video" ? (
+                        <AppVideo
+                          style={styles.igPostEntryPreviewImage}
+                          source={selectedEntryAsset.uri}
+                          shouldPlay
+                          isMuted
+                          isLooping
+                          contentFit={postPreviewResizeMode}
+                        />
+                      ) : (
+                        <Image
+                          source={{ uri: selectedEntryAsset.uri }}
+                          style={styles.igPostEntryPreviewImage}
+                          resizeMode={postPreviewResizeMode}
+                        />
+                      )
                     ) : (
                       <View style={styles.igPostEntryPreviewFallback}>
                         <Ionicons name="images-outline" size={34} color="#fff" />
@@ -2417,7 +2437,7 @@ export function CreateModal({
                 galleryLoading ? (
                   <View style={styles.igGalleryLoading}>
                     <ActivityIndicator size="small" color="#C9FF35" />
-                    <Text style={styles.igGalleryLoadingText}>Loading photos…</Text>
+                    <Text style={styles.igGalleryLoadingText}>Loading media…</Text>
                   </View>
                 ) : null
               }
@@ -2443,6 +2463,7 @@ export function CreateModal({
                 return (
                   <Pressable style={styles.igPostEntryCell} onPress={() => onEntryPressAsset(asset)}>
                     <GalleryThumbnail uri={asset.uri} />
+                    {asset.mediaType === "video" ? <GalleryVideoBadge duration={asset.duration} /> : null}
                     {entrySelectedIds.includes(asset.id) ? (
                       <View style={styles.igPostEntrySelectedBadge}>
                         <Text style={styles.igPostEntrySelectedText}>{entrySelectedIds.indexOf(asset.id) + 1}</Text>
@@ -2529,11 +2550,7 @@ export function CreateModal({
                 return (
                   <Pressable style={styles.igPostEntryCell} onPress={() => onCaptureGalleryAsset(asset)}>
                     <GalleryThumbnail uri={asset.uri} />
-                    {asset.mediaType === "video" ? (
-                      <View style={styles.storyGalleryVideoBadge}>
-                        <Ionicons name="play" size={10} color="#fff" />
-                      </View>
-                    ) : null}
+                    {asset.mediaType === "video" ? <GalleryVideoBadge duration={asset.duration} /> : null}
                   </Pressable>
                 );
               }}
@@ -2682,7 +2699,7 @@ export function CreateModal({
                 </View>
               ) : null}
 
-              {entryIsRecording && (entryType === "reel" || entryType === "live") ? (
+              {entryIsRecording && (entryType === "reel" || entryType === "live" || entryType === "post") ? (
                 <View style={styles.reelCountdownBadge} pointerEvents="none">
                   <View style={styles.reelCountdownDot} />
                   <Text style={styles.reelCountdownText}>
@@ -3225,7 +3242,11 @@ export function CreateModal({
                 contentContainerStyle={styles.igPostComposeThumbRow}
               >
                 {pickedPostAssets.map((a, i) => (
-                  <PostComposeThumbnail key={`${i}-${a.uri}`} uri={a.uri} />
+                  <PostComposeThumbnail
+                    key={`${i}-${a.uri}`}
+                    uri={a.uri}
+                    isVideo={!shouldUseImageUpload(a.uri, a)}
+                  />
                 ))}
               </ScrollView>
 
@@ -3484,7 +3505,7 @@ export function CreateModal({
                     <View style={[styles.igPreviewCarouselPage, { width: previewWidth }]}>
                       <MediaWithCreative
                         uri={item.uri}
-                        isVideo={false}
+                        isVideo={!shouldUseImageUpload(item.uri, item)}
                         filter={creativeFilter}
                         overlayText={creativeText}
                         font={creativeFont}
@@ -4160,28 +4181,12 @@ export function CreateModal({
       </Pressable>
     </Modal>
 
-    <Modal visible={showStickerPanel} transparent animationType="fade" onRequestClose={() => setShowStickerPanel(false)}>
-      <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowStickerPanel(false)}>
-        <Pressable style={styles.creativePanelCard} onPress={(e) => e.stopPropagation?.()}>
-          <Text style={styles.creativePanelTitle}>Stickers</Text>
-          <Text style={styles.creativePanelHint}>Tap to add to your text</Text>
-          <View style={styles.stickerGrid}>
-            {STICKER_EMOJIS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                style={styles.stickerBtn}
-                onPress={() => setCreativeText((t) => (t ? `${t} ${emoji}` : emoji))}
-              >
-                <Text style={styles.stickerEmoji}>{emoji}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Pressable style={styles.creativePanelDone} onPress={() => setShowStickerPanel(false)}>
-            <Text style={styles.creativePanelDoneText}>Done</Text>
-          </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <AppEmojiPicker
+      open={showStickerPanel}
+      allowMultiple
+      onClose={() => setShowStickerPanel(false)}
+      onSelect={(emoji) => setCreativeText((t) => (t ? `${t} ${emoji}` : emoji))}
+    />
 
     <Modal visible={showEditPanel} transparent animationType="fade" onRequestClose={() => setShowEditPanel(false)}>
       <Pressable style={styles.creativePanelBackdrop} onPress={() => setShowEditPanel(false)}>
@@ -4538,6 +4543,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  igPostVideoDurationBadge: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    minWidth: 28,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 4,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  igPostVideoDurationText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   igPostEntrySelectBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -4662,6 +4680,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#383838"
+  },
+  igPostComposeThumbPlay: {
+    position: "absolute",
+    right: 6,
+    bottom: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+    justifyContent: "center"
   },
   igPostComposeCaption: {
     color: "#fff",
@@ -5788,18 +5817,6 @@ const styles = StyleSheet.create({
   filterSwatch: { width: 44, height: 44, borderRadius: 10, marginBottom: 4 },
   filterSwatchNone: { backgroundColor: "#f3f4f6", borderWidth: 2, borderColor: "#d1d5db" },
   filterChipLabel: { fontSize: 11, fontWeight: "600", color: "#4d5f5a", textAlign: "center" },
-  stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center" },
-  stickerBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: "#f8faf9",
-    borderWidth: 1,
-    borderColor: "#e5ece8",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  stickerEmoji: { fontSize: 26 },
   editPanelCard: {
     backgroundColor: "#fff",
     borderTopLeftRadius: 20,

@@ -81,16 +81,36 @@
   font-size: 13px;
 }
 
+.create-modal__caption-row {
+  position: relative;
+  margin-top: 12px;
+}
+
 .create-modal__compose textarea {
   width: 100%;
-  margin-top: 12px;
+  margin-top: 0;
   background: #262626;
   border: 1px solid #404040;
   border-radius: 8px;
   color: #fff;
-  padding: 10px 12px;
+  padding: 10px 40px 10px 12px;
   resize: vertical;
   box-sizing: border-box;
+}
+
+.create-modal__emoji-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
 }
 
 .create-modal__previews {

@@ -65,6 +65,7 @@ import { videoPlaybackUrl } from "../../utils/videoPlaybackUrl";
 import { useLanguage } from "../../localization/LanguageContext";
 import { DirectCallView, type CallDirection, type CallEndResult, type DirectCallMode } from "./DirectCallView";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { AppEmojiPicker } from "../../components/AppEmojiPicker";
 import { ChatMessageActionSheet } from "./ChatMessageActionSheet";
 import { ForwardMessageModal } from "./ForwardMessageModal";
 import { SwipeReplyMessageRow } from "./SwipeReplyMessageRow";
@@ -477,6 +478,7 @@ export function DirectChatScreen() {
     peerAvatarUrl != null && String(peerAvatarUrl).trim() ? String(peerAvatarUrl).trim() : null
   );
   const [draft, setDraft] = useState("");
+  const [composerEmojiOpen, setComposerEmojiOpen] = useState(false);
   const [callSession, setCallSession] = useState<{
     roomName: string;
     mode: DirectCallMode;
@@ -543,7 +545,10 @@ export function DirectChatScreen() {
     replyLabel: string;
   } | null>(null);
   const [actionMessage, setActionMessage] = useState<DirectMessageItem | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<DirectMessageItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    item: DirectMessageItem;
+    mode: "me" | "everyone";
+  } | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
@@ -834,21 +839,22 @@ export function DirectChatScreen() {
   );
 
   const deleteMessage = useCallback(
-    (item: DirectMessageItem) => {
-      if (!token || !isOwnMessage(item)) return;
-      setPendingDelete(item);
+    (item: DirectMessageItem, mode: "me" | "everyone") => {
+      if (!token) return;
+      if (mode === "everyone" && !isOwnMessage(item)) return;
+      setPendingDelete({ item, mode });
     },
     [isOwnMessage, token]
   );
 
   const confirmDeleteMessage = useCallback(() => {
-    const item = pendingDelete;
-    if (!item || !token) return;
+    const pending = pendingDelete;
+    if (!pending || !token) return;
     setPendingDelete(null);
     void (async () => {
       try {
-        await deleteDirectMessage(token, item.id);
-        setMessages((prev) => prev.filter((entry) => entry.id !== item.id));
+        await deleteDirectMessage(token, pending.item.id, pending.mode);
+        setMessages((prev) => prev.filter((entry) => entry.id !== pending.item.id));
       } catch (error) {
         Alert.alert(
           "Delete failed",
@@ -1625,7 +1631,11 @@ export function DirectChatScreen() {
                   <Pressable style={styles.inputTrailingBtn} onPress={() => void openGallery()} disabled={attachBusy}>
                     <ChatAssetIcon icon="gallery" size={COMPOSER_ICON} />
                   </Pressable>
-                  <Pressable style={styles.inputTrailingBtn} disabled={attachBusy}>
+                  <Pressable
+                    style={styles.inputTrailingBtn}
+                    disabled={attachBusy}
+                    onPress={() => setComposerEmojiOpen(true)}
+                  >
                     <ChatAssetIcon icon="sticker" size={COMPOSER_ICON} />
                   </Pressable>
                   <Pressable style={styles.inputTrailingBtn} onPress={openMoreAttachments} disabled={attachBusy}>
@@ -1638,10 +1648,20 @@ export function DirectChatScreen() {
         </View>
         </View>
       </KeyboardAvoidingView>
+      <AppEmojiPicker
+        open={composerEmojiOpen}
+        allowMultiple
+        onClose={() => setComposerEmojiOpen(false)}
+        onSelect={(emoji) => setDraft((text) => `${text}${emoji}`)}
+      />
       <ConfirmDialog
         visible={pendingDelete != null}
-        title="Delete message?"
-        message="This removes the message for everyone in this chat."
+        title={pendingDelete?.mode === "everyone" ? "Delete for everyone?" : "Delete for me?"}
+        message={
+          pendingDelete?.mode === "everyone"
+            ? "This removes the message for everyone in this chat."
+            : "This removes the message only from your chat."
+        }
         confirmLabel="DELETE"
         confirmDanger
         onCancel={() => setPendingDelete(null)}
@@ -1652,7 +1672,8 @@ export function DirectChatScreen() {
         timestampLabel={
           actionMessage ? formatActionSheetTimestamp(new Date(actionMessage.createdAt).getTime()) : undefined
         }
-        showDelete={isOwnMessage(actionMessage)}
+        showDeleteForMe
+        showDeleteForEveryone={isOwnMessage(actionMessage)}
         onClose={() => setActionMessage(null)}
         onReply={() => {
           if (actionMessage) startReplyToMessage(actionMessage);
@@ -1663,8 +1684,11 @@ export function DirectChatScreen() {
         onForward={() => {
           if (actionMessage) setForwardBody(actionMessage.body);
         }}
-        onDelete={() => {
-          if (actionMessage) deleteMessage(actionMessage);
+        onDeleteForMe={() => {
+          if (actionMessage) deleteMessage(actionMessage, "me");
+        }}
+        onDeleteForEveryone={() => {
+          if (actionMessage) deleteMessage(actionMessage, "everyone");
         }}
         onReact={(emoji) => {
           if (actionMessage) void reactToMessage(actionMessage, emoji);

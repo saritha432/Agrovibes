@@ -634,7 +634,16 @@ async function ensureDirectMessagesTable() {
     `
   );
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_sender BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_receiver BOOLEAN NOT NULL DEFAULT false`);
   directMessagesTableReady = true;
+}
+
+function dmVisibleToUserSql(alias, userSql) {
+  return `NOT (
+    (${alias}.sender_id = ${userSql} AND COALESCE(${alias}.hidden_for_sender, FALSE))
+    OR (${alias}.receiver_id = ${userSql} AND COALESCE(${alias}.hidden_for_receiver, FALSE))
+  )`;
 }
 
 function isLegacySyntheticPostAuthorEmail(email) {
@@ -5075,7 +5084,8 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
             ORDER BY dm.created_at DESC
           ) AS rn
         FROM direct_messages dm
-        WHERE dm.sender_id = $1 OR dm.receiver_id = $1
+        WHERE (dm.sender_id = $1 OR dm.receiver_id = $1)
+          AND ${dmVisibleToUserSql("dm", "$1")}
       )
       SELECT
         t.peer_id AS "peerUserId",
@@ -5093,6 +5103,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
           WHERE dm2.sender_id = t.peer_id
             AND dm2.receiver_id = $1
             AND dm2.is_read = false
+            AND ${dmVisibleToUserSql("dm2", "$1")}
         ), 0) AS "unreadCount"
       FROM thread_rows t
       JOIN learn_users u ON u.id = t.peer_id
@@ -5133,7 +5144,7 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
     const beforeId = Number(req.query.beforeId);
     const beforeClause =
-      Number.isFinite(beforeId) && beforeId > 0 ? `AND id < $3` : "";
+      Number.isFinite(beforeId) && beforeId > 0 ? `AND dm.id < $3` : "";
     const params = Number.isFinite(beforeId) && beforeId > 0 ? [me, peerUserId, beforeId, limit] : [me, peerUserId, limit];
 
     const rows = await query(
@@ -5144,11 +5155,12 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         receiver_id AS "receiverId",
         body,
         created_at AS "createdAt"
-      FROM direct_messages
-      WHERE (sender_id = $1 AND receiver_id = $2)
-         OR (sender_id = $2 AND receiver_id = $1)
+      FROM direct_messages dm
+      WHERE ((dm.sender_id = $1 AND dm.receiver_id = $2)
+         OR (dm.sender_id = $2 AND dm.receiver_id = $1))
+        AND ${dmVisibleToUserSql("dm", "$1")}
       ${beforeClause}
-      ORDER BY created_at DESC
+      ORDER BY dm.created_at DESC
       LIMIT ${Number.isFinite(beforeId) && beforeId > 0 ? "$4" : "$3"}
       `,
       params
@@ -5160,9 +5172,10 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     if (oldestId) {
       const older = await query(
         `
-        SELECT 1 FROM direct_messages
-        WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1))
-          AND id < $3
+        SELECT 1 FROM direct_messages dm
+        WHERE ((dm.sender_id = $1 AND dm.receiver_id = $2) OR (dm.sender_id = $2 AND dm.receiver_id = $1))
+          AND dm.id < $3
+          AND ${dmVisibleToUserSql("dm", "$1")}
         LIMIT 1
         `,
         [me, peerUserId, oldestId]
@@ -5415,8 +5428,11 @@ router.delete("/v1/messages/:messageId", authRequired, async (req, res) => {
       return;
     }
 
+    const modeRaw = String(req.body?.mode || req.query?.mode || "everyone").toLowerCase();
+    const mode = modeRaw === "me" ? "me" : "everyone";
+
     const rowRes = await query(
-      `SELECT id, sender_id, receiver_id FROM direct_messages WHERE id = $1 LIMIT 1`,
+      `SELECT id, sender_id, receiver_id, hidden_for_sender, hidden_for_receiver FROM direct_messages WHERE id = $1 LIMIT 1`,
       [messageId]
     );
     const row = rowRes.rows[0];
@@ -5424,18 +5440,46 @@ router.delete("/v1/messages/:messageId", authRequired, async (req, res) => {
       res.status(404).json({ message: "Message not found" });
       return;
     }
-    if (Number(row.sender_id) !== me) {
-      res.status(403).json({ message: "You can only delete your own messages" });
+    const senderId = Number(row.sender_id);
+    const receiverId = Number(row.receiver_id);
+    if (me !== senderId && me !== receiverId) {
+      res.status(403).json({ message: "You can only delete messages in this chat" });
       return;
     }
 
-    await query(`DELETE FROM direct_messages WHERE id = $1`, [messageId]);
+    if (mode === "everyone") {
+      if (senderId !== me) {
+        res.status(403).json({ message: "Only the sender can delete this message for everyone" });
+        return;
+      }
+      await query(`DELETE FROM direct_messages WHERE id = $1`, [messageId]);
+      emitDirectMessageDeleted({ messageId, senderId, receiverId, scope: "everyone" });
+      res.json({ ok: true, messageId, mode });
+      return;
+    }
+
+    if (senderId === me) {
+      await query(`UPDATE direct_messages SET hidden_for_sender = true WHERE id = $1`, [messageId]);
+    } else {
+      await query(`UPDATE direct_messages SET hidden_for_receiver = true WHERE id = $1`, [messageId]);
+    }
+
+    const updated = await query(
+      `SELECT hidden_for_sender AS "hiddenForSender", hidden_for_receiver AS "hiddenForReceiver" FROM direct_messages WHERE id = $1 LIMIT 1`,
+      [messageId]
+    );
+    if (updated.rows[0]?.hiddenForSender && updated.rows[0]?.hiddenForReceiver) {
+      await query(`DELETE FROM direct_messages WHERE id = $1`, [messageId]);
+    }
+
     emitDirectMessageDeleted({
       messageId,
-      senderId: me,
-      receiverId: Number(row.receiver_id)
+      senderId,
+      receiverId,
+      onlyUserId: me,
+      scope: "me"
     });
-    res.json({ ok: true, messageId });
+    res.json({ ok: true, messageId, mode });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete message", error: error.message });
   }

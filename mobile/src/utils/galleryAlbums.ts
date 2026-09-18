@@ -28,7 +28,6 @@ export const GALLERY_PAGE_SIZE = 40;
 const RECENTS_ID = "";
 
 function mediaTypesForMode(mode: "post" | "story" | "reel" | "live") {
-  if (mode === "post") return [MediaLibrary.MediaType.photo];
   if (mode === "reel") return [MediaLibrary.MediaType.video];
   return [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video];
 }
@@ -44,7 +43,7 @@ function mapAsset(a: MediaLibrary.Asset): GalleryGridAsset {
 }
 
 export function defaultPostGallerySelection(assets: GalleryGridAsset[]): string[] {
-  const first = assets.find((a) => a.mediaType === "image");
+  const first = assets[0];
   return first ? [first.id] : [];
 }
 

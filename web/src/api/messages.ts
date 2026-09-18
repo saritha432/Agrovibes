@@ -54,10 +54,21 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
   )) as { message: DirectMessageItem };
 }
 
-export async function deleteDirectMessage(token: string, messageId: number) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/${encodeURIComponent(String(messageId))}`, token, {
-    method: "DELETE"
-  })) as { ok: boolean; messageId: number };
+export async function deleteDirectMessage(
+  token: string,
+  messageId: number,
+  mode: "me" | "everyone" = "everyone"
+) {
+  const qs = new URLSearchParams({ mode });
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/${encodeURIComponent(String(messageId))}?${qs.toString()}`,
+    token,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode })
+    }
+  )) as { ok: boolean; messageId: number; mode?: "me" | "everyone" };
 }
 
 export async function ringDirectCall(

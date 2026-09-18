@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";import { SvgAssetIcon } from "./SvgAssetIcon";
+import React, { useState } from "react";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppEmojiPicker } from "./AppEmojiPicker";
+import { SvgAssetIcon } from "./SvgAssetIcon";
 import { UserAvatar } from "./UserAvatar";
 
 const STICKER_ICON = require("../../assets/sticker-icon.svg");
@@ -47,6 +49,7 @@ export function CommentComposerBar({
 }: Props) {
   const hasText = value.trim().length > 0;
   const isMultiline = value.includes("\n") || value.length > 48;
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   return (
     <View style={styles.root}>
@@ -89,9 +92,13 @@ export function CommentComposerBar({
             hitSlop={8}
             style={styles.trailingBtn}
             onPress={() => {
-              if (hasText && !submitting) onSubmit();
+              if (hasText && !submitting) {
+                onSubmit();
+                return;
+              }
+              setEmojiOpen(true);
             }}
-            disabled={submitting || !hasText}
+            disabled={submitting}
           >
             {hasText ? (
               <Ionicons name="arrow-up-circle" size={24} color="#C9FF35" />
@@ -101,6 +108,12 @@ export function CommentComposerBar({
           </Pressable>
         </View>
       </View>
+      <AppEmojiPicker
+        open={emojiOpen}
+        allowMultiple
+        onClose={() => setEmojiOpen(false)}
+        onSelect={(emoji) => onChangeText(`${value}${emoji}`)}
+      />
     </View>
   );
 }

@@ -141,9 +141,15 @@ function emitStoryViewed({ viewerId, storyId, storyUserId }) {
   });
 }
 
-function emitDirectMessageDeleted({ messageId, senderId, receiverId }) {
+function emitDirectMessageDeleted({ messageId, senderId, receiverId, onlyUserId, scope = "everyone" }) {
   if (!io || !messageId) return;
-  const payload = { messageId: Number(messageId) };
+  const payload = { messageId: Number(messageId), scope };
+  const onlyId = Number(onlyUserId);
+  if (Number.isFinite(onlyId) && onlyId > 0) {
+    const peerUserId = onlyId === Number(senderId) ? receiverId : senderId;
+    io.to(userRoom(onlyId)).emit("dm:deleted", { ...payload, peerUserId });
+    return;
+  }
   io.to(userRoom(senderId)).emit("dm:deleted", { ...payload, peerUserId: receiverId });
   io.to(userRoom(receiverId)).emit("dm:deleted", { ...payload, peerUserId: senderId });
 }
