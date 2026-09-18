@@ -33,11 +33,17 @@ export type StoryViewedSocketPayload = {
   storyUserId?: number | null;
 };
 
+export type DmDeletedSocketPayload = {
+  messageId: number;
+  peerUserId: number;
+};
+
 type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
 type DmReadHandler = (payload: DmReadSocketPayload) => void;
 type NotificationSyncHandler = (payload: NotificationSyncPayload) => void;
 type StoryViewedHandler = (payload: StoryViewedSocketPayload) => void;
+type DmDeletedHandler = (payload: DmDeletedSocketPayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
@@ -48,6 +54,7 @@ const threadHandlers = new Set<DmThreadHandler>();
 const readHandlers = new Set<DmReadHandler>();
 const notificationSyncHandlers = new Set<NotificationSyncHandler>();
 const storyViewedHandlers = new Set<StoryViewedHandler>();
+const deletedHandlers = new Set<DmDeletedHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
 export function resolveSocketBaseUrl() {
@@ -89,6 +96,9 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("story:viewed", (payload: StoryViewedSocketPayload) => {
     storyViewedHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("dm:deleted", (payload: DmDeletedSocketPayload) => {
+    deletedHandlers.forEach((handler) => handler(payload));
   });
 }
 
@@ -171,6 +181,17 @@ export function onStoryViewed(handler: StoryViewedHandler) {
   return () => {
     storyViewedHandlers.delete(handler);
   };
+}
+
+export function onDirectMessageDeleted(handler: DmDeletedHandler) {
+  deletedHandlers.add(handler);
+  return () => {
+    deletedHandlers.delete(handler);
+  };
+}
+
+export function isSocketChatConnected() {
+  return Boolean(socket?.connected);
 }
 
 export function onSocketConnectionChange(handler: ConnectionHandler) {

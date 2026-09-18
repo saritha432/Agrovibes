@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  deleteDirectMessage,
   fetchMessageThread,
   ringDirectCall,
   sendDirectMessage,
@@ -10,7 +11,10 @@ import { uploadAudioFile, uploadPickedMedia, shouldUseImageUpload } from "../../
 import {
   joinDirectThread,
   leaveDirectThread,
-  onDirectMessage
+  onDirectMessage,
+  onDirectMessageDeleted,
+  onDirectThreadUpdate,
+  onSocketConnectionChange
 } from "../../services/socketChat";
 import { ChatAssetIcon } from "../../components/messages/ChatAssetIcon";
 import { ChatMessageActionSheet } from "../../components/messages/ChatMessageActionSheet";
@@ -45,10 +49,29 @@ type ReplyTarget = {
   preview: string;
 };
 
+type MessageReaction = {
+  id: number;
+  emoji: string;
+  senderId: number;
+};
+
 type ThreadMessage = {
   message: DirectMessageItem;
-  reactions: string[];
+  reactions: MessageReaction[];
 };
+
+function mergeThreadMessages(prev: DirectMessageItem[], incoming: DirectMessageItem[]) {
+  if (!incoming.length) return prev;
+  const byId = new Map(prev.map((item) => [item.id, item]));
+  for (const item of incoming) byId.set(item.id, item);
+  return [...byId.values()].sort((a, b) => a.id - b.id || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function ownReactionOn(reactions: MessageReaction[], userId: number | undefined) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid) || uid <= 0) return undefined;
+  return reactions.find((reaction) => Number(reaction.senderId) === uid);
+}
 
 function formatActionSheetTimestamp(ts: number) {
   const d = new Date(ts);
@@ -68,12 +91,12 @@ function formatActionSheetTimestamp(ts: number) {
 }
 
 function buildThreadMessages(messages: DirectMessageItem[]): ThreadMessage[] {
-  const reactionsByTarget = new Map<number, string[]>();
+  const reactionsByTarget = new Map<number, MessageReaction[]>();
   for (const message of messages) {
     const react = parseDmReactMessage(message.body);
     if (!react) continue;
     const list = reactionsByTarget.get(react.targetId) || [];
-    list.push(react.emoji);
+    list.push({ id: message.id, emoji: react.emoji, senderId: message.senderId });
     reactionsByTarget.set(react.targetId, list);
   }
 
@@ -122,20 +145,21 @@ export function MessagesChat() {
     if (el) el.scrollTop = el.scrollHeight;
   };
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
     if (!token || !Number.isFinite(peerUserId) || peerUserId <= 0) {
       setMessages([]);
       setLoading(false);
       return;
     }
+    if (!opts?.silent) setLoading(true);
     try {
       const data = await fetchMessageThread(token, peerUserId);
-      setMessages(data.messages || []);
+      setMessages((prev) => (opts?.silent ? mergeThreadMessages(prev, data.messages || []) : data.messages || []));
       setPeerName(data.peer?.fullName || "Chat");
       const av = data.peer?.avatarUrl;
       setPeerAvatar(av != null && String(av).trim() ? String(av).trim() : null);
     } catch {
-      setMessages([]);
+      if (!opts?.silent) setMessages([]);
     } finally {
       setLoading(false);
       requestAnimationFrame(scrollToEnd);
@@ -150,22 +174,32 @@ export function MessagesChat() {
   useEffect(() => {
     if (!Number.isFinite(peerUserId) || peerUserId <= 0) return;
     joinDirectThread(peerUserId);
-    const unsub = onDirectMessage((payload) => {
+    const unsubMessage = onDirectMessage((payload) => {
       if (Number(payload.peerUserId) !== peerUserId) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === payload.message.id)) return prev;
-        return [...prev, payload.message];
-      });
-      if (token) {
-        void fetchMessageThread(token, peerUserId).catch(() => {});
-      }
+      setMessages((prev) => mergeThreadMessages(prev, [payload.message]));
       requestAnimationFrame(scrollToEnd);
     });
+    const unsubDeleted = onDirectMessageDeleted((payload) => {
+      if (Number(payload.peerUserId) !== peerUserId) return;
+      setMessages((prev) => prev.filter((item) => item.id !== Number(payload.messageId)));
+    });
+    const unsubThread = onDirectThreadUpdate((payload) => {
+      if (Number(payload.peerUserId) !== peerUserId) return;
+      void reload({ silent: true });
+    });
+    const unsubConnection = onSocketConnectionChange((connected) => {
+      if (connected) void reload({ silent: true });
+    });
+    const poll = window.setInterval(() => void reload({ silent: true }), 4000);
     return () => {
-      unsub();
+      unsubMessage();
+      unsubDeleted();
+      unsubThread();
+      unsubConnection();
+      window.clearInterval(poll);
       leaveDirectThread(peerUserId);
     };
-  }, [peerUserId, token]);
+  }, [peerUserId, reload]);
 
   useEffect(() => {
     scrollToEnd();
@@ -186,9 +220,13 @@ export function MessagesChat() {
         body = buildDmReplyMessage(payload);
         setReplyTo(null);
       }
-      await sendDirectMessage(token, peerUserId, body);
+      const result = await sendDirectMessage(token, peerUserId, body);
       setDraft("");
-      await reload();
+      if (result.message) {
+        setMessages((prev) => mergeThreadMessages(prev, [result.message]));
+      } else {
+        await reload({ silent: true });
+      }
     } catch {
       setDraft(text);
     } finally {
@@ -207,7 +245,7 @@ export function MessagesChat() {
         const kind = shouldUseImageUpload(file) ? "image" : "video";
         await sendDirectMessage(token, peerUserId, buildDmMediaMessage({ kind, url }));
       }
-      await reload();
+      await reload({ silent: true });
     } catch {
       window.alert("Failed to send media.");
     } finally {
@@ -282,7 +320,7 @@ export function MessagesChat() {
         try {
           const { url } = await uploadAudioFile(file, ext);
           await sendDirectMessage(token, peerUserId, buildDmVoiceMessage({ url, durationMs }));
-          await reload();
+          await reload({ silent: true });
         } catch {
           window.alert("Failed to send voice message.");
         } finally {
@@ -353,24 +391,32 @@ export function MessagesChat() {
     }
   };
 
-  const reactToMessage = async (item: DirectMessageItem, emoji: string) => {
+  const reactToMessage = async (item: DirectMessageItem, emoji: string, reactions: MessageReaction[] = []) => {
     if (!token) return;
+    const mine = ownReactionOn(reactions, user?.id);
     try {
+      if (mine && mine.emoji === emoji) {
+        setMessages((prev) => prev.filter((row) => row.id !== mine.id));
+        await deleteDirectMessage(token, mine.id);
+        return;
+      }
+      if (mine) {
+        setMessages((prev) => prev.filter((row) => row.id !== mine.id));
+        await deleteDirectMessage(token, mine.id);
+      }
       const result = await sendDirectMessage(
         token,
         peerUserId,
         buildDmReactMessage({ targetId: item.id, emoji })
       );
       if (result.message) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === result.message!.id)) return prev;
-          return [...prev, result.message!];
-        });
+        setMessages((prev) => mergeThreadMessages(prev, [result.message!]));
       } else {
-        await reload();
+        await reload({ silent: true });
       }
     } catch {
-      window.alert("Could not add reaction.");
+      await reload({ silent: true });
+      window.alert("Could not update reaction.");
     }
   };
 
@@ -547,11 +593,23 @@ export function MessagesChat() {
                   <div
                     className={`messages-chat__reactions${isSelf ? " messages-chat__reactions--self" : " messages-chat__reactions--peer"}`}
                   >
-                    {reactions.map((emoji, index) => (
-                      <span key={`${emoji}-${index}`} className="messages-chat__reaction-emoji">
-                        {emoji}
-                      </span>
-                    ))}
+                    {reactions.map((reaction) => {
+                      const mine = Number(reaction.senderId) === Number(user?.id);
+                      return (
+                        <button
+                          key={reaction.id}
+                          type="button"
+                          className={`messages-chat__reaction-emoji${mine ? " messages-chat__reaction-emoji--mine" : ""}`}
+                          title={mine ? "Remove reaction" : "Add this reaction"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void reactToMessage(item, reaction.emoji, reactions);
+                          }}
+                        >
+                          {reaction.emoji}
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
@@ -565,6 +623,12 @@ export function MessagesChat() {
         timestampLabel={
           actionMessage ? formatActionSheetTimestamp(new Date(actionMessage.createdAt).getTime()) : undefined
         }
+        activeEmoji={
+          ownReactionOn(
+            threadMessages.find((row) => row.message.id === actionMessage?.id)?.reactions || [],
+            user?.id
+          )?.emoji
+        }
         onClose={() => setActionMessage(null)}
         onReply={() => {
           if (actionMessage) startReplyToMessage(actionMessage);
@@ -576,7 +640,10 @@ export function MessagesChat() {
           if (actionMessage) setForwardBody(actionMessage.body);
         }}
         onReact={(emoji) => {
-          if (actionMessage) void reactToMessage(actionMessage, emoji);
+          if (!actionMessage) return;
+          const reactions =
+            threadMessages.find((row) => row.message.id === actionMessage.id)?.reactions || [];
+          void reactToMessage(actionMessage, emoji, reactions);
         }}
       />
 

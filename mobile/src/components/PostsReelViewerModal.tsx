@@ -969,6 +969,14 @@ export function PostsReelViewerModal({
         top: statusSafeTop,
         bottom: 0
       };
+      const overlayTouchReserve = Math.max(176, insets.bottom + 156);
+      const mediaTapStyle = {
+        position: "absolute" as const,
+        left: 0,
+        right: 0,
+        top: statusSafeTop,
+        bottom: overlayTouchReserve
+      };
 
       return (
         <View style={[styles.reelPage, { height: pageH, width: reelContentWidth, backgroundColor: "#000" }]}>
@@ -976,47 +984,57 @@ export function PostsReelViewerModal({
             <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: statusSafeTop, backgroundColor: "#000" }} />
           ) : null}
           {post.videoUrl ? (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              {mountVideo ? (
-                <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-                  <ContainedAppVideo
-                    ref={(r) => {
-                      reelVideoHandlesRef.current[post.id] = r;
-                    }}
-                    uri={post.videoUrl}
-                    hlsUrl={post.hlsUrl}
-                    playbackUrl={post.playbackUrl}
-                    shouldPlay={shouldPlayVideo}
-                    preloadOnly={!isActiveVideo}
-                    playbackKey={`rv-${viewerSession}-${post.id}-s`}
-                    containerWidth={reelContentWidth}
-                    containerHeight={mediaContentH}
-                    fit="cover"
-                    posterUri={reelPoster || undefined}
-                    isLooping
-                    isMuted={isReelMuted || !isActiveVideo}
-                    onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
-                  />
-                </View>
-              ) : reelPoster ? (
-                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
-              ) : (
-                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
-              )}
-              {reelUserPaused && isActiveVideo ? (
-                <View style={styles.reelPauseOverlay} pointerEvents="none">
-                  <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
-                  <Ionicons name="play" size={48} color="#fff" />
-                </View>
-              ) : null}
-            </Pressable>
+            <>
+              <View style={mediaFrameStyle} pointerEvents="none">
+                {mountVideo ? (
+                  <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+                    <ContainedAppVideo
+                      ref={(r) => {
+                        reelVideoHandlesRef.current[post.id] = r;
+                      }}
+                      uri={post.videoUrl}
+                      hlsUrl={post.hlsUrl}
+                      playbackUrl={post.playbackUrl}
+                      shouldPlay={shouldPlayVideo}
+                      preloadOnly={!isActiveVideo}
+                      playbackKey={`rv-${viewerSession}-${post.id}-s`}
+                      containerWidth={reelContentWidth}
+                      containerHeight={mediaContentH}
+                      fit="cover"
+                      posterUri={reelPoster || undefined}
+                      isLooping
+                      isMuted={isReelMuted || !isActiveVideo}
+                      onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
+                    />
+                  </View>
+                ) : reelPoster ? (
+                  <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+                )}
+                {reelUserPaused && isActiveVideo ? (
+                  <View style={styles.reelPauseOverlay} pointerEvents="none">
+                    <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
+                    <Ionicons name="play" size={48} color="#fff" />
+                  </View>
+                ) : null}
+              </View>
+              <Pressable style={mediaTapStyle} onPress={() => onReelSurfaceTap(post)} />
+            </>
           ) : isCarousel ? (
             <ScrollView
               horizontal
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={{ width: reelContentWidth, height: mediaContentH, position: "absolute", left: 0, right: 0, top: 0, bottom: 0 }}
+              style={{
+                width: reelContentWidth,
+                height: Math.max(1, mediaContentH - overlayTouchReserve),
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: statusSafeTop
+              }}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -1037,13 +1055,19 @@ export function PostsReelViewerModal({
               ))}
             </ScrollView>
           ) : reelPoster ? (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
-            </Pressable>
+            <>
+              <View style={mediaFrameStyle} pointerEvents="none">
+                <Image source={{ uri: reelPoster }} style={styles.reelVideoFull} resizeMode="cover" />
+              </View>
+              <Pressable style={mediaTapStyle} onPress={() => onReelSurfaceTap(post)} />
+            </>
           ) : (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
-            </Pressable>
+            <>
+              <View style={mediaFrameStyle} pointerEvents="none">
+                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+              </View>
+              <Pressable style={mediaTapStyle} onPress={() => onReelSurfaceTap(post)} />
+            </>
           )}
           {isCarousel ? (
             <View style={[styles.carouselDotsWrap, { bottom: Math.max(reelBottomInset + 92, 112) }]} pointerEvents="none">
@@ -1094,7 +1118,13 @@ export function PostsReelViewerModal({
                     onPressFallback={() => openPostAuthorProfile(post)}
                     accessibilityLabel={reelDisplayName}
                   />
-                  <Pressable onPress={() => openPostAuthorProfile(post)} accessibilityRole="button">
+                  <Pressable
+                    onPress={() => openPostAuthorProfile(post)}
+                    hitSlop={12}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${reelDisplayName} profile`}
+                    style={styles.reelUserNamePress}
+                  >
                     <Text style={styles.reelUserName} numberOfLines={1}>
                       {reelDisplayName}
                     </Text>
@@ -1531,7 +1561,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 2,
+    zIndex: 20,
+    elevation: 20,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
@@ -1545,6 +1576,7 @@ const styles = StyleSheet.create({
   reelAuthorTap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1, minWidth: 0 },
   reelAvatarCircle: { borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", borderRadius: 22, overflow: "hidden" },
   reelUserName: { flex: 1, minWidth: 0, color: "#C9FF35", fontWeight: "800", fontSize: 16 },
+  reelUserNamePress: { flex: 1, minWidth: 44, minHeight: 44, justifyContent: "center" },
   reelMusicRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
   reelMusicText: { color: "rgba(255,255,255,0.95)", fontSize: 13, fontWeight: "600", flex: 1 },
   reelCaptionDark: { color: "rgba(255,255,255,0.96)", fontSize: 14, fontWeight: "600", marginTop: 10, lineHeight: 20 },

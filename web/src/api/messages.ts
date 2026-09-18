@@ -54,6 +54,12 @@ export async function sendDirectMessage(token: string, peerUserId: number, text:
   )) as { message: DirectMessageItem };
 }
 
+export async function deleteDirectMessage(token: string, messageId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/${encodeURIComponent(String(messageId))}`, token, {
+    method: "DELETE"
+  })) as { ok: boolean; messageId: number };
+}
+
 export async function ringDirectCall(
   token: string,
   payload: { peerUserId: number; mode: "voice" | "video" }

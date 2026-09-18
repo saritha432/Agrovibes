@@ -212,10 +212,19 @@
   pointer-events: none;
 }
 
-.reel-slide__meta strong {
+.reel-slide__meta strong,
+.reel-slide__author {
   display: block;
   font-size: 15px;
   font-weight: 800;
+  color: inherit;
+  text-decoration: none;
+  width: fit-content;
+  pointer-events: auto;
+}
+
+.reel-slide__author:hover {
+  text-decoration: underline;
 }
 
 .reel-slide__music {

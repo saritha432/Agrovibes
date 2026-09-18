@@ -68,6 +68,14 @@ export async function likeHomeStory(token: string, storyId: number) {
   )) as { ok: boolean; liked: boolean };
 }
 
+export async function deleteHomeStory(token: string, storyId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}`,
+    token,
+    { method: "DELETE" }
+  )) as { ok: boolean; deleted?: boolean; storyId?: number };
+}
+
 export async function fetchHomePostsPage(
   token?: string | null,
   options?: { limit?: number; cursor?: number | null }

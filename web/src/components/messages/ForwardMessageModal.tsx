@@ -17,11 +17,22 @@ type Props = {
   messageBody: string;
   excludeUserId?: number;
   title?: string;
+  extraActionLabel?: string;
+  onExtraAction?: () => void | Promise<void>;
   onClose: () => void;
   onSent?: () => void;
 };
 
-export function ForwardMessageModal({ visible, messageBody, excludeUserId, title = "Forward", onClose, onSent }: Props) {
+export function ForwardMessageModal({
+  visible,
+  messageBody,
+  excludeUserId,
+  title = "Forward",
+  extraActionLabel,
+  onExtraAction,
+  onClose,
+  onSent
+}: Props) {
   const { token, user } = useAuth();
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -111,6 +122,16 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, title
         </div>
 
         {error ? <p className="forward-modal__error">{error}</p> : null}
+
+        {extraActionLabel && onExtraAction ? (
+          <button
+            type="button"
+            className="forward-modal__extra"
+            onClick={() => void onExtraAction()}
+          >
+            {extraActionLabel}
+          </button>
+        ) : null}
 
         {loading ? (
           <p className="forward-modal__status">Loading…</p>

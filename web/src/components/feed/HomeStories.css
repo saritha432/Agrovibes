@@ -116,6 +116,8 @@
   gap: 10px;
   padding: 12px 14px;
   color: #fff;
+  position: relative;
+  z-index: 3;
 }
 
 .story-viewer__user {
@@ -132,6 +134,23 @@
   line-height: 1;
   cursor: pointer;
   padding: 0 4px;
+}
+
+.story-viewer__delete {
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+
+.story-viewer__delete:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .story-viewer__media {

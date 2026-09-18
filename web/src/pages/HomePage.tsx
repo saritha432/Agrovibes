@@ -51,6 +51,7 @@ export function HomePage() {
         viewerAvatarUrl={user?.avatarUrl}
         viewerId={user?.id ?? null}
         token={token}
+        onStoryDeleted={(storyId) => setStories((prev) => prev.filter((story) => story.id !== storyId))}
       />
 
       {loading ? <p className="home-page__status">Loading feed…</p> : null}

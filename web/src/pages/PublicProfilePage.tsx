@@ -1,27 +1,34 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { useEffect, useRef } from "react";
 import { getWebAppOrigin } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { openProfileInApp, pickStoreUrl } from "../utils/appDeepLink";
+import { webProfilePath } from "../utils/profilePath";
 import "./ReelWatchPage.css";
 
 export function PublicProfilePage() {
   const { userIdOrHandle } = useParams();
+  const { token, user, loading } = useAuth();
   const segment = String(userIdOrHandle || "").trim();
   const numericId = Number(segment);
   const userKey = Number.isFinite(numericId) && numericId > 0 ? numericId : segment;
+  const inAppPath = token ? webProfilePath(numericId, user?.id) : null;
   const webOrigin = getWebAppOrigin();
   const triedAppOpenRef = useRef(false);
-  const appLink = userKey
-    ? `agrovibes://profile/${encodeURIComponent(String(userKey))}`
-    : "";
+  const appLink = userKey ? `agrovibes://profile/${encodeURIComponent(String(userKey))}` : "";
 
   useEffect(() => {
+    if (loading || inAppPath) return;
     if (!userKey || triedAppOpenRef.current) return;
     const params = new URLSearchParams(window.location.search || "");
     if (params.get("web") === "1") return;
     triedAppOpenRef.current = true;
     openProfileInApp(userKey, webOrigin);
-  }, [userKey, webOrigin]);
+  }, [inAppPath, loading, userKey, webOrigin]);
+
+  if (!loading && inAppPath) {
+    return <Navigate to={inAppPath} replace />;
+  }
 
   return (
     <div className="reel-watch">

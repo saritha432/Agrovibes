@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
+import { addPostToStory } from "../../api/posts";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ForwardMessageModal } from "../messages/ForwardMessageModal";
 import { dropCaption, dropMusicLabel, isDropPost, postShowsMusicRow } from "../../utils/feedOrder";
 import { buildPostChatMessage } from "../../utils/postShare";
 import { ProfileReelViewer } from "../profile/ProfileReelViewer";
+import { webProfilePath } from "../../utils/profilePath";
 import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
@@ -31,7 +34,7 @@ type Props = {
 };
 
 export function PostCard({ post, reelPosts = [] }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
   const reelTapTimeoutRef = useRef<number | null>(null);
@@ -58,6 +61,7 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   const showMusic = postShowsMusicRow(post) && !!musicLabel;
   const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
   const likeColor = liked ? "#c9ff35" : "currentColor";
+  const authorProfilePath = webProfilePath(post.userId, user?.id);
 
   const reelList = reelPosts.length ? reelPosts : reel && videoSrc ? [post] : [];
   const reelIndex = reelList.findIndex((p) => p.id === post.id);
@@ -216,17 +220,35 @@ export function PostCard({ post, reelPosts = [] }: Props) {
   return (
     <article className={`post-card${reel ? " post-card--reel" : ""}`}>
       <header className="post-card__head">
-        <span className="post-card__avatar">
-          {post.authorAvatarUrl ? (
-            <img src={post.authorAvatarUrl} alt="" />
-          ) : (
-            post.userName.charAt(0).toUpperCase()
-          )}
-        </span>
-        <div className="post-card__meta">
-          <strong>{post.userName}</strong>
-          {post.location && post.location.trim().toLowerCase() !== "unknown" ? <span>{post.location}</span> : null}
-        </div>
+        {authorProfilePath ? (
+          <Link to={authorProfilePath} className="post-card__author">
+            <span className="post-card__avatar">
+              {post.authorAvatarUrl ? (
+                <img src={post.authorAvatarUrl} alt="" />
+              ) : (
+                post.userName.charAt(0).toUpperCase()
+              )}
+            </span>
+            <div className="post-card__meta">
+              <strong>{post.userName}</strong>
+              {post.location && post.location.trim().toLowerCase() !== "unknown" ? <span>{post.location}</span> : null}
+            </div>
+          </Link>
+        ) : (
+          <>
+            <span className="post-card__avatar">
+              {post.authorAvatarUrl ? (
+                <img src={post.authorAvatarUrl} alt="" />
+              ) : (
+                post.userName.charAt(0).toUpperCase()
+              )}
+            </span>
+            <div className="post-card__meta">
+              <strong>{post.userName}</strong>
+              {post.location && post.location.trim().toLowerCase() !== "unknown" ? <span>{post.location}</span> : null}
+            </div>
+          </>
+        )}
       </header>
 
       <div
@@ -330,7 +352,14 @@ export function PostCard({ post, reelPosts = [] }: Props) {
 
       {caption ? (
         <p className="post-card__caption">
-          <strong>{post.userName}</strong> {caption}
+          {authorProfilePath ? (
+            <Link to={authorProfilePath} className="post-card__caption-user">
+              {post.userName}
+            </Link>
+          ) : (
+            <strong>{post.userName}</strong>
+          )}{" "}
+          {caption}
         </p>
       ) : null}
 
@@ -364,6 +393,25 @@ export function PostCard({ post, reelPosts = [] }: Props) {
           visible={shareOpen}
           title="Share"
           messageBody={buildPostChatMessage(post)}
+          extraActionLabel={isReel(post) ? "Add to story" : undefined}
+          onExtraAction={
+            isReel(post)
+              ? async () => {
+                  if (!token) {
+                    window.alert("Log in to add this drop to your story.");
+                    return;
+                  }
+                  try {
+                    await addPostToStory(post, token, user);
+                    setShareOpen(false);
+                    window.dispatchEvent(new Event("cropvibe:feed-refresh"));
+                    window.alert("Added to your story.");
+                  } catch (err) {
+                    window.alert(err instanceof Error ? err.message : "Could not add to story.");
+                  }
+                }
+              : undefined
+          }
           onClose={() => setShareOpen(false)}
           onSent={() => window.alert("Sent.")}
         />

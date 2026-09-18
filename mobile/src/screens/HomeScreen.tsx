@@ -1198,11 +1198,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       const isOwn =
         (postUserId > 0 && postUserId === Number(user?.id)) ||
         (!postUserId && normalizedPostName.length > 0 && normalizedPostName === normalizedCurrentUserName);
-      setReelImmersiveMode(false);
       setReelModalViewer(null);
       clearReturnToNotifications();
       requestCloseNotificationSheet();
       if (isOwn) {
+        setReelImmersiveMode(false);
         navigateToMyProfile();
         return;
       }
@@ -4287,6 +4287,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         statusSafeTop > 0
           ? ({ position: "absolute" as const, left: 0, right: 0, top: statusSafeTop, bottom: 0 } as const)
           : StyleSheet.absoluteFillObject;
+      // Keep play/pause taps off the author row so native video cannot steal username presses.
+      const overlayTouchReserve = Math.max(176, insets.bottom + 156);
+      const mediaTapStyle =
+        statusSafeTop > 0
+          ? ({ position: "absolute" as const, left: 0, right: 0, top: statusSafeTop, bottom: overlayTouchReserve } as const)
+          : ({ ...StyleSheet.absoluteFillObject, bottom: overlayTouchReserve } as const);
       const immersiveVideoFit = reelImmersiveMode ? "cover" : "auto";
 
       return (
@@ -4295,57 +4301,63 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             <View style={{ position: "absolute", left: 0, right: 0, top: 0, height: statusSafeTop, backgroundColor: "#000" }} />
           ) : null}
           {post.videoUrl ? (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              {mountVideo ? (
-                <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-                  <ContainedAppVideo
-                    ref={(r) => {
-                      reelVideoHandlesRef.current[post.id] = r;
-                    }}
-                    uri={post.videoUrl}
-                    hlsUrl={post.hlsUrl}
-                    playbackUrl={post.playbackUrl}
-                    posterUri={reelPoster || undefined}
-                    playbackKey={`feed-${post.id}-r${feedResumeToken}`}
-                    shouldPlay={shouldPlayReel}
-                    preloadOnly={!isActiveVideo}
-                    resumePositionMillis={isActiveVideo ? Number(getReelProgress(post.id)?.position || 0) : 0}
-                    containerWidth={reelContentWidth}
-                    containerHeight={mediaContentH}
-                    fit={immersiveVideoFit}
-                    isLooping
-                    isMuted={isReelMuted || separateMusicPlaying || !isActiveVideo}
-                    useNativeControls={false}
-                    onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
+            <>
+              <View style={mediaFrameStyle} pointerEvents="none">
+                {mountVideo ? (
+                  <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+                    <ContainedAppVideo
+                      ref={(r) => {
+                        reelVideoHandlesRef.current[post.id] = r;
+                      }}
+                      uri={post.videoUrl}
+                      hlsUrl={post.hlsUrl}
+                      playbackUrl={post.playbackUrl}
+                      posterUri={reelPoster || undefined}
+                      playbackKey={`feed-${post.id}-r${feedResumeToken}`}
+                      shouldPlay={shouldPlayReel}
+                      preloadOnly={!isActiveVideo}
+                      resumePositionMillis={isActiveVideo ? Number(getReelProgress(post.id)?.position || 0) : 0}
+                      containerWidth={reelContentWidth}
+                      containerHeight={mediaContentH}
+                      fit={immersiveVideoFit}
+                      isLooping
+                      isMuted={isReelMuted || separateMusicPlaying || !isActiveVideo}
+                      useNativeControls={false}
+                      onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
+                    />
+                  </View>
+                ) : reelPoster ? (
+                  <FeedImage
+                    source={{ uri: reelPoster }}
+                    style={styles.reelVideoFull}
+                    contentFit="cover"
+                    recyclingKey={reelPoster}
                   />
-                </View>
-              ) : reelPoster ? (
-                <FeedImage
-                  source={{ uri: reelPoster }}
-                  style={styles.reelVideoFull}
-                  contentFit="cover"
-                  recyclingKey={reelPoster}
-                />
-              ) : (
-                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
-              )}
-              {reelUserPaused && isActiveVideo ? (
-                <View style={styles.reelPauseOverlay} pointerEvents="none">
-                  <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
-                  <Ionicons name="play" size={48} color="#fff" />
-                </View>
-              ) : null}
-            </Pressable>
+                ) : (
+                  <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+                )}
+                {reelUserPaused && isActiveVideo ? (
+                  <View style={styles.reelPauseOverlay} pointerEvents="none">
+                    <Ionicons name="volume-mute" size={24} color="#fff" style={styles.reelPauseMuteIcon} />
+                    <Ionicons name="play" size={48} color="#fff" />
+                  </View>
+                ) : null}
+              </View>
+              <Pressable style={mediaTapStyle} onPress={() => onReelSurfaceTap(post)} />
+            </>
           ) : isCarousel ? (
             <ScrollView
               horizontal
               pagingEnabled
               nestedScrollEnabled
               showsHorizontalScrollIndicator={false}
-              style={[
-                { width: reelContentWidth, height: mediaContentH },
-                { height: pageH }
-              ]}
+              style={{
+                width: reelContentWidth,
+                height: Math.max(1, mediaContentH - overlayTouchReserve),
+                position: "absolute",
+                left: 0,
+                top: statusSafeTop
+              }}
               contentContainerStyle={{ width: reelContentWidth * gallery.length }}
               onScroll={(e) => {
                 const w = e.nativeEvent.layoutMeasurement.width || reelContentWidth;
@@ -4370,7 +4382,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   key={`reel-carousel-${post.id}-${i}-${uri.slice(-24)}`}
                   style={{
                     width: reelContentWidth,
-                    height: mediaContentH,
+                    height: Math.max(1, mediaContentH - overlayTouchReserve),
                     backgroundColor: "#000",
                     alignItems: "center",
                     justifyContent: "center"
@@ -4379,7 +4391,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 >
                   <FeedImage
                     source={{ uri }}
-                    style={{ width: reelContentWidth, height: mediaContentH }}
+                    style={{ width: reelContentWidth, height: Math.max(1, mediaContentH - overlayTouchReserve) }}
                     contentFit="cover"
                     recyclingKey={uri}
                   />
@@ -4387,18 +4399,24 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               ))}
             </ScrollView>
           ) : reelPoster ? (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <FeedImage
-                source={{ uri: reelPoster }}
-                style={styles.reelVideoFull}
-                contentFit="cover"
-                recyclingKey={reelPoster}
-              />
-            </Pressable>
+            <>
+              <View style={mediaFrameStyle} pointerEvents="none">
+                <FeedImage
+                  source={{ uri: reelPoster }}
+                  style={styles.reelVideoFull}
+                  contentFit="cover"
+                  recyclingKey={reelPoster}
+                />
+              </View>
+              <Pressable style={mediaTapStyle} onPress={() => onReelSurfaceTap(post)} />
+            </>
           ) : (
-            <Pressable style={mediaFrameStyle} onPress={() => onReelSurfaceTap(post)}>
-              <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
-            </Pressable>
+            <>
+              <View style={mediaFrameStyle} pointerEvents="none">
+                <View style={[styles.reelVideoFull, { backgroundColor: "#000" }]} />
+              </View>
+              <Pressable style={mediaTapStyle} onPress={() => onReelSurfaceTap(post)} />
+            </>
           )}
           {isCarousel ? (
             <View style={[styles.postCarouselDots, styles.reelCarouselDots]} pointerEvents="none">
@@ -4473,7 +4491,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 <Pressable
                   style={styles.reelUserNamePress}
                   onPress={() => openPostAuthorProfile(post)}
+                  hitSlop={12}
                   accessibilityRole="button"
+                  accessibilityLabel={`${reelDisplayName} profile`}
                 >
                   <Text style={styles.reelUserName} numberOfLines={1} ellipsizeMode="tail">
                     {reelDisplayName}
@@ -4729,8 +4749,14 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 initialsColor="#fff"
                 onPressFallback={() => openPostAuthorProfile(post)}
               />
-              <Pressable onPress={() => openPostAuthorProfile(post)}>
-                <Text style={styles.userName}>
+              <Pressable
+                style={styles.postUserNamePress}
+                onPress={() => openPostAuthorProfile(post)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={`${feedDisplayName} profile`}
+              >
+                <Text style={styles.userName} numberOfLines={1}>
                   {feedDisplayName} <Text style={styles.timeText}>• 13h</Text>
                 </Text>
               </Pressable>
@@ -4902,7 +4928,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
           ) : null}
           <Text style={styles.caption}>
-            <Text style={styles.captionUser}>{feedDisplayName}</Text>
+            <Text style={styles.captionUser} onPress={() => openPostAuthorProfile(post)}>
+              {feedDisplayName}
+            </Text>
             {feedCaption ? ` ${feedCaption}` : ""}
           </Text>
           <Pressable onPress={() => openCommentsForPost(post)}>
@@ -4940,6 +4968,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       t,
       labelForFollowStatus,
       resolveFollowStatus,
+      openPostAuthorProfile,
+      openReposterProfile,
       user?.avatarUrl,
       user?.fullName,
       user?.id
@@ -5626,9 +5656,29 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                           />
                           <View style={styles.commentMainCol}>
                             <View style={styles.commentHeaderRow}>
-                              <Text style={styles.commentUserName} numberOfLines={1}>
-                                {c.user}
-                              </Text>
+                              <Pressable
+                                onPress={() => {
+                                  const commentUserId = Number(c.userId);
+                                  const isOwn =
+                                    (commentUserId > 0 && commentUserId === Number(user?.id)) ||
+                                    normalizeIdentity(c.user) === normalizeIdentity(user?.fullName || "");
+                                  if (isOwn) {
+                                    navigateToMyProfile();
+                                    return;
+                                  }
+                                  navigateToPublicProfile({
+                                    userId: commentUserId > 0 ? commentUserId : undefined,
+                                    userName: resolvePersonDisplayName({ fullName: c.user, fallback: c.user }),
+                                    avatarUrl: c.avatarUrl ?? null
+                                  });
+                                }}
+                                hitSlop={6}
+                                accessibilityRole="button"
+                              >
+                                <Text style={styles.commentUserName} numberOfLines={1}>
+                                  {c.user}
+                                </Text>
+                              </Pressable>
                               {rel ? <Text style={styles.commentTime}>{rel}</Text> : null}
                       </View>
                             <Text style={styles.commentBodyText}>{displayFeedCopy(c.text)}</Text>
@@ -5967,7 +6017,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 2,
+    zIndex: 20,
+    elevation: 20,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
@@ -5993,7 +6044,9 @@ const styles = StyleSheet.create({
   reelUserNamePress: {
     flex: 1,
     flexShrink: 1,
-    minWidth: 0
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: "center"
   },
   reelAvatarCircle: {
     borderWidth: 1,
@@ -6312,7 +6365,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4
   },
   followChipText: { color: APP_LIME, fontWeight: "800", fontSize: 12 },
-  postUserRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  postUserRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0, marginRight: 8 },
+  postUserNamePress: { flex: 1, minWidth: 0, minHeight: 36, justifyContent: "center" },
   userAvatar: {
     width: 34,
     height: 34,

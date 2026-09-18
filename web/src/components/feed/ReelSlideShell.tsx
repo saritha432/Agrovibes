@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
+import { addPostToStory } from "../../api/posts";
 import type { HomePost } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ForwardMessageModal } from "../messages/ForwardMessageModal";
 import { dropCaption, dropMusicLabel, postShowsMusicRow } from "../../utils/feedOrder";
 import { buildPostChatMessage } from "../../utils/postShare";
+import { webProfilePath } from "../../utils/profilePath";
 import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
@@ -29,7 +32,7 @@ export function ReelSlideShell({
   initialCommentsOpen = false,
   onCommentsOpenChange
 }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const tapTimeoutRef = useRef<number | null>(null);
   const lastTapRef = useRef(0);
@@ -46,11 +49,13 @@ export function ReelSlideShell({
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [likesOpen, setLikesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [storyBusy, setStoryBusy] = useState(false);
 
   const poster = post.thumbnailUrl || post.imageUrl || post.imageUrls?.[0] || undefined;
   const caption = dropCaption(post.caption);
   const musicLabel = dropMusicLabel(post);
   const showMusic = postShowsMusicRow(post) && !!musicLabel;
+  const authorProfilePath = webProfilePath(post.userId, user?.id);
 
   useEffect(() => {
     setLiked(!!post.viewerHasLiked);
@@ -107,6 +112,26 @@ export function ReelSlideShell({
       // ignore
     } finally {
       setLikeBusy(false);
+    }
+  };
+
+  const addToStory = async () => {
+    if (!token) {
+      window.alert("Log in to add this drop to your story.");
+      return;
+    }
+    if (storyBusy) return;
+    setStoryBusy(true);
+    try {
+      await addPostToStory(post, token, user);
+      setOptionsOpen(false);
+      setShareOpen(false);
+      window.dispatchEvent(new Event("cropvibe:feed-refresh"));
+      window.alert("Added to your story.");
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Could not add to story.");
+    } finally {
+      setStoryBusy(false);
     }
   };
 
@@ -237,7 +262,13 @@ export function ReelSlideShell({
         ) : null}
 
         <div className="reel-slide__meta">
-          <strong>{post.userName}</strong>
+          {authorProfilePath ? (
+            <Link to={authorProfilePath} className="reel-slide__author">
+              {post.userName}
+            </Link>
+          ) : (
+            <strong>{post.userName}</strong>
+          )}
           {showMusic ? (
             <p className="reel-slide__music">
               <span className="reel-slide__music-icon" aria-hidden>
@@ -267,6 +298,8 @@ export function ReelSlideShell({
           visible={shareOpen}
           title="Share drop"
           messageBody={buildPostChatMessage(post)}
+          extraActionLabel="Add to story"
+          onExtraAction={() => void addToStory()}
           onClose={() => setShareOpen(false)}
           onSent={() => window.alert("Sent.")}
         />
@@ -285,6 +318,9 @@ export function ReelSlideShell({
         <div className="reel-slide__options" role="dialog" aria-modal="true" aria-label="Reel options">
           <button className="reel-slide__options-backdrop" type="button" onClick={() => setOptionsOpen(false)} />
           <div className="reel-slide__options-sheet">
+            <button type="button" onClick={() => void addToStory()} disabled={!token || storyBusy}>
+              {storyBusy ? "Adding…" : "Add to story"}
+            </button>
             <button type="button" onClick={() => void toggleSave()} disabled={!token || saveBusy}>
               {saved ? "Remove from saved" : "Save"}
             </button>
