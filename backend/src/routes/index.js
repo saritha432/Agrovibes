@@ -8144,6 +8144,7 @@ router.get("/v1/home/posts/repost-feed", authRequired, async (req, res) => {
             )
           )
       )
+      AND p.deleted_at IS NULL
       ${hidePrivateAccountPostsClause}
       ORDER BY hpr.created_at DESC
       LIMIT $2

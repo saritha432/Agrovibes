@@ -38,6 +38,7 @@ import {
 import { reelGridTileBackground } from "../utils/reelGrid";
 import { hydrateReelPreviews } from "../utils/reelPreviewThumb";
 import { getLocalFollowNetworkByIdentity } from "../social/localFollowStore";
+import { subscribePostDeleted } from "../navigation/postDeletedBridge";
 import { APP_LIME } from "../theme/appColors";
 
 const EXPLORE_POSTS_LIMIT = 24;
@@ -285,6 +286,23 @@ export function UserSearchScreen() {
     enabled: !exploreViewer && !showTypeahead && explorePosts.length > 0,
     intervalMs: 8000
   });
+
+  useEffect(() => {
+    return subscribePostDeleted((postId) => {
+      const id = Number(postId);
+      if (!Number.isFinite(id) || id <= 0) return;
+      setExplorePosts((prev) => prev.filter((p) => Number(p.id) !== id));
+      setExploreViewer((viewer) => {
+        if (!viewer) return viewer;
+        const nextPosts = viewer.posts.filter((p) => Number(p.id) !== id);
+        if (!nextPosts.length) return null;
+        return {
+          posts: nextPosts,
+          initialIndex: Math.min(viewer.initialIndex, nextPosts.length - 1)
+        };
+      });
+    });
+  }, []);
 
   const gridTileSize = (width - GRID_GAP * 2) / GRID_COLUMNS;
   const reelTileHeight = Math.round(gridTileSize * (16 / 9));

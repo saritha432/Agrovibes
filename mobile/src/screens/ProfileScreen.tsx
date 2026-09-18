@@ -67,7 +67,8 @@ import {
   sendLocalFollowRequestByIdentity
 } from "../social/localFollowStore";
 import { clearProfilePostsCache, readProfilePostsCache, writeProfilePostsCache } from "../social/profilePostsCache";
-import { clearHomeFeedCache } from "../social/homeFeedCache";
+import { clearHomeFeedCache, removePostFromHomeFeedCache } from "../social/homeFeedCache";
+import { emitPostDeleted, subscribePostDeleted } from "../navigation/postDeletedBridge";
 import {
   forgetBlockedUser,
   isUserBlocked,
@@ -816,6 +817,51 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
     };
   }, [previewHydrationKey, visiblePosts]);
 
+  useEffect(() => {
+    return subscribePostDeleted((postId) => {
+      const id = Number(postId);
+      if (!Number.isFinite(id) || id <= 0) return;
+      const drop = (prev: HomePost[]) => prev.filter((p) => Number(p.id) !== id);
+      setUserPosts((prev) => {
+        const next = drop(prev);
+        if (user?.id) {
+          writeProfilePostsCache({ userId: Number(user.id), userPosts: next, fetchedAt: Date.now() });
+        }
+        return next;
+      });
+      setResharedPosts((prev) => {
+        const next = drop(prev);
+        if (user?.id) {
+          writeProfilePostsCache({ userId: Number(user.id), resharedPosts: next, fetchedAt: Date.now() });
+        }
+        return next;
+      });
+      setSavedPosts((prev) => {
+        const next = drop(prev);
+        if (user?.id) {
+          writeProfilePostsCache({ userId: Number(user.id), savedPosts: next, fetchedAt: Date.now() });
+        }
+        return next;
+      });
+      setTaggedPosts((prev) => {
+        const next = drop(prev);
+        if (user?.id) {
+          writeProfilePostsCache({ userId: Number(user.id), taggedPosts: next, fetchedAt: Date.now() });
+        }
+        return next;
+      });
+      setProfileReelViewer((v) => {
+        if (!v) return v;
+        const nextPosts = v.posts.filter((p) => Number(p.id) !== id);
+        if (!nextPosts.length) return null;
+        return {
+          posts: nextPosts,
+          initialIndex: Math.min(v.initialIndex, nextPosts.length - 1)
+        };
+      });
+    });
+  }, [user?.id]);
+
   const canDeleteFromProfileGallery =
     !isPublicProfileView && (activeGalleryTab === "Posts" || activeGalleryTab === "Reels");
 
@@ -870,7 +916,15 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       const runDelete = async () => {
         try {
           await deleteHomePost(token, post.id);
-          setUserPosts((prev) => prev.filter((p) => p.id !== post.id));
+          setUserPosts((prev) => {
+            const next = prev.filter((p) => p.id !== post.id);
+            if (user?.id) {
+              writeProfilePostsCache({ userId: Number(user.id), userPosts: next, fetchedAt: Date.now() });
+            }
+            return next;
+          });
+          emitPostDeleted(post.id);
+          void removePostFromHomeFeedCache(post.id, user?.id);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : "Could not delete this post.";
           if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -894,7 +948,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         { text: t("deleteConfirm"), style: "destructive", onPress: () => void runDelete() }
       ]);
     },
-    [canDeleteFromProfileGallery, t, token]
+    [canDeleteFromProfileGallery, t, token, user?.id]
   );
 
   const renderProfileGridItem = useCallback(

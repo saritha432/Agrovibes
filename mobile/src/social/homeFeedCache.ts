@@ -37,7 +37,10 @@ export async function clearHomeFeedCache(viewerKey?: string | number | null): Pr
 }
 
 export async function writeHomeFeedCache(posts: HomePost[], viewerKey?: string | number | null): Promise<void> {
-  if (!posts.length) return;
+  if (!posts.length) {
+    await clearHomeFeedCache(viewerKey);
+    return;
+  }
   try {
     const envelope: CacheEnvelope = {
       posts: posts.slice(0, MAX_CACHED),
@@ -47,6 +50,20 @@ export async function writeHomeFeedCache(posts: HomePost[], viewerKey?: string |
   } catch {
     // ignore disk errors
   }
+}
+
+/** Drop a deleted post from the persisted home feed so it cannot resurface on next launch. */
+export async function removePostFromHomeFeedCache(
+  postId: number,
+  viewerKey?: string | number | null
+): Promise<void> {
+  const id = Number(postId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const cached = await readHomeFeedCache(viewerKey);
+  if (!cached?.length) return;
+  const next = cached.filter((p) => Number(p.id) !== id);
+  if (next.length === cached.length) return;
+  await writeHomeFeedCache(next, viewerKey);
 }
 
 function sortHomeFeedPosts(posts: HomePost[]): HomePost[] {

@@ -40,7 +40,8 @@ import { PostRepostSheet } from "./PostRepostSheet";
 import { RepostAttribution } from "./RepostAttribution";
 import { LiveReelSeekBar } from "./LiveReelSeekBar";
 import { setReelProgress } from "../utils/reelProgressStore";
-import { shownResharesCount, latestResharersForDisplay } from "../social/homeFeedCache";
+import { shownResharesCount, latestResharersForDisplay, removePostFromHomeFeedCache } from "../social/homeFeedCache";
+import { emitPostDeleted } from "../navigation/postDeletedBridge";
 import { useLanguage } from "../localization/LanguageContext";
 import {
   formatDisplayName,
@@ -792,6 +793,8 @@ export function PostsReelViewerModal({
             }
             return next;
           });
+          emitPostDeleted(post.id);
+          void removePostFromHomeFeedCache(post.id, user?.id);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : "Could not delete this post.";
           if (Platform.OS === "web" && typeof window !== "undefined") window.alert(msg);
