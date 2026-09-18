@@ -19,6 +19,7 @@ import {
   shownCommentsCount
 } from "../../utils/commentUtils";
 import { ReelIcon } from "./ReelIcon";
+import { AppEmojiPicker } from "../ui/AppEmojiPicker";
 import "./CommentPanel.css";
 
 type Props = {
@@ -57,6 +58,7 @@ export function CommentPanel({
   const [replyingTo, setReplyingTo] = useState<{ id: string; user: string } | null>(null);
   const [interactions, setInteractions] = useState<Record<string, CommentInteraction>>({});
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -299,6 +301,14 @@ export function CommentPanel({
                   {emoji}
                 </button>
               ))}
+              <button
+                type="button"
+                className="comment-panel__emoji-more"
+                onClick={() => setEmojiOpen((open) => !open)}
+                aria-label="More emojis"
+              >
+                +
+              </button>
             </div>
             <div className="comment-panel__input-row">
               <span className="comment-panel__composer-avatar">
@@ -325,6 +335,13 @@ export function CommentPanel({
                 Post
               </button>
             </div>
+            <AppEmojiPicker
+              open={emojiOpen}
+              variant="overlay"
+              closeOnSelect={false}
+              onClose={() => setEmojiOpen(false)}
+              onSelect={(emoji) => setDraft((d) => `${d}${emoji}`)}
+            />
           </footer>
         ) : (
           <p className="comment-panel__login-hint">Log in to comment.</p>

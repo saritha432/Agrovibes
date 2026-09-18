@@ -208,6 +208,7 @@
 }
 
 .comment-panel__composer {
+  position: relative;
   border-top: 1px solid #333;
   padding: 10px 16px 12px;
 }
@@ -245,6 +246,18 @@
   cursor: pointer;
   padding: 2px 4px;
   line-height: 1;
+}
+
+.comment-panel__emoji-more {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px !important;
+  background: rgba(201, 255, 53, 0.12) !important;
+  color: #c9ff35;
+  font-size: 18px !important;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
 }
 
 .comment-panel__input-row {

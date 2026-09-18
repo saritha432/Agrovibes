@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
 import { registerPostsReelModalBack } from "../navigation/postsReelModalBridge";
-import { stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
+import { stripLegacyCloudinaryUrl, isVideoMediaUrl } from "../utils/mediaUrls";
 import { UserAvatar } from "./UserAvatar";
 import { ContainedAppVideo, type ContainedAppVideoHandle } from "./ContainedAppVideo";
 import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
@@ -1050,7 +1050,20 @@ export function PostsReelViewerModal({
                   style={{ width: reelContentWidth, height: mediaContentH, backgroundColor: "#000", alignItems: "center", justifyContent: "center" }}
                   onPress={() => onReelSurfaceTap(post)}
                 >
-                  <Image source={{ uri }} style={{ width: reelContentWidth, height: mediaContentH }} resizeMode="cover" />
+                  {isVideoMediaUrl(uri) ? (
+                    <ContainedAppVideo
+                      uri={uri}
+                      shouldPlay={shouldPlayVideo && carouselPage === i}
+                      isMuted
+                      containerWidth={reelContentWidth}
+                      containerHeight={mediaContentH}
+                      fit="cover"
+                      isLooping
+                      useNativeControls={false}
+                    />
+                  ) : (
+                    <Image source={{ uri }} style={{ width: reelContentWidth, height: mediaContentH }} resizeMode="cover" />
+                  )}
                 </Pressable>
               ))}
             </ScrollView>

@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   StyleSheet,
@@ -16,7 +17,7 @@ import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
 import { useAndroidTabBackToHome } from "../../navigation/useAndroidScreenBack";
-import { fetchMessageThreads, type MessageThread } from "../../services/api";
+import { fetchMessageThreads, fetchUsers, type MessageThread, type UserSearchRecord } from "../../services/api";
 import {
   isSocketChatConnected,
   onDirectRead,
@@ -55,6 +56,16 @@ function previewMessage(body: string, t: (key: string) => string) {
   return formatDmInboxPreview(body, t);
 }
 
+type InboxRow =
+  | { key: string; kind: "header"; title: string }
+  | { key: string; kind: "thread"; thread: MessageThread }
+  | {
+      key: string;
+      kind: "person";
+      person: { id: number; name: string; username?: string; avatarUrl?: string | null };
+    }
+  | { key: string; kind: "status"; text: string };
+
 export function DirectInboxScreen() {
   const { t } = useLanguage();
   useAndroidTabBackToHome();
@@ -64,6 +75,8 @@ export function DirectInboxScreen() {
   const isAccountDeactivated = useIsAccountDeactivated();
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
+  const [peopleHits, setPeopleHits] = useState<UserSearchRecord[]>([]);
+  const [searchingPeople, setSearchingPeople] = useState(false);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
   const [composerOpen, setComposerOpen] = useState(false);
 
@@ -147,13 +160,95 @@ export function DirectInboxScreen() {
     });
   }, [load, refreshMessageUnread, syncMessageUnreadFromThreads]);
 
-  const trimmedQuery = query.trim().toLowerCase();
-  const filtered = trimmedQuery
-    ? threads.filter((thread) => {
-        const preview = previewMessage(thread.lastMessage, t).toLowerCase();
-        return thread.peerName.toLowerCase().includes(trimmedQuery) || preview.includes(trimmedQuery);
-      })
-    : threads;
+  const trimmedQuery = query.trim();
+  const needle = trimmedQuery.toLowerCase();
+
+  useEffect(() => {
+    if (!token || needle.length < 1) {
+      setPeopleHits([]);
+      setSearchingPeople(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchingPeople(true);
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetchUsers(token, { search: trimmedQuery, limit: 40 });
+          if (cancelled) return;
+          const me = Number(user?.id);
+          setPeopleHits((res.users || []).filter((row) => Number(row.id) !== me));
+        } catch {
+          if (!cancelled) setPeopleHits([]);
+        } finally {
+          if (!cancelled) setSearchingPeople(false);
+        }
+      })();
+    }, 280);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [needle, token, trimmedQuery, user?.id]);
+
+  const matchingThreads = useMemo(() => {
+    if (!needle) return threads;
+    const hitIds = new Set(peopleHits.map((row) => Number(row.id)));
+    return threads.filter((thread) => {
+      const preview = previewMessage(thread.lastMessage, t).toLowerCase();
+      const name = thread.peerName.toLowerCase();
+      const handle = String(thread.peerUsername || "").toLowerCase();
+      return (
+        name.includes(needle) ||
+        handle.includes(needle) ||
+        preview.includes(needle) ||
+        hitIds.has(Number(thread.peerUserId))
+      );
+    });
+  }, [needle, peopleHits, t, threads]);
+
+  const extraPeople = useMemo(() => {
+    if (!needle) return [];
+    const chatIds = new Set(threads.map((thread) => Number(thread.peerUserId)));
+    return peopleHits.filter((row) => !chatIds.has(Number(row.id)));
+  }, [needle, peopleHits, threads]);
+
+  const inboxRows = useMemo((): InboxRow[] => {
+    if (!needle) {
+      return matchingThreads.map((thread) => ({
+        key: `thread-${thread.peerUserId}`,
+        kind: "thread" as const,
+        thread
+      }));
+    }
+    const rows: InboxRow[] = [];
+    if (matchingThreads.length) {
+      rows.push({ key: "header-chats", kind: "header", title: t("messagesTitle") });
+      for (const thread of matchingThreads) {
+        rows.push({ key: `thread-${thread.peerUserId}`, kind: "thread", thread });
+      }
+    }
+    if (extraPeople.length) {
+      rows.push({ key: "header-people", kind: "header", title: t("suggested") });
+      for (const person of extraPeople) {
+        rows.push({
+          key: `person-${person.id}`,
+          kind: "person",
+          person: {
+            id: person.id,
+            name: person.fullName || person.username || "User",
+            username: person.username || undefined,
+            avatarUrl: person.avatarUrl
+          }
+        });
+      }
+    } else if (searchingPeople) {
+      rows.push({ key: "status-search", kind: "status", text: t("searchPeople") });
+    } else if (!matchingThreads.length) {
+      rows.push({ key: "status-empty", kind: "status", text: t("noUsersFound") });
+    }
+    return rows;
+  }, [extraPeople, matchingThreads, needle, searchingPeople, t]);
 
   const openThread = (thread: MessageThread) => {
     navigateToDirectChat({
@@ -162,6 +257,15 @@ export function DirectInboxScreen() {
       peerKey: thread.peerEmail,
       peerUsername: thread.peerUsername || undefined,
       peerAvatarUrl: thread.peerAvatarUrl
+    });
+  };
+
+  const openPersonChat = (person: { id: number; name: string; username?: string; avatarUrl?: string | null }) => {
+    navigateToDirectChat({
+      peerUserId: person.id,
+      peerName: person.name,
+      peerUsername: person.username,
+      peerAvatarUrl: person.avatarUrl
     });
   };
 
@@ -195,19 +299,24 @@ export function DirectInboxScreen() {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder={t("search")}
+          placeholder={t("searchPeople")}
           placeholderTextColor={MUTED}
           style={styles.searchInput}
           autoCorrect={false}
           autoCapitalize="none"
           editable={!isAccountDeactivated}
         />
+        {query ? (
+          <Pressable hitSlop={8} onPress={() => setQuery("")} accessibilityLabel="Clear search">
+            <Ionicons name="close-circle" size={18} color={MUTED} />
+          </Pressable>
+        ) : null}
       </View>
       </DeactivatedChromeWrap>
 
       {isAccountDeactivated ? (
         <DeactivatedContentPlaceholder featureLabel="chat" />
-      ) : filtered.length === 0 ? (
+      ) : !needle && threads.length === 0 ? (
         <View style={styles.emptyWrap}>
           {listHeader}
           <View style={styles.empty}>
@@ -218,27 +327,69 @@ export function DirectInboxScreen() {
         </View>
       ) : (
         <FlatList
-          data={filtered}
-          keyExtractor={(item) => String(item.peerUserId)}
+          data={inboxRows}
+          keyExtractor={(item) => item.key}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          ListHeaderComponent={listHeader}
+          ListHeaderComponent={needle ? null : listHeader}
           renderItem={({ item }) => {
-            const preview = previewMessage(item.lastMessage, t);
-            const timeLabel = formatShortRelativeTime(new Date(item.lastAt).getTime());
-            const unread = isThreadUnread(item);
+            if (item.kind === "header") {
+              return (
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>{item.title}</Text>
+                </View>
+              );
+            }
+            if (item.kind === "status") {
+              return (
+                <View style={styles.searchStatus}>
+                  {searchingPeople ? <ActivityIndicator color={LIME} /> : null}
+                  <Text style={styles.searchStatusText}>{item.text}</Text>
+                </View>
+              );
+            }
+            if (item.kind === "person") {
+              return (
+                <Pressable style={styles.row} onPress={() => openPersonChat(item.person)}>
+                  <UserAvatar
+                    uri={item.person.avatarUrl}
+                    name={item.person.name}
+                    size={56}
+                    borderRadius={28}
+                    style={styles.avatar}
+                  />
+                  <View style={styles.rowBody}>
+                    <Text style={styles.peerName} numberOfLines={1}>
+                      {item.person.name}
+                    </Text>
+                    {item.person.username ? (
+                      <Text style={styles.preview} numberOfLines={1}>
+                        {item.person.username}
+                      </Text>
+                    ) : (
+                      <Text style={styles.preview} numberOfLines={1}>
+                        {t("newMessage")}
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              );
+            }
+            const preview = previewMessage(item.thread.lastMessage, t);
+            const timeLabel = formatShortRelativeTime(new Date(item.thread.lastAt).getTime());
+            const unread = isThreadUnread(item.thread);
             return (
-              <Pressable style={styles.row} onPress={() => openThread(item)}>
+              <Pressable style={styles.row} onPress={() => openThread(item.thread)}>
                 <UserAvatar
-                  uri={item.peerAvatarUrl}
-                  name={item.peerName}
+                  uri={item.thread.peerAvatarUrl}
+                  name={item.thread.peerName}
                   size={56}
                   borderRadius={28}
                   style={styles.avatar}
                 />
                 <View style={styles.rowBody}>
                   <Text style={[styles.peerName, unread ? styles.peerNameUnread : null]} numberOfLines={1}>
-                    {item.peerName}
+                    {item.thread.peerName}
                   </Text>
                   <View style={styles.previewRow}>
                     <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={1}>
@@ -302,6 +453,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: MUTED
+  },
+  searchStatus: {
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    alignItems: "center",
+    gap: 10
+  },
+  searchStatusText: {
+    color: MUTED,
+    fontSize: 14,
+    textAlign: "center"
   },
   row: {
     flexDirection: "row",

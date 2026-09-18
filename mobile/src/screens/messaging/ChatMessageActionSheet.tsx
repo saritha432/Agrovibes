@@ -1,35 +1,45 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { APP_LIME } from "../../theme/appColors";
+import { AppEmojiPicker } from "../../components/AppEmojiPicker";
 
 const QUICK_EMOJIS = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const;
 
 type Props = {
   visible: boolean;
   timestampLabel?: string;
-  showDelete?: boolean;
+  showDeleteForMe?: boolean;
+  showDeleteForEveryone?: boolean;
   onClose: () => void;
   onReply: () => void;
   onCopy: () => void;
   onForward: () => void;
-  onDelete?: () => void;
+  onDeleteForMe?: () => void;
+  onDeleteForEveryone?: () => void;
   onReact: (emoji: string) => void;
 };
 
 export function ChatMessageActionSheet({
   visible,
   timestampLabel,
-  showDelete = false,
+  showDeleteForMe = false,
+  showDeleteForEveryone = false,
   onClose,
   onReply,
   onCopy,
   onForward,
-  onDelete,
+  onDeleteForMe,
+  onDeleteForEveryone,
   onReact
 }: Props) {
   const insets = useSafeAreaInsets();
+  const [fullPickerOpen, setFullPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!visible) setFullPickerOpen(false);
+  }, [visible]);
 
   const run = (fn: () => void) => {
     onClose();
@@ -37,6 +47,7 @@ export function ChatMessageActionSheet({
   };
 
   return (
+    <>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]} onPress={() => undefined}>
@@ -46,6 +57,13 @@ export function ChatMessageActionSheet({
                 <Text style={styles.emojiText}>{emoji}</Text>
               </Pressable>
             ))}
+            <Pressable
+              style={[styles.emojiBtn, styles.moreBtn]}
+              onPress={() => setFullPickerOpen(true)}
+              accessibilityLabel="More emojis"
+            >
+              <Ionicons name="add" size={22} color={APP_LIME} />
+            </Pressable>
           </View>
 
           {timestampLabel ? <Text style={styles.timestamp}>{timestampLabel}</Text> : null}
@@ -65,15 +83,31 @@ export function ChatMessageActionSheet({
             <Text style={styles.menuLabel}>Forward</Text>
           </Pressable>
 
-          {showDelete && onDelete ? (
-            <Pressable style={styles.menuRow} onPress={() => run(onDelete)}>
+          {showDeleteForMe && onDeleteForMe ? (
+            <Pressable style={styles.menuRow} onPress={() => run(onDeleteForMe)}>
+              <Ionicons name="eye-off-outline" size={22} color="#ff6b6b" />
+              <Text style={[styles.menuLabel, styles.menuLabelDanger]}>Delete for Me</Text>
+            </Pressable>
+          ) : null}
+
+          {showDeleteForEveryone && onDeleteForEveryone ? (
+            <Pressable style={styles.menuRow} onPress={() => run(onDeleteForEveryone)}>
               <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
-              <Text style={[styles.menuLabel, styles.menuLabelDanger]}>Delete</Text>
+              <Text style={[styles.menuLabel, styles.menuLabelDanger]}>Delete for Everyone</Text>
             </Pressable>
           ) : null}
         </Pressable>
       </Pressable>
     </Modal>
+    <AppEmojiPicker
+      open={fullPickerOpen}
+      onClose={() => setFullPickerOpen(false)}
+      onSelect={(emoji) => {
+        setFullPickerOpen(false);
+        run(() => onReact(emoji));
+      }}
+    />
+    </>
   );
 }
 
@@ -105,6 +139,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 21
+  },
+  moreBtn: {
+    backgroundColor: "rgba(201,255,53,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(201,255,53,0.45)"
   },
   emojiText: { fontSize: 26 },
   timestamp: {
