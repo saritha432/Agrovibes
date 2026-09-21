@@ -14,6 +14,7 @@ import { useTopChromeInset } from "../../theme/topChromeInset";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchSocialNetwork, sendDirectMessage } from "../../services/api";
+import { markStoryDmForwarded } from "./dmMessageFormats";
 import { APP_LIME } from "../../theme/appColors";
 
 type FollowPerson = {
@@ -83,7 +84,7 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClo
     if (!token || sendingId != null) return;
     setSendingId(person.userId);
     try {
-      await sendDirectMessage(token, person.userId, messageBody);
+      await sendDirectMessage(token, person.userId, markStoryDmForwarded(messageBody));
       onSent?.();
       onClose();
     } catch {

@@ -39,13 +39,14 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { useAndroidScreenBack } from "../../navigation/useAndroidScreenBack";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, markDirectThreadRead, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
 import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
   leaveDirectThread,
   onDirectMessage,
   onDirectMessageDeleted,
+  onDirectRead,
   onSocketConnectionChange,
   isSocketChatConnected
 } from "../../services/socketChat";
@@ -89,6 +90,8 @@ import {
   parseDmReplyMessage,
   parseDmVoiceMessage,
   parseStoryDmMessage,
+  isStoryDmForwarded,
+  storyDmChatLabel,
   isPeerCallEndSignal,
   isCalleeRingCancelledSignal,
   type DmMediaItem
@@ -699,11 +702,25 @@ export function DirectChatScreen() {
         if (prev.some((item) => item.id === payload.message.id)) return prev;
         return [...prev, payload.message];
       });
-      if (token) {
-        void fetchMessageThread(token, peerUserId).catch(() => {});
+      if (token && Number(payload.message.senderId) !== Number(user?.id)) {
+        void markDirectThreadRead(token, peerUserId).catch(() => {});
       }
     });
-  }, [endCallForPeerSignal, peerEndsOutgoingCall, peerUserId, token]);
+  }, [endCallForPeerSignal, peerEndsOutgoingCall, peerUserId, token, user?.id]);
+
+  useEffect(() => {
+    return onDirectRead((payload) => {
+      if (payload?.selfRead) return;
+      if (Number(payload.peerUserId) !== Number(peerUserId) && Number(payload.readerId) !== Number(peerUserId)) {
+        return;
+      }
+      setMessages((prev) =>
+        prev.map((item) =>
+          Number(item.senderId) === Number(user?.id) ? { ...item, isRead: true } : item
+        )
+      );
+    });
+  }, [peerUserId, user?.id]);
 
   useEffect(() => {
     if (!callSession || callSession.direction !== "outgoing") return;
@@ -1352,7 +1369,11 @@ export function DirectChatScreen() {
               onReply={() => startReplyToMessage(messageItem)}
               onLongPress={() => openMessageActions(messageItem)}
             >
-              {sharedReply ? (
+              {storyReply && isStoryDmForwarded(storyReply, messageItem) ? (
+                <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
+                  ↪ Forwarded
+                </Text>
+              ) : sharedReply ? (
                 <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
                   {isSelf ? "You replied" : `${peerName} replied`}
                 </Text>
@@ -1445,9 +1466,7 @@ export function DirectChatScreen() {
                         style={[styles.replyQuoteText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}
                         numberOfLines={2}
                       >
-                        {storyReply.kind === "like"
-                          ? `Liked story${storyReply.userName ? ` · ${storyReply.userName}` : ""}`
-                          : `Replied to story${storyReply.userName ? ` · ${storyReply.userName}` : ""}`}
+                        {storyDmChatLabel(storyReply, isStoryDmForwarded(storyReply, messageItem))}
                       </Text>
                     </Pressable>
                     {storyReply.kind === "like" ? (
@@ -1511,6 +1530,11 @@ export function DirectChatScreen() {
                 )}
                 <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, isRichCard ? styles.reelMeta : null]}>
                   {formatMsgTime(new Date(messageItem.createdAt).getTime())}
+                  {isSelf ? (
+                    <Text style={messageItem.isRead ? styles.readStatusSeen : styles.readStatusUnseen}>
+                      {`  ${messageItem.isRead ? "Seen" : "Unseen"}`}
+                    </Text>
+                  ) : null}
                 </Text>
               </View>
               {messageReactions.length ? (
@@ -1881,6 +1905,8 @@ const styles = StyleSheet.create({
   bubbleMeta: { marginTop: 4, fontSize: 11, alignSelf: "flex-end" },
   bubbleMetaSelf: { color: MUTED },
   bubbleMetaPeer: { color: MUTED },
+  readStatusSeen: { color: APP_LIME, fontSize: 11, fontWeight: "800" },
+  readStatusUnseen: { color: MUTED, fontSize: 11, fontWeight: "700" },
   reelMeta: { color: MUTED, marginTop: 3, marginRight: 4 },
   sharedReelCard: {
     width: 172,

@@ -18,6 +18,7 @@ export interface DirectMessageItem {
   receiverId: number;
   body: string;
   createdAt: string;
+  isRead?: boolean;
 }
 
 export async function fetchMessageThreads(token: string) {
@@ -40,6 +41,14 @@ export async function fetchMessageThread(token: string, peerUserId: number) {
     };
     messages: DirectMessageItem[];
   };
+}
+
+export async function markDirectThreadRead(token: string, peerUserId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}/read`,
+    token,
+    { method: "POST" }
+  )) as { ok: boolean };
 }
 
 export async function sendDirectMessage(token: string, peerUserId: number, text: string) {

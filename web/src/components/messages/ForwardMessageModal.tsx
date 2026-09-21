@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { fetchSocialNetwork } from "../../api/home";
 import { sendDirectMessage } from "../../api/messages";
+import { markStoryDmForwarded } from "../../utils/dmMessageFormats";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "./UserAvatar";
 import "./ForwardMessageModal.css";
@@ -84,7 +85,7 @@ export function ForwardMessageModal({
     if (!token || sendingId != null) return;
     setSendingId(person.userId);
     try {
-      await sendDirectMessage(token, person.userId, messageBody);
+      await sendDirectMessage(token, person.userId, markStoryDmForwarded(messageBody));
       onSent?.();
       onClose();
     } catch {

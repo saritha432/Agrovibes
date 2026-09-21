@@ -909,6 +909,7 @@ export interface DirectMessageItem {
   receiverId: number;
   body: string;
   createdAt: string;
+  isRead?: boolean;
 }
 
 export interface SocialNotificationItem {
@@ -1913,6 +1914,14 @@ export async function fetchMessageThread(
     messages: DirectMessageItem[];
     hasMore?: boolean;
   };
+}
+
+export async function markDirectThreadRead(token: string, peerUserId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}/read`,
+    token,
+    { method: "POST" }
+  )) as { ok: boolean };
 }
 
 export async function fetchPublicSocialLists(token: string, userId: number) {

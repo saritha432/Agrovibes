@@ -5154,7 +5154,8 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         sender_id AS "senderId",
         receiver_id AS "receiverId",
         body,
-        created_at AS "createdAt"
+        created_at AS "createdAt",
+        COALESCE(dm.is_read, false) AS "isRead"
       FROM direct_messages dm
       WHERE ((dm.sender_id = $1 AND dm.receiver_id = $2)
          OR (dm.sender_id = $2 AND dm.receiver_id = $1))
@@ -5196,6 +5197,26 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load message thread", error: error.message });
+  }
+});
+
+router.post("/v1/messages/thread/:peerUserId/read", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    await query(
+      `UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`,
+      [peerUserId, me]
+    );
+    emitMessagesRead({ readerId: me, peerUserId });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark messages read", error: error.message });
   }
 });
 
@@ -5379,7 +5400,8 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
         sender_id AS "senderId",
         receiver_id AS "receiverId",
         body,
-        created_at AS "createdAt"
+        created_at AS "createdAt",
+        COALESCE(is_read, false) AS "isRead"
       `,
       [me, peerUserId, body]
     );
@@ -6074,7 +6096,8 @@ async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, imageUrl,
       sender_id AS "senderId",
       receiver_id AS "receiverId",
       body,
-      created_at AS "createdAt"
+      created_at AS "createdAt",
+      COALESCE(is_read, false) AS "isRead"
     `,
     [me, ownerId, body]
   );
