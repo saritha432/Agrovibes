@@ -160,17 +160,25 @@ function formatDateSeparator(ts: number) {
   return `${datePart} AT ${time}`;
 }
 
+type MessageReaction = { id: number; emoji: string; senderId: number };
+
 type ThreadListItem =
   | { type: "date"; id: string; label: string }
-  | { type: "message"; id: string; message: DirectMessageItem; reactions: string[] };
+  | { type: "message"; id: string; message: DirectMessageItem; reactions: MessageReaction[] };
+
+function ownReactionOn(reactions: MessageReaction[], userId: number | undefined) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid) || uid <= 0) return undefined;
+  return reactions.find((reaction) => Number(reaction.senderId) === uid);
+}
 
 function buildThreadListItems(messages: DirectMessageItem[]): ThreadListItem[] {
-  const reactionsByTarget = new Map<number, string[]>();
+  const reactionsByTarget = new Map<number, MessageReaction[]>();
   for (const message of messages) {
     const react = parseDmReactMessage(message.body);
     if (!react) continue;
     const list = reactionsByTarget.get(react.targetId) || [];
-    list.push(react.emoji);
+    list.push({ id: message.id, emoji: react.emoji, senderId: Number(message.senderId) });
     reactionsByTarget.set(react.targetId, list);
   }
 
@@ -821,13 +829,32 @@ export function DirectChatScreen() {
   );
 
   const reactToMessage = useCallback(
-    async (item: DirectMessageItem, emoji: string) => {
+    async (item: DirectMessageItem, emoji: string, reactions: MessageReaction[] = []) => {
       if (!token) return;
-      const result = await sendDirectMessage(token, peerUserId, buildDmReactMessage({ targetId: item.id, emoji }));
-      if (result.message) appendSentMessage(result.message);
-      else await reload();
+      const mine = ownReactionOn(reactions, user?.id);
+      try {
+        if (mine && mine.emoji === emoji) {
+          setMessages((prev) => prev.filter((row) => row.id !== mine.id));
+          await deleteDirectMessage(token, mine.id, "everyone");
+          return;
+        }
+        if (mine) {
+          setMessages((prev) => prev.filter((row) => row.id !== mine.id));
+          await deleteDirectMessage(token, mine.id, "everyone");
+        }
+        const result = await sendDirectMessage(
+          token,
+          peerUserId,
+          buildDmReactMessage({ targetId: item.id, emoji })
+        );
+        if (result.message) appendSentMessage(result.message);
+        else await reload();
+      } catch {
+        await reload();
+        Alert.alert("Reaction", "Could not update reaction.");
+      }
     },
-    [appendSentMessage, peerUserId, reload, token]
+    [appendSentMessage, peerUserId, reload, token, user?.id]
   );
 
   const isOwnMessage = useCallback(
@@ -1463,6 +1490,8 @@ export function DirectChatScreen() {
                     <Pressable
                       style={[styles.replyQuote, isSelf ? styles.replyQuoteSelf : styles.replyQuotePeer]}
                       onPress={() => openReplyTarget(sharedReply.replyToId)}
+                      onLongPress={() => openMessageActions(messageItem)}
+                      delayLongPress={280}
                     >
                       {replyQuoteThumb ? (
                         <Image source={{ uri: replyQuoteThumb }} style={styles.replyQuoteThumb} resizeMode="cover" />
@@ -1474,9 +1503,11 @@ export function DirectChatScreen() {
                         {replyQuotePreview || sharedReply.replyPreview}
                       </Text>
                     </Pressable>
-                    <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
-                      {sharedReply.text}
-                    </Text>
+                    <Pressable onLongPress={() => openMessageActions(messageItem)} delayLongPress={280}>
+                      <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
+                        {sharedReply.text}
+                      </Text>
+                    </Pressable>
                   </>
                 ) : sharedProfile ? (
                   <Pressable
@@ -1505,9 +1536,11 @@ export function DirectChatScreen() {
                     </View>
                   </Pressable>
                 ) : (
-                  <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
-                    {formatDmInboxPreview(messageItem.body, t)}
-                  </Text>
+                  <Pressable onLongPress={() => openMessageActions(messageItem)} delayLongPress={280}>
+                    <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
+                      {formatDmInboxPreview(messageItem.body, t)}
+                    </Text>
+                  </Pressable>
                 )}
                 <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, isRichCard ? styles.reelMeta : null]}>
                   {formatMsgTime(new Date(messageItem.createdAt).getTime())}
@@ -1515,11 +1548,20 @@ export function DirectChatScreen() {
               </View>
               {messageReactions.length ? (
                 <View style={[styles.reactionRow, isSelf ? styles.reactionRowSelf : styles.reactionRowPeer]}>
-                  {messageReactions.map((emoji, index) => (
-                    <Text key={`${emoji}-${index}`} style={styles.reactionEmoji}>
-                      {emoji}
-                    </Text>
-                  ))}
+                  {messageReactions.map((reaction) => {
+                    const mine = Number(reaction.senderId) === Number(user?.id);
+                    return (
+                      <Pressable
+                        key={reaction.id}
+                        hitSlop={6}
+                        onPress={() => void reactToMessage(messageItem, reaction.emoji, messageReactions)}
+                        style={[styles.reactionChip, mine ? styles.reactionChipMine : null]}
+                        accessibilityLabel={mine ? "Remove reaction" : "Add this reaction"}
+                      >
+                        <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               ) : null}
             </SwipeReplyMessageRow>
@@ -1691,7 +1733,12 @@ export function DirectChatScreen() {
           if (actionMessage) deleteMessage(actionMessage, "everyone");
         }}
         onReact={(emoji) => {
-          if (actionMessage) void reactToMessage(actionMessage, emoji);
+          if (!actionMessage) return;
+          const row = threadItems.find(
+            (item): item is Extract<ThreadListItem, { type: "message" }> =>
+              item.type === "message" && item.message.id === actionMessage.id
+          );
+          void reactToMessage(actionMessage, emoji, row?.reactions || []);
         }}
       />
 
@@ -2053,6 +2100,17 @@ const styles = StyleSheet.create({
   },
   reactionRowSelf: { justifyContent: "flex-end" },
   reactionRowPeer: { justifyContent: "flex-start" },
+  reactionChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.08)"
+  },
+  reactionChipMine: {
+    backgroundColor: "rgba(201,255,53,0.18)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(201,255,53,0.55)"
+  },
   reactionEmoji: { fontSize: 15 },
   composerBar: {
     width: "100%",

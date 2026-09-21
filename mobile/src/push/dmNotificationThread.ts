@@ -1,10 +1,26 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { formatDmInboxPreview } from "../screens/messaging/dmMessageFormats";
 import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 
 const THREAD_KEY_PREFIX = "cropvibe.dm.notif.thread.v5.";
 const AUTH_STORAGE_KEY = "agrovibes.auth";
+
+const PUSH_PREVIEW_LABELS: Record<string, string> = {
+  sharedMedia: "Photo",
+  sharedVideo: "Video",
+  voiceMessage: "Voice message",
+  sharedLive: "Live video",
+  sharedReel: "Reel",
+  sharedPost: "Post",
+  sharedProfile: "Profile"
+};
+
+function formatPushMessageText(raw: string): string {
+  const formatted = formatDmInboxPreview(String(raw || ""), (key) => PUSH_PREVIEW_LABELS[key] || key);
+  return String(formatted || "").trim();
+}
 
 type ThreadMessage = {
   fromPeer: boolean;
@@ -59,6 +75,30 @@ function renderNamedThreadBody(messages: ThreadMessage[]): string {
     .join("\n");
 }
 
+function coalesceReactPayloadLines(messages: ThreadMessage[]): ThreadMessage[] {
+  const out: ThreadMessage[] = [];
+  for (let i = 0; i < messages.length; i += 1) {
+    const current = messages[i];
+    const text = String(current.text || "").trim();
+    const next = messages[i + 1];
+    const nextText = next ? String(next.text || "").trim() : "";
+    if (
+      text === "[Cropvibe React]" &&
+      nextText.startsWith("{") &&
+      nextText.includes("emoji")
+    ) {
+      out.push({
+        ...current,
+        text: `${text}\n${nextText}`
+      });
+      i += 1;
+      continue;
+    }
+    out.push(current);
+  }
+  return out;
+}
+
 function parseLegacyBody(raw: string, peerName: string, selfName: string): ThreadMessage[] {
   const peer = String(peerName || "").trim().toLowerCase();
   const self = String(selfName || "").trim().toLowerCase();
@@ -73,8 +113,16 @@ function parseLegacyBody(raw: string, peerName: string, selfName: string): Threa
     const colon = line.indexOf(":");
     if (colon > 0) {
       const name = line.slice(0, colon).trim();
-      const text = line.slice(colon + 1).trim();
+      let text = line.slice(colon + 1).trim();
       if (!text) continue;
+      // Reaction payloads are split across lines: "Name: [Cropvibe React]" then JSON.
+      if (text === "[Cropvibe React]") {
+        const next = lines[i + 1];
+        if (next && next.startsWith("{") && next.includes("emoji")) {
+          text = `${text}\n${next}`;
+          i += 1;
+        }
+      }
       const nameKey = name.toLowerCase();
       const fromPeer =
         nameKey === "you" || nameKey === "me"
@@ -118,7 +166,7 @@ function parseLegacyBody(raw: string, peerName: string, selfName: string): Threa
       text: line
     });
   }
-  return out;
+  return coalesceReactPayloadLines(out);
 }
 
 async function readStoredThread(peerUserId: string | number): Promise<ThreadMessage[]> {
@@ -244,7 +292,7 @@ export async function presentDirectMessageNotification({
     : String(senderName || "").trim() || storedSelfName || "Me";
   const selfName = storedSelfName || (isFromPeer ? "" : displaySender) || "Me";
 
-  const text = stripSenderPrefix(String(messageText || "").trim(), displaySender);
+  const text = formatPushMessageText(stripSenderPrefix(String(messageText || "").trim(), displaySender));
   if (!text) return;
 
   let messages = await readStoredThread(actorId);
@@ -274,6 +322,14 @@ export async function presentDirectMessageNotification({
       // ignore
     }
   }
+
+  // Upgrade legacy raw payloads (e.g. [Cropvibe React] JSON) to readable previews.
+  messages = messages
+    .map((m) => ({
+      ...m,
+      text: formatPushMessageText(m.text) || String(m.text || "").trim()
+    }))
+    .filter((m) => Boolean(String(m.text || "").trim()));
 
   messages = messages.map((m) =>
     m.fromPeer && !String(m.senderName || "").trim()

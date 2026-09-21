@@ -836,7 +836,7 @@ export function UserSearchScreen() {
             maxToRenderPerBatch={9}
             windowSize={5}
             removeClippedSubviews={Platform.OS === "android"}
-            extraData={`${playingPostId}-${Object.keys(previewUriByPostId).length}`}
+            extraData={{ playing: playingPostId, previews: previewUriByPostId }}
             ListEmptyComponent={
               !loadingExplore ? (
                 <View style={styles.exploreEmpty}>

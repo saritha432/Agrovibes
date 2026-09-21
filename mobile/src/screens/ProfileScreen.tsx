@@ -800,9 +800,11 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
 
   useEffect(() => {
     let cancelled = false;
-    const postsNeedingPreview = visiblePosts
-      .filter((post) => post.videoUrl && !reelGridStillUri(post))
-      .slice(0, 36);
+    // Hydrate every visible reel missing a cover (Posts / Reels / Reshares / etc.).
+    // Previously capped at 36, so deeper grid tiles stayed blank forever.
+    const postsNeedingPreview = visiblePosts.filter(
+      (post) => post.videoUrl && !reelGridStillUri(post)
+    );
     if (!postsNeedingPreview.length) return;
     void hydrateReelPreviews(
       postsNeedingPreview,
@@ -810,7 +812,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
         if (cancelled) return;
         setPreviewUriByPostId((prev) => (prev[postId] === uri ? prev : { ...prev, [postId]: uri }));
       },
-      { maxConcurrent: 4, isCancelled: () => cancelled }
+      { maxConcurrent: 2, isCancelled: () => cancelled }
     );
     return () => {
       cancelled = true;
@@ -1937,7 +1939,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             windowSize={5}
             removeClippedSubviews={false}
             showsVerticalScrollIndicator={false}
-            extraData={`${profilePlayingPostId}-${Object.keys(previewUriByPostId).length}`}
+            extraData={{ playing: profilePlayingPostId, previews: previewUriByPostId }}
           />
         ) : null}
       </SafeAreaView>
