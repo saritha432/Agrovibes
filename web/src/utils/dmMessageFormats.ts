@@ -369,6 +369,8 @@ export function formatDmInboxPreview(body: string): string {
   if (call) return formatDmCallLabel(call);
   const reply = parseDmReplyMessage(text);
   if (reply) return reply.text;
+  const react = parseDmReactMessage(text);
+  if (react) return react.emoji ? `Reacted ${react.emoji}` : "Reacted to your message";
   if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return "Shared a drop";
   if (/\[(?:Cropvibe|AgroVibe)\s+Story\]/i.test(text) || (/^\s*\{/.test(text) && /"storyId"\s*:/.test(text))) {
     return "Replied to story";

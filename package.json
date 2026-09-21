@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "force": "^0.0.3",
     "react-native-reanimated-carousel": "^4.0.3"
   }
 }

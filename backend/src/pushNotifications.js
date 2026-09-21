@@ -414,6 +414,20 @@ function directMessagePushPayload(body) {
     return { excerpt: "Profile", imageUrl: null };
   }
 
+  if (text.startsWith("[Cropvibe React]")) {
+    const jsonText = text.slice("[Cropvibe React]".length).trim();
+    if (jsonText.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(jsonText);
+        const emoji = String(parsed?.emoji || "").trim();
+        if (emoji) return { excerpt: `Reacted ${emoji}`, imageUrl: null };
+      } catch {
+        // fall through
+      }
+    }
+    return { excerpt: "Reacted to your message", imageUrl: null };
+  }
+
   const excerpt = text.length > 120 ? `${text.slice(0, 117)}...` : text;
   return { excerpt, imageUrl: null };
 }

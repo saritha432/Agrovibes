@@ -3,9 +3,13 @@ const path = require("path");
 
 const config = getDefaultConfig(__dirname);
 // Bump when resolver/layout changes so stale per-platform Metro caches rebuild (web vs android).
-config.cacheVersion = "cropvibe-ios-safe-area-v1";
+config.cacheVersion = "cropvibe-emoji-keyboard-lib-v1";
 const firebaseWebStub = path.resolve(__dirname, "src/firebase/stubs/emptyModule.js");
 const safeAreaShim = path.resolve(__dirname, "src/safeArea/safeAreaContextShim.tsx");
+const rnEmojiKeyboardLib = path.resolve(
+  __dirname,
+  "node_modules/rn-emoji-keyboard/lib/module/index.js"
+);
 
 const defaultResolveRequest = config.resolver.resolveRequest;
 
@@ -19,6 +23,12 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     ) {
       return { type: "sourceFile", filePath: firebaseWebStub };
     }
+  }
+
+  // Package "react-native" field points at src/, which Metro fails to resolve on Windows
+  // (Unable to resolve "./hooks/useRecentPicksPersistence"). Use the published lib build.
+  if (moduleName === "rn-emoji-keyboard") {
+    return { type: "sourceFile", filePath: rnEmojiKeyboardLib };
   }
 
   // App code gets JS SafeAreaView (iOS status-bar fallback). Shim folder still resolves the real package.
