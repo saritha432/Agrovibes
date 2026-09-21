@@ -141,8 +141,10 @@ import {
   latestResharersForDisplay,
   readHomeFeedCache,
   reconcileHomeFeedWithFirstPage,
+  removePostFromHomeFeedCache,
   writeHomeFeedCache
 } from "../social/homeFeedCache";
+import { emitPostDeleted, subscribePostDeleted } from "../navigation/postDeletedBridge";
 import {
   filterPostsByBlockedUsers,
   forgetBlockedUser,
@@ -1511,6 +1513,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     return unsubscribe;
   }, [reloadBlockedUsers]);
 
+  useEffect(() => {
+    return subscribePostDeleted((postId) => {
+      const id = Number(postId);
+      if (!Number.isFinite(id) || id <= 0) return;
+      setPosts((prev) => prev.filter((p) => Number(p.id) !== id));
+      setRepostFeedItems((prev) => prev.filter((p) => Number(p.id) !== id));
+      setPlayingPostId((cur) => (cur === id ? null : cur));
+      setActiveReelOptionsPost((cur) => (cur?.id === id ? null : cur));
+      setReelModalViewer((v) => {
+        if (!v) return null;
+        const nextPosts = v.posts.filter((p) => Number(p.id) !== id);
+        if (!nextPosts.length) return null;
+        return {
+          posts: nextPosts,
+          initialIndex: Math.min(v.initialIndex, nextPosts.length - 1)
+        };
+      });
+      void removePostFromHomeFeedCache(id, user?.id);
+    });
+  }, [user?.id]);
+
   const visiblePosts = useMemo(() => {
     const blockedFiltered = filterPostsByBlockedUsers(posts, blockedUsers);
     const me = Number(viewerUserId);
@@ -2650,8 +2673,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         // Full replace only on pull-to-refresh or a newly created post.
         const shouldPreserveExistingOrder =
           !pending && !isPullRefresh && postsRef.current.length > 0;
+        // Reconcile (not merge) so soft-deleted posts drop out of the first-page window.
         const painted = shouldPreserveExistingOrder
-          ? mergeHomeFeedPreservingOrder(merged, postsRef.current)
+          ? reconcileHomeFeedWithFirstPage(merged, postsRef.current)
           : merged;
         setPosts(painted);
         hasLoadedFeedFromNetworkRef.current = true;
@@ -3729,6 +3753,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         try {
           await deleteHomePost(token, post.id);
           setPosts((prev) => prev.filter((p) => p.id !== post.id));
+          setRepostFeedItems((prev) => prev.filter((p) => p.id !== post.id));
           setActiveReelOptionsPost(null);
           setReelModalViewer((v) => {
             if (!v) return null;
@@ -3738,6 +3763,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             return { posts: nextPosts, initialIndex: nextIndex };
           });
           setPlayingPostId((cur) => (cur === post.id ? null : cur));
+          emitPostDeleted(post.id);
+          void removePostFromHomeFeedCache(post.id, user?.id);
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : "Could not delete this post.";
           if (Platform.OS === "web" && typeof window !== "undefined") {

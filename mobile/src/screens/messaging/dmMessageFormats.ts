@@ -412,7 +412,8 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
   const reply = parseDmReplyMessage(text);
   if (reply) return reply.text;
 
-  if (parseDmReactMessage(text)) return "";
+  const react = parseDmReactMessage(text);
+  if (react) return react.emoji ? `Reacted ${react.emoji}` : "Reacted to your message";
 
   const story = parseStoryDmMessage(text);
   if (story) {
