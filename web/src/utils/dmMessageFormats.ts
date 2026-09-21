@@ -201,11 +201,13 @@ export type StoryDmPayload = {
   imageUrl?: string | null;
   videoUrl?: string | null;
   userName?: string;
+  forwarded?: boolean;
 };
 
 function looksLikeStoryPayload(row: Record<string, unknown>): boolean {
   const kind = String(row.kind || "").toLowerCase();
-  if (kind === "like" || kind === "reply") return true;
+  if (kind === "like" || kind === "reply" || kind === "forward") return true;
+  if (row.forwarded === true || row.forwarded === "true") return true;
   if (Number(row.storyId) > 0) return true;
   if ((row.imageUrl || row.previewUrl || row.videoUrl) && (row.text != null || row.userName)) {
     return !String(row.url || "").trim() || (kind !== "image" && kind !== "video");
@@ -236,7 +238,11 @@ function storyPayloadFromRow(parsed: Record<string, unknown>): StoryDmPayload | 
     previewUrl,
     imageUrl,
     videoUrl,
-    userName: String(parsed.userName || "").trim() || "Story"
+    userName: String(parsed.userName || "").trim() || "Story",
+    forwarded:
+      parsed.forwarded === true ||
+      parsed.forwarded === "true" ||
+      String(parsed.kind || "").toLowerCase() === "forward"
   };
 }
 
@@ -276,8 +282,46 @@ export function parseStoryDmMessage(body: unknown): StoryDmPayload | null {
     kind: fallbackKind,
     imageUrl: imgMatch?.[1] || null,
     previewUrl: imgMatch?.[1] || null,
-    userName: String(nameMatch?.[1] || "").replace(/\\"/g, '"').trim() || "Story"
+    userName: String(nameMatch?.[1] || "").replace(/\\"/g, '"').trim() || "Story",
+    forwarded: /"forwarded"\s*:\s*true/i.test(raw)
   };
+}
+
+export function isStoryDmForwarded(
+  story: StoryDmPayload,
+  message?: { senderId?: number; receiverId?: number }
+): boolean {
+  if (story.forwarded) return true;
+  const ownerId = Number(story.ownerId);
+  const receiverId = Number(message?.receiverId);
+  if (!Number.isFinite(ownerId) || ownerId <= 0 || !Number.isFinite(receiverId) || receiverId <= 0) {
+    return false;
+  }
+  // Original story replies/likes are sent to the story owner.
+  return receiverId !== ownerId;
+}
+
+export function markStoryDmForwarded(body: string): string {
+  const story = parseStoryDmMessage(body);
+  if (!story) return body;
+  return `${DM_STORY_PREFIX} ${JSON.stringify({
+    storyId: story.storyId || null,
+    ownerId: story.ownerId || null,
+    text: story.text,
+    previewUrl: story.previewUrl || null,
+    imageUrl: story.imageUrl || null,
+    videoUrl: story.videoUrl || null,
+    userName: story.userName || "Story",
+    kind: story.kind,
+    forwarded: true
+  })}`;
+}
+
+export function storyDmChatLabel(story: StoryDmPayload, forwarded: boolean): string {
+  const who = story.userName ? ` · ${story.userName}` : "";
+  if (forwarded) return `Forwarded story${who}`;
+  if (story.kind === "like") return `Liked story${who}`;
+  return `Replied to story${who}`;
 }
 
 export function formatVoiceDuration(ms?: number) {
@@ -310,6 +354,7 @@ export function formatDmInboxPreview(body: string): string {
   if (!text) return "";
   const story = parseStoryDmMessage(text);
   if (story) {
+    if (story.forwarded) return "Forwarded story";
     if (story.kind === "like") return "Liked a story";
     return story.text && story.text !== "❤️" ? story.text : "Replied to story";
   }

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   deleteDirectMessage,
   fetchMessageThread,
+  markDirectThreadRead,
   ringDirectCall,
   sendDirectMessage,
   type DirectMessageItem
@@ -13,6 +14,7 @@ import {
   leaveDirectThread,
   onDirectMessage,
   onDirectMessageDeleted,
+  onDirectRead,
   onDirectThreadUpdate,
   onSocketConnectionChange
 } from "../../services/socketChat";
@@ -37,6 +39,8 @@ import {
   parseDmReplyMessage,
   parseDmVoiceMessage,
   parseStoryDmMessage,
+  isStoryDmForwarded,
+  storyDmChatLabel,
   dmMediaIsAlbum,
   dmMediaItems,
   type DmReplyPayload
@@ -180,10 +184,20 @@ export function MessagesChat() {
       if (Number(payload.peerUserId) !== peerUserId) return;
       setMessages((prev) => mergeThreadMessages(prev, [payload.message]));
       requestAnimationFrame(scrollToEnd);
+      if (token && Number(payload.message.senderId) !== Number(user?.id)) {
+        void markDirectThreadRead(token, peerUserId).catch(() => {});
+      }
     });
     const unsubDeleted = onDirectMessageDeleted((payload) => {
       if (Number(payload.peerUserId) !== peerUserId) return;
       setMessages((prev) => prev.filter((item) => item.id !== Number(payload.messageId)));
+    });
+    const unsubRead = onDirectRead((payload) => {
+      if (payload?.selfRead) return;
+      if (Number(payload.peerUserId) !== peerUserId && Number(payload.readerId) !== peerUserId) return;
+      setMessages((prev) =>
+        prev.map((item) => (Number(item.senderId) === Number(user?.id) ? { ...item, isRead: true } : item))
+      );
     });
     const unsubThread = onDirectThreadUpdate((payload) => {
       if (Number(payload.peerUserId) !== peerUserId) return;
@@ -196,12 +210,13 @@ export function MessagesChat() {
     return () => {
       unsubMessage();
       unsubDeleted();
+      unsubRead();
       unsubThread();
       unsubConnection();
       window.clearInterval(poll);
       leaveDirectThread(peerUserId);
     };
-  }, [peerUserId, reload]);
+  }, [peerUserId, reload, token, user?.id]);
 
   useEffect(() => {
     scrollToEnd();
@@ -511,10 +526,8 @@ export function MessagesChat() {
     const storyDm = parseStoryDmMessage(body);
     if (storyDm) {
       const thumb = storyDm.imageUrl || storyDm.previewUrl;
-      const label =
-        storyDm.kind === "like"
-          ? `Liked story${storyDm.userName ? ` · ${storyDm.userName}` : ""}`
-          : `Replied to story${storyDm.userName ? ` · ${storyDm.userName}` : ""}`;
+      const forwarded = isStoryDmForwarded(storyDm, item);
+      const label = storyDmChatLabel(storyDm, forwarded);
       return (
         <div className="messages-chat__story">
           <div className="messages-chat__story-card">
@@ -601,6 +614,9 @@ export function MessagesChat() {
               className={`messages-chat__bubble-row${isSelf ? " messages-chat__bubble-row--self" : ""}`}
             >
               <div className="messages-chat__bubble-stack">
+                {storyDm && isStoryDmForwarded(storyDm, item) ? (
+                  <p className="messages-chat__forwarded">↪ Forwarded</p>
+                ) : null}
                 <div
                   className={`messages-chat__bubble${isSelf ? " messages-chat__bubble--self" : ""}${richCard ? " messages-chat__bubble--reel" : ""}`}
                   onContextMenu={(e) => {
@@ -613,7 +629,14 @@ export function MessagesChat() {
                   onPointerCancel={clearLongPress}
                 >
                   {renderBody(item)}
-                  <time dateTime={item.createdAt}>{formatMsgTime(item.createdAt)}</time>
+                  <time dateTime={item.createdAt}>
+                    {formatMsgTime(item.createdAt)}
+                    {isSelf ? (
+                      <span className={item.isRead ? "messages-chat__read messages-chat__read--seen" : "messages-chat__read"}>
+                        {item.isRead ? "Seen" : "Unseen"}
+                      </span>
+                    ) : null}
+                  </time>
                 </div>
                 {reactions.length ? (
                   <div
