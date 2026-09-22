@@ -1456,7 +1456,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       lastPlayingIndexRef.current = primary.index;
       setPlayingPostId((cur) => (cur === primary.post.id ? cur : primary.post.id));
       prefetchPostMedia(primary.post);
-      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 1);
+      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 2);
     },
     []
   );
@@ -3133,7 +3133,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setPlayingPostId((cur) => (cur === nextId ? cur : nextId));
       if (post) {
         prefetchPostMedia(post);
-        prefetchUpcomingPosts(tabPosts, index, 1);
+        prefetchUpcomingPosts(tabPosts, index, 2);
       }
     },
     [effectiveReelSlotHeight, tabPosts]

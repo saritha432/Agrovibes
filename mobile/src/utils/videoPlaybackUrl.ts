@@ -72,6 +72,8 @@ export function videoPlaybackSources(
     pushUnique(sources, hls);
   }
   pushUnique(sources, url);
+  // Original camera file is last-resort only. Prefer 480p / HLS so the feed
+  // does not wait on a 4K/HEVC upload.
   return sources;
 }
 

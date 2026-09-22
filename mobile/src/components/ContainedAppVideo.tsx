@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, View, type ImageStyle, type ViewStyle } from "react-native";
+import { View, type ImageStyle, type ViewStyle } from "react-native";
 import { FeedImage } from "./FeedImage";
 import { AppVideo, type AppVideoHandle } from "./AppVideo";
 import { computeReelVideoFrame } from "../utils/reelGrid";
@@ -57,6 +57,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
   ) {
     const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
     const [playbackBlocked, setPlaybackBlocked] = useState(false);
+    const [hasFirstFrame, setHasFirstFrame] = useState(false);
     const videoRef = useRef<AppVideoHandle | null>(null);
     const sourceIndexRef = useRef(0);
     const durationRef = useRef(0);
@@ -101,6 +102,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
       setSourceIndex(0);
       sourceIndexRef.current = 0;
       setVideoSize({ width: 0, height: 0 });
+      setHasFirstFrame(false);
       didResumeRef.current = false;
     }, [uri, hlsUrl, playbackUrl, playbackKey]);
 
@@ -192,15 +194,16 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
             videoRef.current = r;
           }}
           source={activeUri}
-          shouldPlay={shouldPlay}
+          shouldPlay={shouldPlay && !preloadOnly}
           isLooping={isLooping}
           isMuted={isMuted || preloadOnly}
           warmBuffer={preloadOnly}
           nativeControls={useNativeControls}
-          staysActiveInBackground
+          staysActiveInBackground={!preloadOnly}
           contentFit={contentFit}
-          style={videoStyle}
+          style={{ ...videoStyle, opacity: posterUri && !hasFirstFrame ? 0 : 1 }}
           timeUpdateIntervalMs={preloadOnly ? 4000 : 800}
+          onFirstFrameRender={() => setHasFirstFrame(true)}
           onPlaybackStatusUpdate={(status) => {
             if (!preloadOnly) onStatusUpdate?.(status);
             if (status.isLoaded) {

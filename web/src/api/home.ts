@@ -48,6 +48,21 @@ export async function markHomeStoryViewed(token: string, storyId: number) {
   )) as { ok: boolean; viewed?: boolean; own?: boolean };
 }
 
+export type HomeStoryViewer = {
+  userId: number;
+  fullName: string;
+  username?: string | null;
+  avatarUrl?: string | null;
+  viewedAt?: string;
+};
+
+export async function fetchHomeStoryViewers(token: string, storyId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/viewers`,
+    token
+  )) as { viewers: HomeStoryViewer[]; count: number };
+}
+
 export async function replyToHomeStory(token: string, storyId: number, text: string) {
   return (await fetchWithAuth(
     `${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/reply`,

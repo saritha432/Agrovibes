@@ -29,6 +29,7 @@ import { registerPostsReelModalBack } from "../navigation/postsReelModalBridge";
 import { stripLegacyCloudinaryUrl, isVideoMediaUrl } from "../utils/mediaUrls";
 import { UserAvatar } from "./UserAvatar";
 import { ContainedAppVideo, type ContainedAppVideoHandle } from "./ContainedAppVideo";
+import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
 import { StoryRingAvatar } from "./StoryRingAvatar";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
@@ -893,7 +894,10 @@ export function PostsReelViewerModal({
       .map((v) => ({ post: v.item as HomePost, index: v.index ?? 0 }))
       .sort((a, b) => a.index - b.index);
     if (!ordered.length) return;
-    setPlayingPostId(ordered[ordered.length - 1].post.id);
+    const primary = ordered[ordered.length - 1];
+    setPlayingPostId(primary.post.id);
+    prefetchPostMedia(primary.post);
+    prefetchUpcomingPosts(viewerPostsRef.current, primary.index, 2);
   }, []);
 
   const viewabilityCallbackRef = useRef(onViewableItemsChanged);
@@ -914,6 +918,10 @@ export function PostsReelViewerModal({
       const index = Math.max(0, Math.min(viewerPosts.length - 1, Math.round(offsetY / viewerPageH)));
       const post = viewerPosts[index];
       setPlayingPostId(post?.id ?? null);
+      if (post) {
+        prefetchPostMedia(post);
+        prefetchUpcomingPosts(viewerPosts, index, 2);
+      }
     },
     [visible, viewerPosts, viewerPageH]
   );

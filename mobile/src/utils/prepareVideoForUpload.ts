@@ -12,6 +12,17 @@ export const MIN_BYTES_TO_COMPRESS = 1 * 1024 * 1024;
  * Reject anything below this and keep the original file.
  */
 export const MIN_VALID_COMPRESSED_VIDEO_BYTES = 80 * 1024;
+/** Camera originals above this must compress; otherwise playback is Instagram-slow. */
+export const MAX_UNCOMPRESSED_UPLOAD_BYTES = 8 * 1024 * 1024;
+export const MAX_UNCOMPRESSED_EDGE_PX = 1080;
+
+function compressRequired(originalBytes: number, longEdge: number) {
+  return originalBytes > MAX_UNCOMPRESSED_UPLOAD_BYTES || longEdge > MAX_UNCOMPRESSED_EDGE_PX;
+}
+
+function compressFailedError() {
+  return new Error("Could not optimize this video. Try a shorter clip or 1080p and upload again.");
+}
 
 export type PreparedVideo = {
   uri: string;
@@ -96,7 +107,10 @@ export async function prepareVideoForUpload(
     });
 
     const out = String(compressedUri || "").trim();
-    if (!out || out === trimmed) return fallback;
+    if (!out || out === trimmed) {
+      if (compressRequired(originalBytes, longEdge)) throw compressFailedError();
+      return fallback;
+    }
 
     const compressedBytes = await fileSizeBytes(out);
     // Truncated muxer output (ftyp-only ~28B) or absurdly small result → keep original.
@@ -104,10 +118,12 @@ export async function prepareVideoForUpload(
       console.warn(
         `[prepareVideoForUpload] rejecting compressed output (${compressedBytes}B); using original`
       );
+      if (compressRequired(originalBytes, longEdge)) throw compressFailedError();
       return fallback;
     }
     // Prefer original if compression somehow grew the file.
     if (originalBytes > 0 && compressedBytes >= originalBytes) {
+      if (compressRequired(originalBytes, longEdge)) throw compressFailedError();
       return fallback;
     }
     // Prefer original if compression "saved" almost nothing of a large file but output is tiny fraction
@@ -116,6 +132,7 @@ export async function prepareVideoForUpload(
       console.warn(
         `[prepareVideoForUpload] compressed ${compressedBytes}B from ${originalBytes}B looks incomplete; using original`
       );
+      if (compressRequired(originalBytes, longEdge)) throw compressFailedError();
       return fallback;
     }
 
@@ -126,7 +143,11 @@ export async function prepareVideoForUpload(
       compressed: true
     };
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Could not optimize this video")) {
+      throw error;
+    }
     console.warn("[prepareVideoForUpload] compress failed; using original", error);
+    if (compressRequired(originalBytes, longEdge)) throw compressFailedError();
     return fallback;
   }
 }
