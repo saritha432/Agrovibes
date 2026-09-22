@@ -16,6 +16,7 @@ import { UserAvatar } from "../../components/UserAvatar";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
 import {
+  acceptMessageRequest,
   declineMessageRequest,
   fetchMessageThreads,
   type MessageThread
@@ -85,6 +86,27 @@ export function MessageRequestsScreen() {
     });
   };
 
+  const acceptRequest = async (thread: MessageThread) => {
+    if (!token || busyPeerId) return;
+    setBusyPeerId(thread.peerUserId);
+    try {
+      await acceptMessageRequest(token, thread.peerUserId);
+      setThreads((prev) => prev.filter((row) => row.peerUserId !== thread.peerUserId));
+      navigateToDirectChat({
+        peerUserId: thread.peerUserId,
+        peerName: thread.peerName,
+        peerKey: thread.peerEmail,
+        peerUsername: thread.peerUsername || undefined,
+        peerAvatarUrl: thread.peerAvatarUrl,
+        isMessageRequest: false
+      });
+    } catch {
+      // keep row
+    } finally {
+      setBusyPeerId(null);
+    }
+  };
+
   const deleteRequest = async (thread: MessageThread) => {
     if (!token || busyPeerId) return;
     setBusyPeerId(thread.peerUserId);
@@ -150,18 +172,28 @@ export function MessageRequestsScreen() {
                     {preview} · {timeLabel}
                   </Text>
                 </View>
-                <Pressable
-                  hitSlop={8}
-                  style={styles.deleteBtn}
-                  disabled={busy}
-                  onPress={() => void deleteRequest(item)}
-                >
-                  {busy ? (
-                    <ActivityIndicator size="small" color={MUTED} />
-                  ) : (
-                    <Ionicons name="trash-outline" size={20} color={MUTED} />
-                  )}
-                </Pressable>
+                <View style={styles.rowActions}>
+                  <Pressable
+                    hitSlop={8}
+                    style={styles.acceptBtn}
+                    disabled={busy}
+                    onPress={() => void acceptRequest(item)}
+                  >
+                    <Text style={styles.acceptBtnText}>Accept</Text>
+                  </Pressable>
+                  <Pressable
+                    hitSlop={8}
+                    style={styles.deleteBtn}
+                    disabled={busy}
+                    onPress={() => void deleteRequest(item)}
+                  >
+                    {busy ? (
+                      <ActivityIndicator size="small" color={MUTED} />
+                    ) : (
+                      <Ionicons name="trash-outline" size={20} color={MUTED} />
+                    )}
+                  </Pressable>
+                </View>
               </Pressable>
             );
           }}
@@ -206,5 +238,15 @@ const styles = StyleSheet.create({
   peerNameUnread: { fontWeight: "800" },
   preview: { marginTop: 3, fontSize: 13, color: MUTED },
   previewUnread: { color: TEXT, fontWeight: "600" },
+  rowActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  acceptBtn: {
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  acceptBtnText: { color: "#111", fontWeight: "800", fontSize: 13 },
   deleteBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" }
 });
