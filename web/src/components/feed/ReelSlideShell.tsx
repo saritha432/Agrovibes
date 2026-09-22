@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { likeHomePost, saveHomePost, unlikeHomePost, unsaveHomePost } from "../../api/home";
 import { addPostToStory } from "../../api/posts";
@@ -34,6 +35,8 @@ export function ReelSlideShell({
 }: Props) {
   const { token, user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [optionsAnchor, setOptionsAnchor] = useState<CSSProperties | null>(null);
   const tapTimeoutRef = useRef<number | null>(null);
   const lastTapRef = useRef(0);
   const src = resolveWebPostVideoUrl(post);
@@ -217,9 +220,48 @@ export function ReelSlideShell({
     };
   }, []);
 
+  useEffect(() => {
+    if (!optionsOpen) {
+      setOptionsAnchor(null);
+      return;
+    }
+    const update = () => {
+      const rect = stageRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setOptionsAnchor(null);
+        return;
+      }
+      setOptionsAnchor({
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height
+      });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [optionsOpen]);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOptionsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [optionsOpen]);
+
   return (
     <section className={`reel-slide${sideComments && commentsOpen ? " reel-slide--with-side-comments" : ""}`}>
-      <div className="reel-slide__stage">
+      <div className="reel-slide__stage" ref={stageRef}>
         {src ? (
           <video
             ref={videoRef}
@@ -314,49 +356,68 @@ export function ReelSlideShell({
         />
       ) : null}
 
-      {optionsOpen ? (
-        <div className="reel-slide__options" role="dialog" aria-modal="true" aria-label="Reel options">
-          <button className="reel-slide__options-backdrop" type="button" onClick={() => setOptionsOpen(false)} />
-          <div className="reel-slide__options-sheet">
-            <button type="button" onClick={() => void addToStory()} disabled={!token || storyBusy}>
-              {storyBusy ? "Adding…" : "Add to story"}
-            </button>
-            <button type="button" onClick={() => void toggleSave()} disabled={!token || saveBusy}>
-              {saved ? "Remove from saved" : "Save"}
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                const url = `${window.location.origin}/watch/${post.id}`;
-                try {
-                  if (navigator.clipboard?.writeText) {
-                    await navigator.clipboard.writeText(url);
-                    window.alert("Link copied.");
-                  } else {
-                    window.prompt("Copy this link:", url);
-                  }
-                } finally {
-                  setOptionsOpen(false);
-                }
-              }}
-            >
-              Copy link
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                window.alert("Report submitted.");
-                setOptionsOpen(false);
-              }}
-            >
-              Report
-            </button>
-            <button type="button" onClick={() => setOptionsOpen(false)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {optionsOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div className="reel-slide__options" role="dialog" aria-modal="true" aria-label="Reel options">
+              <button className="reel-slide__options-backdrop" type="button" onClick={() => setOptionsOpen(false)} />
+              <div className="reel-slide__options-anchor" style={optionsAnchor ?? { visibility: "hidden" }}>
+                <div className="reel-slide__options-sheet">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void addToStory();
+                      setOptionsOpen(false);
+                    }}
+                    disabled={!token || storyBusy}
+                  >
+                    {storyBusy ? "Adding…" : "Add to story"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void toggleSave();
+                      setOptionsOpen(false);
+                    }}
+                    disabled={!token || saveBusy}
+                  >
+                    {saved ? "Remove from saved" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const url = `${window.location.origin}/watch/${post.id}`;
+                      try {
+                        if (navigator.clipboard?.writeText) {
+                          await navigator.clipboard.writeText(url);
+                          window.alert("Link copied.");
+                        } else {
+                          window.prompt("Copy this link:", url);
+                        }
+                      } finally {
+                        setOptionsOpen(false);
+                      }
+                    }}
+                  >
+                    Copy link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.alert("Report submitted.");
+                      setOptionsOpen(false);
+                    }}
+                  >
+                    Report
+                  </button>
+                  <button type="button" onClick={() => setOptionsOpen(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </section>
   );
 }

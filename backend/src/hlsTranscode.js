@@ -71,6 +71,7 @@ function playbackMp4UrlForSourceKey(sourceKey) {
 function abrLadderOutputs() {
   const rungs = [
     { name: "_240p", height: 240, maxBitrate: 400_000, buf: 800_000 },
+    { name: "_360p", height: 360, maxBitrate: 800_000, buf: 1_600_000 },
     { name: "_480p", height: 480, maxBitrate: 1_200_000, buf: 2_400_000 },
     { name: "_720p", height: 720, maxBitrate: 2_500_000, buf: 5_000_000 },
     { name: "_1080p", height: 1080, maxBitrate: 5_000_000, buf: 10_000_000 }
