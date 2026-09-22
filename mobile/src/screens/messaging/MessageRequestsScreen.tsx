@@ -46,13 +46,13 @@ export function MessageRequestsScreen() {
   const { t } = useLanguage();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const topChromeInset = useTopChromeInset();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyPeerId, setBusyPeerId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    if (!token) {
+    if (!token || !user?.isPrivate) {
       setThreads([]);
       setLoading(false);
       return;
@@ -66,7 +66,7 @@ export function MessageRequestsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, user?.isPrivate]);
 
   useFocusEffect(
     useCallback(() => {
@@ -109,7 +109,8 @@ export function MessageRequestsScreen() {
       </View>
 
       <Text style={styles.subtitle}>
-        Messages from people you don&apos;t follow. Accept to move them into your inbox, or delete.
+        On a private account, messages from people you don&apos;t follow land here. Accept to move them into your
+        inbox, or delete.
       </Text>
 
       {loading ? (
