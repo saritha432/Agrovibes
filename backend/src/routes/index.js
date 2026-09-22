@@ -710,10 +710,9 @@ async function isUserPrivateAccount(userId) {
 
 /**
  * Message Requests apply only to PRIVATE accounts.
- * - Sender always keeps the thread in Primary.
+ * - Sender always keeps the thread in Primary (or Accepted if they reply to a request).
  * - Public receiver → always Primary.
- * - Private receiver: Primary if they follow the sender / already accepted / already replied;
- *   otherwise Message Request.
+ * - Private receiver after unfollow → stays Request until Accept / reply.
  */
 async function ensureDmInboxBucketsOnSend({ senderId, receiverId }) {
   const sid = Number(senderId);
@@ -736,23 +735,10 @@ async function ensureDmInboxBucketsOnSend({ senderId, receiverId }) {
 
   const receiverBucket = await getDmThreadBucket(rid, sid);
   if (receiverBucket === "primary" || receiverBucket === "accepted") return receiverBucket;
+  // Already marked Request (e.g. after unfollow) → keep it until they Accept.
+  if (receiverBucket === "request") return "request";
 
   if (await viewerFollowsAccepted(rid, sid)) {
-    await upsertDmThreadBucket(rid, sid, "primary");
-    return "primary";
-  }
-
-  // Receiver already messaged this peer before → treat as primary (prior conversation).
-  const priorFromReceiver = await query(
-    `
-    SELECT 1 FROM direct_messages dm
-    WHERE dm.sender_id = $1 AND dm.receiver_id = $2
-      AND ${dmVisibleToUserSql("dm", "$1")}
-    LIMIT 1
-    `,
-    [rid, sid]
-  );
-  if (priorFromReceiver.rows.length > 0) {
     await upsertDmThreadBucket(rid, sid, "primary");
     return "primary";
   }
@@ -783,9 +769,13 @@ async function resolveIsMessageRequest(userId, peerId) {
   // Following someone → always Primary.
   if (await viewerFollowsAccepted(userId, peerId)) return false;
   const bucket = await getDmThreadBucket(userId, peerId);
-  // Explicit Accept / you started the chat as sender → Primary even without a follow.
-  if (bucket === "primary" || bucket === "accepted") return false;
-  // Already replied → treat as accepted (and persist so it stays in Messages).
+  // Explicit Accept (or reply that accepted the request).
+  if (bucket === "accepted") return false;
+  // You started the chat / normal primary thread.
+  if (bucket === "primary") return false;
+  // Explicit request (e.g. after unfollow, or first inbound from a stranger).
+  if (bucket === "request") return true;
+  // No bucket yet: inbound-only → request; if I've messaged them → primary.
   const sent = await query(
     `
     SELECT 1 FROM direct_messages dm
@@ -795,12 +785,17 @@ async function resolveIsMessageRequest(userId, peerId) {
     `,
     [Number(userId), Number(peerId)]
   );
-  if (sent.rows.length > 0) {
-    await upsertDmThreadBucket(userId, peerId, "accepted");
-    return false;
-  }
-  // Private + not following + not explicitly Primary → Message Request.
-  return true;
+  if (sent.rows.length > 0) return false;
+  const received = await query(
+    `
+    SELECT 1 FROM direct_messages dm
+    WHERE dm.sender_id = $2 AND dm.receiver_id = $1
+      AND ${dmVisibleToUserSql("dm", "$1")}
+    LIMIT 1
+    `,
+    [Number(userId), Number(peerId)]
+  );
+  return received.rows.length > 0;
 }
 
 /** After unfollow / remove-follower: move chat to Requests if my account is private and I no longer follow them. */
@@ -812,6 +807,41 @@ async function demoteDmThreadAfterUnfollow(userId, peerId) {
   if (!(await isUserPrivateAccount(uid))) return;
   if (await viewerFollowsAccepted(uid, pid)) return;
   await upsertDmThreadBucket(uid, pid, "request");
+}
+
+/**
+ * Undo false "accepted" rows from an earlier bug that auto-accepted on open
+ * when the viewer never actually messaged that peer.
+ */
+async function repairFalseAcceptedDmThreads(userId) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid) || uid <= 0) return;
+  try {
+    if (!(await isUserPrivateAccount(uid))) return;
+    await query(
+      `
+      UPDATE dm_thread_states dts
+      SET bucket = 'request', updated_at = NOW()
+      WHERE dts.user_id = $1
+        AND dts.bucket = 'accepted'
+        AND NOT EXISTS (
+          SELECT 1 FROM social_follows sf
+          WHERE sf.follower_id = $1
+            AND sf.following_id = dts.peer_id
+            AND sf.status = 'accepted'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM direct_messages dm
+          WHERE dm.sender_id = $1
+            AND dm.receiver_id = dts.peer_id
+            AND ${dmVisibleToUserSql("dm", "$1")}
+        )
+      `,
+      [uid]
+    );
+  } catch {
+    // ignore
+  }
 }
 
 /** Mark a just-sent DM delivered when the receiver is currently connected. */
@@ -5278,6 +5308,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
     const me = Number(req.user.userId);
     // Inbox sync = device has the messages → double grey ticks for senders.
     await flushDeliveriesForReceiver(me);
+    await repairFalseAcceptedDmThreads(me);
     const bucketFilter = String(req.query.bucket || "").trim().toLowerCase();
     const result = await query(
       `
@@ -5321,14 +5352,22 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
           CASE
             WHEN COALESCE(me_user.is_private, false) = false THEN false
             WHEN sf.id IS NOT NULL THEN false
-            WHEN dts.bucket IN ('primary', 'accepted') THEN false
+            WHEN dts.bucket = 'accepted' THEN false
+            WHEN dts.bucket = 'primary' THEN false
+            WHEN dts.bucket = 'request' THEN true
             WHEN EXISTS (
               SELECT 1 FROM direct_messages dm_sent
               WHERE dm_sent.sender_id = $1
                 AND dm_sent.receiver_id = t.peer_id
                 AND ${dmVisibleToUserSql("dm_sent", "$1")}
             ) THEN false
-            ELSE true
+            WHEN EXISTS (
+              SELECT 1 FROM direct_messages dm_recv
+              WHERE dm_recv.sender_id = t.peer_id
+                AND dm_recv.receiver_id = $1
+                AND ${dmVisibleToUserSql("dm_recv", "$1")}
+            ) THEN true
+            ELSE false
           END AS "isMessageRequest"
         FROM thread_rows t
         JOIN learn_users u ON u.id = t.peer_id
@@ -5381,13 +5420,23 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         WHERE t.rn = 1
           AND COALESCE((SELECT is_private FROM learn_users WHERE id = $1), false) = true
           AND sf.id IS NULL
-          AND dts.bucket IS DISTINCT FROM 'primary'
-          AND dts.bucket IS DISTINCT FROM 'accepted'
-          AND NOT EXISTS (
-            SELECT 1 FROM direct_messages dm_sent
-            WHERE dm_sent.sender_id = $1
-              AND dm_sent.receiver_id = t.peer_id
-              AND ${dmVisibleToUserSql("dm_sent", "$1")}
+          AND (
+            dts.bucket = 'request'
+            OR (
+              dts.bucket IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM direct_messages dm_sent
+                WHERE dm_sent.sender_id = $1
+                  AND dm_sent.receiver_id = t.peer_id
+                  AND ${dmVisibleToUserSql("dm_sent", "$1")}
+              )
+              AND EXISTS (
+                SELECT 1 FROM direct_messages dm_recv
+                WHERE dm_recv.sender_id = t.peer_id
+                  AND dm_recv.receiver_id = $1
+                  AND ${dmVisibleToUserSql("dm_recv", "$1")}
+              )
+            )
           )
         `,
         [me]
