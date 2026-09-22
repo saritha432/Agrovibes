@@ -27,7 +27,7 @@ import {
 import { APP_LIME } from "../../theme/appColors";
 import { useLanguage } from "../../localization/LanguageContext";
 import { useNotificationPanel } from "../../context/NotificationPanelContext";
-import { formatDmInboxPreview } from "./dmMessageFormats";
+import { formatDmInboxPreview, formatDmThreadActivityLine } from "./dmMessageFormats";
 import { NewMessageComposerModal } from "./NewMessageComposerModal";
 
 const BG = "#121212";
@@ -129,12 +129,19 @@ export function DirectInboxScreen() {
           typeof update.unreadCount === "number" && Number.isFinite(update.unreadCount)
             ? Math.max(0, update.unreadCount)
             : Math.max(0, Number(current.unreadCount || 0) + unreadDelta);
+        const myId = Number(user?.id);
         next[idx] = {
           ...current,
           lastMessage: update.lastMessage,
           lastAt: update.lastAt,
           lastSenderId: update.lastSenderId,
           lastReceiverId: update.lastReceiverId,
+          lastMessageIsRead:
+            typeof update.lastMessageIsRead === "boolean"
+              ? update.lastMessageIsRead
+              : Number(update.lastSenderId) === myId
+                ? false
+                : current.lastMessageIsRead,
           unreadCount: nextUnread
         };
         next.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
@@ -142,7 +149,7 @@ export function DirectInboxScreen() {
         return next;
       });
     });
-  }, [load, syncMessageUnreadFromThreads]);
+  }, [load, syncMessageUnreadFromThreads, user?.id]);
 
   useEffect(() => {
     return onDirectRead((payload) => {
@@ -154,11 +161,21 @@ export function DirectInboxScreen() {
           syncMessageUnreadFromThreads(next);
           return next;
         });
+      } else if (payload?.readerId && !payload.selfRead) {
+        // Peer read my messages → update Sent → Seen under their name.
+        const myId = Number(user?.id);
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.peerUserId === payload.readerId && Number(thread.lastSenderId) === myId
+              ? { ...thread, lastMessageIsRead: true }
+              : thread
+          )
+        );
       }
       void load();
       void refreshMessageUnread();
     });
-  }, [load, refreshMessageUnread, syncMessageUnreadFromThreads]);
+  }, [load, refreshMessageUnread, syncMessageUnreadFromThreads, user?.id]);
 
   const trimmedQuery = query.trim();
   const needle = trimmedQuery.toLowerCase();
@@ -375,9 +392,17 @@ export function DirectInboxScreen() {
                 </Pressable>
               );
             }
-            const preview = previewMessage(item.thread.lastMessage, t);
+            const preview = formatDmThreadActivityLine({
+              lastMessage: item.thread.lastMessage,
+              lastAt: item.thread.lastAt,
+              lastSenderId: item.thread.lastSenderId,
+              lastMessageIsRead: item.thread.lastMessageIsRead,
+              viewerUserId: user?.id,
+              t
+            });
             const timeLabel = formatShortRelativeTime(new Date(item.thread.lastAt).getTime());
             const unread = isThreadUnread(item.thread);
+            const fromMe = Number(item.thread.lastSenderId) === Number(user?.id);
             return (
               <Pressable style={styles.row} onPress={() => openThread(item.thread)}>
                 <UserAvatar
@@ -394,7 +419,12 @@ export function DirectInboxScreen() {
                   <View style={styles.previewRow}>
                     <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={1}>
                       {preview}
-                      <Text style={[styles.previewMeta, unread ? styles.previewMetaUnread : null]}> • {timeLabel}</Text>
+                      {!fromMe ? (
+                        <Text style={[styles.previewMeta, unread ? styles.previewMetaUnread : null]}>
+                          {" "}
+                          • {timeLabel}
+                        </Text>
+                      ) : null}
                     </Text>
                   </View>
                 </View>

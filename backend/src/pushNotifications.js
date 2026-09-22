@@ -661,7 +661,7 @@ async function sendPushToUser(userId, { title, body, data, imageUrl, categoryId 
   return { sent: response.successCount, failed: response.failureCount };
 }
 
-async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, commentExcerpt, followId, imageUrl }) {
+async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, commentExcerpt, followId, imageUrl, messageId }) {
   const settings = await getPushSettings(Number(userId));
   if (!shouldSendPushForType(settings, String(type || ""))) {
     return { sent: 0, skipped: "user_settings" };
@@ -679,7 +679,8 @@ async function sendSocialPushToUser({ userId, type, actorName, actorId, postId, 
       senderName: String(actorName || "").trim(),
       senderId: actorId != null ? String(actorId) : "",
       postId: postId != null ? String(postId) : "",
-      followId: followId != null ? String(followId) : ""
+      followId: followId != null ? String(followId) : "",
+      messageId: messageId != null ? String(messageId) : ""
     }
   });
 }
