@@ -159,6 +159,11 @@ export function RootNavigator() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="MessageRequests"
+        getComponent={() => require("../screens/messaging/MessageRequestsScreen").MessageRequestsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="SettingsMenu"
         getComponent={() => require("../screens/SettingsMenuScreen").SettingsMenuScreen}
         options={{ headerShown: false, animation: "slide_from_right" }}

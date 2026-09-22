@@ -9,13 +9,15 @@ import {
   TextInput,
   View
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTopChromeInset } from "../../theme/topChromeInset";
 import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../../components/DeactivatedAccountGate";
 import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
+import type { RootStackParamList } from "../../navigation/rootStackTypes";
 import { useAndroidTabBackToHome } from "../../navigation/useAndroidScreenBack";
 import { fetchMessageThreads, fetchUsers, type MessageThread, type UserSearchRecord } from "../../services/api";
 import {
@@ -69,12 +71,14 @@ type InboxRow =
 export function DirectInboxScreen() {
   const { t } = useLanguage();
   useAndroidTabBackToHome();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const topChromeInset = useTopChromeInset();
   const { user, token } = useAuth();
   const { refreshMessageUnread, syncMessageUnreadFromThreads } = useNotificationPanel();
   const isAccountDeactivated = useIsAccountDeactivated();
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<MessageThread[]>([]);
+  const [requestCount, setRequestCount] = useState(0);
   const [peopleHits, setPeopleHits] = useState<UserSearchRecord[]>([]);
   const [searchingPeople, setSearchingPeople] = useState(false);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
@@ -82,9 +86,15 @@ export function DirectInboxScreen() {
 
   const displayName = user?.username || user?.fullName || "You";
 
+  const primaryThreads = useMemo(
+    () => threads.filter((thread) => !thread.isMessageRequest),
+    [threads]
+  );
+
   const load = useCallback(async () => {
     if (!token) {
       setThreads([]);
+      setRequestCount(0);
       syncMessageUnreadFromThreads([]);
       return;
     }
@@ -92,10 +102,16 @@ export function DirectInboxScreen() {
       const list = await fetchMessageThreads(token);
       const next = list.threads || [];
       setThreads(next);
-      // Keep Chat tab badge aligned with what the inbox shows (clears stale "3").
-      syncMessageUnreadFromThreads(next);
+      setRequestCount(
+        typeof list.requestCount === "number"
+          ? list.requestCount
+          : next.filter((row) => row.isMessageRequest).length
+      );
+      // Badge counts only primary inbox unread (requests live under Request).
+      syncMessageUnreadFromThreads(next.filter((row) => !row.isMessageRequest));
     } catch {
       setThreads([]);
+      setRequestCount(0);
     }
   }, [syncMessageUnreadFromThreads, token]);
 
@@ -145,7 +161,7 @@ export function DirectInboxScreen() {
           unreadCount: nextUnread
         };
         next.sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
-        syncMessageUnreadFromThreads(next);
+        syncMessageUnreadFromThreads(next.filter((row) => !row.isMessageRequest));
         return next;
       });
     });
@@ -158,7 +174,7 @@ export function DirectInboxScreen() {
           const next = prev.map((thread) =>
             thread.peerUserId === payload.peerUserId ? { ...thread, unreadCount: 0 } : thread
           );
-          syncMessageUnreadFromThreads(next);
+          syncMessageUnreadFromThreads(next.filter((row) => !row.isMessageRequest));
           return next;
         });
       } else if (payload?.readerId && !payload.selfRead) {
@@ -209,9 +225,9 @@ export function DirectInboxScreen() {
   }, [needle, token, trimmedQuery, user?.id]);
 
   const matchingThreads = useMemo(() => {
-    if (!needle) return threads;
+    if (!needle) return primaryThreads;
     const hitIds = new Set(peopleHits.map((row) => Number(row.id)));
-    return threads.filter((thread) => {
+    return primaryThreads.filter((thread) => {
       const preview = previewMessage(thread.lastMessage, t).toLowerCase();
       const name = thread.peerName.toLowerCase();
       const handle = String(thread.peerUsername || "").toLowerCase();
@@ -222,7 +238,7 @@ export function DirectInboxScreen() {
         hitIds.has(Number(thread.peerUserId))
       );
     });
-  }, [needle, peopleHits, t, threads]);
+  }, [needle, peopleHits, primaryThreads, t]);
 
   const extraPeople = useMemo(() => {
     if (!needle) return [];
@@ -273,7 +289,8 @@ export function DirectInboxScreen() {
       peerName: thread.peerName,
       peerKey: thread.peerEmail,
       peerUsername: thread.peerUsername || undefined,
-      peerAvatarUrl: thread.peerAvatarUrl
+      peerAvatarUrl: thread.peerAvatarUrl,
+      isMessageRequest: Boolean(thread.isMessageRequest)
     });
   };
 
@@ -291,8 +308,18 @@ export function DirectInboxScreen() {
   const listHeader = (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{t("messagesTitle")}</Text>
-      <Pressable hitSlop={8} accessibilityLabel="Request">
-        <Text style={styles.requestLink}>Request</Text>
+      <Pressable
+        hitSlop={8}
+        accessibilityLabel="Message requests"
+        onPress={() => navigation.navigate("MessageRequests")}
+        style={styles.requestLinkWrap}
+      >
+        <Text style={styles.requestLink}>Requests</Text>
+        {requestCount > 0 ? (
+          <View style={styles.requestBadge}>
+            <Text style={styles.requestBadgeText}>{requestCount > 99 ? "99+" : String(requestCount)}</Text>
+          </View>
+        ) : null}
       </Pressable>
     </View>
   );
@@ -333,7 +360,7 @@ export function DirectInboxScreen() {
 
       {isAccountDeactivated ? (
         <DeactivatedContentPlaceholder featureLabel="chat" />
-      ) : !needle && threads.length === 0 ? (
+      ) : !needle && primaryThreads.length === 0 ? (
         <View style={styles.emptyWrap}>
           {listHeader}
           <View style={styles.empty}>
@@ -479,10 +506,29 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: TEXT
   },
+  requestLinkWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6
+  },
   requestLink: {
     fontSize: 15,
     fontWeight: "600",
     color: MUTED
+  },
+  requestBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: LIME,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  requestBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#111"
   },
   searchStatus: {
     paddingHorizontal: 16,

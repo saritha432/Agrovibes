@@ -39,7 +39,7 @@ import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { useAndroidScreenBack } from "../../navigation/useAndroidScreenBack";
 import { UserAvatar } from "../../components/UserAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, markDirectThreadRead, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, markDirectThreadRead, acceptMessageRequest, declineMessageRequest, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
 import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
@@ -500,11 +500,13 @@ export function DirectChatScreen() {
       return true;
     }, [navigation])
   );
-  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall, autoStartCall } =
+  const { peerUserId, peerName, peerKey, peerUsername: peerUsernameParam, peerAvatarUrl, incomingCall, autoStartCall, isMessageRequest: isMessageRequestParam } =
     route.params;
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
+  const [isMessageRequest, setIsMessageRequest] = useState(Boolean(isMessageRequestParam));
+  const [requestActionBusy, setRequestActionBusy] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [peerUsername, setPeerUsername] = useState(peerUsernameParam || "");
@@ -677,6 +679,9 @@ export function DirectChatScreen() {
     const list = await fetchMessageThread(token, peerUserId, { limit: 40 });
     setMessages(list.messages || []);
     setHasMoreOlder(!!list.hasMore);
+    if (typeof list.isMessageRequest === "boolean") {
+      setIsMessageRequest(list.isMessageRequest);
+    }
     const next = list.peer?.avatarUrl != null && String(list.peer.avatarUrl).trim() ? String(list.peer.avatarUrl).trim() : null;
     if (next) setPeerAvatar(next);
   }, [token, peerUserId]);
@@ -818,6 +823,7 @@ export function DirectChatScreen() {
   }, [callSession?.direction, reload, socketConnected]);
 
   const appendSentMessage = useCallback((message: DirectMessageItem) => {
+    setIsMessageRequest(false);
     setMessages((prev) => {
       if (prev.some((item) => Number(item.id) === Number(message.id))) {
         return prev.map((item) =>
@@ -875,10 +881,36 @@ export function DirectChatScreen() {
       const result = await sendDirectMessage(token, peerUserId, body);
       if (result.message) appendSentMessage(result.message);
       else await reload();
+      setIsMessageRequest(false);
     } finally {
       sendingRef.current = false;
     }
   };
+
+  const acceptIncomingRequest = useCallback(async () => {
+    if (!token || requestActionBusy) return;
+    setRequestActionBusy(true);
+    try {
+      await acceptMessageRequest(token, peerUserId);
+      setIsMessageRequest(false);
+    } catch {
+      Alert.alert("Message request", "Could not accept this request.");
+    } finally {
+      setRequestActionBusy(false);
+    }
+  }, [peerUserId, requestActionBusy, token]);
+
+  const declineIncomingRequest = useCallback(async () => {
+    if (!token || requestActionBusy) return;
+    setRequestActionBusy(true);
+    try {
+      await declineMessageRequest(token, peerUserId);
+      navigation.goBack();
+    } catch {
+      Alert.alert("Message request", "Could not delete this request.");
+      setRequestActionBusy(false);
+    }
+  }, [navigation, peerUserId, requestActionBusy, token]);
 
   const startReplyToMessage = useCallback(
     (item: DirectMessageItem) => {
@@ -1692,6 +1724,33 @@ export function DirectChatScreen() {
         keyboardVerticalOffset={Platform.OS === "ios" ? topChromeInset : 0}
       >
         <View style={[styles.composerWrap, { paddingBottom: bottomPad }]}>
+        {isMessageRequest ? (
+          <View style={styles.requestBanner}>
+            <Text style={styles.requestBannerText}>
+              {peerName} isn&apos;t someone you follow. Accept to chat in your inbox, or delete this request.
+            </Text>
+            <View style={styles.requestBannerActions}>
+              <Pressable
+                style={[styles.requestBannerBtn, styles.requestBannerDelete]}
+                disabled={requestActionBusy}
+                onPress={() => void declineIncomingRequest()}
+              >
+                <Text style={styles.requestBannerDeleteText}>Delete</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.requestBannerBtn, styles.requestBannerAccept]}
+                disabled={requestActionBusy}
+                onPress={() => void acceptIncomingRequest()}
+              >
+                {requestActionBusy ? (
+                  <ActivityIndicator size="small" color="#111" />
+                ) : (
+                  <Text style={styles.requestBannerAcceptText}>Accept</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         {replyTarget ? (
           <View style={styles.replyComposerBanner}>
             <View style={styles.replyComposerMeta}>
@@ -2126,6 +2185,47 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: BORDER
+  },
+  requestBanner: {
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#1c1c1e",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    gap: 10
+  },
+  requestBannerText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: MUTED
+  },
+  requestBannerActions: {
+    flexDirection: "row",
+    gap: 8
+  },
+  requestBannerBtn: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  requestBannerDelete: {
+    backgroundColor: "#2a2a2a"
+  },
+  requestBannerAccept: {
+    backgroundColor: APP_LIME
+  },
+  requestBannerDeleteText: {
+    color: TEXT,
+    fontWeight: "700",
+    fontSize: 14
+  },
+  requestBannerAcceptText: {
+    color: "#111",
+    fontWeight: "800",
+    fontSize: 14
   },
   replyComposerBanner: {
     width: "100%",

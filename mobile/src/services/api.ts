@@ -902,6 +902,8 @@ export interface MessageThread {
   lastAt: string;
   lastMessageIsRead?: boolean;
   unreadCount?: number;
+  /** True when this chat is in Message Requests (sender not followed). */
+  isMessageRequest?: boolean;
 }
 
 export interface DirectMessageItem {
@@ -1893,9 +1895,19 @@ export async function fetchRelationships(token: string, userIds: number[]) {
   };
 }
 
-export async function fetchMessageThreads(token: string) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/threads`, token)) as {
+export async function fetchMessageThreads(
+  token: string,
+  options?: { bucket?: "primary" | "requests" }
+) {
+  const params = new URLSearchParams();
+  if (options?.bucket) params.set("bucket", options.bucket);
+  const qs = params.toString();
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/threads${qs ? `?${qs}` : ""}`,
+    token
+  )) as {
     threads: MessageThread[];
+    requestCount?: number;
   };
 }
 
@@ -1915,7 +1927,24 @@ export async function fetchMessageThread(
     peer: { id: number; fullName: string; email?: string; phone?: string; avatarUrl?: string | null };
     messages: DirectMessageItem[];
     hasMore?: boolean;
+    isMessageRequest?: boolean;
   };
+}
+
+export async function acceptMessageRequest(token: string, peerUserId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}/accept-request`,
+    token,
+    { method: "POST" }
+  )) as { ok: boolean; isMessageRequest?: boolean };
+}
+
+export async function declineMessageRequest(token: string, peerUserId: number) {
+  return (await fetchWithAuth(
+    `${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}/decline-request`,
+    token,
+    { method: "POST" }
+  )) as { ok: boolean };
 }
 
 export async function markDirectThreadRead(token: string, peerUserId: number) {

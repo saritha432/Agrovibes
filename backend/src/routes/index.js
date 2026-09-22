@@ -639,6 +639,18 @@ async function ensureDirectMessagesTable() {
   await query(`ALTER TABLE direct_messages ALTER COLUMN is_delivered SET DEFAULT false`);
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_sender BOOLEAN NOT NULL DEFAULT false`);
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_receiver BOOLEAN NOT NULL DEFAULT false`);
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS dm_thread_states (
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      peer_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      bucket TEXT NOT NULL DEFAULT 'primary',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, peer_id)
+    )
+    `
+  );
+  await query(`CREATE INDEX IF NOT EXISTS idx_dm_thread_states_user_bucket ON dm_thread_states (user_id, bucket)`);
   directMessagesTableReady = true;
 }
 
@@ -647,6 +659,122 @@ function dmVisibleToUserSql(alias, userSql) {
     (${alias}.sender_id = ${userSql} AND COALESCE(${alias}.hidden_for_sender, FALSE))
     OR (${alias}.receiver_id = ${userSql} AND COALESCE(${alias}.hidden_for_receiver, FALSE))
   )`;
+}
+
+async function upsertDmThreadBucket(userId, peerId, bucket) {
+  const uid = Number(userId);
+  const pid = Number(peerId);
+  const next = bucket === "request" ? "request" : "primary";
+  if (!Number.isFinite(uid) || !Number.isFinite(pid) || uid <= 0 || pid <= 0 || uid === pid) return;
+  await query(
+    `
+    INSERT INTO dm_thread_states (user_id, peer_id, bucket, updated_at)
+    VALUES ($1, $2, $3, NOW())
+    ON CONFLICT (user_id, peer_id)
+    DO UPDATE SET bucket = EXCLUDED.bucket, updated_at = NOW()
+    `,
+    [uid, pid, next]
+  );
+}
+
+async function getDmThreadBucket(userId, peerId) {
+  const result = await query(
+    `SELECT bucket FROM dm_thread_states WHERE user_id = $1 AND peer_id = $2 LIMIT 1`,
+    [Number(userId), Number(peerId)]
+  );
+  return result.rows[0]?.bucket === "request" ? "request" : result.rows[0]?.bucket === "primary" ? "primary" : null;
+}
+
+async function viewerFollowsAccepted(viewerId, targetId) {
+  const result = await query(
+    `
+    SELECT 1
+    FROM social_follows
+    WHERE follower_id = $1 AND following_id = $2 AND status = 'accepted'
+    LIMIT 1
+    `,
+    [Number(viewerId), Number(targetId)]
+  );
+  return result.rows.length > 0;
+}
+
+/**
+ * Instagram-style buckets when A messages B:
+ * - Sender always keeps the thread in Primary.
+ * - Receiver: Primary if they already follow sender or already accepted / replied;
+ *   otherwise Message Request.
+ */
+async function ensureDmInboxBucketsOnSend({ senderId, receiverId }) {
+  const sid = Number(senderId);
+  const rid = Number(receiverId);
+  await upsertDmThreadBucket(sid, rid, "primary");
+
+  const receiverBucket = await getDmThreadBucket(rid, sid);
+  if (receiverBucket === "primary") return "primary";
+
+  if (await viewerFollowsAccepted(rid, sid)) {
+    await upsertDmThreadBucket(rid, sid, "primary");
+    return "primary";
+  }
+
+  // Receiver already messaged this peer before → treat as primary (prior conversation).
+  const priorFromReceiver = await query(
+    `
+    SELECT 1 FROM direct_messages dm
+    WHERE dm.sender_id = $1 AND dm.receiver_id = $2
+      AND ${dmVisibleToUserSql("dm", "$1")}
+    LIMIT 1
+    `,
+    [rid, sid]
+  );
+  if (priorFromReceiver.rows.length > 0) {
+    await upsertDmThreadBucket(rid, sid, "primary");
+    return "primary";
+  }
+
+  await upsertDmThreadBucket(rid, sid, "request");
+  return "request";
+}
+
+async function hideDmThreadForUser(userId, peerId) {
+  const uid = Number(userId);
+  const pid = Number(peerId);
+  await query(
+    `
+    UPDATE direct_messages
+    SET hidden_for_sender = CASE WHEN sender_id = $1 THEN TRUE ELSE hidden_for_sender END,
+        hidden_for_receiver = CASE WHEN receiver_id = $1 THEN TRUE ELSE hidden_for_receiver END
+    WHERE (sender_id = $1 AND receiver_id = $2)
+       OR (sender_id = $2 AND receiver_id = $1)
+    `,
+    [uid, pid]
+  );
+  await query(`DELETE FROM dm_thread_states WHERE user_id = $1 AND peer_id = $2`, [uid, pid]);
+}
+
+async function resolveIsMessageRequest(userId, peerId) {
+  const bucket = await getDmThreadBucket(userId, peerId);
+  if (bucket === "primary") return false;
+  if (bucket === "request") return true;
+  if (await viewerFollowsAccepted(userId, peerId)) return false;
+  const sent = await query(
+    `
+    SELECT 1 FROM direct_messages dm
+    WHERE dm.sender_id = $1 AND dm.receiver_id = $2 AND ${dmVisibleToUserSql("dm", "$1")}
+    LIMIT 1
+    `,
+    [Number(userId), Number(peerId)]
+  );
+  if (sent.rows.length > 0) return false;
+  const received = await query(
+    `
+    SELECT 1 FROM direct_messages dm
+    WHERE dm.sender_id = $2 AND dm.receiver_id = $1 AND ${dmVisibleToUserSql("dm", "$1")}
+    LIMIT 1
+    `,
+    [Number(userId), Number(peerId)]
+  );
+  return received.rows.length > 0;
 }
 
 /** Mark a just-sent DM delivered when the receiver is currently connected. */
@@ -5109,6 +5237,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
     const me = Number(req.user.userId);
     // Inbox sync = device has the messages → double grey ticks for senders.
     await flushDeliveriesForReceiver(me);
+    const bucketFilter = String(req.query.bucket || "").trim().toLowerCase();
     const result = await query(
       `
       WITH thread_rows AS (
@@ -5127,35 +5256,116 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         FROM direct_messages dm
         WHERE (dm.sender_id = $1 OR dm.receiver_id = $1)
           AND ${dmVisibleToUserSql("dm", "$1")}
+      ),
+      classified AS (
+        SELECT
+          t.peer_id AS "peerUserId",
+          u.full_name AS "peerName",
+          u.email AS "peerEmail",
+          NULLIF(TRIM(u.username), '') AS "peerUsername",
+          NULLIF(TRIM(u.avatar_url), '') AS "peerAvatarUrl",
+          t.sender_id AS "lastSenderId",
+          t.receiver_id AS "lastReceiverId",
+          t.body AS "lastMessage",
+          t.created_at AS "lastAt",
+          t.is_read AS "lastMessageIsRead",
+          COALESCE((
+            SELECT COUNT(*)::INT
+            FROM direct_messages dm2
+            WHERE dm2.sender_id = t.peer_id
+              AND dm2.receiver_id = $1
+              AND dm2.is_read = false
+              AND ${dmVisibleToUserSql("dm2", "$1")}
+          ), 0) AS "unreadCount",
+          CASE
+            WHEN dts.bucket = 'primary' THEN false
+            WHEN dts.bucket = 'request' THEN true
+            WHEN sf.id IS NOT NULL THEN false
+            WHEN EXISTS (
+              SELECT 1 FROM direct_messages dm_sent
+              WHERE dm_sent.sender_id = $1
+                AND dm_sent.receiver_id = t.peer_id
+                AND ${dmVisibleToUserSql("dm_sent", "$1")}
+            ) THEN false
+            WHEN EXISTS (
+              SELECT 1 FROM direct_messages dm_recv
+              WHERE dm_recv.sender_id = t.peer_id
+                AND dm_recv.receiver_id = $1
+                AND ${dmVisibleToUserSql("dm_recv", "$1")}
+            ) THEN true
+            ELSE false
+          END AS "isMessageRequest"
+        FROM thread_rows t
+        JOIN learn_users u ON u.id = t.peer_id
+        LEFT JOIN dm_thread_states dts
+          ON dts.user_id = $1 AND dts.peer_id = t.peer_id
+        LEFT JOIN social_follows sf
+          ON sf.follower_id = $1
+          AND sf.following_id = t.peer_id
+          AND sf.status = 'accepted'
+        WHERE t.rn = 1
       )
-      SELECT
-        t.peer_id AS "peerUserId",
-        u.full_name AS "peerName",
-        u.email AS "peerEmail",
-        NULLIF(TRIM(u.username), '') AS "peerUsername",
-        NULLIF(TRIM(u.avatar_url), '') AS "peerAvatarUrl",
-        t.sender_id AS "lastSenderId",
-        t.receiver_id AS "lastReceiverId",
-        t.body AS "lastMessage",
-        t.created_at AS "lastAt",
-        t.is_read AS "lastMessageIsRead",
-        COALESCE((
-          SELECT COUNT(*)::INT
-          FROM direct_messages dm2
-          WHERE dm2.sender_id = t.peer_id
-            AND dm2.receiver_id = $1
-            AND dm2.is_read = false
-            AND ${dmVisibleToUserSql("dm2", "$1")}
-        ), 0) AS "unreadCount"
-      FROM thread_rows t
-      JOIN learn_users u ON u.id = t.peer_id
-      WHERE t.rn = 1
-      ORDER BY t.created_at DESC
+      SELECT *
+      FROM classified
+      WHERE (
+        $2::text = ''
+        OR ($2::text = 'requests' AND "isMessageRequest" = true)
+        OR ($2::text = 'primary' AND "isMessageRequest" = false)
+      )
+      ORDER BY "lastAt" DESC
       `
       ,
-      [me]
+      [me, bucketFilter === "requests" || bucketFilter === "primary" ? bucketFilter : ""]
     );
-    res.json({ threads: result.rows });
+    const threads = result.rows;
+    const requestCount = threads.filter((row) => row.isMessageRequest).length;
+    // When unfiltered, also report requestCount for the Request badge.
+    let requestCountOut = requestCount;
+    if (!bucketFilter) {
+      // already counted from full list
+    } else if (bucketFilter === "primary") {
+      const reqOnly = await query(
+        `
+        WITH thread_rows AS (
+          SELECT
+            CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END AS peer_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END
+              ORDER BY dm.created_at DESC
+            ) AS rn
+          FROM direct_messages dm
+          WHERE (dm.sender_id = $1 OR dm.receiver_id = $1)
+            AND ${dmVisibleToUserSql("dm", "$1")}
+        )
+        SELECT COUNT(*)::INT AS count
+        FROM thread_rows t
+        LEFT JOIN dm_thread_states dts ON dts.user_id = $1 AND dts.peer_id = t.peer_id
+        LEFT JOIN social_follows sf
+          ON sf.follower_id = $1 AND sf.following_id = t.peer_id AND sf.status = 'accepted'
+        WHERE t.rn = 1
+          AND (
+            dts.bucket = 'request'
+            OR (
+              dts.bucket IS NULL
+              AND sf.id IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM direct_messages dm_sent
+                WHERE dm_sent.sender_id = $1 AND dm_sent.receiver_id = t.peer_id
+                  AND ${dmVisibleToUserSql("dm_sent", "$1")}
+              )
+              AND EXISTS (
+                SELECT 1 FROM direct_messages dm_recv
+                WHERE dm_recv.sender_id = t.peer_id AND dm_recv.receiver_id = $1
+                  AND ${dmVisibleToUserSql("dm_recv", "$1")}
+              )
+            )
+          )
+        `,
+        [me]
+      );
+      requestCountOut = Number(reqOnly.rows[0]?.count || 0);
+    }
+    res.json({ threads, requestCount: requestCountOut });
   } catch (error) {
     res.status(500).json({ message: "Failed to load message threads", error: error.message });
   }
@@ -5260,7 +5470,8 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         avatarUrl: peerRes.rows[0].avatarUrl || undefined
       },
       messages,
-      hasMore
+      hasMore,
+      isMessageRequest: await resolveIsMessageRequest(me, peerUserId)
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load message thread", error: error.message });
@@ -5325,6 +5536,40 @@ router.post("/v1/messages/delivered", authRequired, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to mark messages delivered", error: error.message });
+  }
+});
+
+/** Move a message request into the primary inbox (Instagram Accept). */
+router.post("/v1/messages/thread/:peerUserId/accept-request", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    await upsertDmThreadBucket(me, peerUserId, "primary");
+    res.json({ ok: true, isMessageRequest: false });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to accept message request", error: error.message });
+  }
+});
+
+/** Delete / decline a message request (hide thread for me). */
+router.post("/v1/messages/thread/:peerUserId/decline-request", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const peerUserId = Number(req.params.peerUserId);
+    if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
+      res.status(400).json({ message: "Valid peerUserId is required" });
+      return;
+    }
+    await hideDmThreadForUser(me, peerUserId);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to decline message request", error: error.message });
   }
 });
 
@@ -5515,6 +5760,7 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       [me, peerUserId, body]
     );
     const message = await attachDeliveryStatus(ins.rows[0], peerUserId);
+    await ensureDmInboxBucketsOnSend({ senderId: me, receiverId: peerUserId });
     const isLiveShare = String(body).startsWith("[Cropvibe Live]");
     let livePostId;
     if (isLiveShare) {
@@ -6214,6 +6460,7 @@ async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, imageUrl,
     [me, ownerId, body]
   );
   const message = await attachDeliveryStatus(ins.rows[0], ownerId);
+  await ensureDmInboxBucketsOnSend({ senderId: me, receiverId: ownerId });
   const excerpt = kind === "like" ? "Liked your story" : String(text || "").slice(0, 80);
   const pushImage = String(imageUrl || "").trim() || undefined;
   fireSocialPush({
