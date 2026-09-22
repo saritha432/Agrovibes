@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
 import type { HomeStory } from "../../api/types";
-import { deleteHomeStory, likeHomeStory, markHomeStoryViewed, replyToHomeStory } from "../../api/home";
+import {
+  deleteHomeStory,
+  fetchHomeStoryViewers,
+  likeHomeStory,
+  markHomeStoryViewed,
+  replyToHomeStory,
+  type HomeStoryViewer
+} from "../../api/home";
 import { UserAvatar } from "../messages/UserAvatar";
 import { ReelIcon } from "./ReelIcon";
 import { groupHomeStories } from "../../utils/storyUtils";
+import { webProfilePath } from "../../utils/profilePath";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { onStoryViewed } from "../../services/socketChat";
 import "./HomeStories.css";
@@ -26,6 +36,10 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   const [replyBusy, setReplyBusy] = useState(false);
   const [likeBusy, setLikeBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [viewersOpen, setViewersOpen] = useState(false);
+  const [viewers, setViewers] = useState<HomeStoryViewer[]>([]);
+  const [viewersCount, setViewersCount] = useState(0);
+  const [viewersLoading, setViewersLoading] = useState(false);
 
   const { ownStories, otherGroups } = useMemo(
     () => groupHomeStories(stories, viewerId ?? null),
@@ -82,7 +96,32 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
     setQueue([]);
     setQueueIndex(0);
     setReplyDraft("");
+    setViewersOpen(false);
+    setViewers([]);
+    setViewersCount(0);
   };
+
+  const loadStoryViewers = useCallback(
+    async (storyId: number) => {
+      if (!token || !Number.isFinite(storyId) || storyId <= 0) {
+        setViewers([]);
+        setViewersCount(0);
+        return;
+      }
+      setViewersLoading(true);
+      try {
+        const data = await fetchHomeStoryViewers(token, storyId);
+        setViewers(Array.isArray(data.viewers) ? data.viewers : []);
+        setViewersCount(Number(data.count) || 0);
+      } catch {
+        setViewers([]);
+        setViewersCount(0);
+      } finally {
+        setViewersLoading(false);
+      }
+    },
+    [token]
+  );
 
   const markViewed = (story: HomeStory) => {
     setViewedIds((prev) => {
@@ -120,7 +159,14 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
     if (!active) return;
     markViewed(active);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeViewer();
+      if (e.key === "Escape") {
+        if (viewersOpen) {
+          e.stopPropagation();
+          setViewersOpen(false);
+          return;
+        }
+        closeViewer();
+      }
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       if (typing) return;
       if (e.key === "ArrowRight") goNext();
@@ -129,7 +175,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.id, queueIndex, queue.length]);
+  }, [active?.id, queueIndex, queue.length, viewersOpen]);
 
   const ownHasNew = ownStories.some((s) => !storySeen(s));
   const isOwnActive = (() => {
@@ -141,7 +187,14 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
 
   useEffect(() => {
     setReplyDraft("");
-  }, [active?.id]);
+    setViewersOpen(false);
+    if (token && isOwnActive && active?.id) {
+      void loadStoryViewers(active.id);
+      return;
+    }
+    setViewers([]);
+    setViewersCount(0);
+  }, [active?.id, isOwnActive, loadStoryViewers, token]);
 
   const sendReply = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -220,18 +273,32 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
           queueLength={queue.length}
           canInteract={!!token && !isOwnActive}
           canDelete={!!token && isOwnActive}
+          canViewViewers={!!token && isOwnActive}
           deleteBusy={deleteBusy}
           liked={likedIds.has(active.id)}
           likeBusy={likeBusy}
           replyDraft={replyDraft}
           replyBusy={replyBusy}
+          viewersCount={viewersCount}
+          viewersLoading={viewersLoading}
           onReplyDraftChange={setReplyDraft}
           onLike={() => void likeStory()}
           onDelete={() => void deleteStory()}
+          onOpenViewers={() => setViewersOpen(true)}
           onSend={(e) => void sendReply(e)}
           onClose={closeViewer}
           onNext={goNext}
           onPrev={goPrev}
+        />
+      ) : null}
+
+      {viewersOpen ? (
+        <StoryViewersSheet
+          viewers={viewers}
+          count={viewersCount}
+          loading={viewersLoading}
+          viewerId={viewerId}
+          onClose={() => setViewersOpen(false)}
         />
       ) : null}
     </>
@@ -314,14 +381,18 @@ function StoryViewer({
   queueLength,
   canInteract,
   canDelete,
+  canViewViewers,
   deleteBusy,
   liked,
   likeBusy,
   replyDraft,
   replyBusy,
+  viewersCount,
+  viewersLoading,
   onReplyDraftChange,
   onLike,
   onDelete,
+  onOpenViewers,
   onSend,
   onClose,
   onNext,
@@ -334,14 +405,18 @@ function StoryViewer({
   queueLength: number;
   canInteract: boolean;
   canDelete: boolean;
+  canViewViewers: boolean;
   deleteBusy: boolean;
   liked: boolean;
   likeBusy: boolean;
   replyDraft: string;
   replyBusy: boolean;
+  viewersCount: number;
+  viewersLoading: boolean;
   onReplyDraftChange: (value: string) => void;
   onLike: () => void;
   onDelete: () => void;
+  onOpenViewers: () => void;
   onSend: (e?: FormEvent) => void;
   onClose: () => void;
   onNext: () => void;
@@ -380,7 +455,21 @@ function StoryViewer({
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--left" onClick={onPrev} aria-label="Previous" />
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--right" onClick={onNext} aria-label="Next" />
         </div>
-        {canInteract ? (
+        {canViewViewers ? (
+          <div className="story-viewer__actions" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="story-viewer__viewers-btn" onClick={onOpenViewers}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>
+                {viewersLoading
+                  ? "Viewers"
+                  : `${viewersCount} viewer${viewersCount === 1 ? "" : "s"}`}
+              </span>
+            </button>
+          </div>
+        ) : canInteract ? (
           <form className="story-viewer__actions" onSubmit={onSend} onClick={(e) => e.stopPropagation()}>
             <input
               type="text"
@@ -413,4 +502,70 @@ function StoryViewer({
       </div>
     </div>
   );
+}
+
+function StoryViewersSheet({
+  viewers,
+  count,
+  loading,
+  viewerId,
+  onClose
+}: {
+  viewers: HomeStoryViewer[];
+  count: number;
+  loading: boolean;
+  viewerId?: number | null;
+  onClose: () => void;
+}) {
+  const content = (
+    <div className="story-viewers-sheet" role="dialog" aria-modal="true" aria-label="Story viewers">
+      <button type="button" className="story-viewers-sheet__backdrop" onClick={onClose} aria-label="Close" />
+      <div className="story-viewers-sheet__panel">
+        <div className="story-viewers-sheet__handle" aria-hidden />
+        <header className="story-viewers-sheet__head">
+          <strong>Viewers · {count}</strong>
+          <button type="button" className="story-viewers-sheet__close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        <div className="story-viewers-sheet__list">
+          {loading ? <p className="story-viewers-sheet__status">Loading…</p> : null}
+          {!loading && viewers.length === 0 ? <p className="story-viewers-sheet__status">No views yet</p> : null}
+          {!loading
+            ? viewers.map((viewer) => {
+                const name = viewer.fullName?.trim() || viewer.username?.trim() || "User";
+                const handle = viewer.username ? `@${String(viewer.username).replace(/^@+/, "")}` : "";
+                const profilePath = webProfilePath(viewer.userId, viewerId);
+                const row = (
+                  <>
+                    <UserAvatar uri={viewer.avatarUrl} name={name} size={40} />
+                    <span className="story-viewers-sheet__meta">
+                      <strong>{name}</strong>
+                      {handle ? <span>{handle}</span> : null}
+                    </span>
+                  </>
+                );
+                return profilePath ? (
+                  <Link
+                    key={viewer.userId}
+                    className="story-viewers-sheet__row"
+                    to={profilePath}
+                    onClick={onClose}
+                  >
+                    {row}
+                  </Link>
+                ) : (
+                  <div key={viewer.userId} className="story-viewers-sheet__row">
+                    {row}
+                  </div>
+                );
+              })
+            : null}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (typeof document === "undefined") return content;
+  return createPortal(content, document.body);
 }

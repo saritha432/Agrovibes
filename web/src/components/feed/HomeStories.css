@@ -259,3 +259,128 @@
 .story-viewer__seg--on {
   background: #fff;
 }
+
+.story-viewer__viewers-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 8px 4px;
+}
+
+.story-viewer__viewers-btn:hover {
+  opacity: 0.85;
+}
+
+.story-viewers-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.story-viewers-sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.story-viewers-sheet__panel {
+  position: relative;
+  width: min(420px, 100%);
+  max-height: 52vh;
+  background: #1a1a1a;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #333;
+  border-bottom: none;
+}
+
+.story-viewers-sheet__handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: #52525b;
+  margin: 8px auto 0;
+}
+
+.story-viewers-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 10px 44px 12px;
+}
+
+.story-viewers-sheet__head strong {
+  color: #fff;
+  font-size: 16px;
+}
+
+.story-viewers-sheet__close {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.story-viewers-sheet__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 16px;
+}
+
+.story-viewers-sheet__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.story-viewers-sheet__row:hover {
+  opacity: 0.85;
+}
+
+.story-viewers-sheet__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.story-viewers-sheet__meta strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.story-viewers-sheet__meta span {
+  font-size: 12px;
+  color: #a1a1aa;
+}
+
+.story-viewers-sheet__status {
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+  padding: 28px 0;
+  margin: 0;
+}
