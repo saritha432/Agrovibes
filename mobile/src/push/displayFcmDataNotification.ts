@@ -2,6 +2,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { presentDirectMessageNotification } from "./dmNotificationThread";
 import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
+import { reportDmDeliveredOnDevice } from "./reportDmDelivered";
 
 type FcmRemoteMessage = {
   data?: Record<string, unknown>;
@@ -23,6 +24,13 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
     data.actorName || data.senderName || data.peerName || title || ""
   ).trim();
   const actorId = String(data.actorId || data.senderId || "").trim();
+
+  if (isDirectMessage) {
+    // Notification hit this device → sender should see double ticks (even if chat stays closed).
+    void reportDmDeliveredOnDevice({
+      messageId: data.messageId as string | number | undefined
+    });
+  }
 
   if (isDirectMessage && actorId) {
     await presentDirectMessageNotification({

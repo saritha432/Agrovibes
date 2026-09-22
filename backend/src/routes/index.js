@@ -58,7 +58,7 @@ const { setCallSession, clearCallSession, isUserBusy, isRoomRinging } = require(
 const { buildShareReelHtml } = require("../shareReelPage");
 const { buildShareProfileHtml } = require("../shareProfilePage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
-const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitNotificationSync, emitStoryViewed, getSocketIo } = require("../socketChat");
+const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitMessagesDelivered, emitNotificationSync, emitStoryViewed, getSocketIo, flushDeliveriesForReceiver, isUserConnected, markMessagesDeliveredByIds } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
 
 const router = express.Router();
@@ -634,6 +634,9 @@ async function ensureDirectMessagesTable() {
     `
   );
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_delivered BOOLEAN`);
+  await query(`UPDATE direct_messages SET is_delivered = TRUE WHERE is_delivered IS NULL`);
+  await query(`ALTER TABLE direct_messages ALTER COLUMN is_delivered SET DEFAULT false`);
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_sender BOOLEAN NOT NULL DEFAULT false`);
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_receiver BOOLEAN NOT NULL DEFAULT false`);
   directMessagesTableReady = true;
@@ -644,6 +647,41 @@ function dmVisibleToUserSql(alias, userSql) {
     (${alias}.sender_id = ${userSql} AND COALESCE(${alias}.hidden_for_sender, FALSE))
     OR (${alias}.receiver_id = ${userSql} AND COALESCE(${alias}.hidden_for_receiver, FALSE))
   )`;
+}
+
+/** Mark a just-sent DM delivered when the receiver is currently connected. */
+async function attachDeliveryStatus(message, receiverId) {
+  const row = {
+    ...message,
+    isRead: Boolean(message?.isRead),
+    isDelivered: Boolean(message?.isDelivered)
+  };
+  if (!row?.id) return row;
+  try {
+    if (isUserConnected(receiverId)) {
+      await query(`UPDATE direct_messages SET is_delivered = TRUE WHERE id = $1`, [row.id]);
+      row.isDelivered = true;
+      emitMessagesDelivered({
+        receiverId: Number(receiverId),
+        peerUserId: Number(row.senderId),
+        messageIds: [Number(row.id)]
+      });
+    }
+  } catch {
+    // leave undelivered
+  }
+  return row;
+}
+
+/** Notify sender of delivery receipts for messages just marked delivered/read. */
+function emitDeliveryReceipts({ receiverId, peerUserId, messageIds }) {
+  const ids = (messageIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0);
+  if (!ids.length) return;
+  emitMessagesDelivered({
+    receiverId: Number(receiverId),
+    peerUserId: Number(peerUserId),
+    messageIds: ids
+  });
 }
 
 function isLegacySyntheticPostAuthorEmail(email) {
@@ -5069,6 +5107,8 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
   try {
     await ensureDirectMessagesTable();
     const me = Number(req.user.userId);
+    // Inbox sync = device has the messages → double grey ticks for senders.
+    await flushDeliveriesForReceiver(me);
     const result = await query(
       `
       WITH thread_rows AS (
@@ -5079,6 +5119,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
           dm.receiver_id,
           dm.body,
           dm.created_at,
+          COALESCE(dm.is_read, false) AS is_read,
           ROW_NUMBER() OVER (
             PARTITION BY CASE WHEN dm.sender_id = $1 THEN dm.receiver_id ELSE dm.sender_id END
             ORDER BY dm.created_at DESC
@@ -5097,6 +5138,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
         t.receiver_id AS "lastReceiverId",
         t.body AS "lastMessage",
         t.created_at AS "lastAt",
+        t.is_read AS "lastMessageIsRead",
         COALESCE((
           SELECT COUNT(*)::INT
           FROM direct_messages dm2
@@ -5138,7 +5180,31 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
       return;
     }
 
-    await query(`UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`, [peerUserId, me]);
+    const newlyRead = await query(
+      `
+      UPDATE direct_messages
+      SET is_read = true, is_delivered = TRUE
+      WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false
+      RETURNING id
+      `,
+      [peerUserId, me]
+    );
+    const newlyDelivered = await query(
+      `
+      UPDATE direct_messages
+      SET is_delivered = TRUE
+      WHERE receiver_id = $1
+        AND sender_id = $2
+        AND COALESCE(is_delivered, FALSE) = FALSE
+      RETURNING id
+      `,
+      [me, peerUserId]
+    );
+    const deliveredIds = [
+      ...newlyRead.rows.map((row) => Number(row.id)),
+      ...newlyDelivered.rows.map((row) => Number(row.id))
+    ].filter((id) => Number.isFinite(id) && id > 0);
+    emitDeliveryReceipts({ receiverId: me, peerUserId, messageIds: deliveredIds });
     emitMessagesRead({ readerId: me, peerUserId });
 
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
@@ -5155,7 +5221,8 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         receiver_id AS "receiverId",
         body,
         created_at AS "createdAt",
-        COALESCE(dm.is_read, false) AS "isRead"
+        COALESCE(dm.is_read, false) AS "isRead",
+        COALESCE(dm.is_delivered, true) AS "isDelivered"
       FROM direct_messages dm
       WHERE ((dm.sender_id = $1 AND dm.receiver_id = $2)
          OR (dm.sender_id = $2 AND dm.receiver_id = $1))
@@ -5209,14 +5276,55 @@ router.post("/v1/messages/thread/:peerUserId/read", authRequired, async (req, re
       res.status(400).json({ message: "Valid peerUserId is required" });
       return;
     }
-    await query(
-      `UPDATE direct_messages SET is_read = true WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false`,
+    const newlyRead = await query(
+      `
+      UPDATE direct_messages
+      SET is_read = true, is_delivered = TRUE
+      WHERE sender_id = $1 AND receiver_id = $2 AND is_read = false
+      RETURNING id
+      `,
       [peerUserId, me]
     );
+    const newlyDelivered = await query(
+      `
+      UPDATE direct_messages
+      SET is_delivered = TRUE
+      WHERE receiver_id = $1
+        AND sender_id = $2
+        AND COALESCE(is_delivered, FALSE) = FALSE
+      RETURNING id
+      `,
+      [me, peerUserId]
+    );
+    const deliveredIds = [
+      ...newlyRead.rows.map((row) => Number(row.id)),
+      ...newlyDelivered.rows.map((row) => Number(row.id))
+    ].filter((id) => Number.isFinite(id) && id > 0);
+    emitDeliveryReceipts({ receiverId: me, peerUserId, messageIds: deliveredIds });
     emitMessagesRead({ readerId: me, peerUserId });
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ message: "Failed to mark messages read", error: error.message });
+  }
+});
+
+/** Device received DMs (push / socket / inbox) → double ticks for senders, without opening chat. */
+router.post("/v1/messages/delivered", authRequired, async (req, res) => {
+  try {
+    await ensureDirectMessagesTable();
+    const me = Number(req.user.userId);
+    const rawIds = req.body?.messageIds ?? req.body?.messageId;
+    const messageIds = (Array.isArray(rawIds) ? rawIds : rawIds != null ? [rawIds] : [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    if (messageIds.length) {
+      await markMessagesDeliveredByIds(me, messageIds);
+    } else {
+      await flushDeliveriesForReceiver(me);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark messages delivered", error: error.message });
   }
 });
 
@@ -5393,18 +5501,20 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
 
     const ins = await query(
       `
-      INSERT INTO direct_messages (sender_id, receiver_id, body, is_read)
-      VALUES ($1, $2, $3, false)
+      INSERT INTO direct_messages (sender_id, receiver_id, body, is_read, is_delivered)
+      VALUES ($1, $2, $3, false, false)
       RETURNING
         id,
         sender_id AS "senderId",
         receiver_id AS "receiverId",
         body,
         created_at AS "createdAt",
-        COALESCE(is_read, false) AS "isRead"
+        COALESCE(is_read, false) AS "isRead",
+        COALESCE(is_delivered, false) AS "isDelivered"
       `,
       [me, peerUserId, body]
     );
+    const message = await attachDeliveryStatus(ins.rows[0], peerUserId);
     const isLiveShare = String(body).startsWith("[Cropvibe Live]");
     let livePostId;
     if (isLiveShare) {
@@ -5426,15 +5536,16 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
         actorName: await actorDisplayName(me),
         postId: livePostId,
         commentExcerpt: dmPush.excerpt,
-        imageUrl: dmPush.imageUrl
+        imageUrl: dmPush.imageUrl,
+        messageId: message?.id
       });
     }
     emitDirectMessage({
       senderId: me,
       receiverId: peerUserId,
-      message: ins.rows[0]
+      message
     });
-    res.status(201).json({ message: ins.rows[0] });
+    res.status(201).json({ message });
   } catch (error) {
     res.status(500).json({ message: "Failed to send message", error: error.message });
   }
@@ -6089,18 +6200,20 @@ async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, imageUrl,
   const body = `[Cropvibe Story] ${JSON.stringify(payload)}`;
   const ins = await query(
     `
-    INSERT INTO direct_messages (sender_id, receiver_id, body, is_read)
-    VALUES ($1, $2, $3, false)
+    INSERT INTO direct_messages (sender_id, receiver_id, body, is_read, is_delivered)
+    VALUES ($1, $2, $3, false, false)
     RETURNING
       id,
       sender_id AS "senderId",
       receiver_id AS "receiverId",
       body,
       created_at AS "createdAt",
-      COALESCE(is_read, false) AS "isRead"
+      COALESCE(is_read, false) AS "isRead",
+      COALESCE(is_delivered, false) AS "isDelivered"
     `,
     [me, ownerId, body]
   );
+  const message = await attachDeliveryStatus(ins.rows[0], ownerId);
   const excerpt = kind === "like" ? "Liked your story" : String(text || "").slice(0, 80);
   const pushImage = String(imageUrl || "").trim() || undefined;
   fireSocialPush({
@@ -6109,14 +6222,15 @@ async function insertStoryDm({ me, ownerId, storyId, text, previewUrl, imageUrl,
     actorId: me,
     actorName: await actorDisplayName(me),
     commentExcerpt: excerpt,
-    imageUrl: pushImage
+    imageUrl: pushImage,
+    messageId: message?.id
   });
   emitDirectMessage({
     senderId: me,
     receiverId: ownerId,
-    message: ins.rows[0]
+    message
   });
-  return ins.rows[0];
+  return message;
 }
 
 router.get("/v1/home/posts", authOptional, async (req, res) => {

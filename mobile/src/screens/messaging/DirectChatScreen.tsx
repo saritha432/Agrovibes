@@ -44,6 +44,7 @@ import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
   leaveDirectThread,
+  onDirectDelivered,
   onDirectMessage,
   onDirectMessageDeleted,
   onDirectRead,
@@ -241,6 +242,35 @@ function formatPeerHandle(username?: string | null, peerKey?: string) {
 
 function formatMsgTime(ts: number) {
   return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** WhatsApp-style ticks: 1 = not delivered, 2 grey = delivered, 2 lime = seen. */
+function MessageDeliveryTicks({
+  isDelivered,
+  isRead
+}: {
+  isDelivered?: boolean;
+  isRead?: boolean;
+}) {
+  if (isRead) {
+    return (
+      <View style={styles.tickWrap}>
+        <Ionicons name="checkmark-done" size={15} color={APP_LIME} />
+      </View>
+    );
+  }
+  if (isDelivered) {
+    return (
+      <View style={styles.tickWrap}>
+        <Ionicons name="checkmark-done" size={15} color={MUTED} />
+      </View>
+    );
+  }
+  return (
+    <View style={styles.tickWrap}>
+      <Ionicons name="checkmark" size={15} color={MUTED} />
+    </View>
+  );
 }
 
 function dmReplyQuoteThumbUri(body: string, hydratedPost?: HomePost | null): string | undefined {
@@ -707,7 +737,18 @@ export function DirectChatScreen() {
         });
       }
       setMessages((prev) => {
-        if (prev.some((item) => item.id === payload.message.id)) return prev;
+        const existingIdx = prev.findIndex((item) => Number(item.id) === Number(payload.message.id));
+        if (existingIdx >= 0) {
+          const next = [...prev];
+          const cur = next[existingIdx];
+          next[existingIdx] = {
+            ...cur,
+            ...payload.message,
+            isDelivered: Boolean(payload.message.isDelivered || cur.isDelivered),
+            isRead: Boolean(payload.message.isRead || cur.isRead)
+          };
+          return next;
+        }
         return [...prev, payload.message];
       });
       if (token && Number(payload.message.senderId) !== Number(user?.id)) {
@@ -724,8 +765,28 @@ export function DirectChatScreen() {
       }
       setMessages((prev) =>
         prev.map((item) =>
-          Number(item.senderId) === Number(user?.id) ? { ...item, isRead: true } : item
+          Number(item.senderId) === Number(user?.id)
+            ? { ...item, isRead: true, isDelivered: true }
+            : item
         )
+      );
+    });
+  }, [peerUserId, user?.id]);
+
+  useEffect(() => {
+    return onDirectDelivered((payload) => {
+      if (Number(payload.peerUserId) !== Number(peerUserId)) return;
+      const ids = new Set((payload.messageIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id)));
+      setMessages((prev) =>
+        prev.map((item) => {
+          if (Number(item.senderId) !== Number(user?.id)) return item;
+          if (ids.size && !ids.has(Number(item.id))) return item;
+          if (!ids.size) {
+            // Receipt without ids → mark all my undelivered in this thread.
+            return item.isDelivered ? item : { ...item, isDelivered: true };
+          }
+          return { ...item, isDelivered: true };
+        })
       );
     });
   }, [peerUserId, user?.id]);
@@ -758,8 +819,26 @@ export function DirectChatScreen() {
 
   const appendSentMessage = useCallback((message: DirectMessageItem) => {
     setMessages((prev) => {
-      if (prev.some((item) => item.id === message.id)) return prev;
-      return [...prev, message];
+      if (prev.some((item) => Number(item.id) === Number(message.id))) {
+        return prev.map((item) =>
+          Number(item.id) === Number(message.id)
+            ? {
+                ...item,
+                ...message,
+                isDelivered: Boolean(message.isDelivered || item.isDelivered),
+                isRead: Boolean(message.isRead || item.isRead)
+              }
+            : item
+        );
+      }
+      return [
+        ...prev,
+        {
+          ...message,
+          isDelivered: Boolean(message.isDelivered),
+          isRead: Boolean(message.isRead)
+        }
+      ];
     });
   }, []);
 
@@ -1561,14 +1640,20 @@ export function DirectChatScreen() {
                     </Text>
                   </Pressable>
                 )}
-                <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer, isRichCard ? styles.reelMeta : null]}>
-                  {formatMsgTime(new Date(messageItem.createdAt).getTime())}
+                <View
+                  style={[
+                    styles.bubbleMetaRow,
+                    isSelf ? styles.bubbleMetaRowSelf : styles.bubbleMetaRowPeer,
+                    isRichCard ? styles.reelMeta : null
+                  ]}
+                >
+                  <Text style={[styles.bubbleMeta, isSelf ? styles.bubbleMetaSelf : styles.bubbleMetaPeer]}>
+                    {formatMsgTime(new Date(messageItem.createdAt).getTime())}
+                  </Text>
                   {isSelf ? (
-                    <Text style={messageItem.isRead ? styles.readStatusSeen : styles.readStatusUnseen}>
-                      {`  ${messageItem.isRead ? "Seen" : "Unseen"}`}
-                    </Text>
+                    <MessageDeliveryTicks isDelivered={messageItem.isDelivered} isRead={messageItem.isRead} />
                   ) : null}
-                </Text>
+                </View>
               </View>
               {messageReactions.length ? (
                 <View style={[styles.reactionRow, isSelf ? styles.reactionRowSelf : styles.reactionRowPeer]}>
@@ -1949,12 +2034,19 @@ const styles = StyleSheet.create({
   bubbleText: { fontSize: 15, lineHeight: 20 },
   bubbleTextSelf: { color: TEXT },
   bubbleTextPeer: { color: TEXT },
-  bubbleMeta: { marginTop: 4, fontSize: 11, alignSelf: "flex-end" },
+  bubbleMetaRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3
+  },
+  bubbleMetaRowSelf: { alignSelf: "flex-end", justifyContent: "flex-end" },
+  bubbleMetaRowPeer: { alignSelf: "flex-start", justifyContent: "flex-start" },
+  bubbleMeta: { fontSize: 11, lineHeight: 15 },
   bubbleMetaSelf: { color: MUTED },
   bubbleMetaPeer: { color: MUTED },
-  readStatusSeen: { color: APP_LIME, fontSize: 11, fontWeight: "800" },
-  readStatusUnseen: { color: MUTED, fontSize: 11, fontWeight: "700" },
-  reelMeta: { color: MUTED, marginTop: 3, marginRight: 4 },
+  tickWrap: { marginTop: 0.5, marginLeft: 1 },
+  reelMeta: { marginTop: 3, marginRight: 4 },
   sharedReelCard: {
     width: 172,
     height: 306,
