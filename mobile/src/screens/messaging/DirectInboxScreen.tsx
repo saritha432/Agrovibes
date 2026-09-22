@@ -308,19 +308,21 @@ export function DirectInboxScreen() {
   const listHeader = (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{t("messagesTitle")}</Text>
-      <Pressable
-        hitSlop={8}
-        accessibilityLabel="Message requests"
-        onPress={() => navigation.navigate("MessageRequests")}
-        style={styles.requestLinkWrap}
-      >
-        <Text style={styles.requestLink}>Requests</Text>
-        {requestCount > 0 ? (
-          <View style={styles.requestBadge}>
-            <Text style={styles.requestBadgeText}>{requestCount > 99 ? "99+" : String(requestCount)}</Text>
-          </View>
-        ) : null}
-      </Pressable>
+      {user?.isPrivate ? (
+        <Pressable
+          hitSlop={8}
+          accessibilityLabel="Message requests"
+          onPress={() => navigation.navigate("MessageRequests")}
+          style={styles.requestLinkWrap}
+        >
+          <Text style={styles.requestLink}>Requests</Text>
+          {requestCount > 0 ? (
+            <View style={styles.requestBadge}>
+              <Text style={styles.requestBadgeText}>{requestCount > 99 ? "99+" : String(requestCount)}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
     </View>
   );
 
