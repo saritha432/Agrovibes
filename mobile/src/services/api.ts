@@ -900,6 +900,7 @@ export interface MessageThread {
   lastReceiverId?: number;
   lastMessage: string;
   lastAt: string;
+  lastMessageIsRead?: boolean;
   unreadCount?: number;
 }
 
@@ -910,6 +911,7 @@ export interface DirectMessageItem {
   body: string;
   createdAt: string;
   isRead?: boolean;
+  isDelivered?: boolean;
 }
 
 export interface SocialNotificationItem {
@@ -1922,6 +1924,16 @@ export async function markDirectThreadRead(token: string, peerUserId: number) {
     token,
     { method: "POST" }
   )) as { ok: boolean };
+}
+
+/** Confirm DMs arrived on this device (double ticks for sender) without opening the chat. */
+export async function markDirectMessagesDelivered(token: string, messageIds?: number[]) {
+  const ids = (messageIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0);
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/delivered`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(ids.length ? { messageIds: ids } : {})
+  })) as { ok: boolean };
 }
 
 export async function fetchPublicSocialLists(token: string, userId: number) {

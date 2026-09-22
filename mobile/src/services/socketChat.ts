@@ -8,6 +8,7 @@ export type DmThreadSocketUpdate = {
   lastAt: string;
   lastSenderId: number;
   lastReceiverId: number;
+  lastMessageIsRead?: boolean;
   unreadDelta?: number;
   unreadCount?: number;
 };
@@ -38,6 +39,11 @@ export type DmDeletedSocketPayload = {
   peerUserId: number;
 };
 
+export type DmDeliveredSocketPayload = {
+  peerUserId: number;
+  messageIds: number[];
+};
+
 type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
 type DmTypingHandler = (payload: { peerUserId: number; isTyping: boolean }) => void;
@@ -45,6 +51,7 @@ type DmReadHandler = (payload: DmReadSocketPayload) => void;
 type NotificationSyncHandler = (payload: NotificationSyncPayload) => void;
 type StoryViewedHandler = (payload: StoryViewedSocketPayload) => void;
 type DmDeletedHandler = (payload: DmDeletedSocketPayload) => void;
+type DmDeliveredHandler = (payload: DmDeliveredSocketPayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
@@ -57,6 +64,7 @@ const readHandlers = new Set<DmReadHandler>();
 const notificationSyncHandlers = new Set<NotificationSyncHandler>();
 const storyViewedHandlers = new Set<StoryViewedHandler>();
 const deletedHandlers = new Set<DmDeletedHandler>();
+const deliveredHandlers = new Set<DmDeliveredHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
 export function resolveSocketBaseUrl() {
@@ -85,6 +93,11 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("disconnect", () => notifyConnection(false));
   sock.on("dm:message", (payload: DmMessageSocketPayload) => {
+    // Device received this message → ACK so sender gets double ticks.
+    const messageId = Number(payload?.message?.id);
+    if (Number.isFinite(messageId) && messageId > 0) {
+      sock.emit("dm:ack", { messageIds: [messageId] });
+    }
     messageHandlers.forEach((handler) => handler(payload));
   });
   sock.on("dm:thread", (payload: DmThreadSocketUpdate) => {
@@ -104,6 +117,9 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("dm:deleted", (payload: DmDeletedSocketPayload) => {
     deletedHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("dm:delivered", (payload: DmDeliveredSocketPayload) => {
+    deliveredHandlers.forEach((handler) => handler(payload));
   });
 }
 
@@ -207,6 +223,13 @@ export function onDirectMessageDeleted(handler: DmDeletedHandler) {
   deletedHandlers.add(handler);
   return () => {
     deletedHandlers.delete(handler);
+  };
+}
+
+export function onDirectDelivered(handler: DmDeliveredHandler) {
+  deliveredHandlers.add(handler);
+  return () => {
+    deliveredHandlers.delete(handler);
   };
 }
 

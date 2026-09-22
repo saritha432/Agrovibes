@@ -475,3 +475,43 @@ export function formatDmInboxPreview(body: string, t: (key: string) => string): 
 
   return text;
 }
+
+/** Instagram-style relative time: "2h ago", "5m ago", "yesterday". */
+export function formatDmRelativeAgo(ts: number): string {
+  const diffMs = Math.max(0, Date.now() - ts);
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/**
+ * Inbox / chat header line under a contact name:
+ * - Last message from me → "Sent 2h ago" / "Seen 2h ago"
+ * - Last message from them → message preview (not sent/seen)
+ */
+export function formatDmThreadActivityLine(opts: {
+  lastMessage: string;
+  lastAt: string | number;
+  lastSenderId?: number | null;
+  lastMessageIsRead?: boolean | null;
+  viewerUserId?: number | null;
+  t: (key: string) => string;
+}): string {
+  const at =
+    typeof opts.lastAt === "number" ? opts.lastAt : Date.parse(String(opts.lastAt || "")) || Date.now();
+  const ago = formatDmRelativeAgo(at);
+  const viewerId = Number(opts.viewerUserId);
+  const senderId = Number(opts.lastSenderId);
+  const fromMe = Number.isFinite(viewerId) && viewerId > 0 && senderId === viewerId;
+  if (fromMe) {
+    return opts.lastMessageIsRead ? `Seen ${ago}` : `Sent ${ago}`;
+  }
+  const preview = formatDmInboxPreview(opts.lastMessage, opts.t).trim();
+  return preview || "Message";
+}
