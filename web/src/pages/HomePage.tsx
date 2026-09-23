@@ -50,6 +50,7 @@ export function HomePage() {
         viewerName={user?.fullName || "You"}
         viewerAvatarUrl={user?.avatarUrl}
         viewerId={user?.id ?? null}
+        viewerUsername={user?.username}
         token={token}
         onStoryDeleted={(storyId) => setStories((prev) => prev.filter((story) => story.id !== storyId))}
       />

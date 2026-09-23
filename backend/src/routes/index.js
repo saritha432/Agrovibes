@@ -2584,6 +2584,12 @@ async function findLearnUserIdForPostAuthor(displayName) {
   return matchRes.rows[0]?.id || null;
 }
 
+async function resolveHomeStoryOwnerId(story) {
+  const direct = Number(story?.userId);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  return Number(await findLearnUserIdForPostAuthor(story?.userName)) || 0;
+}
+
 async function backfillHomePostUserIds() {
   await ensureHomePostsTable();
   await ensureLearnUsersTable();
@@ -6000,7 +6006,7 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
     `
     SELECT
       s.id,
-      s.user_id AS "userId",
+      COALESCE(s.user_id, lu.id) AS "userId",
       s.user_name AS "userName",
       s.district,
       s.avatar_label AS "avatarLabel",
@@ -6077,7 +6083,7 @@ router.get("/v1/home/stories", authOptional, async (req, res) => {
     const viewerId = Number.isFinite(viewerIdRaw) && viewerIdRaw > 0 ? viewerIdRaw : null;
     const viewerKey = viewerId != null ? String(viewerId) : "anon";
     const gen = await cacheGenString("home:stories:gen");
-    const cacheKey = `v2:home:stories:${gen}:${viewerKey}`;
+    const cacheKey = `v3:home:stories:${gen}:${viewerKey}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached && Array.isArray(cached.stories)) {
       res.json(cached);
@@ -6269,7 +6275,7 @@ router.post("/v1/home/stories/:storyId/view", authRequired, async (req, res) => 
       [storyId, me]
     );
     const gen = await cacheGenString("home:stories:gen");
-    await cacheDel(`v2:home:stories:${gen}:${me}`);
+    await cacheDel(`v3:home:stories:${gen}:${me}`);
     emitStoryViewed({ viewerId: me, storyId, storyUserId: ownerId });
     res.json({ ok: true, viewed: true });
   } catch (error) {
@@ -6287,34 +6293,37 @@ router.get("/v1/home/stories/:storyId/viewers", authRequired, async (req, res) =
       return;
     }
     const storyRes = await query(
-      `SELECT id, user_id AS "userId" FROM home_stories WHERE id = $1 LIMIT 1`,
+      `SELECT id, user_id AS "userId", user_name AS "userName" FROM home_stories WHERE id = $1 LIMIT 1`,
       [storyId]
     );
     if (!storyRes.rows[0]) {
       res.status(404).json({ message: "Story not found" });
       return;
     }
-    const ownerId = Number(storyRes.rows[0].userId);
-    if (!Number.isFinite(ownerId) || ownerId !== me) {
+    const ownerId = await resolveHomeStoryOwnerId(storyRes.rows[0]);
+    if (!Number.isFinite(ownerId) || ownerId <= 0 || ownerId !== me) {
       res.status(403).json({ message: "Only the story author can see viewers" });
       return;
     }
-    const result = await query(
-      `
-      SELECT
-        u.id AS "userId",
-        u.full_name AS "fullName",
-        NULLIF(TRIM(u.username), '') AS "username",
-        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
-        v.created_at AS "viewedAt"
-      FROM home_story_views v
-      JOIN learn_users u ON u.id = v.viewer_id
-      WHERE v.story_id = $1
-      ORDER BY v.created_at DESC
-      LIMIT 200
-      `,
-      [storyId]
-    );
+    const [result, countRes] = await Promise.all([
+      query(
+        `
+        SELECT
+          u.id AS "userId",
+          u.full_name AS "fullName",
+          NULLIF(TRIM(u.username), '') AS "username",
+          NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
+          v.created_at AS "viewedAt"
+        FROM home_story_views v
+        JOIN learn_users u ON u.id = v.viewer_id
+        WHERE v.story_id = $1
+        ORDER BY v.created_at DESC
+        LIMIT 200
+        `,
+        [storyId]
+      ),
+      query(`SELECT COUNT(*)::int AS count FROM home_story_views WHERE story_id = $1`, [storyId])
+    ]);
     const viewers = result.rows.map((row) => ({
       userId: row.userId,
       fullName: sanitizePersonDisplayName(row.fullName, row.username),
@@ -6322,7 +6331,7 @@ router.get("/v1/home/stories/:storyId/viewers", authRequired, async (req, res) =
       avatarUrl: row.avatarUrl || null,
       viewedAt: row.viewedAt
     }));
-    res.json({ viewers, count: viewers.length });
+    res.json({ viewers, count: Number(countRes.rows[0]?.count) || viewers.length });
   } catch (error) {
     res.status(500).json({ message: "Failed to load story viewers", error: error.message });
   }
