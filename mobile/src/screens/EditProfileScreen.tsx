@@ -357,9 +357,16 @@ export function EditProfileScreen() {
             <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.headerBackBtn}>
               <Ionicons name="chevron-back" size={24} color={TEXT} />
             </Pressable>
-            <Text style={styles.headerTitle}>{t("editProfileTitle")}</Text>
-            <Pressable onPress={save} disabled={isSaving} hitSlop={8} style={styles.headerBackBtn}>
-              <Text style={[styles.headerSave, isSaving ? styles.headerSaveDisabled : null]}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {t("editProfileTitle")}
+            </Text>
+            <Pressable onPress={save} disabled={isSaving} hitSlop={8} style={styles.headerSaveBtn}>
+              <Text
+                style={[styles.headerSave, isSaving ? styles.headerSaveDisabled : null]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
                 {isSaving ? t("saving") : t("saveProfile")}
               </Text>
             </Pressable>
@@ -629,12 +636,31 @@ const styles = StyleSheet.create({
     paddingBottom: 12
   },
   headerBackBtn: {
-    width: 36,
+    width: 44,
     alignItems: "flex-start",
     justifyContent: "center"
   },
-  headerTitle: { flex: 1, color: TEXT, fontSize: 18, fontWeight: "800", textAlign: "center" },
-  headerSave: { color: ACCENT, fontSize: 16, fontWeight: "800" },
+  headerSaveBtn: {
+    minWidth: 44,
+    maxWidth: 96,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    flexShrink: 0
+  },
+  headerTitle: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+    paddingHorizontal: 8
+  },
+  headerSave: {
+    color: ACCENT,
+    fontSize: 16,
+    fontWeight: "800",
+    textAlign: "right"
+  },
   headerSaveDisabled: { opacity: 0.55 },
   scrollContent: { paddingHorizontal: 16 },
   heroWrap: {
