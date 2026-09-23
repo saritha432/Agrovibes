@@ -83,6 +83,8 @@ export async function updateMyProfile(
     bio?: string;
     website?: string;
     locationLabel?: string;
+    locationLat?: number | null;
+    locationLng?: number | null;
     avatarUrl?: string;
   }
 ) {

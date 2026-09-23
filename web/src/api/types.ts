@@ -11,6 +11,8 @@ export interface AuthUser {
   bio?: string;
   website?: string;
   locationLabel?: string;
+  locationLat?: number;
+  locationLng?: number;
 }
 
 export interface AuthResponse {

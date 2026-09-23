@@ -60,6 +60,7 @@ const { buildShareProfileHtml } = require("../shareProfilePage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
 const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitMessagesDelivered, emitNotificationSync, emitStoryViewed, getSocketIo, flushDeliveriesForReceiver, isUserConnected, markMessagesDeliveredByIds } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
+const { mapsConfigHandler, parseMapCoord } = require("../googleMaps");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -278,6 +279,8 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS bio TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS website TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_lat DOUBLE PRECISION`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_lng DOUBLE PRECISION`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMPTZ`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active'`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false`);
@@ -880,6 +883,8 @@ function authUserFromRow(row) {
     bio: row.bio || undefined,
     website: row.website || undefined,
     locationLabel: row.locationLabel || undefined,
+    locationLat: Number.isFinite(Number(row.locationLat)) ? Number(row.locationLat) : undefined,
+    locationLng: Number.isFinite(Number(row.locationLng)) ? Number(row.locationLng) : undefined,
     accountStatus: row.accountStatus || "active",
     isPrivate: Boolean(row.isPrivate)
   };
@@ -896,6 +901,8 @@ const authUserSelect = `
   bio,
   website,
   location_label AS "locationLabel",
+  location_lat AS "locationLat",
+  location_lng AS "locationLng",
   account_status AS "accountStatus",
   COALESCE(is_private, false) AS "isPrivate"
 `;
@@ -3693,6 +3700,8 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
   }
 });
 
+router.get("/v1/places/maps-config", authRequired, mapsConfigHandler);
+
 router.get("/v1/auth/me", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
@@ -4185,7 +4194,9 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
         : undefined;
     const bio = String(req.body?.bio || "").trim().slice(0, 150) || null;
     const website = String(req.body?.website || "").trim().slice(0, 200) || null;
-    const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 120) || null;
+    const locationLabel = String(req.body?.locationLabel || "").trim().slice(0, 255) || null;
+    const locationLat = locationLabel ? parseMapCoord(req.body?.locationLat, -90, 90) : null;
+    const locationLng = locationLabel ? parseMapCoord(req.body?.locationLng, -180, 180) : null;
     const avatarUrl = stripLegacyCloudinaryUrl(String(req.body?.avatarUrl || "").trim().slice(0, 1000));
 
     if (!fullName) {
@@ -4219,11 +4230,13 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
         bio = $3,
         website = $4,
         location_label = $5,
-        avatar_url = $6
-      WHERE id = $7
+        location_lat = $6,
+        location_lng = $7,
+        avatar_url = $8
+      WHERE id = $9
       RETURNING ${authUserSelect}
       `,
-      [fullName, nextUsername, bio, website, locationLabel, avatarUrl, req.user.userId]
+      [fullName, nextUsername, bio, website, locationLabel, locationLat, locationLng, avatarUrl, req.user.userId]
     );
     const user = authUserFromRow(updated.rows[0]);
     if (!user) {

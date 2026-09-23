@@ -25,7 +25,8 @@ import { ProfilePhotoAdjustModal } from "../components/ProfilePhotoAdjustModal";
 import { ProfilePhotoCaptureReview } from "../components/ProfilePhotoCaptureReview";
 import { WebCameraCapture } from "../components/WebCameraCapture";
 import { useAuth } from "../auth/AuthContext";
-import { updateMyProfile, uploadImageFile } from "../services/api";
+import { updateMyProfile, uploadImageFile, fetchMapsConfig } from "../services/api";
+import { LocationMapPicker } from "../components/LocationMapPicker";
 import { UserAvatar, avatarColorForName } from "../components/UserAvatar";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 import { useLanguage } from "../localization/LanguageContext";
@@ -137,6 +138,11 @@ export function EditProfileScreen() {
   const [bio, setBio] = useState(user?.bio || "");
   const [website, setWebsite] = useState(user?.website || "");
   const [location, setLocation] = useState(user?.locationLabel || "");
+  const [locationLat, setLocationLat] = useState<number | null>(user?.locationLat ?? null);
+  const [locationLng, setLocationLng] = useState<number | null>(user?.locationLng ?? null);
+  const [mapsKey, setMapsKey] = useState("");
+  const [mapsReady, setMapsReady] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const [gender, setGender] = useState<GenderOption | null>(null);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [pendingAvatarUri, setPendingAvatarUri] = useState<string | null>(null);
@@ -166,12 +172,36 @@ export function EditProfileScreen() {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!token) {
+      setMapsReady(false);
+      setMapsKey("");
+      return;
+    }
+    let active = true;
+    void fetchMapsConfig(token)
+      .then((config) => {
+        if (!active) return;
+        setMapsKey(config.key);
+        setMapsReady(config.configured);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMapsReady(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
   type payloadFallback = {
     fullName?: string;
     username?: string;
     bio?: string;
     website?: string;
     locationLabel?: string;
+    locationLat?: number | null;
+    locationLng?: number | null;
     avatarUrl?: string;
   };
 
@@ -231,6 +261,8 @@ export function EditProfileScreen() {
       bio: bio.trim() || undefined,
       website: website.trim() || undefined,
       locationLabel: location.trim() || undefined,
+      locationLat: location.trim() ? locationLat : null,
+      locationLng: location.trim() ? locationLng : null,
       avatarUrl: finalAvatarUrl
     };
     setSaving(true);
@@ -429,13 +461,26 @@ export function EditProfileScreen() {
               </FieldRow>
 
               <FieldRow label={t("location")} last>
-                <TextInput
-                  value={location}
-                  onChangeText={setLocation}
-                  style={[styles.fieldInput, inputProps]}
-                  placeholder={t("locationPlaceholder")}
-                  placeholderTextColor={LABEL}
-                />
+                {mapsReady ? (
+                  <Pressable
+                    style={styles.genderRow}
+                    onPress={() => setMapOpen(true)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={[styles.fieldValue, !location.trim() ? styles.fieldValuePlaceholder : null]}>
+                      {location.trim() || t("locationPlaceholder")}
+                    </Text>
+                    <Ionicons name="map-outline" size={18} color={LABEL} />
+                  </Pressable>
+                ) : (
+                  <TextInput
+                    value={location}
+                    onChangeText={setLocation}
+                    style={[styles.fieldInput, inputProps]}
+                    placeholder={t("locationPlaceholder")}
+                    placeholderTextColor={LABEL}
+                  />
+                )}
               </FieldRow>
             </View>
           </ScrollView>
@@ -504,6 +549,23 @@ export function EditProfileScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {mapsReady && mapsKey ? (
+        <LocationMapPicker
+          open={mapOpen}
+          apiKey={mapsKey}
+          label={location}
+          lat={locationLat}
+          lng={locationLng}
+          onClose={() => setMapOpen(false)}
+          onSelect={(value) => {
+            setLocation(value.label);
+            setLocationLat(value.lat);
+            setLocationLng(value.lng);
+            setMapOpen(false);
+          }}
+        />
+      ) : null}
 
       {Platform.OS === "web" ? (
         <WebCameraCapture
