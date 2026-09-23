@@ -507,7 +507,6 @@ export function DirectChatScreen() {
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [isMessageRequest, setIsMessageRequest] = useState(Boolean(isMessageRequestParam));
   const [requestActionBusy, setRequestActionBusy] = useState(false);
-  const requestDismissedRef = useRef(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [peerUsername, setPeerUsername] = useState(peerUsernameParam || "");
@@ -671,11 +670,6 @@ export function DirectChatScreen() {
     };
   }, []);
 
-  const dismissMessageRequestUi = useCallback(() => {
-    requestDismissedRef.current = true;
-    setIsMessageRequest(false);
-  }, []);
-
   const reload = useCallback(async () => {
     if (!token) {
       setMessages([]);
@@ -685,17 +679,12 @@ export function DirectChatScreen() {
     const list = await fetchMessageThread(token, peerUserId, { limit: 40 });
     setMessages(list.messages || []);
     setHasMoreOlder(!!list.hasMore);
-    if (requestDismissedRef.current) {
-      setIsMessageRequest(false);
-    } else if (typeof list.isMessageRequest === "boolean") {
+    if (typeof list.isMessageRequest === "boolean") {
       setIsMessageRequest(list.isMessageRequest);
-    } else if ((list.messages || []).some((row) => Number(row.senderId) === Number(user?.id))) {
-      // Already replied in this thread → not a request.
-      dismissMessageRequestUi();
     }
     const next = list.peer?.avatarUrl != null && String(list.peer.avatarUrl).trim() ? String(list.peer.avatarUrl).trim() : null;
     if (next) setPeerAvatar(next);
-  }, [dismissMessageRequestUi, peerUserId, token, user?.id]);
+  }, [token, peerUserId]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!token || loadingOlder || !hasMoreOlder || messages.length === 0) return;
@@ -834,7 +823,6 @@ export function DirectChatScreen() {
   }, [callSession?.direction, reload, socketConnected]);
 
   const appendSentMessage = useCallback((message: DirectMessageItem) => {
-    requestDismissedRef.current = true;
     setIsMessageRequest(false);
     setMessages((prev) => {
       if (prev.some((item) => Number(item.id) === Number(message.id))) {
@@ -893,7 +881,7 @@ export function DirectChatScreen() {
       const result = await sendDirectMessage(token, peerUserId, body);
       if (result.message) appendSentMessage(result.message);
       else await reload();
-      dismissMessageRequestUi();
+      setIsMessageRequest(false);
     } finally {
       sendingRef.current = false;
     }
@@ -904,13 +892,13 @@ export function DirectChatScreen() {
     setRequestActionBusy(true);
     try {
       await acceptMessageRequest(token, peerUserId);
-      dismissMessageRequestUi();
-      navigation.navigate("Main", { screen: "Messages" });
+      setIsMessageRequest(false);
     } catch {
-      Alert.alert("Message request", "Could not accept this request. Is the latest API running?");
+      Alert.alert("Message request", "Could not accept this request.");
+    } finally {
       setRequestActionBusy(false);
     }
-  }, [dismissMessageRequestUi, navigation, peerUserId, requestActionBusy, token]);
+  }, [peerUserId, requestActionBusy, token]);
 
   const declineIncomingRequest = useCallback(async () => {
     if (!token || requestActionBusy) return;
