@@ -1,0 +1,132 @@
+.location-map-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 24000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.location-map-picker__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+}
+
+.location-map-picker__sheet {
+  position: relative;
+  z-index: 1;
+  width: min(720px, 100%);
+  max-height: min(860px, 96vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.location-map-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.location-map-picker__head strong {
+  font-size: 16px;
+}
+
+.location-map-picker__head button {
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.location-map-picker__search {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.location-map-picker__search input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 15px;
+}
+
+.location-map-picker__search button {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.location-map-picker__map {
+  height: min(420px, 52vh);
+  background: #1a1a1a;
+}
+
+.location-map-picker__status,
+.location-map-picker__hint {
+  margin: 0;
+  padding: 8px 14px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.location-map-picker__status {
+  color: #f87171;
+}
+
+.location-map-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+.location-map-picker__cancel,
+.location-map-picker__confirm {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.location-map-picker__cancel {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.location-map-picker__confirm {
+  background: var(--accent);
+  color: #111;
+}
+
+.location-map-picker__confirm:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pac-container {
+  z-index: 25000 !important;
+}

@@ -1,6 +1,8 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { updateMyProfile } from "../api/profile";
+import { fetchMapsConfig } from "../api/places";
+import { LocationMapPicker } from "../components/profile/LocationMapPicker";
 import { uploadImageFile } from "../api/uploads";
 import { useAuth } from "../auth/AuthContext";
 import { ProfilePhotoCropModal } from "../components/profile/ProfilePhotoCropModal";
@@ -28,6 +30,11 @@ export function EditProfilePage() {
   const [bio, setBio] = useState(user?.bio || "");
   const [website, setWebsite] = useState(user?.website || "");
   const [location, setLocation] = useState(user?.locationLabel || "");
+  const [locationLat, setLocationLat] = useState<number | null>(user?.locationLat ?? null);
+  const [locationLng, setLocationLng] = useState<number | null>(user?.locationLng ?? null);
+  const [mapsKey, setMapsKey] = useState("");
+  const [mapsReady, setMapsReady] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
@@ -36,6 +43,28 @@ export function EditProfilePage() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [photoOptionsOpen, setPhotoOptionsOpen] = useState(false);
   const [cropSource, setCropSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) {
+      setMapsReady(false);
+      setMapsKey("");
+      return;
+    }
+    let active = true;
+    void fetchMapsConfig(token)
+      .then((config) => {
+        if (!active) return;
+        setMapsKey(config.key);
+        setMapsReady(config.configured);
+      })
+      .catch(() => {
+        if (!active) return;
+        setMapsReady(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
   if (!user || !token) {
     return (
@@ -101,6 +130,8 @@ export function EditProfilePage() {
         bio: bio.trim() || undefined,
         website: website.trim() || undefined,
         locationLabel: location.trim() || undefined,
+        locationLat: location.trim() ? locationLat : null,
+        locationLng: location.trim() ? locationLng : null,
         avatarUrl: finalAvatar
       };
       const updated = await updateMyProfile(token, payload);
@@ -185,7 +216,32 @@ export function EditProfilePage() {
           </label>
           <label>
             Location
-            <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="District, State" />
+            {mapsReady ? (
+              <span className="edit-profile__location">
+                <button
+                  type="button"
+                  className="edit-profile__location-btn"
+                  onClick={() => setMapOpen(true)}
+                >
+                  {location.trim() || "Search Google Maps"}
+                </button>
+                {location.trim() ? (
+                  <button
+                    type="button"
+                    className="edit-profile__location-clear"
+                    onClick={() => {
+                      setLocation("");
+                      setLocationLat(null);
+                      setLocationLng(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </span>
+            ) : (
+              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="District, State" />
+            )}
           </label>
         </section>
 
@@ -226,6 +282,23 @@ export function EditProfilePage() {
         onCancel={onCropCancel}
         onDone={(blob) => void onCropDone(blob)}
       />
+
+      {mapsReady && mapsKey ? (
+        <LocationMapPicker
+          open={mapOpen}
+          apiKey={mapsKey}
+          label={location}
+          lat={locationLat}
+          lng={locationLng}
+          onClose={() => setMapOpen(false)}
+          onSelect={(value) => {
+            setLocation(value.label);
+            setLocationLat(value.lat);
+            setLocationLng(value.lng);
+            setMapOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
