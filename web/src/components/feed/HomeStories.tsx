@@ -12,7 +12,7 @@ import {
 } from "../../api/home";
 import { UserAvatar } from "../messages/UserAvatar";
 import { ReelIcon } from "./ReelIcon";
-import { groupHomeStories } from "../../utils/storyUtils";
+import { groupHomeStories, isOwnHomeStory } from "../../utils/storyUtils";
 import { webProfilePath } from "../../utils/profilePath";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import { onStoryViewed } from "../../services/socketChat";
@@ -23,11 +23,20 @@ type Props = {
   viewerName: string;
   viewerAvatarUrl?: string | null;
   viewerId?: number | null;
+  viewerUsername?: string | null;
   token?: string | null;
   onStoryDeleted?: (storyId: number) => void;
 };
 
-export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, token, onStoryDeleted }: Props) {
+export function HomeStories({
+  stories,
+  viewerName,
+  viewerAvatarUrl,
+  viewerId,
+  viewerUsername,
+  token,
+  onStoryDeleted
+}: Props) {
   const [viewedIds, setViewedIds] = useState<Set<number>>(() => new Set());
   const [queue, setQueue] = useState<HomeStory[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
@@ -42,8 +51,8 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   const [viewersLoading, setViewersLoading] = useState(false);
 
   const { ownStories, otherGroups } = useMemo(
-    () => groupHomeStories(stories, viewerId ?? null),
-    [stories, viewerId]
+    () => groupHomeStories(stories, viewerId ?? null, viewerName, viewerUsername),
+    [stories, viewerId, viewerName, viewerUsername]
   );
 
   useEffect(() => {
@@ -130,10 +139,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
       next.add(story.id);
       return next;
     });
-    const ownerId = Number(story.userId);
-    const viewer = Number(viewerId);
-    const isOwn = Number.isFinite(ownerId) && Number.isFinite(viewer) && ownerId === viewer;
-    if (token && !isOwn && !story.viewed) {
+    if (token && !isOwnHomeStory(story, viewerId, viewerName, viewerUsername) && !story.viewed) {
       void markHomeStoryViewed(token, story.id).catch(() => {});
     }
   };
@@ -178,12 +184,7 @@ export function HomeStories({ stories, viewerName, viewerAvatarUrl, viewerId, to
   }, [active?.id, queueIndex, queue.length, viewersOpen]);
 
   const ownHasNew = ownStories.some((s) => !storySeen(s));
-  const isOwnActive = (() => {
-    const ownerId = Number(active?.userId);
-    const viewer = Number(viewerId);
-    if (Number.isFinite(ownerId) && Number.isFinite(viewer) && ownerId === viewer) return true;
-    return String(active?.userName || "").trim().toLowerCase() === "you";
-  })();
+  const isOwnActive = isOwnHomeStory(active, viewerId, viewerName, viewerUsername);
 
   useEffect(() => {
     setReplyDraft("");
@@ -426,6 +427,11 @@ function StoryViewer({
     <div className="story-viewer" role="dialog" aria-modal="true" aria-label={`${active.userName} story`}>
       <button type="button" className="story-viewer__backdrop" onClick={onClose} aria-label="Close" />
       <div className="story-viewer__frame">
+        <div className="story-viewer__progress" aria-hidden>
+          {Array.from({ length: queueLength }, (_, i) => (
+            <span key={i} className={`story-viewer__seg${i <= queueIndex ? " story-viewer__seg--on" : ""}`} />
+          ))}
+        </div>
         <header className="story-viewer__header">
           <UserAvatar uri={active.avatarUrl} name={active.userName} size={32} />
           <span className="story-viewer__user">{active.userName}</span>
@@ -446,7 +452,7 @@ function StoryViewer({
         </header>
         <div className="story-viewer__media">
           {isVideo ? (
-            <video key={activeMedia} src={activeMedia} controls autoPlay playsInline className="story-viewer__video" />
+            <video key={activeMedia} src={activeMedia} autoPlay playsInline className="story-viewer__video" />
           ) : (
             <img src={activeMedia} alt="" className="story-viewer__image" />
           )}
@@ -456,20 +462,17 @@ function StoryViewer({
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--right" onClick={onNext} aria-label="Next" />
         </div>
         {canViewViewers ? (
-          <div className="story-viewer__actions" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className="story-viewer__viewers-btn" onClick={onOpenViewers}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-              <span>
-                {viewersLoading
-                  ? "Viewers"
-                  : `${viewersCount} viewer${viewersCount === 1 ? "" : "s"}`}
-              </span>
-            </button>
-          </div>
-        ) : canInteract ? (
+          <button type="button" className="story-viewer__viewers-overlay" onClick={onOpenViewers}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>
+              {viewersLoading ? "Viewers" : `${viewersCount} viewer${viewersCount === 1 ? "" : "s"}`}
+            </span>
+          </button>
+        ) : null}
+        {canInteract ? (
           <form className="story-viewer__actions" onSubmit={onSend} onClick={(e) => e.stopPropagation()}>
             <input
               type="text"
@@ -493,12 +496,21 @@ function StoryViewer({
               <ReelIcon name="heart" filled={liked} size={26} color={liked ? "#ff2d55" : "#fff"} />
             </button>
           </form>
+        ) : canViewViewers ? (
+          <div className="story-viewer__actions story-viewer__actions--own" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="story-viewer__viewers-btn" onClick={onOpenViewers}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>
+                {viewersLoading
+                  ? "Viewers"
+                  : `${viewersCount} viewer${viewersCount === 1 ? "" : "s"}`}
+              </span>
+            </button>
+          </div>
         ) : null}
-        <div className="story-viewer__progress" aria-hidden>
-          {Array.from({ length: queueLength }, (_, i) => (
-            <span key={i} className={`story-viewer__seg${i <= queueIndex ? " story-viewer__seg--on" : ""}`} />
-          ))}
-        </div>
       </div>
     </div>
   );

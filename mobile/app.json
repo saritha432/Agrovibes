@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cropvibe",
     "slug": "agrovibes",
-    "version": "1.0.25",
+    "version": "1.0.26",
     "orientation": "portrait",
     "icon": "./assets/logo-adaptive-foreground.png",
 
@@ -30,7 +30,7 @@
 
     "android": {
       "package": "com.cropvibe.app",
-      "versionCode": 29,
+      "versionCode": 30,
       "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "adaptiveIcon": {
