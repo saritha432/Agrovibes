@@ -156,6 +156,8 @@ export interface AuthResponse {
     bio?: string;
     website?: string;
     locationLabel?: string;
+    locationLat?: number;
+    locationLng?: number;
     accountStatus?: "active" | "deactivated";
     isPrivate?: boolean;
   };
@@ -539,6 +541,8 @@ export async function updateMyProfile(
     bio?: string;
     website?: string;
     locationLabel?: string;
+    locationLat?: number | null;
+    locationLng?: number | null;
     avatarUrl?: string;
   }
 ) {
@@ -547,6 +551,20 @@ export async function updateMyProfile(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as AuthResponse;
+}
+
+export async function fetchMapsConfig(token: string) {
+  const envKey = String((process.env as Record<string, string | undefined>).EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "").trim();
+  try {
+    const data = (await fetchWithAuth(`${API_BASE_URL}/v1/places/maps-config`, token)) as {
+      configured?: boolean;
+      key?: string;
+    };
+    const key = String(data?.key || envKey).trim();
+    return { configured: Boolean(key), key };
+  } catch {
+    return { configured: Boolean(envKey), key: envKey };
+  }
 }
 
 export async function updateMyPrivacySettings(token: string, payload: { isPrivate: boolean }) {

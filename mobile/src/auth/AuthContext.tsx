@@ -19,6 +19,8 @@ export interface AuthUser {
   dateOfBirth?: string;
   preferredLanguage?: string;
   locationLabel?: string;
+  locationLat?: number;
+  locationLng?: number;
   accountStatus?: "active" | "deactivated";
   isPrivate?: boolean;
 }
