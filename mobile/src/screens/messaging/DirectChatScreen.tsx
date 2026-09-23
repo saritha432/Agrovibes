@@ -507,6 +507,8 @@ export function DirectChatScreen() {
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [isMessageRequest, setIsMessageRequest] = useState(Boolean(isMessageRequestParam));
   const [requestActionBusy, setRequestActionBusy] = useState(false);
+  /** Once user accepts/replies, never let a stale API reload bring the request banner back. */
+  const messageRequestClearedRef = useRef(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [peerUsername, setPeerUsername] = useState(peerUsernameParam || "");
@@ -670,6 +672,16 @@ export function DirectChatScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    messageRequestClearedRef.current = false;
+    setIsMessageRequest(Boolean(isMessageRequestParam));
+  }, [peerUserId, isMessageRequestParam]);
+
+  const clearMessageRequestUi = useCallback(() => {
+    messageRequestClearedRef.current = true;
+    setIsMessageRequest(false);
+  }, []);
+
   const reload = useCallback(async () => {
     if (!token) {
       setMessages([]);
@@ -680,7 +692,12 @@ export function DirectChatScreen() {
     setMessages(list.messages || []);
     setHasMoreOlder(!!list.hasMore);
     if (typeof list.isMessageRequest === "boolean") {
-      setIsMessageRequest(list.isMessageRequest);
+      if (messageRequestClearedRef.current || list.isMessageRequest === false) {
+        setIsMessageRequest(false);
+        if (list.isMessageRequest === false) messageRequestClearedRef.current = true;
+      } else {
+        setIsMessageRequest(true);
+      }
     }
     const next = list.peer?.avatarUrl != null && String(list.peer.avatarUrl).trim() ? String(list.peer.avatarUrl).trim() : null;
     if (next) setPeerAvatar(next);
@@ -823,7 +840,7 @@ export function DirectChatScreen() {
   }, [callSession?.direction, reload, socketConnected]);
 
   const appendSentMessage = useCallback((message: DirectMessageItem) => {
-    setIsMessageRequest(false);
+    clearMessageRequestUi();
     setMessages((prev) => {
       if (prev.some((item) => Number(item.id) === Number(message.id))) {
         return prev.map((item) =>
@@ -846,7 +863,7 @@ export function DirectChatScreen() {
         }
       ];
     });
-  }, []);
+  }, [clearMessageRequestUi]);
 
   const isComposerSingleLine = !draft.includes("\n") && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT + 2;
 
@@ -881,7 +898,7 @@ export function DirectChatScreen() {
       const result = await sendDirectMessage(token, peerUserId, body);
       if (result.message) appendSentMessage(result.message);
       else await reload();
-      setIsMessageRequest(false);
+      clearMessageRequestUi();
     } finally {
       sendingRef.current = false;
     }
@@ -890,15 +907,29 @@ export function DirectChatScreen() {
   const acceptIncomingRequest = useCallback(async () => {
     if (!token || requestActionBusy) return;
     setRequestActionBusy(true);
+    // Hide banner immediately so a slow/stale reload can't flash it back.
+    clearMessageRequestUi();
     try {
-      await acceptMessageRequest(token, peerUserId);
-      setIsMessageRequest(false);
+      const result = await acceptMessageRequest(token, peerUserId);
+      if (result?.isMessageRequest === true) {
+        messageRequestClearedRef.current = false;
+        setIsMessageRequest(true);
+        Alert.alert("Message request", "Could not accept this request.");
+        return;
+      }
+      clearMessageRequestUi();
+      // Refresh messages only; keep request UI cleared even if API is briefly stale.
+      const list = await fetchMessageThread(token, peerUserId, { limit: 40 });
+      setMessages(list.messages || []);
+      setHasMoreOlder(!!list.hasMore);
     } catch {
+      messageRequestClearedRef.current = false;
+      setIsMessageRequest(true);
       Alert.alert("Message request", "Could not accept this request.");
     } finally {
       setRequestActionBusy(false);
     }
-  }, [peerUserId, requestActionBusy, token]);
+  }, [clearMessageRequestUi, peerUserId, requestActionBusy, token]);
 
   const declineIncomingRequest = useCallback(async () => {
     if (!token || requestActionBusy) return;
