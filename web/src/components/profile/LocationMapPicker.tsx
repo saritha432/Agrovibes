@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DEFAULT_MAP_CENTER, formatCoordLabel, loadGoogleMaps } from "../../utils/googleMaps";
+import { DEFAULT_MAP_CENTER, formatCoordLabel, loadGoogleMaps, loadOpenStreetMap, reverseOsmLabel, searchOsmPlace } from "../../utils/googleMaps";
 import "./LocationMapPicker.css";
 
 export type PickedMapLocation = {
@@ -11,7 +11,7 @@ export type PickedMapLocation = {
 
 type Props = {
   open: boolean;
-  apiKey: string;
+  apiKey?: string | null;
   label: string;
   lat?: number | null;
   lng?: number | null;
@@ -26,8 +26,9 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
   const searchEl = useRef<HTMLInputElement>(null);
   const applyPointRef = useRef<ApplyPoint | null>(null);
   const [picked, setPicked] = useState<PickedMapLocation | null>(null);
-  const [status, setStatus] = useState("Loading Google Maps…");
+  const [status, setStatus] = useState("Loading map…");
   const [locating, setLocating] = useState(false);
+  const canSearchOsm = !String(apiKey || "").trim();
 
   useEffect(() => {
     if (!open) return;
@@ -40,7 +41,7 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
   }, [open, label, lat, lng]);
 
   useEffect(() => {
-    if (!open || !apiKey) return;
+    if (!open) return;
     let cancelled = false;
     const start = { ...DEFAULT_MAP_CENTER };
     const hasPoint = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
@@ -49,76 +50,109 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
       start.lat = Number(lat);
       start.lng = Number(lng);
     }
+    const key = String(apiKey || "").trim();
 
     (async () => {
       try {
-        const maps = await loadGoogleMaps(apiKey);
-        if (cancelled || !mapEl.current || !searchEl.current) return;
-        setStatus("");
-        const map = new maps.Map(mapEl.current, {
-          center: start,
-          zoom: startZoom,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false
-        });
-        const marker = new maps.Marker({
-          map,
-          position: start,
-          draggable: true,
-          title: "Selected location"
-        });
-        const geocoder = new maps.Geocoder();
+        if (key) {
+          const maps = await loadGoogleMaps(key);
+          if (cancelled || !mapEl.current || !searchEl.current) return;
+          setStatus("");
+          const map = new maps.Map(mapEl.current, {
+            center: start,
+            zoom: startZoom,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false
+          });
+          const marker = new maps.Marker({
+            map,
+            position: start,
+            draggable: true,
+            title: "Selected location"
+          });
+          const geocoder = new maps.Geocoder();
+          const applyPoint: ApplyPoint = (nextLat, nextLng, nextLabel) => {
+            marker.setPosition({ lat: nextLat, lng: nextLng });
+            map.setCenter({ lat: nextLat, lng: nextLng });
+            map.setZoom(16);
+            const finish = (formatted: string) => {
+              setPicked({ label: formatted, lat: nextLat, lng: nextLng });
+              if (searchEl.current) searchEl.current.value = formatted;
+            };
+            if (nextLabel) {
+              finish(nextLabel);
+              return;
+            }
+            geocoder.geocode({ location: { lat: nextLat, lng: nextLng } }, (results, geocodeStatus) => {
+              finish(
+                geocodeStatus === "OK" && results?.[0]?.formatted_address
+                  ? results[0].formatted_address
+                  : formatCoordLabel(nextLat, nextLng)
+              );
+            });
+          };
+          applyPointRef.current = applyPoint;
+          map.addListener("click", (e) => {
+            const point = e.latLng;
+            if (!point) return;
+            applyPoint(point.lat(), point.lng());
+          });
+          marker.addListener("dragend", () => {
+            const point = marker.getPosition();
+            if (!point) return;
+            applyPoint(point.lat(), point.lng());
+          });
+          const autocomplete = new maps.places.Autocomplete(searchEl.current, {
+            fields: ["formatted_address", "geometry", "name"]
+          });
+          autocomplete.addListener("place_changed", () => {
+            const place = autocomplete.getPlace();
+            const loc = place.geometry?.location;
+            if (!loc) {
+              setStatus("Choose a place from the suggestions.");
+              return;
+            }
+            setStatus("");
+            applyPoint(loc.lat(), loc.lng(), place.formatted_address || place.name || formatCoordLabel(loc.lat(), loc.lng()));
+          });
+          return;
+        }
 
+        const L = await loadOpenStreetMap();
+        if (cancelled || !mapEl.current) return;
+        setStatus("");
+        const map = L.map(mapEl.current);
+        map.setView([start.lat, start.lng], startZoom);
+        L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+          maxZoom: 19,
+          attribution: "Tiles © Esri"
+        }).addTo(map);
+        const marker = L.marker([start.lat, start.lng], { draggable: true }).addTo(map) as {
+          setLatLng: (ll: [number, number]) => void;
+          on: (event: string, handler: () => void) => void;
+          getLatLng: () => { lat: number; lng: number };
+        };
         const applyPoint: ApplyPoint = (nextLat, nextLng, nextLabel) => {
-          marker.setPosition({ lat: nextLat, lng: nextLng });
-          map.setCenter({ lat: nextLat, lng: nextLng });
-          map.setZoom(16);
-          const finish = (formatted: string) => {
+          marker.setLatLng([nextLat, nextLng]);
+          map.setView([nextLat, nextLng], Math.max(map.getZoom(), 16));
+          void (async () => {
+            const formatted = nextLabel || (await reverseOsmLabel(nextLat, nextLng));
+            if (cancelled) return;
             setPicked({ label: formatted, lat: nextLat, lng: nextLng });
             if (searchEl.current) searchEl.current.value = formatted;
-          };
-          if (nextLabel) {
-            finish(nextLabel);
-            return;
-          }
-          geocoder.geocode({ location: { lat: nextLat, lng: nextLng } }, (results, geocodeStatus) => {
-            finish(
-              geocodeStatus === "OK" && results?.[0]?.formatted_address
-                ? results[0].formatted_address
-                : formatCoordLabel(nextLat, nextLng)
-            );
-          });
+          })();
         };
         applyPointRef.current = applyPoint;
-
-        map.addListener("click", (e) => {
-          const point = e.latLng;
-          if (!point) return;
-          applyPoint(point.lat(), point.lng());
+        map.on("click", (e) => applyPoint(e.latlng.lat, e.latlng.lng));
+        marker.on("dragend", () => {
+          const point = marker.getLatLng();
+          applyPoint(point.lat, point.lng);
         });
-        marker.addListener("dragend", () => {
-          const point = marker.getPosition();
-          if (!point) return;
-          applyPoint(point.lat(), point.lng());
-        });
-
-        const autocomplete = new maps.places.Autocomplete(searchEl.current, {
-          fields: ["formatted_address", "geometry", "name"]
-        });
-        autocomplete.addListener("place_changed", () => {
-          const place = autocomplete.getPlace();
-          const loc = place.geometry?.location;
-          if (!loc) {
-            setStatus("Choose a place from the Google suggestions.");
-            return;
-          }
-          setStatus("");
-          applyPoint(loc.lat(), loc.lng(), place.formatted_address || place.name || formatCoordLabel(loc.lat(), loc.lng()));
-        });
+        window.setTimeout(() => map.invalidateSize(), 200);
       } catch (error) {
         if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : "Could not load Google Maps.");
+          setStatus(error instanceof Error ? error.message : "Could not load map.");
         }
       }
     })();
@@ -174,9 +208,40 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
           <input
             ref={searchEl}
             defaultValue={label}
-            placeholder="Search Google Maps"
+            placeholder="Search maps"
             autoComplete="off"
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || !canSearchOsm) return;
+              e.preventDefault();
+              const q = searchEl.current?.value || "";
+              void searchOsmPlace(q).then((hit) => {
+                if (!hit) {
+                  setStatus("No matching place found.");
+                  return;
+                }
+                setStatus("");
+                applyPointRef.current?.(hit.lat, hit.lng, hit.label);
+              });
+            }}
           />
+          {canSearchOsm ? (
+            <button
+              type="button"
+              onClick={() => {
+                const q = searchEl.current?.value || "";
+                void searchOsmPlace(q).then((hit) => {
+                  if (!hit) {
+                    setStatus("No matching place found.");
+                    return;
+                  }
+                  setStatus("");
+                  applyPointRef.current?.(hit.lat, hit.lng, hit.label);
+                });
+              }}
+            >
+              Search
+            </button>
+          ) : null}
           <button type="button" onClick={useMyLocation} disabled={locating}>
             {locating ? "Locating…" : "Use my location"}
           </button>

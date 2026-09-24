@@ -22,7 +22,7 @@ import { useAuth } from "../auth/AuthContext";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
 import { ReelGridTile } from "../components/ReelGridTile";
 import { useReelGridAutoplay } from "../hooks/useReelGridAutoplay";
-import { UserAvatar } from "../components/UserAvatar";
+import { PresenceAvatar } from "../components/PresenceAvatar";
 import { formatDisplayName, resolvePersonDisplayName } from "../localization/feedDisplay";
 import { useLanguage } from "../localization/LanguageContext";
 import type { AppLanguage } from "../localization/LanguageContext";
@@ -681,7 +681,8 @@ export function UserSearchScreen() {
       return (
         <View style={styles.userRow}>
           <Pressable style={styles.userRowMain} onPress={() => openUserProfile(item)}>
-            <UserAvatar
+            <PresenceAvatar
+              userId={item.id}
               uri={item.avatarUrl}
               name={item.name}
               size={44}

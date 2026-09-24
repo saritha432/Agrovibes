@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   deleteDirectMessage,
@@ -9,6 +9,8 @@ import {
   type DirectMessageItem
 } from "../../api/messages";
 import { uploadAudioFile, uploadPickedMedia, shouldUseImageUpload } from "../../api/uploads";
+import { fetchHomePost, isPostUnavailableError } from "../../api/home";
+import type { HomePost } from "../../api/types";
 import {
   joinDirectThread,
   leaveDirectThread,
@@ -21,8 +23,9 @@ import {
 import { ChatAssetIcon } from "../../components/messages/ChatAssetIcon";
 import { ChatMessageActionSheet } from "../../components/messages/ChatMessageActionSheet";
 import { ForwardMessageModal } from "../../components/messages/ForwardMessageModal";
-import { UserAvatar } from "../../components/messages/UserAvatar";
+import { PresenceAvatar } from "../../components/messages/PresenceAvatar";
 import { useAuth } from "../../auth/AuthContext";
+import { useIsOnline } from "../../context/PresenceContext";
 import { resolveWebVideoUrl } from "../../utils/videoUrl";
 import {
   buildDmReactMessage,
@@ -43,6 +46,7 @@ import {
   storyDmChatLabel,
   dmMediaIsAlbum,
   dmMediaItems,
+  isPhotoClipboardPlaceholder,
   type DmReplyPayload
 } from "../../utils/dmMessageFormats";
 import { formatMsgTime, parseSharedReel } from "./messagesUtils";
@@ -70,6 +74,57 @@ function mergeThreadMessages(prev: DirectMessageItem[], incoming: DirectMessageI
   const byId = new Map(prev.map((item) => [item.id, item]));
   for (const item of incoming) byId.set(item.id, item);
   return [...byId.values()].sort((a, b) => a.id - b.id || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function WebVoiceNote({ url, durationMs }: { url: string; durationMs?: number }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+    };
+  }, []);
+
+  const toggle = async () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) {
+      el.pause();
+      setPlaying(false);
+      return;
+    }
+    try {
+      await el.play();
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+    }
+  };
+
+  return (
+    <div className="messages-chat__voice">
+      <audio
+        ref={audioRef}
+        src={url}
+        preload="metadata"
+        onEnded={() => setPlaying(false)}
+      />
+      <button
+        type="button"
+        className="messages-chat__voice-play"
+        onClick={(e) => {
+          e.stopPropagation();
+          void toggle();
+        }}
+        aria-label={playing ? "Pause voice message" : "Play voice message"}
+      >
+        {playing ? "❚❚" : "▶"}
+      </button>
+      <span className="messages-chat__voice-wave" aria-hidden />
+      <span className="messages-chat__voice-duration">{formatVoiceDuration(durationMs)}</span>
+    </div>
+  );
 }
 
 function ownReactionOn(reactions: MessageReaction[], userId: number | undefined) {
@@ -121,7 +176,10 @@ export function MessagesChat() {
   const { peerUserId: peerParam } = useParams();
   const peerUserId = Number(peerParam);
   const { token, user } = useAuth();
+  const peerOnline = useIsOnline(peerUserId);
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
+  const [hydratedSharedPosts, setHydratedSharedPosts] = useState<Record<number, HomePost>>({});
+  const [unavailableSharedIds, setUnavailableSharedIds] = useState<Record<number, true>>({});
   const [peerName, setPeerName] = useState("Chat");
   const [peerAvatar, setPeerAvatar] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -145,6 +203,46 @@ export function MessagesChat() {
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const threadMessages = useMemo(() => buildThreadMessages(messages), [messages]);
+
+  useEffect(() => {
+    if (!token) return;
+    const ids = [
+      ...new Set(
+        messages
+          .map((item) => parseSharedReel(item.body)?.id)
+          .filter((id): id is number => typeof id === "number" && id > 0)
+      )
+    ];
+    if (!ids.length) return;
+    let cancelled = false;
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          const { post } = await fetchHomePost(token, id);
+          return { id, post, unavailable: false as const };
+        } catch (error) {
+          return { id, post: null, unavailable: isPostUnavailableError(error) };
+        }
+      })
+    ).then((results) => {
+      if (cancelled) return;
+      const nextPosts: Record<number, HomePost> = {};
+      const nextUnavailable: Record<number, true> = {};
+      for (const row of results) {
+        if (row.post) nextPosts[row.id] = row.post;
+        else if (row.unavailable) nextUnavailable[row.id] = true;
+      }
+      if (Object.keys(nextPosts).length) {
+        setHydratedSharedPosts((prev) => ({ ...prev, ...nextPosts }));
+      }
+      if (Object.keys(nextUnavailable).length) {
+        setUnavailableSharedIds((prev) => ({ ...prev, ...nextUnavailable }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, token]);
 
   const scrollToEnd = () => {
     const el = listRef.current;
@@ -222,8 +320,63 @@ export function MessagesChat() {
     scrollToEnd();
   }, [messages.length]);
 
+  const sendMediaFiles = async (files: File[]) => {
+    if (!files.length || !token || sending) return;
+    setSending(true);
+    try {
+      for (const file of files) {
+        const { url } = await uploadPickedMedia(file);
+        const kind = shouldUseImageUpload(file) ? "image" : "video";
+        const result = await sendDirectMessage(token, peerUserId, buildDmMediaMessage({ kind, url }));
+        if (result.message) {
+          setMessages((prev) => mergeThreadMessages(prev, [result.message!]));
+        }
+      }
+      await reload({ silent: true });
+    } catch {
+      window.alert("Failed to send media.");
+    } finally {
+      setSending(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
   const sendText = async (text: string) => {
     if (!text || !token || sending || !Number.isFinite(peerUserId)) return;
+    if (isPhotoClipboardPlaceholder(text)) {
+      try {
+        const clipItems = await navigator.clipboard.read();
+        for (const clipItem of clipItems) {
+          const type = clipItem.types.find((entry) => entry.startsWith("image/"));
+          if (!type) continue;
+          const blob = await clipItem.getType(type);
+          await sendMediaFiles([
+            new File([blob], `pasted-${Date.now()}.png`, { type: blob.type || "image/png" })
+          ]);
+          setDraft("");
+          return;
+        }
+      } catch {
+        // Fall through to sending the label if the clipboard has no image.
+      }
+    }
+    if (parseDmMediaMessage(text)) {
+      setSending(true);
+      try {
+        const result = await sendDirectMessage(token, peerUserId, text);
+        setDraft("");
+        if (result.message) {
+          setMessages((prev) => mergeThreadMessages(prev, [result.message]));
+        } else {
+          await reload({ silent: true });
+        }
+      } catch {
+        setDraft(text);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
     setSending(true);
     try {
       let body = text;
@@ -254,20 +407,29 @@ export function MessagesChat() {
   const send = () => void sendText(draft.trim());
 
   const onPickMedia = async (files: FileList | null) => {
-    if (!files?.length || !token || sending) return;
-    setSending(true);
-    try {
-      for (const file of Array.from(files)) {
-        const { url } = await uploadPickedMedia(file);
-        const kind = shouldUseImageUpload(file) ? "image" : "video";
-        await sendDirectMessage(token, peerUserId, buildDmMediaMessage({ kind, url }));
-      }
-      await reload({ silent: true });
-    } catch {
-      window.alert("Failed to send media.");
-    } finally {
-      setSending(false);
-      if (fileRef.current) fileRef.current.value = "";
+    await sendMediaFiles(files ? Array.from(files) : []);
+  };
+
+  const onComposerPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const imageFiles = Array.from(event.clipboardData?.files || []).filter((file) =>
+      file.type.startsWith("image/")
+    );
+    if (!imageFiles.length) {
+      const item = Array.from(event.clipboardData?.items || []).find((entry) =>
+        entry.type.startsWith("image/")
+      );
+      const fromItem = item?.getAsFile();
+      if (fromItem) imageFiles.push(fromItem);
+    }
+    if (imageFiles.length) {
+      event.preventDefault();
+      void sendMediaFiles(imageFiles);
+      return;
+    }
+    const pastedText = event.clipboardData?.getData("text/plain") || "";
+    if (parseDmMediaMessage(pastedText)) {
+      event.preventDefault();
+      void sendText(pastedText);
     }
   };
 
@@ -396,6 +558,25 @@ export function MessagesChat() {
   };
 
   const copyMessage = async (item: DirectMessageItem) => {
+    const media = parseDmMediaMessage(item.body);
+    const image = media ? dmMediaItems(media).find((entry) => entry.kind === "image") : undefined;
+    if (image?.url) {
+      const src = resolveWebVideoUrl(image.url) || image.url;
+      try {
+        const res = await fetch(src);
+        const blob = await res.blob();
+        const type = blob.type.startsWith("image/") ? blob.type : "image/png";
+        await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+        return;
+      } catch {
+        try {
+          await navigator.clipboard.writeText(item.body);
+          return;
+        } catch {
+          // Fall through to preview text.
+        }
+      }
+    }
     const text = dmMessageCopyText(item.body);
     if (!text.trim()) {
       window.alert("This message cannot be copied as text.");
@@ -492,10 +673,7 @@ export function MessagesChat() {
     const voice = parseDmVoiceMessage(body);
     if (voice) {
       return (
-        <div className="messages-chat__voice">
-          <audio src={resolveWebVideoUrl(voice.url) || voice.url} controls preload="metadata" />
-          <span>{formatVoiceDuration(voice.durationMs)}</span>
-        </div>
+        <WebVoiceNote url={resolveWebVideoUrl(voice.url) || voice.url} durationMs={voice.durationMs} />
       );
     }
     const media = parseDmMediaMessage(body);
@@ -547,20 +725,27 @@ export function MessagesChat() {
       );
     }
     const sharedReel = parseSharedReel(body);
-    const videoSrc = sharedReel?.videoUrl ? resolveWebVideoUrl(sharedReel.videoUrl) : null;
     if (sharedReel) {
+      const livePost = sharedReel.id ? hydratedSharedPosts[sharedReel.id] : null;
+      const unavailable = sharedReel.id ? Boolean(unavailableSharedIds[sharedReel.id]) : false;
+      const liveVideo = livePost ? resolveWebVideoUrl(String(livePost.videoUrl || livePost.hlsUrl || livePost.playbackUrl || "")) : null;
+      const liveImage = livePost ? String(livePost.imageUrl || livePost.thumbnailUrl || "") : "";
       return (
-        <div className="messages-chat__reel-card">
-          {videoSrc ? (
-            <video src={videoSrc} controls playsInline className="messages-chat__reel-media" />
-          ) : sharedReel.imageUrl ? (
-            <img src={sharedReel.imageUrl} alt="" className="messages-chat__reel-media" />
+        <div className={`messages-chat__reel-card${unavailable ? " messages-chat__reel-card--gone" : ""}`}>
+          {unavailable ? (
+            <div className="messages-chat__reel-ph messages-chat__reel-ph--gone">This post is no longer available.</div>
+          ) : liveVideo ? (
+            <video src={liveVideo} controls playsInline className="messages-chat__reel-media" />
+          ) : liveImage ? (
+            <img src={liveImage} alt="" className="messages-chat__reel-media" />
           ) : (
             <span className="messages-chat__reel-ph">▶ Drop</span>
           )}
           <div className="messages-chat__reel-meta">
-            <strong>{sharedReel.author}</strong>
-            {sharedReel.caption ? <p>{sharedReel.caption}</p> : null}
+            <strong>{livePost?.userName || sharedReel.author}</strong>
+            {!unavailable && (livePost?.caption || sharedReel.caption) ? (
+              <p>{livePost?.caption || sharedReel.caption}</p>
+            ) : null}
           </div>
         </div>
       );
@@ -583,8 +768,11 @@ export function MessagesChat() {
         <button type="button" className="messages-chat__back" onClick={() => navigate("/messages")} aria-label="Back">
           ←
         </button>
-        <UserAvatar uri={peerAvatar} name={peerName} size={32} />
-        <strong className="messages-chat__title">{peerName}</strong>
+        <PresenceAvatar userId={peerUserId} uri={peerAvatar} name={peerName} size={32} />
+        <div className="messages-chat__header-meta">
+          <strong className="messages-chat__title">{peerName}</strong>
+          {peerOnline ? <span className="messages-chat__active">Active now</span> : null}
+        </div>
         <div className="messages-chat__header-actions">
           <button type="button" title="Voice call" onClick={() => void startCall("voice")} aria-label="Voice call">
             <ChatAssetIcon name="voiceCall" size={22} />
@@ -606,7 +794,9 @@ export function MessagesChat() {
           const isSelf = Number(item.senderId) === Number(user?.id);
           const sharedReel = parseSharedReel(item.body);
           const storyDm = parseStoryDmMessage(item.body);
-          const richCard = Boolean(sharedReel || storyDm || parseDmMediaMessage(item.body));
+          const richCard = Boolean(
+            sharedReel || storyDm || parseDmMediaMessage(item.body) || parseDmVoiceMessage(item.body)
+          );
 
           return (
             <div
@@ -772,6 +962,7 @@ export function MessagesChat() {
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onPaste={onComposerPaste}
                 placeholder="Message"
                 rows={1}
                 maxLength={2000}

@@ -24,6 +24,123 @@ function isUserConnected(userId) {
   return Boolean(room && room.size > 0);
 }
 
+const PRESENCE_GRACE_MS = 8000;
+/** Users currently using the app (foreground + connected). */
+const activeUsers = new Set();
+/** Last seen ISO timestamps for recently-offline users in this process. */
+const lastSeenAt = new Map();
+/** @type {Map<number, NodeJS.Timeout>} */
+const disconnectTimers = new Map();
+
+function socketsForUser(userId) {
+  if (!io) return [];
+  const room = io.sockets.adapter.rooms.get(userRoom(userId));
+  if (!room) return [];
+  const sockets = [];
+  for (const socketId of room) {
+    const sock = io.sockets.sockets.get(socketId);
+    if (sock) sockets.push(sock);
+  }
+  return sockets;
+}
+
+function userHasForegroundSocket(userId) {
+  return socketsForUser(userId).some((sock) => sock.presenceActive !== false);
+}
+
+function emitPresenceUpdate(userId, online) {
+  if (!io) return;
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  io.emit("presence:update", {
+    userId: id,
+    online: Boolean(online),
+    lastSeenAt: online ? null : lastSeenAt.get(id) || null
+  });
+}
+
+async function persistLastSeen(userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  try {
+    await query(`UPDATE learn_users SET last_seen_at = NOW() WHERE id = $1`, [id]);
+  } catch {
+    // Column may not exist until ensureLearnUsersTable ran.
+  }
+}
+
+function markActive(userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const timer = disconnectTimers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    disconnectTimers.delete(id);
+  }
+  const wasActive = activeUsers.has(id);
+  activeUsers.add(id);
+  lastSeenAt.delete(id);
+  if (!wasActive) emitPresenceUpdate(id, true);
+}
+
+function markInactive(userId, { persist = true } = {}) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  if (!activeUsers.has(id)) return;
+  activeUsers.delete(id);
+  const at = new Date().toISOString();
+  lastSeenAt.set(id, at);
+  emitPresenceUpdate(id, false);
+  if (persist) void persistLastSeen(id);
+}
+
+function scheduleInactive(userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  if (disconnectTimers.has(id)) return;
+  const timer = setTimeout(() => {
+    disconnectTimers.delete(id);
+    if (isUserConnected(id) && userHasForegroundSocket(id)) {
+      markActive(id);
+      return;
+    }
+    if (isUserConnected(id)) return;
+    markInactive(id);
+  }, PRESENCE_GRACE_MS);
+  disconnectTimers.set(id, timer);
+}
+
+async function getPresenceForUserIds(userIds) {
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : []).map((id) => Number(id)))]
+    .filter((id) => Number.isFinite(id) && id > 0)
+    .slice(0, 100);
+  /** @type {Map<number, string|null>} */
+  const dbLastSeen = new Map();
+  if (ids.length) {
+    try {
+      const result = await query(
+        `SELECT id, last_seen_at AS "lastSeenAt" FROM learn_users WHERE id = ANY($1::int[])`,
+        [ids]
+      );
+      for (const row of result.rows || []) {
+        const id = Number(row.id);
+        if (!Number.isFinite(id)) continue;
+        dbLastSeen.set(id, row.lastSeenAt ? new Date(row.lastSeenAt).toISOString() : null);
+      }
+    } catch {
+      // ignore missing column
+    }
+  }
+  return ids.map((id) => {
+    const online = activeUsers.has(id);
+    return {
+      userId: id,
+      online,
+      lastSeenAt: online ? null : lastSeenAt.get(id) || dbLastSeen.get(id) || null
+    };
+  });
+}
+
 async function markMessagesDeliveredByIds(receiverId, messageIds) {
   const rid = Number(receiverId);
   const ids = (Array.isArray(messageIds) ? messageIds : [messageIds])
@@ -131,8 +248,32 @@ function initSocketChat(httpServer, { corsOrigins = [] } = {}) {
     }
 
     socket.join(userRoom(userId));
+    socket.presenceActive = true;
+    markActive(userId);
     // Device came online → any pending DMs to this user are now delivered.
     void flushDeliveriesForReceiver(userId);
+
+    socket.on("presence:active", () => {
+      socket.presenceActive = true;
+      markActive(userId);
+    });
+
+    socket.on("presence:away", () => {
+      socket.presenceActive = false;
+      if (!userHasForegroundSocket(userId)) {
+        markInactive(userId);
+      }
+    });
+
+    socket.on("disconnect", () => {
+      socket.presenceActive = false;
+      const remaining = socketsForUser(userId).filter((sock) => sock.id !== socket.id);
+      if (remaining.length > 0) {
+        if (!remaining.some((sock) => sock.presenceActive !== false)) markInactive(userId);
+        return;
+      }
+      scheduleInactive(userId);
+    });
 
     socket.on("dm:join", (payload) => {
       const peerUserId = Number(payload?.peerUserId);
@@ -284,6 +425,7 @@ module.exports = {
   initSocketChat,
   getSocketIo,
   isUserConnected,
+  getPresenceForUserIds,
   emitDirectMessage,
   emitMessagesRead,
   emitMessagesDelivered,

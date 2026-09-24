@@ -135,7 +135,7 @@
 
         "NSPhotoLibraryAddUsageDescription": "Cropvibe saves media to your device only when you choose to download or save content.",
 
-        "NSLocationWhenInUseUsageDescription": "Cropvibe uses your location so you can pin your exact place on Google Maps in your profile.",
+        "NSLocationWhenInUseUsageDescription": "Cropvibe uses your location so you can pin your exact place on Google Maps in your profile."
       },
 
       "icon": "./assets/icon-ios.png",

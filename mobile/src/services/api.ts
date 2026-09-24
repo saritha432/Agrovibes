@@ -783,6 +783,24 @@ export async function fetchWithAuth(url: string, token: string | null, init: Req
   return await parseJsonOrThrow(response);
 }
 
+export type PresenceEntry = {
+  userId: number;
+  online: boolean;
+  lastSeenAt: string | null;
+};
+
+export async function fetchPresence(token: string, userIds: number[]): Promise<PresenceEntry[]> {
+  const ids = [...new Set(userIds.map((id) => Number(id)))]
+    .filter((id) => Number.isFinite(id) && id > 0)
+    .slice(0, 100);
+  if (!ids.length) return [];
+  const data = (await fetchWithAuth(
+    `${API_BASE_URL}/v1/presence?userIds=${ids.join(",")}`,
+    token
+  )) as { presence?: PresenceEntry[] };
+  return Array.isArray(data?.presence) ? data.presence : [];
+}
+
 export type MarketplaceListingType = "produce" | "machinery" | "knowledge" | "services";
 
 export interface MarketplaceListing {
@@ -1233,10 +1251,19 @@ export async function fetchUserHomePosts(
   };
 }
 
+export function isPostUnavailableError(error: unknown) {
+  return error instanceof Error && error.name === "PostUnavailableError";
+}
+
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetchWithRetry(`${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`, { headers });
+  if (response.status === 404) {
+    const error = new Error("Post unavailable");
+    error.name = "PostUnavailableError";
+    throw error;
+  }
   if (!response.ok) {
     throw new Error("Failed to load post");
   }

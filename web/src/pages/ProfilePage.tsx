@@ -18,6 +18,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ProfileGalleryIcon, PROFILE_GALLERY_TABS } from "../components/profile/ProfileGalleryIcons";
 import { ProfileGridTile } from "../components/profile/ProfileGridTile";
 import { ProfileReelViewer } from "../components/profile/ProfileReelViewer";
+import { PresenceDot } from "../components/messages/PresenceAvatar";
 import {
   filterUserPosts,
   locationDisplay,
@@ -386,6 +387,7 @@ export function ProfilePage() {
             <span className="profile-card__avatar">
               {displayAvatar ? <img src={displayAvatar} alt="" /> : initials}
             </span>
+            {isPublicView ? <PresenceDot userId={requestedPublicId} size={18} /> : null}
           </div>
 
           <div className="profile-card__stats">

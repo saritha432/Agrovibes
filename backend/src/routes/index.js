@@ -58,7 +58,7 @@ const { setCallSession, clearCallSession, isUserBusy, isRoomRinging } = require(
 const { buildShareReelHtml } = require("../shareReelPage");
 const { buildShareProfileHtml } = require("../shareProfilePage");
 const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
-const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitMessagesDelivered, emitNotificationSync, emitStoryViewed, getSocketIo, flushDeliveriesForReceiver, isUserConnected, markMessagesDeliveredByIds } = require("../socketChat");
+const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitMessagesDelivered, emitNotificationSync, emitStoryViewed, getSocketIo, flushDeliveriesForReceiver, isUserConnected, markMessagesDeliveredByIds, getPresenceForUserIds } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
 const { mapsConfigHandler, parseMapCoord } = require("../googleMaps");
 
@@ -284,6 +284,7 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMPTZ`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active'`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
   learnUsersTableReady = true;
 }
 
@@ -2804,6 +2805,21 @@ router.get("/health", async (_req, res) => {
 
 router.get("/v1/ping", (_req, res) => {
   res.json({ ok: true });
+});
+
+router.get("/v1/presence", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    const raw = String(req.query.userIds || "");
+    const userIds = raw
+      .split(/[,\s]+/)
+      .map((value) => Number(value))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const presence = await getPresenceForUserIds(userIds);
+    res.json({ presence });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load presence", error: error.message });
+  }
 });
 
 router.get("/v1/bootstrap", (_req, res) => {

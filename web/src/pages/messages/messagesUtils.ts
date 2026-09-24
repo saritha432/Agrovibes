@@ -23,6 +23,7 @@ export function previewMessage(body: string) {
 }
 
 export type SharedReelPayload = {
+  id?: number;
   author: string;
   caption: string;
   videoUrl: string;
@@ -31,7 +32,7 @@ export type SharedReelPayload = {
 };
 
 export function parseSharedReel(body: string): SharedReelPayload | null {
-  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]"];
+  const prefixes = ["[Cropvibe Reel]", "[AgroVibe Reel]", "[Cropvibe Post]"];
   let jsonText = "";
   let matched = false;
   for (const p of prefixes) {
@@ -47,15 +48,19 @@ export function parseSharedReel(body: string): SharedReelPayload | null {
   if (jsonText.startsWith("{")) {
     try {
       const parsed = JSON.parse(jsonText) as {
+        id?: number;
         author?: string;
+        userName?: string;
         caption?: string;
         videoUrl?: string | null;
         imageUrl?: string | null;
         thumbnailUrl?: string | null;
         link?: string;
       };
+      const idNum = Number(parsed.id);
       return {
-        author: parsed.author || "Cropvibe",
+        id: Number.isFinite(idNum) && idNum > 0 ? idNum : undefined,
+        author: parsed.author || parsed.userName || "Cropvibe",
         caption: parsed.caption || "",
         videoUrl: parsed.videoUrl || "",
         imageUrl: parsed.imageUrl || parsed.thumbnailUrl || "",
@@ -66,8 +71,11 @@ export function parseSharedReel(body: string): SharedReelPayload | null {
     }
   }
 
-  const link = lines.find((line) => line.includes("/reel/")) || "";
+  const link = lines.find((line) => /\/(reel|watch)\//i.test(line)) || "";
+  const idMatch = link.match(/\/(?:reel|watch)\/(\d+)/i);
+  const legacyId = idMatch ? Number(idMatch[1]) : NaN;
   return {
+    id: Number.isFinite(legacyId) && legacyId > 0 ? legacyId : undefined,
     author: lines[1] || "Cropvibe",
     caption: lines.slice(2).filter((line) => line !== link).join("\n"),
     videoUrl: "",

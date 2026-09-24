@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from "./src/auth/AuthContext";
 import { OnboardingProvider } from "./src/onboarding/OnboardingContext";
 import { CartProvider } from "./src/cart/CartContext";
 import { LanguageProvider } from "./src/localization/LanguageContext";
+import { PresenceProvider } from "./src/context/PresenceContext";
 import { LanguageSync } from "./src/localization/LanguageSync";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { EnsureIosSafeAreaInsets } from "./src/safeArea/EnsureIosSafeAreaInsets";
@@ -172,11 +173,13 @@ export default function App() {
         <StatusBar barStyle="light-content" translucent={Platform.OS === "android"} backgroundColor="transparent" />
         <LanguageProvider>
           <AuthProvider>
-            <OnboardingProvider>
-              <CartProvider>
-                <AppShell />
-              </CartProvider>
-            </OnboardingProvider>
+            <PresenceProvider>
+              <OnboardingProvider>
+                <CartProvider>
+                  <AppShell />
+                </CartProvider>
+              </OnboardingProvider>
+            </PresenceProvider>
           </AuthProvider>
         </LanguageProvider>
       </EnsureIosSafeAreaInsets>

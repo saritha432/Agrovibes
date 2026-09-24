@@ -8,9 +8,10 @@ import { APP_LIME } from "../theme/appColors";
 type ChatVoiceNoteBubbleProps = {
   voice: DmVoicePayload;
   isSelf: boolean;
+  onLongPress?: () => void;
 };
 
-export function ChatVoiceNoteBubble({ voice, isSelf }: ChatVoiceNoteBubbleProps) {
+export function ChatVoiceNoteBubble({ voice, isSelf, onLongPress }: ChatVoiceNoteBubbleProps) {
   const soundRef = React.useRef<Audio.Sound | null>(null);
   const [playing, setPlaying] = React.useState(false);
 
@@ -50,6 +51,8 @@ export function ChatVoiceNoteBubble({ voice, isSelf }: ChatVoiceNoteBubbleProps)
     <Pressable
       style={[styles.row, isSelf ? styles.rowSelf : styles.rowPeer]}
       onPress={() => void togglePlay()}
+      onLongPress={onLongPress}
+      delayLongPress={280}
     >
       <View style={[styles.playBtn, isSelf ? styles.playBtnSelf : styles.playBtnPeer]}>
         <Ionicons name={playing ? "pause" : "play"} size={16} color={isSelf ? "#111" : APP_LIME} />

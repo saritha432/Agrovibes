@@ -49,12 +49,36 @@ type GoogleMapsApi = {
   };
 };
 
+type LeafletApi = {
+  map: (el: HTMLElement) => {
+    setView: (ll: [number, number], zoom: number) => void;
+    getZoom: () => number;
+    on: (event: string, handler: (e: { latlng: { lat: number; lng: number } }) => void) => void;
+    remove: () => void;
+    invalidateSize: () => void;
+  };
+  tileLayer: (
+    url: string,
+    opts: { maxZoom: number; attribution: string }
+  ) => { addTo: (map: unknown) => void };
+  marker: (
+    ll: [number, number],
+    opts: { draggable: boolean }
+  ) => {
+    addTo: (map: unknown) => unknown;
+    setLatLng: (ll: [number, number]) => void;
+    on: (event: string, handler: () => void) => void;
+    getLatLng: () => { lat: number; lng: number };
+  };
+};
+
 const CALLBACK = "__cropvibeGoogleMapsReady";
 
 declare global {
   interface Window {
     google?: { maps?: GoogleMapsApi };
     __cropvibeGoogleMapsReady?: () => void;
+    L?: LeafletApi;
   }
 }
 
@@ -96,4 +120,59 @@ export function loadGoogleMaps(apiKey: string): Promise<GoogleMapsApi> {
 
 export function formatCoordLabel(lat: number, lng: number) {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+let leafletPromise: Promise<LeafletApi> | null = null;
+
+export function loadOpenStreetMap(): Promise<LeafletApi> {
+  if (window.L?.map) return Promise.resolve(window.L);
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.L?.map) resolve(window.L);
+      else {
+        leafletPromise = null;
+        reject(new Error("Map library failed to initialize."));
+      }
+    };
+    script.onerror = () => {
+      leafletPromise = null;
+      reject(new Error("Could not load map."));
+    };
+    document.head.appendChild(script);
+  });
+  return leafletPromise;
+}
+
+export async function reverseOsmLabel(lat: number, lng: number) {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`
+    );
+    const data = (await response.json()) as { display_name?: string };
+    return data.display_name?.trim() || formatCoordLabel(lat, lng);
+  } catch {
+    return formatCoordLabel(lat, lng);
+  }
+}
+
+export async function searchOsmPlace(query: string) {
+  const q = query.trim();
+  if (!q) return null;
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`
+  );
+  const rows = (await response.json()) as Array<{ lat?: string; lon?: string; display_name?: string }>;
+  const row = rows[0];
+  const lat = Number(row?.lat);
+  const lng = Number(row?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng, label: row?.display_name?.trim() || q };
 }

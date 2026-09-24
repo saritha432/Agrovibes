@@ -14,7 +14,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTopChromeInset } from "../../theme/topChromeInset";
 import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../../components/DeactivatedAccountGate";
 import { useAuth } from "../../auth/AuthContext";
-import { UserAvatar } from "../../components/UserAvatar";
+import { PresenceAvatar } from "../../components/PresenceAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
 import { navigateToDirectChat } from "../../navigation/navigationRef";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
@@ -397,7 +397,8 @@ export function DirectInboxScreen() {
             if (item.kind === "person") {
               return (
                 <Pressable style={styles.row} onPress={() => openPersonChat(item.person)}>
-                  <UserAvatar
+                  <PresenceAvatar
+                    userId={item.person.id}
                     uri={item.person.avatarUrl}
                     name={item.person.name}
                     size={56}
@@ -434,7 +435,8 @@ export function DirectInboxScreen() {
             const fromMe = Number(item.thread.lastSenderId) === Number(user?.id);
             return (
               <Pressable style={styles.row} onPress={() => openThread(item.thread)}>
-                <UserAvatar
+                <PresenceAvatar
+                  userId={item.thread.peerUserId}
                   uri={item.thread.peerAvatarUrl}
                   name={item.thread.peerName}
                   size={56}

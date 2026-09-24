@@ -384,3 +384,21 @@ export function dmMessageCopyText(body: string): string {
   if (parseDmReactMessage(body)) return "";
   return formatDmInboxPreview(body);
 }
+
+const PHOTO_PASTE_LABELS = new Set([
+  "photo",
+  "image",
+  "picture",
+  "img",
+  "photos",
+  "images"
+]);
+
+/** True when OS/chat paste inserted a photo label instead of the image bytes. */
+export function isPhotoClipboardPlaceholder(text: string): boolean {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (PHOTO_PASTE_LABELS.has(lower)) return true;
+  return /^(?:img[_-]?\d+|image|photo|picture|screenshot)\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(trimmed);
+}

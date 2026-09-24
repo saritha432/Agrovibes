@@ -3,7 +3,7 @@ import { NavLink, useParams } from "react-router-dom";
 import { fetchMessageThreads, type MessageThread } from "../../api/messages";
 import { fetchUsers } from "../../api/home";
 import type { UserSearchRecord } from "../../api/types";
-import { UserAvatar } from "../../components/messages/UserAvatar";
+import { PresenceAvatar } from "../../components/messages/PresenceAvatar";
 import { useAuth } from "../../auth/AuthContext";
 import { onDirectRead, onDirectThreadUpdate } from "../../services/socketChat";
 import { formatThreadTime, previewMessage } from "./messagesUtils";
@@ -175,7 +175,7 @@ export function MessagesInbox() {
                     to={`/messages/${t.peerUserId}`}
                     className={`messages-inbox__row${isActive ? " messages-inbox__row--active" : ""}`}
                   >
-                    <UserAvatar uri={t.peerAvatarUrl} name={t.peerName} size={56} />
+                    <PresenceAvatar userId={t.peerUserId} uri={t.peerAvatarUrl} name={t.peerName} size={56} />
                     <div className="messages-inbox__row-body">
                       <div className="messages-inbox__row-top">
                         <strong>{t.peerName}</strong>
@@ -205,7 +205,7 @@ export function MessagesInbox() {
                     to={`/messages/${person.id}`}
                     className={`messages-inbox__row${isActive ? " messages-inbox__row--active" : ""}`}
                   >
-                    <UserAvatar uri={person.avatarUrl} name={name} size={56} />
+                    <PresenceAvatar userId={person.id} uri={person.avatarUrl} name={name} size={56} />
                     <div className="messages-inbox__row-body">
                       <div className="messages-inbox__row-top">
                         <strong>{name}</strong>
