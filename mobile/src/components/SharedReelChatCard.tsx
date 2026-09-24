@@ -17,18 +17,34 @@ type TranslateFn = (key: string, params?: Record<string, string | number>) => st
 
 type SharedReelChatCardProps = {
   post: HomePost;
+  access?: "available" | "unavailable" | "pending";
   onPress: () => void;
   onLongPress?: () => void;
   language: AppLanguage;
   t: TranslateFn;
 };
 
-export function SharedReelChatCard({ post, onPress, onLongPress, language, t }: SharedReelChatCardProps) {
-  const videoUrl = String(post.videoUrl || "").trim();
+export function SharedReelChatCard({
+  post,
+  access = "available",
+  onPress,
+  onLongPress,
+  language,
+  t
+}: SharedReelChatCardProps) {
+  const unavailable = access === "unavailable";
+  const pending = access === "pending";
+  const videoUrl = unavailable || pending ? "" : String(post.videoUrl || "").trim();
   const isVideo = !!videoUrl;
-  const [previewUri, setPreviewUri] = React.useState<string | null>(() => staticReelPreviewUri(post));
+  const [previewUri, setPreviewUri] = React.useState<string | null>(() =>
+    unavailable || pending ? null : staticReelPreviewUri(post)
+  );
 
   React.useEffect(() => {
+    if (unavailable || pending) {
+      setPreviewUri(null);
+      return;
+    }
     const staticUri = staticReelPreviewUri(post);
     if (staticUri) {
       setPreviewUri(staticUri);
@@ -45,15 +61,31 @@ export function SharedReelChatCard({ post, onPress, onLongPress, language, t }: 
     return () => {
       cancelled = true;
     };
-  }, [post.id, post.thumbnailUrl, post.imageUrl, post.imageUrls, post.videoUrl, videoUrl]);
+  }, [pending, post, unavailable, videoUrl]);
 
   const author = formatDisplayName(post.userName, language, t);
-  const label = sharedReelCardCaption(post.caption);
+  const label = unavailable ? t("sharedPostGone") : sharedReelCardCaption(post.caption);
 
   return (
-    <Pressable style={styles.card} onPress={onPress} onLongPress={onLongPress} delayLongPress={280} accessibilityRole="button">
+    <Pressable
+      style={styles.card}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={280}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: unavailable }}
+    >
       <View style={styles.mediaWrap}>
-        {previewUri ? (
+        {unavailable ? (
+          <View style={[styles.media, styles.placeholder]}>
+            <Ionicons name="ban-outline" size={32} color="rgba(255,255,255,0.4)" />
+            <Text style={styles.unavailableText}>{t("unavailable")}</Text>
+          </View>
+        ) : pending ? (
+          <View style={[styles.media, styles.placeholder]}>
+            <Ionicons name={isVideo ? "videocam-outline" : "images-outline"} size={32} color="rgba(255,255,255,0.35)" />
+          </View>
+        ) : previewUri ? (
           <Image source={{ uri: previewUri }} style={styles.media} resizeMode="cover" />
         ) : videoUrl ? (
           <AppVideo
@@ -82,7 +114,7 @@ export function SharedReelChatCard({ post, onPress, onLongPress, language, t }: 
           pointerEvents="none"
         />
 
-        {isVideo ? (
+        {isVideo && !unavailable && !pending ? (
           <>
             <View style={styles.centerPlay} pointerEvents="none">
               <View style={styles.centerPlayCircle}>
@@ -130,6 +162,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#262626"
+  },
+  unavailableText: {
+    marginTop: 8,
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 12,
+    fontWeight: "700"
   },
   gradient: {
     position: "absolute",

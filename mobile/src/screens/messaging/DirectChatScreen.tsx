@@ -21,11 +21,13 @@ import {
   View
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as FileSystem from "expo-file-system";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFloatingTopChromeInset, useTopChromeInset } from "../../theme/topChromeInset";
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../../auth/AuthContext";
+import { useIsOnline } from "../../context/PresenceContext";
 import { CallHistoryBubble } from "../../components/CallHistoryBubble";
 import { ChatMediaAlbumBubble } from "../../components/ChatMediaAlbumBubble";
 import { ChatMediaBubble } from "../../components/ChatMediaBubble";
@@ -38,8 +40,9 @@ import { StoryViewerModal } from "../../components/StoryViewerModal";
 import type { RootStackParamList } from "../../navigation/RootNavigator";
 import { useAndroidScreenBack } from "../../navigation/useAndroidScreenBack";
 import { UserAvatar } from "../../components/UserAvatar";
+import { PresenceAvatar } from "../../components/PresenceAvatar";
 import { SvgAssetIcon } from "../../components/SvgAssetIcon";
-import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchMyHomePosts, fetchProfileStats, markDirectThreadRead, acceptMessageRequest, declineMessageRequest, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
+import { fetchHomePost, fetchHomePosts, fetchHomeStoriesForUser, fetchMessageThread, fetchProfileStats, markDirectThreadRead, acceptMessageRequest, declineMessageRequest, ringDirectCall, cancelDirectCall, deleteDirectMessage, reportDirectCallSession, sendDirectMessage, uploadAudioFile, uploadPickedMedia, isPostUnavailableError, type DirectMessageItem, type HomePost, type HomeStory } from "../../services/api";
 import { clearDmNotificationThread } from "../../push/dmNotificationThread";
 import {
   joinDirectThread,
@@ -53,6 +56,7 @@ import {
 } from "../../services/socketChat";
 import { queueJoinLive } from "../../navigation/liveJoinBridge";
 import { publishActiveStories } from "../../navigation/storyActivityBridge";
+import { subscribePostDeleted } from "../../navigation/postDeletedBridge";
 import { presentIncomingCallFromPush } from "../../push/GlobalIncomingCallHost";
 import { setLocalCallSession } from "../../push/localCallSession";
 import { dismissIncomingCallRinging } from "../../push/incomingCallSignal";
@@ -81,6 +85,7 @@ import {
   dmMessageCopyText,
   dmMediaIsAlbum,
   dmMediaItems,
+  isPhotoClipboardPlaceholder,
   dmMediaPrimaryItem,
   dmReplyPreviewForMessage,
   formatDmInboxPreview,
@@ -425,66 +430,23 @@ function hasRenderableMedia(post: HomePost) {
   );
 }
 
-async function hydrateSharedPostFromFeed(post: HomePost, token: string | null): Promise<HomePost> {
-  if (!token) return post;
-  try {
-    const { post: found } = await fetchHomePost(token, post.id);
-    return { ...post, ...found };
-  } catch {
-    // fall through
-  }
-  try {
-    const feed = await fetchHomePosts(token);
-    const found = feed.posts.find((p) => p.id === post.id);
-    if (found) return { ...post, ...found };
-  } catch {
-    // ignore
-  }
-  try {
-    const mine = await fetchMyHomePosts(token);
-    const found = mine.posts.find((p) => p.id === post.id);
-    if (found) return { ...post, ...found };
-  } catch {
-    // ignore
-  }
-  return post;
-}
-
-async function hydrateSharedPostsById(postIds: number[], token: string): Promise<Record<number, HomePost>> {
-  const map: Record<number, HomePost> = {};
-  if (!postIds.length) return map;
-  const wanted = new Set(postIds);
-  try {
-    const feed = await fetchHomePosts(token);
-    for (const p of feed.posts) {
-      if (wanted.has(p.id)) map[p.id] = p;
-    }
-  } catch {
-    // ignore
-  }
-  const missing = postIds.filter((id) => !map[id]);
-  if (missing.length) {
-    try {
-      const mine = await fetchMyHomePosts(token);
-      for (const p of mine.posts) {
-        if (missing.includes(p.id)) map[p.id] = p;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  const stillMissing = postIds.filter((id) => !map[id]);
+async function hydrateSharedPostsById(
+  postIds: number[],
+  token: string
+): Promise<{ posts: Record<number, HomePost>; unavailableIds: number[] }> {
+  const posts: Record<number, HomePost> = {};
+  const unavailableIds: number[] = [];
   await Promise.all(
-    stillMissing.map(async (id) => {
+    postIds.map(async (id) => {
       try {
         const { post } = await fetchHomePost(token, id);
-        map[id] = post;
-      } catch {
-        // ignore
+        posts[id] = post;
+      } catch (error) {
+        if (isPostUnavailableError(error)) unavailableIds.push(id);
       }
     })
   );
-  return map;
+  return { posts, unavailableIds };
 }
 
 export function DirectChatScreen() {
@@ -504,6 +466,7 @@ export function DirectChatScreen() {
     route.params;
   const { t, language } = useLanguage();
   const { token, user } = useAuth();
+  const peerOnline = useIsOnline(peerUserId);
   const [messages, setMessages] = useState<DirectMessageItem[]>([]);
   const [isMessageRequest, setIsMessageRequest] = useState(Boolean(isMessageRequestParam));
   const [requestActionBusy, setRequestActionBusy] = useState(false);
@@ -573,6 +536,7 @@ export function DirectChatScreen() {
   const [chatStoryViewer, setChatStoryViewer] = useState<{ stories: HomeStory[]; initialIndex: number } | null>(null);
   const [chatMediaViewer, setChatMediaViewer] = useState<{ items: DmMediaItem[]; index: number } | null>(null);
   const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
+  const [unavailablePostIds, setUnavailablePostIds] = useState<Record<number, true>>({});
   const [attachBusy, setAttachBusy] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
@@ -583,6 +547,10 @@ export function DirectChatScreen() {
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceStartedAtRef = useRef(0);
   const sendingRef = useRef(false);
+  const draftRef = useRef("");
+  const pasteBusyRef = useRef(false);
+  const sendClipboardImageRef = useRef<() => Promise<boolean>>(async () => false);
+  draftRef.current = draft;
   const [replyTarget, setReplyTarget] = useState<{
     messageId: number;
     preview: string;
@@ -646,9 +614,17 @@ export function DirectChatScreen() {
     );
     if (!ids.length) return;
     let cancelled = false;
-    void hydrateSharedPostsById(ids, token).then((map) => {
-      if (!cancelled && Object.keys(map).length) {
-        setHydratedPostsById((prev) => ({ ...prev, ...map }));
+    void hydrateSharedPostsById(ids, token).then(({ posts, unavailableIds }) => {
+      if (cancelled) return;
+      if (Object.keys(posts).length) {
+        setHydratedPostsById((prev) => ({ ...prev, ...posts }));
+      }
+      if (unavailableIds.length) {
+        setUnavailablePostIds((prev) => {
+          const next = { ...prev };
+          for (const id of unavailableIds) next[id] = true;
+          return next;
+        });
       }
     });
     return () => {
@@ -656,12 +632,58 @@ export function DirectChatScreen() {
     };
   }, [messages, token]);
 
+  useEffect(() => {
+    return subscribePostDeleted((postId) => {
+      setUnavailablePostIds((prev) => ({ ...prev, [postId]: true }));
+      setHydratedPostsById((prev) => {
+        if (!prev[postId]) return prev;
+        const next = { ...prev };
+        delete next[postId];
+        return next;
+      });
+      setSharedReelViewer((current) => {
+        if (!current) return current;
+        if (current.posts.some((post) => Number(post.id) === postId)) return null;
+        return current;
+      });
+    });
+  }, []);
+
   const mergeHydratedPost = useCallback(
     (post: HomePost) => {
+      if (unavailablePostIds[post.id]) {
+        return {
+          ...post,
+          videoUrl: null,
+          imageUrl: null,
+          imageUrls: undefined,
+          thumbnailUrl: undefined,
+          hlsUrl: null,
+          playbackUrl: null
+        };
+      }
       const hydrated = hydratedPostsById[post.id];
-      return hydrated ? { ...post, ...hydrated } : post;
+      if (hydrated) return { ...hydrated };
+      return {
+        ...post,
+        videoUrl: null,
+        imageUrl: null,
+        imageUrls: undefined,
+        thumbnailUrl: undefined,
+        hlsUrl: null,
+        playbackUrl: null
+      };
     },
-    [hydratedPostsById]
+    [hydratedPostsById, unavailablePostIds]
+  );
+
+  const sharedPostAccess = useCallback(
+    (postId: number): "available" | "unavailable" | "pending" => {
+      if (unavailablePostIds[postId]) return "unavailable";
+      if (hydratedPostsById[postId]) return "available";
+      return "pending";
+    },
+    [hydratedPostsById, unavailablePostIds]
   );
 
   useEffect(() => {
@@ -868,6 +890,43 @@ export function DirectChatScreen() {
   const isComposerSingleLine = !draft.includes("\n") && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT + 2;
 
   const handleDraftChange = useCallback((text: string) => {
+    const prev = draftRef.current;
+    const inserted = text.length - prev.length;
+    const looksLikePaste = inserted > 1 || (prev.trim() === "" && isPhotoClipboardPlaceholder(text, t("sharedMedia")));
+    if (looksLikePaste && isPhotoClipboardPlaceholder(text, t("sharedMedia"))) {
+      void (async () => {
+        const sent = await sendClipboardImageRef.current();
+        if (!sent) {
+          draftRef.current = text;
+          setDraft(text);
+        }
+      })();
+      return;
+    }
+    if (looksLikePaste && parseDmMediaMessage(text)) {
+      void (async () => {
+        if (!token || attachBusy || sendingRef.current) {
+          draftRef.current = text;
+          setDraft(text);
+          return;
+        }
+        sendingRef.current = true;
+        setDraft("");
+        setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+        try {
+          const result = await sendDirectMessage(token, peerUserId, text);
+          if (result.message) appendSentMessage(result.message);
+          else await reload();
+        } catch {
+          draftRef.current = text;
+          setDraft(text);
+        } finally {
+          sendingRef.current = false;
+        }
+      })();
+      return;
+    }
+    draftRef.current = text;
     setDraft(text);
     if (!text.trim()) {
       setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
@@ -876,11 +935,32 @@ export function DirectChatScreen() {
     if (!text.includes("\n") && text.length > 42 && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT) {
       setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT + COMPOSER_LINE_HEIGHT);
     }
-  }, [composerInputHeight]);
+  }, [appendSentMessage, attachBusy, composerInputHeight, peerUserId, reload, t, token]);
 
   const send = async () => {
     const text = draft.trim();
     if (!text || !token || attachBusy || sendingRef.current) return;
+    if (isPhotoClipboardPlaceholder(text, t("sharedMedia"))) {
+      const sent = await sendClipboardImageRef.current();
+      if (sent) {
+        setDraft("");
+        setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+        return;
+      }
+    }
+    if (parseDmMediaMessage(text)) {
+      sendingRef.current = true;
+      setDraft("");
+      setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+      try {
+        const result = await sendDirectMessage(token, peerUserId, text);
+        if (result.message) appendSentMessage(result.message);
+        else await reload();
+      } finally {
+        sendingRef.current = false;
+      }
+      return;
+    }
     sendingRef.current = true;
     setDraft("");
     setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
@@ -977,6 +1057,28 @@ export function DirectChatScreen() {
 
   const copyMessage = useCallback(
     async (item: DirectMessageItem) => {
+      const media = parseDmMediaMessage(item.body);
+      const image = media ? dmMediaItems(media).find((entry) => entry.kind === "image") : undefined;
+      if (image?.url) {
+        try {
+          const cacheDir = FileSystem.cacheDirectory;
+          if (cacheDir) {
+            const dest = `${cacheDir}cv-copy-${Date.now()}.jpg`;
+            const downloaded = await FileSystem.downloadAsync(image.url, dest);
+            const base64 = await FileSystem.readAsStringAsync(downloaded.uri, {
+              encoding: "base64"
+            });
+            if (base64) {
+              await Clipboard.setImageAsync(base64);
+              return;
+            }
+          }
+        } catch {
+          // Fall back to the structured media payload so in-app paste still shows the image.
+        }
+        await Clipboard.setStringAsync(item.body);
+        return;
+      }
       const text = dmMessageCopyText(item.body, t);
       if (!text.trim()) {
         Alert.alert("Copy", "This message cannot be copied as text.");
@@ -1084,6 +1186,38 @@ export function DirectChatScreen() {
     },
     [attachBusy, appendSentMessage, peerUserId, reload, socketConnected, t, token]
   );
+
+  const trySendClipboardImage = useCallback(async (): Promise<boolean> => {
+    if (!token || attachBusy || pasteBusyRef.current) return false;
+    try {
+      const hasImage = await Clipboard.hasImageAsync();
+      if (!hasImage) return false;
+      const img = await Clipboard.getImageAsync({ format: "jpeg" });
+      if (!img?.data) return false;
+      const cacheDir = FileSystem.cacheDirectory;
+      if (!cacheDir) return false;
+      pasteBusyRef.current = true;
+      const raw = img.data.includes(",") ? img.data.split(",")[1] : img.data;
+      const dest = `${cacheDir}cv-paste-${Date.now()}.jpg`;
+      await FileSystem.writeAsStringAsync(dest, raw, { encoding: "base64" });
+      await sendPickedAssets([
+        {
+          uri: dest,
+          width: img.size?.width ?? 0,
+          height: img.size?.height ?? 0,
+          type: "image",
+          mimeType: "image/jpeg",
+          fileName: "pasted-photo.jpg"
+        } as ImagePicker.ImagePickerAsset
+      ]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      pasteBusyRef.current = false;
+    }
+  }, [attachBusy, sendPickedAssets, token]);
+  sendClipboardImageRef.current = trySendClipboardImage;
 
   const sendPickedAsset = useCallback(
     async (asset: ImagePicker.ImagePickerAsset) => {
@@ -1388,17 +1522,35 @@ export function DirectChatScreen() {
 
   const openSharedCropvibeCard = useCallback(
     async (body: string) => {
-      let post = parseSharedCropvibeContent(body);
-      if (!post) return;
-      post = mergeHydratedPost(post);
-      post = await hydrateSharedPostFromFeed(post, token ?? null);
-      if (!hasRenderableMedia(post)) {
-        Alert.alert("Can't open this share", "This post isn't available. Try again after refreshing your feed.");
+      const parsed = parseSharedCropvibeContent(body);
+      if (!parsed) return;
+      if (unavailablePostIds[parsed.id]) {
+        Alert.alert(t("unavailable"), t("sharedPostGone"));
         return;
       }
-      setSharedReelViewer({ posts: [post], initialIndex: 0 });
+      if (!token) {
+        Alert.alert(t("unavailable"), t("sharedPostGone"));
+        return;
+      }
+      try {
+        const { post: found } = await fetchHomePost(token, parsed.id);
+        if (!hasRenderableMedia(found)) {
+          setUnavailablePostIds((prev) => ({ ...prev, [parsed.id]: true }));
+          Alert.alert(t("unavailable"), t("sharedPostGone"));
+          return;
+        }
+        setHydratedPostsById((prev) => ({ ...prev, [found.id]: found }));
+        setSharedReelViewer({ posts: [found], initialIndex: 0 });
+      } catch (error) {
+        if (isPostUnavailableError(error)) {
+          setUnavailablePostIds((prev) => ({ ...prev, [parsed.id]: true }));
+          Alert.alert(t("unavailable"), t("sharedPostGone"));
+          return;
+        }
+        Alert.alert(t("unavailable"), t("sharedPostGone"));
+      }
     },
-    [mergeHydratedPost, token]
+    [t, token, unavailablePostIds]
   );
 
   const openReplyTarget = useCallback(
@@ -1432,7 +1584,8 @@ export function DirectChatScreen() {
           <Ionicons name="chevron-back" size={28} color={TEXT} />
         </Pressable>
         <Pressable style={styles.headerProfileTap} onPress={openPeerProfile}>
-          <UserAvatar
+          <PresenceAvatar
+            userId={peerUserId}
             uri={peerAvatar}
             name={peerName}
             size={40}
@@ -1443,7 +1596,11 @@ export function DirectChatScreen() {
             <Text style={styles.headerTitle} numberOfLines={1}>
               {peerName}
             </Text>
-            {peerHandle ? (
+            {peerOnline ? (
+              <Text style={styles.headerActive} numberOfLines={1}>
+                Active now
+              </Text>
+            ) : peerHandle ? (
               <Text style={styles.headerHandle} numberOfLines={1}>
                 {peerHandle}
               </Text>
@@ -1594,6 +1751,7 @@ export function DirectChatScreen() {
                 ) : sharedPost ? (
                   <SharedReelChatCard
                     post={sharedPost}
+                    access={sharedPostAccess(sharedPost.id)}
                     language={language}
                     t={t}
                     onPress={() => void openSharedCropvibeCard(messageItem.body)}
@@ -1615,7 +1773,11 @@ export function DirectChatScreen() {
                     />
                   )
                 ) : sharedVoice ? (
-                  <ChatVoiceNoteBubble voice={sharedVoice} isSelf={isSelf} />
+                  <ChatVoiceNoteBubble
+                    voice={sharedVoice}
+                    isSelf={isSelf}
+                    onLongPress={() => openMessageActions(messageItem)}
+                  />
                 ) : sharedCall ? (
                   <CallHistoryBubble call={sharedCall} isSelf={isSelf} t={t} />
                 ) : storyReply ? (
@@ -2097,6 +2259,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 16, fontWeight: "800", color: TEXT },
   headerHandle: { marginTop: 2, fontSize: 13, fontWeight: "500", color: MUTED },
+  headerActive: { marginTop: 2, fontSize: 13, fontWeight: "600", color: APP_LIME },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   headerAction: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
   dateSeparatorWrap: { alignItems: "center", marginVertical: 14 },

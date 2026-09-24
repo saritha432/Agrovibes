@@ -4,6 +4,7 @@ import { fetchHomePosts, fetchUsers, sendFollowRequest } from "../api/home";
 import type { HomePost, UserSearchRecord } from "../api/types";
 import { ProfileReelViewer } from "../components/profile/ProfileReelViewer";
 import { useAuth } from "../auth/AuthContext";
+import { PresenceDot } from "../components/messages/PresenceAvatar";
 import { webProfilePath } from "../utils/profilePath";
 import { isDropPost, orderPostsForFeed, reelGridStillUri, reelGridTileBackground } from "../utils/feedOrder";
 import { resolveWebPostVideoUrl } from "../utils/videoUrl";
@@ -191,8 +192,11 @@ export function SearchPage() {
               {users.map((u) => (
                 <li key={u.id} className="search-page__item">
                   <Link to={webProfilePath(u.id, user?.id) || "/search"} className="search-page__person">
-                    <span className="search-page__avatar">
-                      {u.avatarUrl ? <img src={u.avatarUrl} alt="" /> : u.fullName.charAt(0)}
+                    <span className="presence-avatar search-page__avatar-wrap">
+                      <span className="search-page__avatar">
+                        {u.avatarUrl ? <img src={u.avatarUrl} alt="" /> : u.fullName.charAt(0)}
+                      </span>
+                      <PresenceDot userId={u.id} size={12} />
                     </span>
                     <div className="search-page__meta">
                       <strong>{u.fullName}</strong>

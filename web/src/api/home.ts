@@ -183,6 +183,10 @@ export async function fetchUserHomePosts(
   };
 }
 
+export function isPostUnavailableError(error: unknown) {
+  return error instanceof Error && error.name === "PostUnavailableError";
+}
+
 export async function fetchHomePost(token: string | null | undefined, postId: number) {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -190,10 +194,17 @@ export async function fetchHomePost(token: string | null | undefined, postId: nu
     `${API_BASE_URL}/v1/home/posts/${encodeURIComponent(String(postId))}`,
     { headers }
   );
+  if (response.status === 404) {
+    const error = new Error("Post unavailable");
+    error.name = "PostUnavailableError";
+    throw error;
+  }
   const data = (await parseJsonOrThrow(response)) as { post: HomePost };
   const post = sanitizeHomePost(data.post);
   if (!keepVisibleHomePost(post)) {
-    throw new Error("Post not found");
+    const error = new Error("Post unavailable");
+    error.name = "PostUnavailableError";
+    throw error;
   }
   return { post };
 }

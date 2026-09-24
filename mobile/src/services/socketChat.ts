@@ -44,6 +44,12 @@ export type DmDeliveredSocketPayload = {
   messageIds: number[];
 };
 
+export type PresenceUpdatePayload = {
+  userId: number;
+  online: boolean;
+  lastSeenAt?: string | null;
+};
+
 type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
 type DmTypingHandler = (payload: { peerUserId: number; isTyping: boolean }) => void;
@@ -52,6 +58,7 @@ type NotificationSyncHandler = (payload: NotificationSyncPayload) => void;
 type StoryViewedHandler = (payload: StoryViewedSocketPayload) => void;
 type DmDeletedHandler = (payload: DmDeletedSocketPayload) => void;
 type DmDeliveredHandler = (payload: DmDeliveredSocketPayload) => void;
+type PresenceUpdateHandler = (payload: PresenceUpdatePayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
@@ -65,6 +72,7 @@ const notificationSyncHandlers = new Set<NotificationSyncHandler>();
 const storyViewedHandlers = new Set<StoryViewedHandler>();
 const deletedHandlers = new Set<DmDeletedHandler>();
 const deliveredHandlers = new Set<DmDeliveredHandler>();
+const presenceHandlers = new Set<PresenceUpdateHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
 export function resolveSocketBaseUrl() {
@@ -120,6 +128,9 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("dm:delivered", (payload: DmDeliveredSocketPayload) => {
     deliveredHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("presence:update", (payload: PresenceUpdatePayload) => {
+    presenceHandlers.forEach((handler) => handler(payload));
   });
 }
 
@@ -238,5 +249,20 @@ export function onSocketConnectionChange(handler: ConnectionHandler) {
   handler(isSocketChatConnected());
   return () => {
     connectionHandlers.delete(handler);
+  };
+}
+
+export function emitPresenceActive() {
+  socket?.emit("presence:active");
+}
+
+export function emitPresenceAway() {
+  socket?.emit("presence:away");
+}
+
+export function onPresenceUpdate(handler: PresenceUpdateHandler) {
+  presenceHandlers.add(handler);
+  return () => {
+    presenceHandlers.delete(handler);
   };
 }

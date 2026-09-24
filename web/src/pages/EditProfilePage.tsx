@@ -33,7 +33,6 @@ export function EditProfilePage() {
   const [locationLat, setLocationLat] = useState<number | null>(user?.locationLat ?? null);
   const [locationLng, setLocationLng] = useState<number | null>(user?.locationLng ?? null);
   const [mapsKey, setMapsKey] = useState("");
-  const [mapsReady, setMapsReady] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
@@ -46,7 +45,6 @@ export function EditProfilePage() {
 
   useEffect(() => {
     if (!token) {
-      setMapsReady(false);
       setMapsKey("");
       return;
     }
@@ -55,11 +53,10 @@ export function EditProfilePage() {
       .then((config) => {
         if (!active) return;
         setMapsKey(config.key);
-        setMapsReady(config.configured);
       })
       .catch(() => {
         if (!active) return;
-        setMapsReady(false);
+        setMapsKey("");
       });
     return () => {
       active = false;
@@ -216,32 +213,28 @@ export function EditProfilePage() {
           </label>
           <label>
             Location
-            {mapsReady ? (
-              <span className="edit-profile__location">
+            <span className="edit-profile__location">
+              <button
+                type="button"
+                className="edit-profile__location-btn"
+                onClick={() => setMapOpen(true)}
+              >
+                {location.trim() || "Select on map"}
+              </button>
+              {location.trim() ? (
                 <button
                   type="button"
-                  className="edit-profile__location-btn"
-                  onClick={() => setMapOpen(true)}
+                  className="edit-profile__location-clear"
+                  onClick={() => {
+                    setLocation("");
+                    setLocationLat(null);
+                    setLocationLng(null);
+                  }}
                 >
-                  {location.trim() || "Search Google Maps"}
+                  Clear
                 </button>
-                {location.trim() ? (
-                  <button
-                    type="button"
-                    className="edit-profile__location-clear"
-                    onClick={() => {
-                      setLocation("");
-                      setLocationLat(null);
-                      setLocationLng(null);
-                    }}
-                  >
-                    Clear
-                  </button>
-                ) : null}
-              </span>
-            ) : (
-              <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="District, State" />
-            )}
+              ) : null}
+            </span>
           </label>
         </section>
 
@@ -283,22 +276,20 @@ export function EditProfilePage() {
         onDone={(blob) => void onCropDone(blob)}
       />
 
-      {mapsReady && mapsKey ? (
-        <LocationMapPicker
-          open={mapOpen}
-          apiKey={mapsKey}
-          label={location}
-          lat={locationLat}
-          lng={locationLng}
-          onClose={() => setMapOpen(false)}
-          onSelect={(value) => {
-            setLocation(value.label);
-            setLocationLat(value.lat);
-            setLocationLng(value.lng);
-            setMapOpen(false);
-          }}
-        />
-      ) : null}
+      <LocationMapPicker
+        open={mapOpen}
+        apiKey={mapsKey}
+        label={location}
+        lat={locationLat}
+        lng={locationLng}
+        onClose={() => setMapOpen(false)}
+        onSelect={(value) => {
+          setLocation(value.label);
+          setLocationLat(value.lat);
+          setLocationLng(value.lng);
+          setMapOpen(false);
+        }}
+      />
     </div>
   );
 }

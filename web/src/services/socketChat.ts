@@ -38,12 +38,19 @@ export type DmDeletedSocketPayload = {
   peerUserId: number;
 };
 
+export type PresenceUpdatePayload = {
+  userId: number;
+  online: boolean;
+  lastSeenAt?: string | null;
+};
+
 type DmMessageHandler = (payload: DmMessageSocketPayload) => void;
 type DmThreadHandler = (payload: DmThreadSocketUpdate) => void;
 type DmReadHandler = (payload: DmReadSocketPayload) => void;
 type NotificationSyncHandler = (payload: NotificationSyncPayload) => void;
 type StoryViewedHandler = (payload: StoryViewedSocketPayload) => void;
 type DmDeletedHandler = (payload: DmDeletedSocketPayload) => void;
+type PresenceUpdateHandler = (payload: PresenceUpdatePayload) => void;
 type ConnectionHandler = (connected: boolean) => void;
 
 let socket: Socket | null = null;
@@ -55,6 +62,7 @@ const readHandlers = new Set<DmReadHandler>();
 const notificationSyncHandlers = new Set<NotificationSyncHandler>();
 const storyViewedHandlers = new Set<StoryViewedHandler>();
 const deletedHandlers = new Set<DmDeletedHandler>();
+const presenceHandlers = new Set<PresenceUpdateHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
 
 export function resolveSocketBaseUrl() {
@@ -99,6 +107,9 @@ function bindSocketEvents(sock: Socket) {
   });
   sock.on("dm:deleted", (payload: DmDeletedSocketPayload) => {
     deletedHandlers.forEach((handler) => handler(payload));
+  });
+  sock.on("presence:update", (payload: PresenceUpdatePayload) => {
+    presenceHandlers.forEach((handler) => handler(payload));
   });
 }
 
@@ -199,5 +210,20 @@ export function onSocketConnectionChange(handler: ConnectionHandler) {
   handler(Boolean(socket?.connected));
   return () => {
     connectionHandlers.delete(handler);
+  };
+}
+
+export function emitPresenceActive() {
+  socket?.emit("presence:active");
+}
+
+export function emitPresenceAway() {
+  socket?.emit("presence:away");
+}
+
+export function onPresenceUpdate(handler: PresenceUpdateHandler) {
+  presenceHandlers.add(handler);
+  return () => {
+    presenceHandlers.delete(handler);
   };
 }

@@ -27,6 +27,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import { UserAvatar } from "../components/UserAvatar";
+import { PresenceDot } from "../components/PresenceAvatar";
 import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { SvgAssetIcon } from "../components/SvgAssetIcon";
 import { useLanguage } from "../localization/LanguageContext";
@@ -1584,19 +1585,24 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       <>
         <View style={styles.profileCard}>
           <View style={styles.headerMidRow}>
-            <StoryRingAvatar
-              uri={profileSubject?.avatarUrl}
-              name={profileSubject?.fullName || profileSubject?.username || "U"}
-              userId={isPublicProfileView ? publicUserId : user?.id}
-              userName={profileSubject?.fullName || profileSubject?.username || publicUserName || ""}
-              size={88}
-              borderRadius={44}
-              style={styles.avatar}
-              onPressFallback={() => {
-                if (displayAvatarUrl) setAvatarPreviewOpen(true);
-              }}
-              accessibilityLabel={t("viewProfilePhoto")}
-            />
+            <View style={styles.avatarPresenceWrap}>
+              <StoryRingAvatar
+                uri={profileSubject?.avatarUrl}
+                name={profileSubject?.fullName || profileSubject?.username || "U"}
+                userId={isPublicProfileView ? publicUserId : user?.id}
+                userName={profileSubject?.fullName || profileSubject?.username || publicUserName || ""}
+                size={88}
+                borderRadius={44}
+                style={styles.avatar}
+                onPressFallback={() => {
+                  if (displayAvatarUrl) setAvatarPreviewOpen(true);
+                }}
+                accessibilityLabel={t("viewProfilePhoto")}
+              />
+              {isPublicProfileView ? (
+                <PresenceDot userId={publicUserId} size={18} style={styles.avatarPresenceDot} />
+              ) : null}
+            </View>
 
             <View style={styles.headerInfo}>
               <View style={styles.statsRow}>
@@ -2419,6 +2425,13 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44
+  },
+  avatarPresenceWrap: {
+    position: "relative"
+  },
+  avatarPresenceDot: {
+    right: 2,
+    bottom: 2
   },
   avatarPressable: { borderRadius: 44 },
   avatarPreviewRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)" },

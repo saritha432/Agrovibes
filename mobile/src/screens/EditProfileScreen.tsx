@@ -141,7 +141,6 @@ export function EditProfileScreen() {
   const [locationLat, setLocationLat] = useState<number | null>(user?.locationLat ?? null);
   const [locationLng, setLocationLng] = useState<number | null>(user?.locationLng ?? null);
   const [mapsKey, setMapsKey] = useState("");
-  const [mapsReady, setMapsReady] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [gender, setGender] = useState<GenderOption | null>(null);
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
@@ -174,7 +173,6 @@ export function EditProfileScreen() {
 
   useEffect(() => {
     if (!token) {
-      setMapsReady(false);
       setMapsKey("");
       return;
     }
@@ -183,11 +181,10 @@ export function EditProfileScreen() {
       .then((config) => {
         if (!active) return;
         setMapsKey(config.key);
-        setMapsReady(config.configured);
       })
       .catch(() => {
         if (!active) return;
-        setMapsReady(false);
+        setMapsKey("");
       });
     return () => {
       active = false;
@@ -468,26 +465,17 @@ export function EditProfileScreen() {
               </FieldRow>
 
               <FieldRow label={t("location")} last>
-                {mapsReady ? (
-                  <Pressable
-                    style={styles.genderRow}
-                    onPress={() => setMapOpen(true)}
-                    accessibilityRole="button"
-                  >
-                    <Text style={[styles.fieldValue, !location.trim() ? styles.fieldValuePlaceholder : null]}>
-                      {location.trim() || t("locationPlaceholder")}
-                    </Text>
-                    <Ionicons name="map-outline" size={18} color={LABEL} />
-                  </Pressable>
-                ) : (
-                  <TextInput
-                    value={location}
-                    onChangeText={setLocation}
-                    style={[styles.fieldInput, inputProps]}
-                    placeholder={t("locationPlaceholder")}
-                    placeholderTextColor={LABEL}
-                  />
-                )}
+                <Pressable
+                  style={styles.genderRow}
+                  onPress={() => setMapOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("location")}
+                >
+                  <Text style={[styles.fieldValue, !location.trim() ? styles.fieldValuePlaceholder : null]}>
+                    {location.trim() || t("locationPlaceholder")}
+                  </Text>
+                  <Ionicons name="map-outline" size={18} color={LABEL} />
+                </Pressable>
               </FieldRow>
             </View>
           </ScrollView>
@@ -557,7 +545,7 @@ export function EditProfileScreen() {
         </Pressable>
       </Modal>
 
-      {mapsReady && mapsKey ? (
+      {mapOpen ? (
         <LocationMapPicker
           open={mapOpen}
           apiKey={mapsKey}

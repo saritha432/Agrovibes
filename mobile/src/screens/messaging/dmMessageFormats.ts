@@ -333,6 +333,26 @@ export function dmMessageCopyText(body: string, t: (key: string) => string): str
   return formatDmInboxPreview(body, t);
 }
 
+const PHOTO_PASTE_LABELS = new Set([
+  "photo",
+  "image",
+  "picture",
+  "img",
+  "photos",
+  "images"
+]);
+
+/** True when OS/chat paste inserted a photo label instead of the image bytes. */
+export function isPhotoClipboardPlaceholder(text: string, localizedPhoto?: string): boolean {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (PHOTO_PASTE_LABELS.has(lower)) return true;
+  const localized = String(localizedPhoto || "").trim().toLowerCase();
+  if (localized && lower === localized) return true;
+  return /^(?:img[_-]?\d+|image|photo|picture|screenshot)\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(trimmed);
+}
+
 /** Short preview for reply composer + quote chips (includes media labels). */
 export function dmReplyPreviewForMessage(body: string, t: (key: string) => string): string {
   const media = parseDmMediaMessage(body);

@@ -109,6 +109,11 @@
   text-decoration: none;
 }
 
+.search-page__avatar-wrap {
+  width: 44px;
+  height: 44px;
+}
+
 .search-page__avatar {
   width: 44px;
   height: 44px;

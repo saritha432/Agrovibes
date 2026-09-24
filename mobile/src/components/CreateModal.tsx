@@ -2710,7 +2710,7 @@ export function CreateModal({
 
               <View
                 style={styles.igCamMiddleArea}
-                pointerEvents="auto"
+                pointerEvents={showAudioPanel || showAlbumPicker ? "none" : "auto"}
                 collapsable={false}
                 {...entryPinchHandlers}
               >
@@ -3926,17 +3926,21 @@ export function CreateModal({
       ) : null}
 
       {showAudioPanel ? (
-        <View style={styles.audioPanelOverlayRoot} pointerEvents="box-none">
+        <View style={styles.audioPanelOverlayRoot} pointerEvents="auto">
           <Pressable
             style={styles.audioPanelBackdrop}
             onPress={() => {
+              Keyboard.dismiss();
               setShowAudioPanel(false);
               void stopAudioPreview();
             }}
             accessibilityRole="button"
             accessibilityLabel="Dismiss audio picker"
           />
-          <View style={[styles.creativePanelCard, styles.audioPanelCard]} pointerEvents="auto">
+          <Pressable
+            style={[styles.creativePanelCard, styles.audioPanelCard]}
+            onPress={(e) => e.stopPropagation?.()}
+          >
             <Text style={styles.creativePanelTitle}>Add audio</Text>
             <Text style={styles.creativePanelHint}>Select a music track for your story or reel.</Text>
             <TextInput
@@ -3947,7 +3951,6 @@ export function CreateModal({
               placeholderTextColor="#8b9793"
               autoCapitalize="none"
               autoCorrect={false}
-              autoFocus
             />
             {audioSearchLoading ? (
               <View style={styles.audioSearchStateRow}>
@@ -3956,7 +3959,11 @@ export function CreateModal({
               </View>
             ) : null}
             {audioSearchError ? <Text style={styles.audioSearchErrorText}>{audioSearchError}</Text> : null}
-            <ScrollView style={styles.audioTrackList} keyboardShouldPersistTaps="handled">
+            <ScrollView
+              style={styles.audioTrackList}
+              keyboardShouldPersistTaps="always"
+              nestedScrollEnabled
+            >
               {audioTracksToShow.map((track) => {
                 const selected = selectedAudioTrackId === track.id;
                 const playing = audioPreviewTrackId === track.id;
@@ -3972,7 +3979,9 @@ export function CreateModal({
                     </View>
                     <Pressable
                       style={styles.audioTrackPlayBtn}
+                      hitSlop={8}
                       onPress={() => {
+                        setSelectedAudioTrackId(track.id);
                         void previewAudioTrack(track);
                       }}
                     >
@@ -3985,27 +3994,36 @@ export function CreateModal({
                 <Text style={styles.audioSearchStateText}>No playable preview found for this search.</Text>
               ) : null}
             </ScrollView>
-            <View style={styles.audioActionsRow}>
+            <View style={styles.audioActionsRow} pointerEvents="auto">
               <Pressable
                 style={styles.secondaryBtn}
+                hitSlop={8}
                 onPress={() => {
+                  Keyboard.dismiss();
                   setSelectedAudioTrackId(null);
+                  setShowAudioPanel(false);
                   void stopAudioPreview();
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Remove audio"
               >
                 <Text style={styles.secondaryBtnText}>Remove</Text>
               </Pressable>
               <Pressable
                 style={styles.audioDoneBtn}
+                hitSlop={8}
                 onPress={() => {
+                  Keyboard.dismiss();
                   setShowAudioPanel(false);
                   void stopAudioPreview();
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Done"
               >
                 <Text style={styles.primaryBtnText}>Done</Text>
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </View>
       ) : null}
       </View>
@@ -5870,7 +5888,7 @@ const styles = StyleSheet.create({
   audioSearchStateRow: { marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8 },
   audioSearchStateText: { marginTop: 10, color: "#62706c", fontSize: 12, fontWeight: "600" },
   audioSearchErrorText: { marginTop: 8, color: "#b91c1c", fontSize: 12, fontWeight: "700" },
-  audioTrackList: { marginTop: 8, gap: 10, maxHeight: 320 },
+  audioTrackList: { marginTop: 8, gap: 10, maxHeight: 320, flexGrow: 0, flexShrink: 1 },
   tagPeopleList: { marginTop: 10, maxHeight: 260 },
   audioTrackRow: {
     minHeight: 54,
@@ -5895,7 +5913,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  audioActionsRow: { flexDirection: "row", gap: 8, marginTop: 12 },
+  audioActionsRow: { flexDirection: "row", gap: 8, marginTop: 12, zIndex: 2, elevation: 2 },
   audioDoneBtn: {
     flex: 1,
     backgroundColor: "#C9FF35",
