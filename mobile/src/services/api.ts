@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import * as FileSystem from "expo-file-system";
 import { buildLocalLoginSessionsFallback, isLocalLoginSessionId, LOGIN_ACTIVITY_DEPLOY_HINT } from "../utils/loginActivityFallback";
 import { sanitizeHomePost, sanitizeHomeStory, stripLegacyCloudinaryUrl } from "../utils/mediaUrls";
 import { assertVideoUnderUploadLimit, assertVideoResolutionWithinLimit } from "../utils/mediaUploadSize";
@@ -2226,6 +2227,105 @@ function imageFilenameFromUri(uri: string) {
   return `image-${Date.now()}${ext}`;
 }
 
+type DirectVideoUploadTicket = {
+  uploadUrl: string;
+  headers?: Record<string, string>;
+  url: string;
+  path: string;
+  mimeType?: string;
+};
+
+async function localFileByteSize(uri: string): Promise<number> {
+  if (Platform.OS === "web") {
+    const blob = await (await fetch(uri)).blob();
+    return blob.size;
+  }
+  const info = await FileSystem.getInfoAsync(uri, { size: true });
+  if (!info.exists) return 0;
+  return Number((info as { size?: number }).size ?? 0) || 0;
+}
+
+async function requestDirectVideoUpload(
+  filename: string,
+  mimeType: string,
+  byteSize: number
+): Promise<DirectVideoUploadTicket | null> {
+  try {
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}/v1/media/upload-url`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, mimeType, byteSize })
+      },
+      AUTH_FETCH_TIMEOUT_MS
+    );
+    if (response.status === 409 || response.status === 503) return null;
+    const parsed = (await parseJsonOrThrow(response)) as DirectVideoUploadTicket & { fallback?: string };
+    if (!parsed?.uploadUrl || !parsed?.path) return null;
+    return parsed;
+  } catch (error) {
+    const status = Number((error as { status?: number })?.status || 0);
+    if (status === 400) throw error;
+    return null;
+  }
+}
+
+async function putFileToSignedUrl(fileUri: string, ticket: DirectVideoUploadTicket) {
+  const headers = { ...(ticket.headers || {}) };
+  if (Platform.OS === "web") {
+    const blob = await (await fetch(fileUri)).blob();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    try {
+      const putRes = await fetch(ticket.uploadUrl, {
+        method: "PUT",
+        headers,
+        body: blob,
+        signal: controller.signal
+      });
+      if (!putRes.ok) {
+        throw new Error(`Direct upload failed (${putRes.status})`);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error || "");
+      if (/aborted|abort|timed out|timeout/i.test(msg)) {
+        throw new Error("Upload timed out. Check internet speed and try a smaller video.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+    return;
+  }
+  const result = await FileSystem.uploadAsync(ticket.uploadUrl, fileUri, {
+    httpMethod: "PUT",
+    headers,
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT
+  });
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`Direct upload failed (${result.status})`);
+  }
+}
+
+async function completeDirectVideoUpload(path: string, fallbackUrl: string) {
+  try {
+    const response = await fetchWithRetry(
+      `${API_BASE_URL}/v1/media/upload-complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path })
+      },
+      AUTH_FETCH_TIMEOUT_MS
+    );
+    const parsed = (await parseJsonOrThrow(response)) as { url?: string };
+    return { url: String(parsed?.url || fallbackUrl) };
+  } catch {
+    return { url: fallbackUrl };
+  }
+}
+
 async function uploadToSupabaseServer(fileUri: string, filename: string, nativeMime: string) {
   const form = new FormData();
   if (Platform.OS === "web") {
@@ -2324,6 +2424,17 @@ export async function uploadVideoFile(fileUri: string, asset?: PickerAssetMeta |
     height: asset?.height ?? undefined
   });
   await assertVideoUnderUploadLimit(prepared.uri);
+  const byteSize = await localFileByteSize(prepared.uri);
+  const ticket = await requestDirectVideoUpload(prepared.filename, prepared.mime, byteSize);
+  if (ticket) {
+    try {
+      await putFileToSignedUrl(prepared.uri, ticket);
+      return completeDirectVideoUpload(ticket.path, ticket.url);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error || "");
+      if (/timed out|incomplete/i.test(msg)) throw error;
+    }
+  }
   return uploadToSupabaseServer(prepared.uri, prepared.filename, prepared.mime);
 }
 

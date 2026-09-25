@@ -36,7 +36,7 @@ const {
   resolveCompletedHlsUrlForVideo,
   startHlsJobPolling
 } = require("../hlsTranscode");
-const { extractS3ObjectKeyFromUrl } = require("../s3Storage");
+const { extractS3ObjectKeyFromUrl, createPresignedPutUrl, headS3Object, buildS3PublicUrl } = require("../s3Storage");
 const {
   isEgressConfigured,
   startLiveRoomRecording,
@@ -257,6 +257,56 @@ function mediaExtFromMime(mimeType, originalName) {
   const name = String(originalName || "").toLowerCase();
   const m = name.match(/\.(jpe?g|png|gif|webp|heic|bmp|avif|mp4|mov|webm|m4v|m4a|mp3|caf|aac|wav|ogg)$/i);
   return m ? m[0].toLowerCase() : ".bin";
+}
+
+function resolveUploadMediaMeta(mimeTypeRaw, originalName) {
+  const original = String(originalName || "");
+  const mimeTypeRawSafe = String(mimeTypeRaw || "application/octet-stream");
+  const nameLooksVideo = /\.(mp4|mov|webm|m4v|mkv|avi)(\?|$)/i.test(original);
+  const nameLooksAudio =
+    /\.(m4a|mp3|caf|aac|wav|ogg)(\?|$)/i.test(original) || /^audio[-_]/i.test(original) || /^voice[-_]/i.test(original);
+  const nameLooksImage = /\.(jpe?g|png|gif|webp|heic|bmp|avif)(\?|$)/i.test(original);
+  let mimeType = mimeTypeRawSafe;
+  const isAudio = mimeType.startsWith("audio/") || nameLooksAudio;
+  let isVideo = !isAudio && (mimeType.startsWith("video/") || (nameLooksVideo && !mimeType.startsWith("image/")));
+  if (isAudio && !mimeType.startsWith("audio/")) {
+    if (/\.webm$/i.test(original)) mimeType = "audio/webm";
+    else if (/\.(m4a|mp4)$/i.test(original)) mimeType = "audio/mp4";
+    else mimeType = "audio/mpeg";
+  }
+  if (isVideo && !mimeType.startsWith("video/")) {
+    if (/\.webm$/i.test(original)) mimeType = "video/webm";
+    else if (/\.mov$/i.test(original)) mimeType = "video/quicktime";
+    else mimeType = "video/mp4";
+  }
+  if (!isVideo && nameLooksImage && mimeType === "application/octet-stream") {
+    if (/\.png$/i.test(original)) mimeType = "image/png";
+    else if (/\.webp$/i.test(original)) mimeType = "image/webp";
+    else mimeType = "image/jpeg";
+  }
+  const ext = mediaExtFromMime(mimeType, original);
+  const folder = isVideo ? "videos" : isAudio ? "audio" : "images";
+  return { mimeType, isVideo, isAudio, folder, ext };
+}
+
+function buildMediaObjectPath(folder, ext) {
+  return `agrovibes/${folder}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+}
+
+function isDirectVideoObjectPath(objectPath) {
+  return /^agrovibes\/videos\/[0-9]+-[0-9]+\.(mp4|mov|webm|m4v)$/i.test(String(objectPath || ""));
+}
+
+async function enqueueHlsForUploadedVideo(sourceKey, videoUrl) {
+  if (!isHlsTranscodeConfigured()) return false;
+  try {
+    await ensureMediaHlsJobsTable();
+    await startHlsJobForUploadedVideo(query, { sourceKey, videoUrl });
+    return true;
+  } catch (error) {
+    console.warn("[hls] upload enqueue failed:", error?.message || error);
+    return false;
+  }
 }
 
 async function ensureLearnUsersTable() {
@@ -1468,11 +1518,15 @@ function staticOtpCode() {
   return "525252";
 }
 
+function isStaticOtpEnabled() {
+  const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
+  return !(disabled === "true" || disabled === "1" || disabled === "yes");
+}
+
 function matchesStaticOtp(code) {
   const digits = String(code || "").replace(/\D/g, "");
   if (digits.length !== 6) return false;
-  const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
-  if (disabled === "true" || disabled === "1" || disabled === "yes") return false;
+  if (!isStaticOtpEnabled()) return false;
   return digits === staticOtpCode() || digits === "525252";
 }
 
@@ -3367,13 +3421,12 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
   try {
     const provider = otpProvider();
     const phone = normalizeIndiaPhone(req.body?.phone);
-    const staticCode = staticOtpCode();
     if (!phone) {
       res.status(400).json({ message: "Enter a valid phone number" });
       return;
     }
 
-    if (staticCode) {
+    if (isStaticOtpEnabled()) {
       res.json({
         success: true,
         phone,
@@ -9315,6 +9368,116 @@ router.get("/v1/media/config", async (_req, res) => {
   }
 });
 
+router.post("/v1/media/upload-url", authOptional, async (req, res) => {
+  try {
+    if (getMediaStorageProvider() !== "s3") {
+      res.status(409).json({
+        message: "Direct S3 upload is only available when AWS S3 is configured",
+        fallback: "proxy"
+      });
+      return;
+    }
+    const filename = String(req.body?.filename || req.body?.originalName || "");
+    const mimeTypeRaw = String(req.body?.mimeType || req.body?.contentType || "");
+    const byteSize = Number(req.body?.byteSize || req.body?.size || 0);
+    const meta = resolveUploadMediaMeta(mimeTypeRaw, filename);
+    if (!meta.isVideo) {
+      res.status(400).json({
+        message: "Direct upload is only for videos",
+        fallback: "proxy"
+      });
+      return;
+    }
+    if (byteSize > MAX_MEDIA_UPLOAD_BYTES) {
+      res.status(400).json({
+        message: "File is over the 100MB upload limit. Trim the video or export a smaller MP4."
+      });
+      return;
+    }
+    if (byteSize > 0 && byteSize < 80 * 1024) {
+      res.status(400).json({
+        message: "Video file looks incomplete or corrupted. Please try again.",
+        error: `Video too small (${byteSize} bytes)`
+      });
+      return;
+    }
+    const objectPath = buildMediaObjectPath(meta.folder, meta.ext);
+    const signed = await createPresignedPutUrl({
+      objectPath,
+      mimeType: meta.mimeType
+    });
+    res.json({
+      ...signed,
+      provider: "s3",
+      mimeType: meta.mimeType
+    });
+  } catch (error) {
+    const msg = String(error?.message || error || "");
+    res.status(500).json({
+      message: "Could not create upload URL",
+      error: msg,
+      fallback: "proxy",
+      hint: /AWS|S3|bucket/i.test(msg)
+        ? "Check AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET and IAM s3:PutObject permission."
+        : undefined
+    });
+  }
+});
+
+router.post("/v1/media/upload-complete", authOptional, async (req, res) => {
+  try {
+    if (getMediaStorageProvider() !== "s3") {
+      res.status(409).json({ message: "Direct S3 upload is only available when AWS S3 is configured" });
+      return;
+    }
+    const objectPath = String(req.body?.path || "").replace(/^\/+/, "");
+    if (!isDirectVideoObjectPath(objectPath)) {
+      res.status(400).json({ message: "Invalid object path" });
+      return;
+    }
+    let head;
+    try {
+      head = await headS3Object(objectPath);
+    } catch (error) {
+      const msg = String(error?.message || error || "");
+      res.status(404).json({
+        message: "Upload was not found in storage. Try again.",
+        error: msg
+      });
+      return;
+    }
+    if (head.contentLength < 80 * 1024) {
+      res.status(400).json({
+        message: "Video file looks incomplete or corrupted. Please try again.",
+        error: `Video too small (${head.contentLength} bytes)`
+      });
+      return;
+    }
+    if (head.contentLength > MAX_MEDIA_UPLOAD_BYTES) {
+      res.status(400).json({
+        message: "File is over the 100MB upload limit. Trim the video or export a smaller MP4."
+      });
+      return;
+    }
+    const url = buildS3PublicUrl(objectPath);
+    const hlsPending = Boolean(isHlsTranscodeConfigured());
+    if (hlsPending) {
+      void enqueueHlsForUploadedVideo(objectPath, url);
+    }
+    res.json({
+      url,
+      path: objectPath,
+      provider: "s3",
+      hlsPending
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Could not finalize upload",
+      error: String(error?.message || error || "")
+    });
+  }
+});
+
 router.post("/v1/media/upload", authOptional, (req, res) => {
   uploadMediaMemory.single("file")(req, res, async (err) => {
     if (err) {
@@ -9341,32 +9504,9 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
     }
 
     try {
-      const mimeTypeRaw = String(req.file.mimetype || "application/octet-stream");
       const originalName = String(req.file.originalname || "");
-      const nameLooksVideo = /\.(mp4|mov|webm|m4v|mkv|avi)(\?|$)/i.test(originalName);
-      const nameLooksAudio =
-        /\.(m4a|mp3|caf|aac|wav|ogg)(\?|$)/i.test(originalName) || /^audio[-_]/i.test(originalName) || /^voice[-_]/i.test(originalName);
-      const nameLooksImage = /\.(jpe?g|png|gif|webp|heic|bmp|avif)(\?|$)/i.test(originalName);
-      // Android FormData sometimes sends application/octet-stream — trust filename too.
-      let mimeType = mimeTypeRaw;
-      const isAudio = mimeType.startsWith("audio/") || nameLooksAudio;
-      let isVideo =
-        !isAudio && (mimeType.startsWith("video/") || (nameLooksVideo && !mimeType.startsWith("image/")));
-      if (isAudio && !mimeType.startsWith("audio/")) {
-        if (/\.webm$/i.test(originalName)) mimeType = "audio/webm";
-        else if (/\.(m4a|mp4)$/i.test(originalName)) mimeType = "audio/mp4";
-        else mimeType = "audio/mpeg";
-      }
-      if (isVideo && !mimeType.startsWith("video/")) {
-        if (/\.webm$/i.test(originalName)) mimeType = "video/webm";
-        else if (/\.mov$/i.test(originalName)) mimeType = "video/quicktime";
-        else mimeType = "video/mp4";
-      }
-      if (!isVideo && nameLooksImage && mimeType === "application/octet-stream") {
-        if (/\.png$/i.test(originalName)) mimeType = "image/png";
-        else if (/\.webp$/i.test(originalName)) mimeType = "image/webp";
-        else mimeType = "image/jpeg";
-      }
+      const meta = resolveUploadMediaMeta(req.file.mimetype, originalName);
+      const { mimeType, isVideo, folder, ext } = meta;
       // Reject incomplete MP4s (compressor sometimes writes only the 28-byte ftyp box).
       if (isVideo && req.file.buffer && req.file.buffer.length < 80 * 1024) {
         res.status(400).json({
@@ -9376,9 +9516,7 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
         });
         return;
       }
-      const ext = mediaExtFromMime(mimeType, originalName);
-      const folder = isVideo ? "videos" : isAudio ? "audio" : "images";
-      const objectPath = `agrovibes/${folder}/${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+      const objectPath = buildMediaObjectPath(folder, ext);
       const uploaded = await uploadMediaBuffer({
         buffer: req.file.buffer,
         mimeType,
@@ -9386,18 +9524,8 @@ router.post("/v1/media/upload", authOptional, (req, res) => {
       });
       const payload = { url: uploaded.url, provider: uploaded.provider, path: uploaded.path };
       if (isVideo && uploaded.provider === "s3" && isHlsTranscodeConfigured()) {
-        void (async () => {
-          try {
-            await ensureMediaHlsJobsTable();
-            await startHlsJobForUploadedVideo(query, {
-              sourceKey: uploaded.path || objectPath,
-              videoUrl: uploaded.url
-            });
-          } catch (error) {
-            console.warn("[hls] upload enqueue failed:", error?.message || error);
-          }
-        })();
         payload.hlsPending = true;
+        void enqueueHlsForUploadedVideo(uploaded.path || objectPath, uploaded.url);
       }
       res.status(201).json(payload);
     } catch (error) {
