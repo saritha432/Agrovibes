@@ -1,4 +1,5 @@
-const { HeadBucketCommand, PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+const { HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 function stripEnv(value) {
   return String(value || "")
@@ -97,7 +98,10 @@ function getS3Client() {
     credentials: {
       accessKeyId: cfg.accessKeyId,
       secretAccessKey: cfg.secretAccessKey
-    }
+    },
+    // SDK v3.729+ signs CRC32 checksums by default, which breaks client PUTs to a presigned URL.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED"
   });
 }
 
@@ -153,6 +157,65 @@ async function uploadBufferToS3({ buffer, mimeType, objectPath }) {
   return buildS3PublicUrl(key);
 }
 
+function buildPutObjectInput(cfg, { objectPath, mimeType }) {
+  const key = String(objectPath || "").replace(/^\/+/, "");
+  const usePublicAcl = stripEnv(process.env.AWS_S3_PUBLIC_READ) !== "false";
+  const contentType = mimeType || "application/octet-stream";
+  const cacheControl = "public, max-age=31536000, immutable";
+  const putInput = {
+    Bucket: cfg.bucket,
+    Key: key,
+    ContentType: contentType,
+    CacheControl: cacheControl
+  };
+  const headers = {
+    "Content-Type": contentType,
+    "Cache-Control": cacheControl
+  };
+  if (usePublicAcl) {
+    putInput.ACL = "public-read";
+    headers["x-amz-acl"] = "public-read";
+  }
+  return { key, putInput, headers };
+}
+
+/**
+ * Temporary PUT URL so clients upload bytes straight to S3 (Node never sees the file).
+ * The returned `headers` MUST be sent with the PUT or the signature will fail.
+ */
+async function createPresignedPutUrl({ objectPath, mimeType, expiresIn = 600 }) {
+  const cfg = readS3StorageConfig();
+  const client = getS3Client();
+  if (!cfg || !client) {
+    throw new Error("AWS S3 is not configured (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET)");
+  }
+  const ttl = Math.max(60, Math.min(Number(expiresIn) || 600, 3600));
+  const { key, putInput, headers } = buildPutObjectInput(cfg, { objectPath, mimeType });
+  const uploadUrl = await getSignedUrl(client, new PutObjectCommand(putInput), { expiresIn: ttl });
+  return {
+    uploadUrl,
+    method: "PUT",
+    headers,
+    url: buildS3PublicUrl(key),
+    path: key,
+    expiresIn: ttl
+  };
+}
+
+async function headS3Object(objectPath) {
+  const cfg = readS3StorageConfig();
+  const client = getS3Client();
+  if (!cfg || !client) {
+    throw new Error("AWS S3 is not configured");
+  }
+  const key = String(objectPath || "").replace(/^\/+/, "");
+  const result = await client.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: key }));
+  return {
+    contentLength: Number(result.ContentLength) || 0,
+    contentType: String(result.ContentType || "")
+  };
+}
+
 async function checkS3StorageHealth() {
   const cfg = readS3StorageConfig();
   if (!cfg) {
@@ -196,5 +259,7 @@ module.exports = {
   extractS3ObjectKeyFromUrl,
   rewriteS3ObjectUrlToPublicCdn,
   uploadBufferToS3,
+  createPresignedPutUrl,
+  headS3Object,
   checkS3StorageHealth
 };
