@@ -75,6 +75,7 @@ import { AppEmojiPicker } from "../../components/AppEmojiPicker";
 import { ChatMessageActionSheet } from "./ChatMessageActionSheet";
 import { ForwardMessageModal } from "./ForwardMessageModal";
 import { SwipeReplyMessageRow } from "./SwipeReplyMessageRow";
+import { ComposerPasteBoundary } from "./ComposerPasteBoundary";
 import {
   buildDmCallMessage,
   buildDmMediaAlbumMessage,
@@ -119,6 +120,7 @@ const COMPOSER_LINE_HEIGHT = 20;
 const COMPOSER_INPUT_MAX_HEIGHT = 120;
 const CAMERA_ICON_SIZE = 35;
 const COMPOSER_ICON = 24;
+const PASTE_PREVIEW_SIZE = 64;
 
 const CHAT_ASSETS = {
   camera: require("../../../assets/camera.svg"),
@@ -538,6 +540,9 @@ export function DirectChatScreen() {
   const [hydratedPostsById, setHydratedPostsById] = useState<Record<number, HomePost>>({});
   const [unavailablePostIds, setUnavailablePostIds] = useState<Record<number, true>>({});
   const [attachBusy, setAttachBusy] = useState(false);
+  const [pendingPasteImages, setPendingPasteImages] = useState<
+    Array<{ uri: string; width: number; height: number }>
+  >([]);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceRecordingMs, setVoiceRecordingMs] = useState(0);
   const listRef = useRef<FlatList<ThreadListItem>>(null);
@@ -549,8 +554,13 @@ export function DirectChatScreen() {
   const sendingRef = useRef(false);
   const draftRef = useRef("");
   const pasteBusyRef = useRef(false);
-  const sendClipboardImageRef = useRef<() => Promise<boolean>>(async () => false);
+  const attachClipboardImageRef = useRef<() => Promise<boolean>>(async () => false);
+  const sendPickedAssetsRef = useRef<(assets: ImagePicker.ImagePickerAsset[]) => Promise<boolean>>(
+    async () => false
+  );
+  const pendingPasteImagesRef = useRef(pendingPasteImages);
   draftRef.current = draft;
+  pendingPasteImagesRef.current = pendingPasteImages;
   const [replyTarget, setReplyTarget] = useState<{
     messageId: number;
     preview: string;
@@ -888,18 +898,61 @@ export function DirectChatScreen() {
   }, [clearMessageRequestUi]);
 
   const isComposerSingleLine = !draft.includes("\n") && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT + 2;
+  const hasComposerContent = Boolean(draft.trim()) || pendingPasteImages.length > 0;
+
+  const stagePasteImageUris = useCallback((uris: string[], sizes?: Array<{ width?: number; height?: number }>) => {
+    const next = uris
+      .map((uri, index) => {
+        const trimmed = String(uri || "").trim();
+        if (!trimmed) return null;
+        return {
+          uri: trimmed,
+          width: sizes?.[index]?.width ?? 0,
+          height: sizes?.[index]?.height ?? 0
+        };
+      })
+      .filter((entry): entry is { uri: string; width: number; height: number } => entry != null);
+    if (!next.length) return false;
+    const merged = [...pendingPasteImagesRef.current, ...next].slice(0, 10);
+    pendingPasteImagesRef.current = merged;
+    setPendingPasteImages(merged);
+    return true;
+  }, []);
+
+  const clearPendingPasteImages = useCallback(() => {
+    pendingPasteImagesRef.current = [];
+    setPendingPasteImages([]);
+  }, []);
+
+  const removePendingPasteImage = useCallback((uri: string) => {
+    const next = pendingPasteImagesRef.current.filter((entry) => entry.uri !== uri);
+    pendingPasteImagesRef.current = next;
+    setPendingPasteImages(next);
+  }, []);
 
   const handleDraftChange = useCallback((text: string) => {
     const prev = draftRef.current;
     const inserted = text.length - prev.length;
+    if (inserted > 1 && text.startsWith(prev)) {
+      const pasted = text.slice(prev.length).trim();
+      const isContentUri = /^content:\/\/\S+$/i.test(pasted);
+      const isImageFile = /^file:\/\/\S+\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(pasted);
+      if ((isContentUri || isImageFile) && stagePasteImageUris([pasted])) {
+        return;
+      }
+    }
     const looksLikePaste = inserted > 1 || (prev.trim() === "" && isPhotoClipboardPlaceholder(text, t("sharedMedia")));
     if (looksLikePaste && isPhotoClipboardPlaceholder(text, t("sharedMedia"))) {
       void (async () => {
-        const sent = await sendClipboardImageRef.current();
-        if (!sent) {
-          draftRef.current = text;
-          setDraft(text);
+        const attached = await attachClipboardImageRef.current();
+        if (attached) {
+          draftRef.current = prev;
+          setDraft(prev);
+          if (!prev.trim()) setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+          return;
         }
+        draftRef.current = text;
+        setDraft(text);
       })();
       return;
     }
@@ -935,19 +988,78 @@ export function DirectChatScreen() {
     if (!text.includes("\n") && text.length > 42 && composerInputHeight <= COMPOSER_INPUT_MIN_HEIGHT) {
       setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT + COMPOSER_LINE_HEIGHT);
     }
-  }, [appendSentMessage, attachBusy, composerInputHeight, peerUserId, reload, t, token]);
+  }, [appendSentMessage, attachBusy, composerInputHeight, peerUserId, reload, stagePasteImageUris, t, token]);
 
   const send = async () => {
-    const text = draft.trim();
-    if (!text || !token || attachBusy || sendingRef.current) return;
-    if (isPhotoClipboardPlaceholder(text, t("sharedMedia"))) {
-      const sent = await sendClipboardImageRef.current();
-      if (sent) {
+    let text = draft.trim();
+    if (isPhotoClipboardPlaceholder(text, t("sharedMedia")) && !pendingPasteImagesRef.current.length) {
+      const attached = await attachClipboardImageRef.current();
+      if (attached) {
+        text = "";
         setDraft("");
         setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
-        return;
       }
     }
+    const stagedImages = pendingPasteImagesRef.current;
+    if ((!text && !stagedImages.length) || !token || attachBusy || sendingRef.current) return;
+
+    if (stagedImages.length) {
+      sendingRef.current = true;
+      const caption =
+        text && !isPhotoClipboardPlaceholder(text, t("sharedMedia")) && !parseDmMediaMessage(text)
+          ? text
+          : "";
+      setDraft("");
+      setComposerInputHeight(COMPOSER_INPUT_MIN_HEIGHT);
+      clearPendingPasteImages();
+      try {
+        const sent = await sendPickedAssetsRef.current(
+          stagedImages.map(
+            (image, index) =>
+              ({
+                uri: image.uri,
+                width: image.width,
+                height: image.height,
+                type: "image",
+                mimeType: "image/jpeg",
+                fileName: `pasted-photo-${index + 1}.jpg`
+              }) as ImagePicker.ImagePickerAsset
+          )
+        );
+        if (!sent) {
+          setPendingPasteImages(stagedImages);
+          pendingPasteImagesRef.current = stagedImages;
+          draftRef.current = text;
+          setDraft(text);
+          return;
+        }
+        if (caption) {
+          const reply = replyTarget;
+          setReplyTarget(null);
+          const body = reply
+            ? buildDmReplyMessage({
+                replyToId: reply.messageId,
+                replyPreview: reply.preview,
+                replyAuthor: reply.authorName,
+                text: caption
+              })
+            : caption;
+          const result = await sendDirectMessage(token, peerUserId, body);
+          if (result.message) appendSentMessage(result.message);
+          else if (!socketConnected) await reload();
+        }
+      } catch (error) {
+        setPendingPasteImages(stagedImages);
+        pendingPasteImagesRef.current = stagedImages;
+        draftRef.current = text;
+        setDraft(text);
+        Alert.alert(t("sendFailed"), error instanceof Error ? error.message : t("sendFailedReel"));
+      } finally {
+        sendingRef.current = false;
+      }
+      return;
+    }
+
     if (parseDmMediaMessage(text)) {
       sendingRef.current = true;
       setDraft("");
@@ -1157,8 +1269,8 @@ export function DirectChatScreen() {
   }, []);
 
   const sendPickedAssets = useCallback(
-    async (assets: ImagePicker.ImagePickerAsset[]) => {
-      if (!token || attachBusy || !assets.length) return;
+    async (assets: ImagePicker.ImagePickerAsset[]): Promise<boolean> => {
+      if (!token || attachBusy || !assets.length) return false;
       setAttachBusy(true);
       try {
         const uploaded: DmMediaItem[] = await Promise.all(
@@ -1178,16 +1290,19 @@ export function DirectChatScreen() {
         const result = await sendDirectMessage(token, peerUserId, body);
         if (result.message) appendSentMessage(result.message);
         else if (!socketConnected) await reload();
+        return true;
       } catch (error) {
         Alert.alert(t("sendFailed"), error instanceof Error ? error.message : t("sendFailedReel"));
+        return false;
       } finally {
         setAttachBusy(false);
       }
     },
     [attachBusy, appendSentMessage, peerUserId, reload, socketConnected, t, token]
   );
+  sendPickedAssetsRef.current = sendPickedAssets;
 
-  const trySendClipboardImage = useCallback(async (): Promise<boolean> => {
+  const attachClipboardImage = useCallback(async (): Promise<boolean> => {
     if (!token || attachBusy || pasteBusyRef.current) return false;
     try {
       const hasImage = await Clipboard.hasImageAsync();
@@ -1199,25 +1314,18 @@ export function DirectChatScreen() {
       pasteBusyRef.current = true;
       const raw = img.data.includes(",") ? img.data.split(",")[1] : img.data;
       const dest = `${cacheDir}cv-paste-${Date.now()}.jpg`;
-      await FileSystem.writeAsStringAsync(dest, raw, { encoding: "base64" });
-      await sendPickedAssets([
-        {
-          uri: dest,
-          width: img.size?.width ?? 0,
-          height: img.size?.height ?? 0,
-          type: "image",
-          mimeType: "image/jpeg",
-          fileName: "pasted-photo.jpg"
-        } as ImagePicker.ImagePickerAsset
-      ]);
-      return true;
+      await FileSystem.writeAsStringAsync(dest, raw, { encoding: FileSystem.EncodingType.Base64 });
+      return stagePasteImageUris(
+        [dest],
+        [{ width: img.size?.width ?? 0, height: img.size?.height ?? 0 }]
+      );
     } catch {
       return false;
     } finally {
       pasteBusyRef.current = false;
     }
-  }, [attachBusy, sendPickedAssets, token]);
-  sendClipboardImageRef.current = trySendClipboardImage;
+  }, [attachBusy, stagePasteImageUris, token]);
+  attachClipboardImageRef.current = attachClipboardImage;
 
   const sendPickedAsset = useCallback(
     async (asset: ImagePicker.ImagePickerAsset) => {
@@ -1958,6 +2066,38 @@ export function DirectChatScreen() {
           </View>
         ) : null}
         <View style={styles.composerBar}>
+          {pendingPasteImages.length > 0 && !isRecordingVoice ? (
+            <View style={styles.pastePreviewRow}>
+              {pendingPasteImages.map((image, index) => (
+                <View key={image.uri} style={styles.pastePreviewThumbWrap}>
+                  <Pressable
+                    onPress={() =>
+                      openChatMedia(
+                        pendingPasteImages.map((entry) => ({
+                          kind: "image" as const,
+                          url: entry.uri,
+                          width: entry.width || undefined,
+                          height: entry.height || undefined
+                        })),
+                        index
+                      )
+                    }
+                  >
+                    <Image source={{ uri: image.uri }} style={styles.pastePreviewThumb} />
+                  </Pressable>
+                  <Pressable
+                    style={styles.pastePreviewRemove}
+                    hitSlop={8}
+                    onPress={() => removePendingPasteImage(image.uri)}
+                    disabled={attachBusy}
+                  >
+                    <Ionicons name="close" size={12} color="#111" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.composerRow}>
           <Pressable
             style={styles.cameraBtn}
             onPress={() => void openCamera()}
@@ -1983,71 +2123,78 @@ export function DirectChatScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={styles.inputArea}>
-              <TextInput
-                ref={composerInputRef}
-                value={draft}
-                onChangeText={handleDraftChange}
-                placeholder="Message"
-                placeholderTextColor={MUTED}
-                showSoftInputOnFocus
-                style={[
-                  styles.input,
-                  {
-                    height: composerInputHeight,
-                    lineHeight: COMPOSER_LINE_HEIGHT,
-                    paddingTop: isComposerSingleLine ? 0 : 6,
-                    paddingBottom: isComposerSingleLine ? 0 : 6,
-                    textAlignVertical: isComposerSingleLine ? "center" : "top"
-                  }
-                ]}
-                multiline={!isComposerSingleLine}
-                scrollEnabled={!isComposerSingleLine && composerInputHeight >= COMPOSER_INPUT_MAX_HEIGHT}
-                onContentSizeChange={
-                  isComposerSingleLine
-                    ? undefined
-                    : (event) => {
-                        const next = Math.min(
-                          COMPOSER_INPUT_MAX_HEIGHT,
-                          Math.max(COMPOSER_INPUT_MIN_HEIGHT, Math.ceil(event.nativeEvent.contentSize.height))
-                        );
-                        setComposerInputHeight(next);
+              <View style={styles.inputArea}>
+                <ComposerPasteBoundary
+                  inputRef={composerInputRef}
+                  onPasteImages={(uris) => void stagePasteImageUris(uris)}
+                  style={styles.pasteInputWrap}
+                >
+                  <TextInput
+                    ref={composerInputRef}
+                    value={draft}
+                    onChangeText={handleDraftChange}
+                    placeholder="Message"
+                    placeholderTextColor={MUTED}
+                    showSoftInputOnFocus
+                    style={[
+                      styles.input,
+                      {
+                        height: composerInputHeight,
+                        lineHeight: COMPOSER_LINE_HEIGHT,
+                        paddingTop: isComposerSingleLine ? 0 : 6,
+                        paddingBottom: isComposerSingleLine ? 0 : 6,
+                        textAlignVertical: isComposerSingleLine ? "center" : "top"
                       }
-                }
-                maxLength={2000}
-                onSubmitEditing={send}
-                editable={!attachBusy}
-              />
-              {draft.trim() ? (
-                <Pressable style={styles.inputTrailingBtn} onPress={send} disabled={attachBusy}>
-                  <Ionicons name="send" size={20} color={YELLOW} />
-                </Pressable>
-              ) : (
-                <View style={styles.inputTrailing}>
-                  <Pressable
-                    style={styles.inputTrailingBtn}
-                    disabled={attachBusy}
-                    onPress={() => void startVoiceRecording()}
-                  >
-                    <ChatAssetIcon icon="mic" size={COMPOSER_ICON} />
+                    ]}
+                    multiline={!isComposerSingleLine}
+                    scrollEnabled={!isComposerSingleLine && composerInputHeight >= COMPOSER_INPUT_MAX_HEIGHT}
+                    onContentSizeChange={
+                      isComposerSingleLine
+                        ? undefined
+                        : (event) => {
+                            const next = Math.min(
+                              COMPOSER_INPUT_MAX_HEIGHT,
+                              Math.max(COMPOSER_INPUT_MIN_HEIGHT, Math.ceil(event.nativeEvent.contentSize.height))
+                            );
+                            setComposerInputHeight(next);
+                          }
+                    }
+                    maxLength={2000}
+                    onSubmitEditing={send}
+                    editable={!attachBusy}
+                  />
+                </ComposerPasteBoundary>
+                {hasComposerContent ? (
+                  <Pressable style={styles.inputTrailingBtn} onPress={send} disabled={attachBusy}>
+                    <Ionicons name="send" size={20} color={YELLOW} />
                   </Pressable>
-                  <Pressable style={styles.inputTrailingBtn} onPress={() => void openGallery()} disabled={attachBusy}>
-                    <ChatAssetIcon icon="gallery" size={COMPOSER_ICON} />
-                  </Pressable>
-                  <Pressable
-                    style={styles.inputTrailingBtn}
-                    disabled={attachBusy}
-                    onPress={() => setComposerEmojiOpen(true)}
-                  >
-                    <ChatAssetIcon icon="sticker" size={COMPOSER_ICON} />
-                  </Pressable>
-                  <Pressable style={styles.inputTrailingBtn} onPress={openMoreAttachments} disabled={attachBusy}>
-                    <ChatAssetIcon icon="plus" size={COMPOSER_ICON} />
-                  </Pressable>
-                </View>
-              )}
-            </View>
+                ) : (
+                  <View style={styles.inputTrailing}>
+                    <Pressable
+                      style={styles.inputTrailingBtn}
+                      disabled={attachBusy}
+                      onPress={() => void startVoiceRecording()}
+                    >
+                      <ChatAssetIcon icon="mic" size={COMPOSER_ICON} />
+                    </Pressable>
+                    <Pressable style={styles.inputTrailingBtn} onPress={() => void openGallery()} disabled={attachBusy}>
+                      <ChatAssetIcon icon="gallery" size={COMPOSER_ICON} />
+                    </Pressable>
+                    <Pressable
+                      style={styles.inputTrailingBtn}
+                      disabled={attachBusy}
+                      onPress={() => setComposerEmojiOpen(true)}
+                    >
+                      <ChatAssetIcon icon="sticker" size={COMPOSER_ICON} />
+                    </Pressable>
+                    <Pressable style={styles.inputTrailingBtn} onPress={openMoreAttachments} disabled={attachBusy}>
+                      <ChatAssetIcon icon="plus" size={COMPOSER_ICON} />
+                    </Pressable>
+                  </View>
+                )}
+              </View>
           )}
+          </View>
         </View>
         </View>
       </KeyboardAvoidingView>
@@ -2532,10 +2679,51 @@ const styles = StyleSheet.create({
     borderRadius: COMPOSER_RADIUS,
     padding: COMPOSER_PADDING,
     backgroundColor: COMPOSER_BG,
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 10
+  },
+  composerRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: COMPOSER_GAP,
-    overflow: "hidden"
+    minHeight: COMPOSER_HEIGHT - COMPOSER_PADDING * 2
+  },
+  pastePreviewRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    paddingTop: 4,
+    paddingRight: 4
+  },
+  pastePreviewThumbWrap: {
+    width: PASTE_PREVIEW_SIZE,
+    height: PASTE_PREVIEW_SIZE,
+    borderRadius: 10,
+    overflow: "visible"
+  },
+  pastePreviewThumb: {
+    width: PASTE_PREVIEW_SIZE,
+    height: PASTE_PREVIEW_SIZE,
+    borderRadius: 10,
+    backgroundColor: "#1a1b1c"
+  },
+  pastePreviewRemove: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#e8eaed",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  pasteInputWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center"
   },
   inputArea: {
     flex: 1,
@@ -2559,7 +2747,8 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     includeFontPadding: false,
     fontSize: 15,
-    color: TEXT
+    color: TEXT,
+    ...(Platform.OS === "web" ? ({ outlineStyle: "none", borderWidth: 0 } as object) : null)
   },
   inputTrailing: {
     flexDirection: "row",
