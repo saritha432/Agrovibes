@@ -3,6 +3,7 @@ import { fetchHomeReelsExplore } from "../api/home";
 import type { HomePost } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { DropVideoSlide, useDropFeedAutoplay } from "../components/feed/DropsFeed";
+import { prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import { orderPostsForFeed } from "../utils/feedOrder";
 import "./ReelsPage.css";
 
@@ -45,6 +46,10 @@ export function ReelsPage() {
     setActiveIndex(index);
     setCommentsOpen(false);
   }, []);
+
+  useEffect(() => {
+    prefetchUpcomingPosts(drops, activeIndex);
+  }, [drops, activeIndex]);
 
   const scrollerRef = useDropFeedAutoplay(drops.length, onActiveChange);
 

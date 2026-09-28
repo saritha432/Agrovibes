@@ -1,7 +1,9 @@
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
-import { APP_BLACK, APP_DARK_BG, APP_LIME } from "../theme/appColors";
+import { navigateToWeather } from "../navigation/navigationRef";
+import { APP_BLACK, APP_DARK_BG, APP_LIME, APP_TEXT } from "../theme/appColors";
 import { useTopChromeInset } from "../theme/topChromeInset";
 
 export { useModalTopChromeInset, useTopChromeInset } from "../theme/topChromeInset";
@@ -28,10 +30,15 @@ export function AppTopBar() {
     <View style={[styles.topBar, { paddingTop: topInset }]}>
       <View style={[styles.topBarContent, compact ? styles.topBarContentCompact : null]}>
         <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
-        <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
-          <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />
-          {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}
-        </Pressable>
+        <View style={styles.actions}>
+          <Pressable style={styles.iconBadge} onPress={navigateToWeather} accessibilityLabel="Weather">
+            <Ionicons name="partly-sunny-outline" size={26} color={APP_TEXT} />
+          </Pressable>
+          <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
+            <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />
+            {notificationUnreadCount > 0 ? <CountBadge count={notificationUnreadCount} /> : null}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -54,10 +61,15 @@ const styles = StyleSheet.create({
     paddingBottom: 2
   },
   logoImage: { width: 132, height: 28, maxWidth: "46%" },
-  iconBadge: {
-    width: 24,
-    height: 24,
+  actions: {
     marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  iconBadge: {
+    width: 28,
+    height: 28,
     alignItems: "center",
     justifyContent: "center"
   },

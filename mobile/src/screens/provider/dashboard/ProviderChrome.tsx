@@ -2,6 +2,7 @@ import React from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { navigateToWeather } from "../../../navigation/navigationRef";
 import { APP_LIME, APP_TEXT_MUTED } from "../../../theme/appColors";
 
 const BG = "#262626";
@@ -18,15 +19,26 @@ export function ProviderChromeHeader({
     <View style={[styles.wrap, { paddingTop: Math.max(insets.top, 12) }]}>
       <View style={styles.bar}>
         <Image source={CROP_VIBE_MARK} style={styles.brand} resizeMode="contain" accessibilityLabel="CropVibe" />
-        <Pressable
-          style={styles.bellBtn}
-          onPress={onBellPress}
-          accessibilityRole="button"
-          accessibilityLabel="Notifications"
-          hitSlop={10}
-        >
-          <Ionicons name="notifications-outline" size={22} color={APP_LIME} />
-        </Pressable>
+        <View style={styles.actions}>
+          <Pressable
+            style={styles.bellBtn}
+            onPress={navigateToWeather}
+            accessibilityRole="button"
+            accessibilityLabel="Weather"
+            hitSlop={10}
+          >
+            <Ionicons name="partly-sunny-outline" size={22} color={APP_LIME} />
+          </Pressable>
+          <Pressable
+            style={styles.bellBtn}
+            onPress={onBellPress}
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            hitSlop={10}
+          >
+            <Ionicons name="notifications-outline" size={22} color={APP_LIME} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -62,9 +74,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingTop: 12,
-    paddingRight: 16,
+    paddingRight: 8,
     paddingBottom: 12,
     paddingLeft: 16
+  },
+  actions: {
+    flexDirection: "row",
+    alignItems: "center"
   },
   brand: {
     width: 132,

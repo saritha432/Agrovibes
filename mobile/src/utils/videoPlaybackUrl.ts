@@ -43,15 +43,28 @@ export function inferTranscodedUrlsFromVideoUrl(videoUrl: string | undefined | n
   };
 }
 
+export type VideoPlaybackSourceKind = "hls" | "mp4" | "original";
+
+export function isHlsPlaybackUri(url: string | undefined | null): boolean {
+  return /\.m3u8(\?|#|$)/i.test(normalizeVideoPlaybackUri(url));
+}
+
+export function playbackSourceKind(url: string | undefined | null): VideoPlaybackSourceKind {
+  const uri = normalizeVideoPlaybackUri(url);
+  if (isHlsPlaybackUri(uri)) return "hls";
+  if (/\/agrovibes\/playback\//i.test(uri)) return "mp4";
+  return "original";
+}
+
 /**
- * Instagram-style start order:
- * 1. Fast-start 480p MP4 (moov at front)
- * 2. Native HLS — adaptive ladder (Main profile, device-friendly)
+ * Native start order:
+ * 1. HLS master (.m3u8) — adaptive ladder (240/360/480/720/1080)
+ * 2. Fast-start 480p MP4 — fallback when HLS is missing or fails
  * 3. Original upload MP4 — last resort
  *
- * Inferred playback/HLS paths are only added when the API already has at least one
- * transcode URL (job completed). Otherwise we play the original directly — guessing
- * CloudFront paths that were never created causes 403 loops and blocks playback.
+ * Expo web uses HTML5 video, which cannot play HLS outside Safari, so web
+ * keeps MP4 first. Inferred playback/HLS paths are only added when the API
+ * already has at least one transcode URL (job completed).
  */
 export function videoPlaybackSources(
   url: string | undefined | null,
@@ -64,16 +77,17 @@ export function videoPlaybackSources(
   const inferred = hasApiTranscode ? inferTranscodedUrlsFromVideoUrl(url) : {};
 
   const sources: string[] = [];
+  const hls = apiHls || normalizeVideoPlaybackUri(inferred.hlsUrl);
+  const nativeHls = Platform.OS !== "web" && !!hls && isHlsPlaybackUri(hls);
+  if (nativeHls) {
+    pushUnique(sources, hls);
+  }
   pushUnique(sources, apiPlayback);
   pushUnique(sources, inferred.playbackUrl);
-  const hls = apiHls || normalizeVideoPlaybackUri(inferred.hlsUrl);
-  const hasHls = Platform.OS !== "web" && !!hls && /\.m3u8(\?|#|$)/i.test(hls);
-  if (hasHls) {
+  if (!nativeHls) {
     pushUnique(sources, hls);
   }
   pushUnique(sources, url);
-  // Original camera file is last-resort only. Prefer 480p / HLS so the feed
-  // does not wait on a 4K/HEVC upload.
   return sources;
 }
 
@@ -134,7 +148,7 @@ export function nextVideoErrorAction(
   sourceIndex: number,
   sourceCount: number
 ): "ignore" | "next-source" {
-  // Try every fallback URL before giving up (480p MP4 → HLS → original).
+  // Try every fallback URL before giving up (HLS → 480p MP4 → original).
   if (sourceIndex + 1 < sourceCount) return "next-source";
   if (isTransientVideoPlaybackError(error)) return "ignore";
   return "ignore";

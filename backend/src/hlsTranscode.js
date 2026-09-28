@@ -69,6 +69,8 @@ function playbackMp4UrlForSourceKey(sourceKey) {
 }
 
 function abrLadderOutputs() {
+  // 360p is required so cellular ABR can step between 240p and 480p.
+  // Jobs encoded before this rung existed keep their original ladder until requeued.
   const rungs = [
     { name: "_240p", height: 240, maxBitrate: 400_000, buf: 800_000 },
     { name: "_360p", height: 360, maxBitrate: 800_000, buf: 1_600_000 },

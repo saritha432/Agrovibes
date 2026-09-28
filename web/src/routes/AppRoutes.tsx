@@ -6,6 +6,8 @@ import { LoginPage } from "../pages/LoginPage";
 import { MessagesPage } from "../pages/MessagesPage";
 import { MessagesChat } from "../pages/messages/MessagesChat";
 import { MessagesChatPlaceholder } from "../pages/messages/MessagesChatPlaceholder";
+import { WeatherPage } from "../pages/WeatherPage";
+import { SchemesPage } from "../pages/SchemesPage";
 import { NotificationsPage } from "../pages/NotificationsPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ForgotPasswordPage } from "../pages/ForgotPasswordPage";
@@ -77,6 +79,9 @@ export function AppRoutes() {
           <Route index element={<MessagesChatPlaceholder />} />
           <Route path=":peerUserId" element={<MessagesChat />} />
         </Route>
+        <Route path="weather" element={<WeatherPage />} />
+        <Route path="schemes" element={<SchemesPage />} />
+        <Route path="schemes/:schemeId" element={<SchemesPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="u/:userId" element={<ProfilePage />} />

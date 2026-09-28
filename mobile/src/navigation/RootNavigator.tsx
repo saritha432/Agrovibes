@@ -146,6 +146,29 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen
+        name="Weather"
+        getComponent={() => require("../screens/WeatherScreen").WeatherScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="Schemes"
+        getComponent={() => require("../screens/schemes/SchemesScreen").SchemesScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#262626" }
+        }}
+      />
+      <Stack.Screen
+        name="SchemeDetail"
+        getComponent={() => require("../screens/schemes/SchemeDetailScreen").SchemeDetailScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#262626" }
+        }}
+      />
+      <Stack.Screen
         name="PublicProfile"
         getComponent={() => require("../screens/ProfileScreen").ProfileScreen}
         options={{

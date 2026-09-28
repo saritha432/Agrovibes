@@ -1,8 +1,9 @@
 import { Platform } from "react-native";
 import type { HomePost } from "../services/api";
 import { reelGridStillUri } from "./reelGrid";
-import { videoPlaybackUrl } from "./videoPlaybackUrl";
+import { isHlsPlaybackUri, videoPlaybackUrl } from "./videoPlaybackUrl";
 import { hasExpoImageNative } from "./hasExpoImageNative";
+import { recordNextReelPrepMs } from "./reelPlaybackTelemetry";
 
 let ExpoImageModule: typeof import("expo-image").Image | null = null;
 try {
@@ -16,9 +17,10 @@ try {
 const prefetchedImages = new Set<string>();
 const warmedVideos = new Set<string>();
 
-/** Warm ~1MB of each upcoming progressive MP4 — moov + first GOP for fast-start files. */
-const VIDEO_WARM_BYTES = 1_048_576;
-const HLS_SEGMENT_WARM_BYTES = 524_288;
+/** Warm a small prefix of progressive MP4 fallback files. */
+const VIDEO_WARM_BYTES = 524_288;
+/** First HLS media segment prefix — enough for the opening GOP, not the whole clip. */
+const HLS_SEGMENT_WARM_BYTES = 262_144;
 
 function prefetchUri(uri: string | null | undefined) {
   const clean = typeof uri === "string" ? uri.trim() : "";
@@ -39,7 +41,7 @@ function warmWebVideo(url: string) {
     const el = document.createElement("video");
     el.muted = true;
     el.defaultMuted = true;
-    el.preload = "auto";
+    el.preload = "metadata";
     el.playsInline = true;
     el.setAttribute("playsinline", "");
     el.setAttribute("webkit-playsinline", "");
@@ -94,6 +96,28 @@ function firstPlaylistRef(body: string) {
   return "";
 }
 
+function lowestBandwidthPlaylistRef(body: string) {
+  const lines = body.split(/\r?\n/);
+  let bestBw = Infinity;
+  let bestRef = "";
+  let pendingBw: number | null = null;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#EXT-X-STREAM-INF:")) {
+      const match = trimmed.match(/BANDWIDTH=(\d+)/i);
+      pendingBw = match ? Number(match[1]) : null;
+      continue;
+    }
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (pendingBw != null && pendingBw < bestBw) {
+      bestBw = pendingBw;
+      bestRef = trimmed;
+    }
+    pendingBw = null;
+  }
+  return bestRef || firstPlaylistRef(body);
+}
+
 async function warmHlsStart(url: string, signal?: AbortSignal, depth = 0) {
   if (depth > 3) return;
   const res = await fetch(url, {
@@ -102,7 +126,7 @@ async function warmHlsStart(url: string, signal?: AbortSignal, depth = 0) {
     signal
   });
   const text = await res.text().catch(() => "");
-  const ref = firstPlaylistRef(text);
+  const ref = depth === 0 ? lowestBandwidthPlaylistRef(text) : firstPlaylistRef(text);
   if (!ref) return;
   const next = resolvePlaylistUrl(ref, url);
   if (!next) return;
@@ -121,29 +145,31 @@ async function warmHlsStart(url: string, signal?: AbortSignal, depth = 0) {
 
 /**
  * Warm the start of the next reel so swipe-in does not wait on a cold HTTP start.
- * Prefers the 480p fast-start MP4 (same URL the player uses). For HLS, fetch the
- * master playlist and the first media segment — not only the .m3u8 text.
+ * Prefers HLS master + lowest-rung playlist + a small first-segment prefix.
  */
 export function warmVideoUri(
   uri: string | null | undefined,
   hlsUrl?: string | null,
   playbackUrl?: string | null
-) {
+): Promise<void> {
   const raw = typeof uri === "string" ? uri.trim() : "";
-  if (!raw && !hlsUrl && !playbackUrl) return;
+  if (!raw && !hlsUrl && !playbackUrl) return Promise.resolve();
   const clean = videoPlaybackUrl(raw || playbackUrl || hlsUrl, hlsUrl, playbackUrl);
-  if (!clean || warmedVideos.has(clean)) return;
-  if (clean.startsWith("file:") || clean.startsWith("content:") || clean.startsWith("ph:")) return;
+  if (!clean || warmedVideos.has(clean)) return Promise.resolve();
+  if (clean.startsWith("file:") || clean.startsWith("content:") || clean.startsWith("ph:")) {
+    return Promise.resolve();
+  }
 
   if (Platform.OS === "web") {
     warmWebVideo(clean);
     warmedVideos.add(clean);
-    return;
+    return Promise.resolve();
   }
 
   warmedVideos.add(clean);
+  const started = Date.now();
   const { controller, timer } = abortIn(8_000);
-  const isHls = /\.m3u8(\?|#|$)/i.test(clean);
+  const isHls = isHlsPlaybackUri(clean);
 
   const task = isHls
     ? warmHlsStart(clean, controller?.signal)
@@ -162,7 +188,10 @@ export function warmVideoUri(
         await res.arrayBuffer().catch(() => null);
       });
 
-  void task
+  return task
+    .then(() => {
+      recordNextReelPrepMs(Date.now() - started);
+    })
     .catch(() => {
       warmedVideos.delete(clean);
     })
@@ -181,15 +210,14 @@ export function prefetchPostMedia(post: HomePost | null | undefined, options?: {
   }
   prefetchUri(post.authorAvatarUrl);
   if (options?.warmVideo !== false) {
-    warmVideoUri(post.videoUrl, post.hlsUrl, post.playbackUrl);
+    void warmVideoUri(post.videoUrl, post.hlsUrl, post.playbackUrl);
   }
 }
 
 /**
- * Poster for the next two items; warm only the immediate next video so the
- * current reel keeps bandwidth.
+ * Poster for the current + next item; warm HLS for only the immediate next reel.
  */
-export function prefetchUpcomingPosts(posts: HomePost[], anchorIndex: number, count = 2) {
+export function prefetchUpcomingPosts(posts: HomePost[], anchorIndex: number, count = 1) {
   if (!posts.length || anchorIndex < 0) return;
   prefetchPostMedia(posts[anchorIndex], { warmVideo: false });
   const ahead = Math.max(1, count);

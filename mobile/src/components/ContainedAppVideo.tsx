@@ -32,6 +32,8 @@ export type ContainedAppVideoProps = {
   /** Resume near the last known position after a remount (ms). */
   resumePositionMillis?: number;
   onStatusUpdate?: (status: AppPlaybackStatus) => void;
+  /** When set, emit reel playback telemetry for this post. */
+  telemetryPostId?: number;
 };
 
 export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, ContainedAppVideoProps>(
@@ -51,7 +53,8 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
       useNativeControls = false,
       playbackKey,
       resumePositionMillis = 0,
-      onStatusUpdate
+      onStatusUpdate,
+      telemetryPostId
     },
     ref
   ) {
@@ -203,6 +206,7 @@ export const ContainedAppVideo = React.forwardRef<ContainedAppVideoHandle, Conta
           contentFit={contentFit}
           style={{ ...videoStyle, opacity: posterUri && !hasFirstFrame ? 0 : 1 }}
           timeUpdateIntervalMs={preloadOnly ? 4000 : 800}
+          telemetryPostId={preloadOnly ? undefined : telemetryPostId}
           onFirstFrameRender={() => setHasFirstFrame(true)}
           onPlaybackStatusUpdate={(status) => {
             if (!preloadOnly) onStatusUpdate?.(status);

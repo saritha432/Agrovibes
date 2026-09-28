@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppTopBar } from "../components/AppTopBar";
+import { navigateToSchemes, navigateToWeather } from "../navigation/navigationRef";
 import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
 import { useLanguage } from "../localization/LanguageContext";
 import { APP_LIME } from "../theme/appColors";
@@ -35,6 +36,12 @@ export function ServicesScreen() {
         title: t("serviceWeatherTitle"),
         desc: t("serviceWeatherDesc"),
         icon: "partly-sunny-outline" as const
+      },
+      {
+        key: "schemes",
+        title: t("serviceSchemesTitle"),
+        desc: t("serviceSchemesDesc"),
+        icon: "ribbon-outline" as const
       }
     ],
     [t]
@@ -55,7 +62,12 @@ export function ServicesScreen() {
           <View style={styles.body}>
             <Text style={styles.cardTitle}>{item.title}</Text>
             <Text style={styles.cardDesc}>{item.desc}</Text>
-            <Pressable style={styles.cta}>
+            <Pressable
+              style={styles.cta}
+              onPress={
+                item.key === "weather" ? navigateToWeather : item.key === "schemes" ? navigateToSchemes : undefined
+              }
+            >
               <Text style={styles.ctaText}>{t("open")}</Text>
             </Pressable>
           </View>

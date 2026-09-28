@@ -16,6 +16,7 @@ import { MarketSvgIcon, type SvgModule } from "../components/market/shared/marke
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
 import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
 import { AppTopBar } from "../components/AppTopBar";
+import { navigateToSchemes } from "../navigation/navigationRef";
 import {
   APP_BLACK,
   APP_LIME,
@@ -49,7 +50,13 @@ export function MarketHomeScreen() {
   const [search, setSearch] = useState("");
 
   const openStore = () => navigation.navigate("MarketListings");
-  const openCategory = (categoryId: string) => navigation.navigate("MarketCategory", { categoryId });
+  const openCategory = (categoryId: string) => {
+    if (categoryId === "subsidies") {
+      navigateToSchemes();
+      return;
+    }
+    navigation.navigate("MarketCategory", { categoryId });
+  };
 
   return (
     <View style={styles.screen}>

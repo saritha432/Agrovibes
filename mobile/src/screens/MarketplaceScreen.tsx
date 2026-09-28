@@ -16,6 +16,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { fetchMarketplaceListings, MarketplaceListing } from "../services/api";
 import { useCart } from "../cart/CartContext";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
+import { navigateToWeather } from "../navigation/navigationRef";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
 import { useLanguage } from "../localization/LanguageContext";
 
@@ -190,6 +191,9 @@ export function MarketplaceScreen() {
         <View style={styles.topIcons}>
           <Pressable style={styles.iconBtn}>
             <Ionicons name="search-outline" size={18} color="#1f2c29" />
+          </Pressable>
+          <Pressable style={styles.iconBtn} onPress={navigateToWeather} accessibilityLabel="Weather">
+            <Ionicons name="partly-sunny-outline" size={18} color="#1f2c29" />
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={openNotificationSheet}>
             <Ionicons name="notifications-outline" size={18} color="#1f2c29" />

@@ -16,6 +16,7 @@ import type { CheckoutBill, MarketStackParamList } from "../navigation/MarketSta
 import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { useCart } from "../cart/CartContext";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
+import { navigateToWeather } from "../navigation/navigationRef";
 import { APP_LIME } from "../theme/appColors";
 
 const TEAL = "#0d9488";
@@ -137,6 +138,9 @@ export function CartScreen() {
         <View style={styles.topIcons}>
           <Pressable style={styles.iconBtn}>
             <Ionicons name="search-outline" size={18} color="#1f2c29" />
+          </Pressable>
+          <Pressable style={styles.iconBtn} onPress={navigateToWeather} accessibilityLabel="Weather">
+            <Ionicons name="partly-sunny-outline" size={18} color="#1f2c29" />
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={openNotificationSheet}>
             <Ionicons name="notifications-outline" size={18} color="#1f2c29" />

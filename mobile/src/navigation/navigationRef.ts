@@ -26,6 +26,23 @@ export function navigateToEditProfile() {
   }
 }
 
+export function navigateToWeather() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("Weather");
+  }
+}
+
+export function navigateToSchemes() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("Schemes");
+  }
+}
+
+export function navigateToSchemeDetail(schemeId: string) {
+  if (!navigationRef.isReady() || !schemeId) return;
+  navigationRef.dispatch(StackActions.push("SchemeDetail", { schemeId }));
+}
+
 export function navigateToUserSearch() {
   if (navigationRef.isReady()) {
     navigationRef.navigate("Main", { screen: "Search" });

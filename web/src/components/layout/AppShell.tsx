@@ -10,7 +10,7 @@ export function AppShell() {
   const { pathname } = useLocation();
   const showRightPanel = RIGHT_PANEL_ROUTES.has(pathname);
   const flushContent = FLUSH_ROUTES.has(pathname) || pathname.startsWith("/messages/");
-  const notificationsView = pathname === "/notifications";
+  const notificationsView = pathname === "/notifications" || pathname === "/weather" || pathname.startsWith("/schemes");
 
   return (
     <div className="app-shell">
