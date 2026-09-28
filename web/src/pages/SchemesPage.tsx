@@ -151,15 +151,17 @@ function SchemeDetail({ schemeId }: { schemeId: string }) {
     );
   }
 
+  const selected = scheme;
+
   function toggleSaved() {
     const ids = readSaved();
-    const next = saved ? ids.filter((id) => id !== scheme.id) : [...ids, scheme.id];
+    const next = saved ? ids.filter((id) => id !== selected.id) : [...ids, selected.id];
     writeSaved(next);
     setSaved(!saved);
   }
 
   function checkEligible() {
-    window.alert(`${scheme.whoFor}\n\nThis is not an official check. Confirm on the government website.`);
+    window.alert(`${selected.whoFor}\n\nThis is not an official check. Confirm on the government website.`);
   }
 
   return (
@@ -172,23 +174,23 @@ function SchemeDetail({ schemeId }: { schemeId: string }) {
           {saved ? "Saved" : "Save"}
         </button>
       </div>
-      <p className="schemes-page__kicker">{scheme.categoryLabel.toUpperCase()}</p>
-      <h1>{scheme.name}</h1>
-      <p className="schemes-page__lead">{scheme.description}</p>
+      <p className="schemes-page__kicker">{selected.categoryLabel.toUpperCase()}</p>
+      <h1>{selected.name}</h1>
+      <p className="schemes-page__lead">{selected.description}</p>
       <p>
         <strong>Who it is for: </strong>
-        {scheme.whoFor}
+        {selected.whoFor}
       </p>
       <p>
         <strong>Documents typically needed: </strong>
-        {scheme.documents}
+        {selected.documents}
       </p>
-      {scheme.note ? <p className="schemes-page__note">{scheme.note}</p> : null}
+      {selected.note ? <p className="schemes-page__note">{selected.note}</p> : null}
       <div className="schemes-page__actions">
         <button type="button" className="schemes-page__primary" onClick={checkEligible}>
           Check if likely eligible
         </button>
-        <a className="schemes-page__secondary" href={scheme.officialUrl} target="_blank" rel="noreferrer">
+        <a className="schemes-page__secondary" href={selected.officialUrl} target="_blank" rel="noreferrer">
           Official site (external)
         </a>
       </div>
