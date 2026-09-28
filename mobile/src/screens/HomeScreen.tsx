@@ -31,7 +31,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useAppIsActive } from "../hooks/useAppIsActive";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { navigateToMyProfile, navigateToPublicProfile, navigateToHome } from "../navigation/navigationRef";
+import { navigateToMyProfile, navigateToPublicProfile, navigateToHome, navigateToSchemes } from "../navigation/navigationRef";
 import { stripLegacyCloudinaryUrl, isVideoMediaUrl } from "../utils/mediaUrls";
 import { takePendingJoinLive, subscribeJoinLive } from "../navigation/liveJoinBridge";
 import {
@@ -201,7 +201,8 @@ const postTints = ["#8a5b00", APP_LIME, "#8b3a62", "#105f75"];
 const REEL_DOUBLE_TAP_MS = 420;
 const REEL_SINGLE_TAP_DELAY_MS = 500;
 
-const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live"] as const;
+const HOME_TOP_TABS_ALL = ["Feed", "Friends", "live", "schemes"] as const;
+const HOME_VISIBLE_TABS = ["Feed", "Friends", "schemes"] as const;
 type HomeTopTab = (typeof HOME_TOP_TABS_ALL)[number];
 const likeActiveColor = APP_LIME;
 const REEL_LIKE_COLOR = "#ffffff";
@@ -1106,6 +1107,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const homeTabLabel = React.useCallback(
     (tab: HomeTopTab) => {
       if (tab === "live") return t("tabLive");
+      if (tab === "schemes") return t("tabSchemes");
       if (tab === "Feed") return t("tabFeed");
       if (tab === "Friends") return t("tabFriends");
       return tab;
@@ -1456,7 +1458,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       lastPlayingIndexRef.current = primary.index;
       setPlayingPostId((cur) => (cur === primary.post.id ? cur : primary.post.id));
       prefetchPostMedia(primary.post);
-      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 2);
+      prefetchUpcomingPosts(tabPostsRef.current, primary.index, 1);
     },
     []
   );
@@ -1854,7 +1856,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     socialNetworkHydrated && (followingUserIds.size > 0 || followerUserIds.size > 0);
 
   const visibleHomeTopTabs = useMemo(
-    () => (showFriendsTab ? [...HOME_TOP_TABS_ALL] : HOME_TOP_TABS_ALL.filter((t) => t !== "Friends")),
+    () => (showFriendsTab ? [...HOME_VISIBLE_TABS] : HOME_VISIBLE_TABS.filter((t) => t !== "Friends")),
     [showFriendsTab]
   );
 
@@ -3133,7 +3135,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setPlayingPostId((cur) => (cur === nextId ? cur : nextId));
       if (post) {
         prefetchPostMedia(post);
-        prefetchUpcomingPosts(tabPosts, index, 2);
+        prefetchUpcomingPosts(tabPosts, index, 1);
       }
     },
     [effectiveReelSlotHeight, tabPosts]
@@ -4186,7 +4188,13 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               return (
                 <Pressable
                   key={tab}
-                  onPress={() => setActiveHomeTab(tab)}
+                  onPress={() => {
+                    if (tab === "schemes") {
+                      navigateToSchemes();
+                      return;
+                    }
+                    setActiveHomeTab(tab);
+                  }}
                   style={({ pressed }) => [
                     styles.homeTopTabPressable,
                     pressed ? styles.homeTopTabPressablePressed : null,
@@ -4323,6 +4331,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                       isLooping
                       isMuted={isReelMuted || separateMusicPlaying || !isActiveVideo}
                       useNativeControls={false}
+                      telemetryPostId={post.id}
                       onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
                     />
                   </View>

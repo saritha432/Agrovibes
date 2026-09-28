@@ -1,9 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { APP_BLACK, APP_TEXT } from "../theme/appColors";
+import { DEFAULT_WEB_APP_ORIGIN } from "../utils/webAppOrigin";
+
+/** Maps JS API reads this as the HTTP referrer. Must match the browser key restriction. */
+const MAPS_WEBVIEW_ORIGIN = DEFAULT_WEB_APP_ORIGIN;
 
 export type PickedMapLocation = {
   label: string;
@@ -67,7 +71,7 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
   <div class="wrap">
     <div class="search">
       <input id="q" placeholder="Search maps" value=${JSON.stringify(label)} autocomplete="off"/>
-      ${useGoogle ? "" : '<button id="go" type="button">Search</button>'}
+      <button id="go" type="button">Search</button>
       <button id="me" type="button">My location</button>
     </div>
     <div id="map"></div>
@@ -100,55 +104,82 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
   ${
     useGoogle
       ? `<script>
+    window.gm_authFailure = function() {
+      send({ t: "maps-error" });
+    };
+    setTimeout(function() {
+      if (!window.google || !window.google.maps) send({ t: "maps-error" });
+    }, 8000);
     function initGoogle() {
-      var maps = window.google.maps;
-      var start = { lat: ${startLat}, lng: ${startLng} };
-      var map = new maps.Map(document.getElementById("map"), {
-        center: start, zoom: ${startZoom}, mapTypeControl: false, streetViewControl: false, fullscreenControl: false
-      });
-      var marker = new maps.Marker({ map: map, position: start, draggable: true });
-      var geocoder = new maps.Geocoder();
-      function applyPoint(nextLat, nextLng, nextLabel) {
-        marker.setPosition({ lat: nextLat, lng: nextLng });
-        map.setCenter({ lat: nextLat, lng: nextLng });
-        map.setZoom(16);
-        if (nextLabel) {
-          setPicked({ label: nextLabel, lat: nextLat, lng: nextLng });
-          document.getElementById("q").value = nextLabel;
-          return;
+      try {
+        var maps = window.google.maps;
+        var start = { lat: ${startLat}, lng: ${startLng} };
+        var map = new maps.Map(document.getElementById("map"), {
+          center: start, zoom: ${startZoom}, mapTypeControl: false, streetViewControl: false, fullscreenControl: false
+        });
+        var marker = new maps.Marker({ map: map, position: start, draggable: true });
+        var geocoder = new maps.Geocoder();
+        function applyPoint(nextLat, nextLng, nextLabel) {
+          marker.setPosition({ lat: nextLat, lng: nextLng });
+          map.setCenter({ lat: nextLat, lng: nextLng });
+          map.setZoom(16);
+          if (nextLabel) {
+            setPicked({ label: nextLabel, lat: nextLat, lng: nextLng });
+            document.getElementById("q").value = nextLabel;
+            return;
+          }
+          geocoder.geocode({ location: { lat: nextLat, lng: nextLng } }, function(results, status) {
+            var formatted = status === "OK" && results && results[0] && results[0].formatted_address
+              ? results[0].formatted_address
+              : nextLat.toFixed(5) + ", " + nextLng.toFixed(5);
+            setPicked({ label: formatted, lat: nextLat, lng: nextLng });
+            document.getElementById("q").value = formatted;
+          });
         }
-        geocoder.geocode({ location: { lat: nextLat, lng: nextLng } }, function(results, status) {
-          var formatted = status === "OK" && results && results[0] && results[0].formatted_address
-            ? results[0].formatted_address
-            : nextLat.toFixed(5) + ", " + nextLng.toFixed(5);
-          setPicked({ label: formatted, lat: nextLat, lng: nextLng });
-          document.getElementById("q").value = formatted;
+        function searchPlace() {
+          var q = String(document.getElementById("q").value || "").trim();
+          if (!q) return;
+          geocoder.geocode({ address: q }, function(results, status) {
+            if (status !== "OK" || !results || !results[0] || !results[0].geometry) return;
+            var loc = results[0].geometry.location;
+            applyPoint(loc.lat(), loc.lng(), results[0].formatted_address);
+          });
+        }
+        map.addListener("click", function(e) { if (e.latLng) applyPoint(e.latLng.lat(), e.latLng.lng()); });
+        marker.addListener("dragend", function() {
+          var p = marker.getPosition();
+          if (p) applyPoint(p.lat(), p.lng());
         });
+        try {
+          var autocomplete = new maps.places.Autocomplete(document.getElementById("q"), {
+            fields: ["formatted_address", "geometry", "name"]
+          });
+          autocomplete.addListener("place_changed", function() {
+            var place = autocomplete.getPlace();
+            if (!place || !place.geometry || !place.geometry.location) return;
+            var loc = place.geometry.location;
+            applyPoint(loc.lat(), loc.lng(), place.formatted_address || place.name);
+          });
+        } catch (_placesErr) {
+          // Places library can fail independently; Search still uses Geocoder.
+        }
+        document.getElementById("go").onclick = searchPlace;
+        document.getElementById("q").addEventListener("keydown", function(e) {
+          if (e.key === "Enter") { e.preventDefault(); searchPlace(); }
+        });
+        document.getElementById("me").onclick = function() {
+          if (!navigator.geolocation) return;
+          navigator.geolocation.getCurrentPosition(function(pos) {
+            applyPoint(pos.coords.latitude, pos.coords.longitude);
+          });
+        };
+        if (picked) setPicked(picked);
+      } catch (_err) {
+        send({ t: "maps-error" });
       }
-      map.addListener("click", function(e) { if (e.latLng) applyPoint(e.latLng.lat(), e.latLng.lng()); });
-      marker.addListener("dragend", function() {
-        var p = marker.getPosition();
-        if (p) applyPoint(p.lat(), p.lng());
-      });
-      var autocomplete = new maps.places.Autocomplete(document.getElementById("q"), {
-        fields: ["formatted_address", "geometry", "name"]
-      });
-      autocomplete.addListener("place_changed", function() {
-        var place = autocomplete.getPlace();
-        if (!place || !place.geometry || !place.geometry.location) return;
-        var loc = place.geometry.location;
-        applyPoint(loc.lat(), loc.lng(), place.formatted_address || place.name);
-      });
-      document.getElementById("me").onclick = function() {
-        if (!navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition(function(pos) {
-          applyPoint(pos.coords.latitude, pos.coords.longitude);
-        });
-      };
-      if (picked) setPicked(picked);
     }
   </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=initGoogle" async></script>`
+  <script src="https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=initGoogle&loading=async" async onerror="send({ t: 'maps-error' })"></script>`
       : `<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     function reverseOsm(nextLat, nextLng, nextLabel) {
@@ -229,16 +260,26 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
 
 export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSelect }: Props) {
   const insets = useSafeAreaInsets();
+  const [googleFailed, setGoogleFailed] = useState(false);
+  const effectiveKey = googleFailed ? "" : String(apiKey || "");
   const html = useMemo(
-    () => buildPickerHtml(String(apiKey || ""), label, lat, lng),
-    [apiKey, label, lat, lng]
+    () => buildPickerHtml(effectiveKey, label, lat, lng),
+    [effectiveKey, label, lat, lng]
   );
+
+  useEffect(() => {
+    if (!open) setGoogleFailed(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open || Platform.OS !== "web") return;
     const onMessage = (event: MessageEvent) => {
       try {
         const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (data?.t === "maps-error") {
+          setGoogleFailed(true);
+          return;
+        }
         if (data?.t === "ok" && typeof data.label === "string") {
           onSelect({ label: data.label, lat: Number(data.lat), lng: Number(data.lng) });
         }
@@ -253,6 +294,10 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
   const onWebViewMessage = (raw: string) => {
     try {
       const data = JSON.parse(raw) as { t?: string; label?: string; lat?: number; lng?: number };
+      if (data?.t === "maps-error") {
+        setGoogleFailed(true);
+        return;
+      }
       if (data?.t === "ok" && data.label && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
         onSelect({ label: data.label, lat: Number(data.lat), lng: Number(data.lng) });
       }
@@ -279,14 +324,14 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
             })
           : (
           <WebView
-            source={{ html, baseUrl: "https://server.arcgisonline.com" }}
+            source={{ html, baseUrl: `${MAPS_WEBVIEW_ORIGIN}/` }}
             originWhitelist={["*"]}
             javaScriptEnabled
             domStorageEnabled
             geolocationEnabled
             mixedContentMode="always"
             thirdPartyCookiesEnabled
-            cacheEnabled
+            cacheEnabled={false}
             setSupportMultipleWindows={false}
             userAgent="Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
             onMessage={(e) => onWebViewMessage(e.nativeEvent.data)}

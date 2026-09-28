@@ -7,6 +7,15 @@ import { ensureLocalFileUri } from "../utils/mediaLocalUri";
 import { prepareImageForUpload, prepareProfileImageForUpload } from "../utils/mediaUpload";
 import { prepareVideoForUpload } from "../utils/prepareVideoForUpload";
 import { resolveWebAppOrigin } from "../utils/webAppOrigin";
+import {
+  isUsableLatLng,
+  loadOpenMeteoWeather,
+  searchOpenMeteoPlaces,
+  type WeatherDay,
+  type WeatherIconName,
+  type WeatherPlace,
+  type WeatherReport
+} from "../utils/openMeteoWeather";
 
 /** Production API URL used whenever the build/runtime can't determine a local backend. */
 const PRODUCTION_API_BASE_URL = "https://cropvibe-api-production.up.railway.app/api";
@@ -566,6 +575,24 @@ export async function fetchMapsConfig(token: string) {
   } catch {
     return { configured: Boolean(envKey), key: envKey };
   }
+}
+
+export type { WeatherDay, WeatherIconName, WeatherPlace, WeatherReport };
+
+export async function fetchWeatherReport(
+  _token: string | null,
+  params?: { q?: string; lat?: number; lng?: number }
+) {
+  const hasCoords = isUsableLatLng(params?.lat, params?.lng);
+  return loadOpenMeteoWeather({
+    q: params?.q,
+    lat: hasCoords ? params?.lat : undefined,
+    lng: hasCoords ? params?.lng : undefined
+  });
+}
+
+export async function searchWeatherPlaces(_token: string | null, query: string) {
+  return searchOpenMeteoPlaces(query);
 }
 
 export async function updateMyPrivacySettings(token: string, payload: { isPrivate: boolean }) {

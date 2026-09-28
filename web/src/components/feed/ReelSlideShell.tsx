@@ -9,7 +9,11 @@ import { ForwardMessageModal } from "../messages/ForwardMessageModal";
 import { dropCaption, dropMusicLabel, postShowsMusicRow } from "../../utils/feedOrder";
 import { buildPostChatMessage } from "../../utils/postShare";
 import { webProfilePath } from "../../utils/profilePath";
-import { resolveWebPostVideoUrl } from "../../utils/videoUrl";
+import { resolveWebPostVideoSources, playbackSourceKind } from "../../utils/videoUrl";
+import {
+  reportReelPlaybackTelemetry,
+  takeLastNextReelPrepMs
+} from "../../utils/reelPlaybackTelemetry";
 import { CommentPanel } from "./CommentPanel";
 import { PostLikesSheet } from "./PostLikesSheet";
 import { ReelActionsRail } from "./ReelActionsRail";
@@ -39,7 +43,17 @@ export function ReelSlideShell({
   const [optionsAnchor, setOptionsAnchor] = useState<CSSProperties | null>(null);
   const tapTimeoutRef = useRef<number | null>(null);
   const lastTapRef = useRef(0);
-  const src = resolveWebPostVideoUrl(post);
+  const sources = resolveWebPostVideoSources(post);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const src = sources[sourceIndex] || null;
+  const telemetryRef = useRef({
+    startedAt: 0,
+    firstFrameAt: 0,
+    rebufferCount: 0,
+    rebufferMs: 0,
+    rebufferStartedAt: 0,
+    flushed: false
+  });
   const [muted, setMuted] = useState(true);
   const [liked, setLiked] = useState(!!post.viewerHasLiked);
   const [likes, setLikes] = useState(post.likesCount);
@@ -66,6 +80,46 @@ export function ReelSlideShell({
     setCommentsCount(post.commentsCount);
     setSaved(!!post.viewerHasSaved);
   }, [post.id, post.viewerHasLiked, post.likesCount, post.commentsCount, post.viewerHasSaved]);
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [post.id, post.hlsUrl, post.playbackUrl, post.videoUrl]);
+
+  useEffect(() => {
+    const flush = () => {
+      const session = telemetryRef.current;
+      if (session.flushed || !session.firstFrameAt) return;
+      session.flushed = true;
+      if (session.rebufferStartedAt) {
+        session.rebufferMs += Date.now() - session.rebufferStartedAt;
+        session.rebufferStartedAt = 0;
+      }
+      reportReelPlaybackTelemetry({
+        postId: post.id,
+        sourceKind: playbackSourceKind(src),
+        startupMs: Math.max(0, session.firstFrameAt - session.startedAt),
+        rebufferCount: session.rebufferCount,
+        rebufferMs: session.rebufferMs,
+        qualitySwitches: 0,
+        nextPrepMs: takeLastNextReelPrepMs()
+      });
+    };
+    if (!active) {
+      flush();
+      return;
+    }
+    telemetryRef.current = {
+      startedAt: Date.now(),
+      firstFrameAt: 0,
+      rebufferCount: 0,
+      rebufferMs: 0,
+      rebufferStartedAt: 0,
+      flushed: false
+    };
+    return () => {
+      flush();
+    };
+  }, [active, post.id, src]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -273,6 +327,28 @@ export function ReelSlideShell({
             muted={muted}
             autoPlay={active}
             onClick={onSurfaceTap}
+            onLoadedData={() => {
+              const session = telemetryRef.current;
+              if (!session.firstFrameAt) session.firstFrameAt = Date.now();
+            }}
+            onWaiting={() => {
+              const session = telemetryRef.current;
+              if (!session.firstFrameAt || session.rebufferStartedAt) return;
+              session.rebufferStartedAt = Date.now();
+              session.rebufferCount += 1;
+            }}
+            onPlaying={() => {
+              const session = telemetryRef.current;
+              if (!session.firstFrameAt) session.firstFrameAt = Date.now();
+              if (session.rebufferStartedAt) {
+                session.rebufferMs += Date.now() - session.rebufferStartedAt;
+                session.rebufferStartedAt = 0;
+              }
+            }}
+            onError={() => {
+              const next = sourceIndex + 1;
+              if (next < sources.length) setSourceIndex(next);
+            }}
           />
         ) : (
           <div className="reel-slide__missing">Video unavailable</div>

@@ -61,6 +61,7 @@ const { evaluateFarmingPostPolicy } = require("../social/farmingContentPolicy");
 const { emitDirectMessage, emitDirectMessageDeleted, emitMessagesRead, emitMessagesDelivered, emitNotificationSync, emitStoryViewed, getSocketIo, flushDeliveriesForReceiver, isUserConnected, markMessagesDeliveredByIds, getPresenceForUserIds } = require("../socketChat");
 const { isCloudFrontConfigured } = require("../s3Storage");
 const { mapsConfigHandler, parseMapCoord } = require("../googleMaps");
+const { searchPlaces, resolvePlace, loadForecast } = require("../weather");
 
 const router = express.Router();
 let homePostsTableReady = false;
@@ -1502,13 +1503,23 @@ function allowDevOtpFallback() {
 }
 
 function otpProvider() {
-  const configured = String(process.env.OTP_PROVIDER || "msg91").trim().toLowerCase();
-  return configured === "twilio" ? "twilio" : "msg91";
+  const configured = String(process.env.OTP_PROVIDER || "").trim().toLowerCase();
+  if (configured === "msg91") return "msg91";
+  if (configured === "twilio" || isTwilioVerifyConfigured()) return "twilio";
+  return "msg91";
 }
 
-function msg91Mode() {
-  const mode = String(process.env.MSG91_API_MODE || "").trim().toLowerCase();
-  return mode === "widget" ? "widget" : "sendotp";
+function twilioVerifyCredentials() {
+  return {
+    accountSid: String(process.env.TWILIO_ACCOUNT_SID || "").trim(),
+    authToken: String(process.env.TWILIO_AUTH_TOKEN || "").trim(),
+    verifyServiceSid: String(process.env.TWILIO_VERIFY_SERVICE_SID || "").trim()
+  };
+}
+
+function isTwilioVerifyConfigured() {
+  const { accountSid, authToken, verifyServiceSid } = twilioVerifyCredentials();
+  return Boolean(accountSid && authToken && verifyServiceSid);
 }
 
 function staticOtpCode() {
@@ -1520,7 +1531,15 @@ function staticOtpCode() {
 
 function isStaticOtpEnabled() {
   const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
-  return !(disabled === "true" || disabled === "1" || disabled === "yes");
+  if (disabled === "true" || disabled === "1" || disabled === "yes") return false;
+  // Twilio Verify takes over as soon as SID + token + service are present.
+  if (isTwilioVerifyConfigured()) return false;
+  return true;
+}
+
+function msg91Mode() {
+  const mode = String(process.env.MSG91_API_MODE || "").trim().toLowerCase();
+  return mode === "widget" ? "widget" : "sendotp";
 }
 
 function matchesStaticOtp(code) {
@@ -1530,10 +1549,35 @@ function matchesStaticOtp(code) {
   return digits === staticOtpCode() || digits === "525252";
 }
 
+function formatTwilioVerifyError(payload, fallback) {
+  const code = Number(payload?.code || 0);
+  const message = String(payload?.message || payload?.detail || fallback || "Twilio Verify failed");
+  if (code === 20003 || /authenticate/i.test(message)) {
+    return "Twilio credentials are invalid. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.";
+  }
+  if (code === 20404 || /was not found/i.test(message)) {
+    return "Twilio Verify service was not found. Check TWILIO_VERIFY_SERVICE_SID.";
+  }
+  if (code === 21608 || /unverified/i.test(message)) {
+    return "This number is not allowed yet. Verify it in Twilio or wait for the upgraded account SMS permission.";
+  }
+  if (code === 21408 || /permission.*region|geo/i.test(message)) {
+    return "SMS to this country is blocked. Enable India in Twilio Messaging geo permissions.";
+  }
+  if (code === 60200 || /invalid parameter/i.test(message)) {
+    return "Enter a valid mobile number.";
+  }
+  if (code === 60202 || /max check/i.test(message)) {
+    return "Too many incorrect OTP attempts. Request a new code.";
+  }
+  if (code === 60203 || /max send/i.test(message)) {
+    return "Too many OTP requests. Try again later.";
+  }
+  return message;
+}
+
 async function sendTwilioVerifyOtp(phone) {
-  const accountSid = String(process.env.TWILIO_ACCOUNT_SID || "").trim();
-  const authToken = String(process.env.TWILIO_AUTH_TOKEN || "").trim();
-  const verifyServiceSid = String(process.env.TWILIO_VERIFY_SERVICE_SID || "").trim();
+  const { accountSid, authToken, verifyServiceSid } = twilioVerifyCredentials();
 
   if (!accountSid || !authToken || !verifyServiceSid) {
     if (allowDevOtpFallback()) {
@@ -1561,8 +1605,7 @@ async function sendTwilioVerifyOtp(phone) {
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const message = payload?.message || payload?.detail || "Failed to send OTP";
-    throw new Error(message);
+    throw new Error(formatTwilioVerifyError(payload, "Failed to send OTP"));
   }
 
   return {
@@ -1574,9 +1617,7 @@ async function sendTwilioVerifyOtp(phone) {
 }
 
 async function verifyTwilioOtp(phone, code) {
-  const accountSid = String(process.env.TWILIO_ACCOUNT_SID || "").trim();
-  const authToken = String(process.env.TWILIO_AUTH_TOKEN || "").trim();
-  const verifyServiceSid = String(process.env.TWILIO_VERIFY_SERVICE_SID || "").trim();
+  const { accountSid, authToken, verifyServiceSid } = twilioVerifyCredentials();
 
   if (!accountSid || !authToken || !verifyServiceSid) {
     if (allowDevOtpFallback()) return false;
@@ -2891,6 +2932,30 @@ router.get("/v1/ping", (_req, res) => {
   res.json({ ok: true });
 });
 
+router.post("/v1/metrics/reel-playback", authOptional, (req, res) => {
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const clamp = (value, min, max) => {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n)) return min;
+    return Math.max(min, Math.min(max, n));
+  };
+  const source = String(body.source || "").trim().toLowerCase();
+  const event = {
+    postId: clamp(body.post_id ?? body.postId, 0, 2_147_483_647),
+    source: source === "hls" || source === "mp4" || source === "original" ? source : "unknown",
+    startupMs: clamp(body.startup_ms ?? body.startupMs, 0, 120_000),
+    rebufferCount: clamp(body.rebuf_n ?? body.rebufferCount, 0, 200),
+    rebufferMs: clamp(body.rebuf_ms ?? body.rebufferMs, 0, 120_000),
+    qualitySwitches: clamp(body.q_switch ?? body.qualitySwitches, 0, 200),
+    height: clamp(body.height, 0, 4320),
+    nextPrepMs: clamp(body.next_prep_ms ?? body.nextPrepMs, 0, 30_000),
+    platform: String(body.platform || "").slice(0, 24),
+    userId: req.user?.id || null
+  };
+  console.info("[reel-playback]", JSON.stringify(event));
+  res.json({ ok: true });
+});
+
 router.get("/v1/presence", authRequired, async (req, res) => {
   try {
     await ensureLearnUsersTable();
@@ -3462,8 +3527,8 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
       return;
     }
 
-    const otp = randomOtp6();
-    const otpHash = hashOtp(phone, otp);
+    const otp = provider === "twilio" ? "" : randomOtp6();
+    const otpHash = hashOtp(phone, otp || `twilio:${Date.now()}`);
     const sent = provider === "twilio" ? await sendTwilioVerifyOtp(phone) : await sendSmsOtp(phone, otp);
 
     try {
@@ -3800,6 +3865,53 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
 });
 
 router.get("/v1/places/maps-config", authRequired, mapsConfigHandler);
+
+router.get("/v1/weather/places", authRequired, async (req, res) => {
+  try {
+    const places = await searchPlaces(req.query.q, 6);
+    res.json({ places });
+  } catch (error) {
+    res.status(502).json({ message: "Could not search locations", error: error.message });
+  }
+});
+
+router.get("/v1/weather", authRequired, async (req, res) => {
+  try {
+    await ensureLearnUsersTable();
+    let fallbackLabel = "";
+    let profileLat = null;
+    let profileLng = null;
+    if (req.user?.userId) {
+      const result = await query(
+        `SELECT location_label AS "locationLabel", location_lat AS "locationLat", location_lng AS "locationLng"
+         FROM learn_users WHERE id = $1 LIMIT 1`,
+        [req.user.userId]
+      );
+      const row = result.rows[0] || {};
+      fallbackLabel = String(row.locationLabel || "").trim();
+      profileLat = row.locationLat;
+      profileLng = row.locationLng;
+    }
+    const queryHasCoords =
+      Number.isFinite(Number(req.query.lat)) &&
+      Number.isFinite(Number(req.query.lng)) &&
+      !(Math.abs(Number(req.query.lat)) < 0.05 && Math.abs(Number(req.query.lng)) < 0.05);
+    const profileHasCoords =
+      Number.isFinite(Number(profileLat)) &&
+      Number.isFinite(Number(profileLng)) &&
+      !(Math.abs(Number(profileLat)) < 0.05 && Math.abs(Number(profileLng)) < 0.05);
+    const place = await resolvePlace({
+      q: req.query.q,
+      lat: queryHasCoords ? req.query.lat : profileHasCoords ? profileLat : null,
+      lng: queryHasCoords ? req.query.lng : profileHasCoords ? profileLng : null,
+      fallbackLabel
+    });
+    const report = await loadForecast(place);
+    res.json(report);
+  } catch (error) {
+    res.status(502).json({ message: "Could not load weather", error: error.message });
+  }
+});
 
 router.get("/v1/auth/me", authRequired, async (req, res) => {
   try {

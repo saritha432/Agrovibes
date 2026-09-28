@@ -15,7 +15,6 @@ const BG = "#262626";
 const CARD = "#252a30";
 const BORDER = "#3a424c";
 const ERROR = "#ff6b6b";
-const STATIC_OTP_HINT = "525252";
 
 function normalizePhoneForApi(phone: string) {
   const digits = phone.replace(/\D/g, "");
@@ -121,18 +120,7 @@ export function ForgotPasswordOtpResetScreen() {
       setPendingLoginPhone(phoneDigitsForLogin(apiPhone));
       setShowSuccessPopup(true);
     } catch (e: any) {
-      const message = String(e?.message || "Failed to reset password");
-      if (/invalid otp/i.test(message) && digits === STATIC_OTP_HINT) {
-        setErrorText(
-          "Static OTP 525252 was rejected by the server. Redeploy the latest backend on Railway, or set STATIC_OTP_ENABLED=true in Railway env vars."
-        );
-      } else if (/otp expired/i.test(message) && digits === STATIC_OTP_HINT) {
-        setErrorText(
-          "Static OTP was rejected by the server. Deploy the latest backend to Render, or set STATIC_OTP_CODE=525252 in Render env."
-        );
-      } else {
-        setErrorText(message);
-      }
+      setErrorText(formatAuthError(e, "Failed to reset password"));
     } finally {
       setLoading(false);
     }
@@ -186,7 +174,7 @@ export function ForgotPasswordOtpResetScreen() {
         <Text style={styles.subtitle}>
           Reset password for {route.params.phone}
           {"\n"}
-          Use static OTP: {STATIC_OTP_HINT}
+          Enter the 6-digit code sent to your phone
         </Text>
 
         <TextInput

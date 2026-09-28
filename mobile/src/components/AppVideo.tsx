@@ -1,8 +1,12 @@
 import React, { useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { Platform, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { useVideoPlayer, VideoView, type VideoSource } from "expo-video";
-import { normalizeVideoPlaybackUri } from "../utils/videoPlaybackUrl";
+import { normalizeVideoPlaybackUri, playbackSourceKind } from "../utils/videoPlaybackUrl";
 import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
+import {
+  reportReelPlaybackTelemetry,
+  takeLastNextReelPrepMs
+} from "../utils/reelPlaybackTelemetry";
 
 export type AppVideoHandle = {
   playAsync: () => Promise<void>;
@@ -28,6 +32,8 @@ export type AppVideoProps = {
   onLoad?: () => void;
   onError?: () => void;
   onFirstFrameRender?: () => void;
+  /** When set and the player is actually playing (not a warm buffer), emit reel telemetry. */
+  telemetryPostId?: number;
 };
 
 function sourceUri(source: AppVideoProps["source"]): string {
@@ -74,7 +80,8 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
     onPlaybackStatusUpdate,
     onLoad,
     onError,
-    onFirstFrameRender
+    onFirstFrameRender,
+    telemetryPostId
   },
   ref
 ) {
@@ -90,6 +97,77 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
   onErrorRef.current = onError;
   const onStatusRef = useRef(onPlaybackStatusUpdate);
   onStatusRef.current = onPlaybackStatusUpdate;
+  const onFirstFrameRef = useRef(onFirstFrameRender);
+  onFirstFrameRef.current = onFirstFrameRender;
+  const telemetryEnabledRef = useRef(false);
+  telemetryEnabledRef.current = Number(telemetryPostId) > 0 && !warmBuffer;
+  const shouldPlayRef = useRef(shouldPlay);
+  shouldPlayRef.current = shouldPlay;
+  const telemetryPostIdRef = useRef(telemetryPostId);
+  telemetryPostIdRef.current = telemetryPostId;
+  const uriRef = useRef(uri);
+  uriRef.current = uri;
+  const telemetryRef = useRef({
+    startedAt: Date.now(),
+    firstFrameAt: 0,
+    rebufferCount: 0,
+    rebufferMs: 0,
+    rebufferStartedAt: 0,
+    qualitySwitches: 0,
+    lastHeight: 0,
+    flushed: false
+  });
+
+  const noteTrackHeight = (height: number) => {
+    if (!(height > 0)) return;
+    const session = telemetryRef.current;
+    if (session.lastHeight > 0 && session.lastHeight !== height) {
+      session.qualitySwitches += 1;
+    }
+    session.lastHeight = height;
+  };
+
+  const flushTelemetry = () => {
+    const session = telemetryRef.current;
+    if (session.flushed || !session.firstFrameAt) return;
+    if (!telemetryPostIdRef.current) return;
+    session.flushed = true;
+    if (session.rebufferStartedAt) {
+      session.rebufferMs += Date.now() - session.rebufferStartedAt;
+      session.rebufferStartedAt = 0;
+    }
+    reportReelPlaybackTelemetry({
+      postId: telemetryPostIdRef.current,
+      sourceKind: playbackSourceKind(uriRef.current),
+      startupMs: Math.max(0, session.firstFrameAt - session.startedAt),
+      rebufferCount: session.rebufferCount,
+      rebufferMs: session.rebufferMs,
+      qualitySwitches: session.qualitySwitches,
+      lastHeight: session.lastHeight || undefined,
+      nextPrepMs: takeLastNextReelPrepMs()
+    });
+  };
+
+  const resetTelemetry = () => {
+    telemetryRef.current = {
+      startedAt: Date.now(),
+      firstFrameAt: 0,
+      rebufferCount: 0,
+      rebufferMs: 0,
+      rebufferStartedAt: 0,
+      qualitySwitches: 0,
+      lastHeight: 0,
+      flushed: false
+    };
+  };
+
+  const markFirstFrame = () => {
+    if (telemetryEnabledRef.current || shouldPlayRef.current) {
+      const session = telemetryRef.current;
+      if (!session.firstFrameAt) session.firstFrameAt = Date.now();
+    }
+    onFirstFrameRef.current?.();
+  };
 
   const player = useVideoPlayer(videoSource, (next) => {
     next.loop = isLooping;
@@ -149,14 +227,29 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
 
   useEffect(() => {
     if (lastUriRef.current === uri) return;
+    flushTelemetry();
     lastUriRef.current = uri;
     loadedRef.current = false;
     finishedRef.current = false;
     sizeRef.current = undefined;
+    resetTelemetry();
     void replacePlayerSource(player, videoSource).catch(() => {
       onErrorRef.current?.();
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [player, uri, videoSource]);
+
+  useEffect(() => {
+    return () => {
+      flushTelemetry();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (warmBuffer) flushTelemetry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warmBuffer]);
 
   useEffect(() => {
     player.loop = isLooping;
@@ -190,6 +283,15 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
     };
     listen("statusChange", (payload) => {
       const { status, error } = payload as { status?: string; error?: { message?: string } | string };
+      const session = telemetryRef.current;
+      if (status === "loading" && session.firstFrameAt && !session.rebufferStartedAt) {
+        session.rebufferStartedAt = Date.now();
+        session.rebufferCount += 1;
+      }
+      if ((status === "readyToPlay" || status === "idle") && session.rebufferStartedAt) {
+        session.rebufferMs += Date.now() - session.rebufferStartedAt;
+        session.rebufferStartedAt = 0;
+      }
       if (status === "error") {
         loadedRef.current = false;
         const message = error ? String(typeof error === "string" ? error : error.message || error) : "playback error";
@@ -214,12 +316,23 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
       const track = tracks?.[0];
       const width = Number(track?.width || 0);
       const height = Number(track?.height || 0);
-      if (width > 0 && height > 0) sizeRef.current = { width, height };
+      if (width > 0 && height > 0) {
+        sizeRef.current = { width, height };
+        noteTrackHeight(height);
+      }
       if (!loadedRef.current) {
         loadedRef.current = true;
         onLoadRef.current?.();
       }
       emitStatus();
+    });
+    listen("videoTrackChange", (payload) => {
+      const track = payload as {
+        videoTrack?: { size?: { height?: number }; height?: number };
+        height?: number;
+      };
+      const height = Number(track?.videoTrack?.size?.height || track?.videoTrack?.height || track?.height || 0);
+      noteTrackHeight(height);
     });
     listen("timeUpdate", () => {
       finishedRef.current = false;
@@ -269,7 +382,7 @@ export const AppVideo = React.forwardRef<AppVideoHandle, AppVideoProps>(function
       contentFit={contentFit}
       nativeControls={nativeControls}
       playsInline
-      onFirstFrameRender={onFirstFrameRender}
+      onFirstFrameRender={markFirstFrame}
     />
   );
 });

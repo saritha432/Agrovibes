@@ -897,7 +897,7 @@ export function PostsReelViewerModal({
     const primary = ordered[ordered.length - 1];
     setPlayingPostId(primary.post.id);
     prefetchPostMedia(primary.post);
-    prefetchUpcomingPosts(viewerPostsRef.current, primary.index, 2);
+    prefetchUpcomingPosts(viewerPostsRef.current, primary.index, 1);
   }, []);
 
   const viewabilityCallbackRef = useRef(onViewableItemsChanged);
@@ -920,7 +920,7 @@ export function PostsReelViewerModal({
       setPlayingPostId(post?.id ?? null);
       if (post) {
         prefetchPostMedia(post);
-        prefetchUpcomingPosts(viewerPosts, index, 2);
+        prefetchUpcomingPosts(viewerPosts, index, 1);
       }
     },
     [visible, viewerPosts, viewerPageH]
@@ -1012,6 +1012,7 @@ export function PostsReelViewerModal({
                       posterUri={reelPoster || undefined}
                       isLooping
                       isMuted={isReelMuted || !isActiveVideo}
+                      telemetryPostId={post.id}
                       onStatusUpdate={(status) => onReelStatusUpdate(post.id, status)}
                     />
                   </View>

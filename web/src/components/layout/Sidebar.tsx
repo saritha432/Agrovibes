@@ -10,6 +10,8 @@ const NAV = [
   { to: "/search", label: "Search", icon: "search" },
   { to: "/drops", label: "Drops", icon: "drops" },
   { to: "/messages", label: "Messages", icon: "messages" },
+  { to: "/weather", label: "Weather", icon: "weather" },
+  { to: "/schemes", label: "Schemes", icon: "schemes" },
   { to: "/notifications", label: "Notifications", icon: "notifications" },
   { to: "/profile", label: "Profile", icon: "profile" }
 ] as const;
@@ -41,6 +43,19 @@ function NavIcon({ name }: { name: NavIconName }) {
       return (
         <svg viewBox="0 0 24 24" aria-hidden>
           <path d="M12 4.2c-4.9 0-8.8 3.2-8.8 7.3 0 2.3 1.2 4.3 3.2 5.7v2.6a.6.6 0 0 0 1 .5l2.8-1.7c.6.1 1.2.2 1.8.2 4.9 0 8.8-3.2 8.8-7.3S16.9 4.2 12 4.2Z" />
+        </svg>
+      );
+    case "weather":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M7.5 16.5a4.5 4.5 0 1 1 1.3-8.8 5.5 5.5 0 0 1 10.4 1.7 3.8 3.8 0 0 1 .3 7.1H7.5Z" />
+          <path d="M16.2 6.2a3 3 0 0 0-4.4 2.1" />
+        </svg>
+      );
+    case "schemes":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M7 4.5h10a1.5 1.5 0 0 1 1.5 1.5v13l-6.5-3.2L5.5 19V6A1.5 1.5 0 0 1 7 4.5Z" />
         </svg>
       );
     case "notifications":

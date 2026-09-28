@@ -36,6 +36,9 @@ export type RootStackParamList = {
   ProviderNewListing: undefined;
   InstructorStudio: undefined;
   EditProfile: undefined;
+  Weather: undefined;
+  Schemes: undefined;
+  SchemeDetail: { schemeId: string };
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };
   DirectChat: {
     peerUserId: number;

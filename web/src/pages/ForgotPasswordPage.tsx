@@ -123,7 +123,7 @@ export function ForgotPasswordPage() {
           <p className="login-card__subtitle">
             Reset password for {phone}
             <br />
-            Use static OTP: 525252
+            Enter the 6-digit code sent to your phone
           </p>
         ) : (
           <p className="login-card__subtitle">We will send an OTP to your mobile number.</p>
