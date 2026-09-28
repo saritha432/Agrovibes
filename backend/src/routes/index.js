@@ -4738,6 +4738,10 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
 
     if (createdPendingRequest) {
       await query(
+        `DELETE FROM social_notifications WHERE follow_id = $1 AND type = 'follow_request'`,
+        [followRow.id]
+      );
+      await query(
         `
         INSERT INTO social_notifications (user_id, actor_id, follow_id, type, is_read)
         VALUES ($1, $2, $3, 'follow_request', false)
@@ -4747,6 +4751,7 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
       fireSocialPush({
         userId: targetUserId,
         type: "follow_request",
+        actorId: actorUserId,
         actorName: await actorDisplayName(actorUserId),
         followId: followRow.id
       });
@@ -4762,6 +4767,7 @@ router.post("/v1/social/follow/request", authRequired, async (req, res) => {
       fireSocialPush({
         userId: targetUserId,
         type: "new_follow",
+        actorId: actorUserId,
         actorName: await actorDisplayName(actorUserId),
         followId: followRow.id
       });
@@ -5066,6 +5072,7 @@ router.post("/v1/social/follow/:followId/respond", authRequired, async (req, res
       fireSocialPush({
         userId: updatedFollow.followerId,
         type: "follow_accept",
+        actorId: updatedFollow.followingId,
         actorName: await actorDisplayName(updatedFollow.followingId),
         followId
       });
@@ -5139,7 +5146,19 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       [currentUserId]
     );
 
-    const followRequests = result.rows.filter((r) => r.type === "follow_request" && r.followStatus === "pending");
+    // Rows are newest-first; keep one request per follow row (re-requests after decline reuse it).
+    const seenFollowRequestIds = new Set();
+    const staleFollowRequestRowIds = new Set();
+    const followRequests = result.rows.filter((r) => {
+      if (r.type !== "follow_request" || r.followStatus !== "pending") return false;
+      const key = r.followId != null ? `f:${r.followId}` : `a:${r.actorId}`;
+      if (seenFollowRequestIds.has(key)) {
+        staleFollowRequestRowIds.add(r.id);
+        return false;
+      }
+      seenFollowRequestIds.add(key);
+      return true;
+    });
     const followAccepted = result.rows.filter((r) => r.type === "follow_accept");
     const newFollows = result.rows.filter((r) => r.type === "new_follow");
     const postLikes = result.rows.filter((r) => r.type === "post_like" || r.type === "post_tag");
@@ -5179,7 +5198,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
     }
     const unreadCount = result.rows.filter((r) => {
       if (r.isRead) return false;
-      if (r.type === "follow_request") return r.followStatus === "pending";
+      if (r.type === "follow_request") return r.followStatus === "pending" && !staleFollowRequestRowIds.has(r.id);
       return (
         r.type === "follow_accept" ||
         r.type === "new_follow" ||

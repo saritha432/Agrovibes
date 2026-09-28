@@ -9,9 +9,16 @@ let closer: Closer | null = null;
 let suppressHandler: Suppress | null = null;
 let sheetOpen = false;
 let sheetBackHandler: (() => boolean) | null = null;
+/** Open requested (e.g. push tap on cold start) before the sheet provider mounted. */
+let pendingOpen = false;
 
 export function registerNotificationSheetOpener(fn: Opener | null) {
   opener = fn;
+  if (fn && pendingOpen) {
+    pendingOpen = false;
+    suppressHandler?.(false);
+    fn();
+  }
 }
 
 export function registerNotificationSheetCloser(fn: Closer | null) {
@@ -36,8 +43,12 @@ export function tryHandleNotificationSheetBack(): boolean {
 }
 
 export function requestOpenNotificationSheet() {
+  if (!opener) {
+    pendingOpen = true;
+    return;
+  }
   suppressHandler?.(false);
-  opener?.();
+  opener();
 }
 
 export function requestCloseNotificationSheet() {
