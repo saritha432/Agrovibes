@@ -17,6 +17,10 @@ import { APP_BLACK } from "./src/theme/appColors";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 import { installAndroidHardwareBackHandler } from "./src/navigation/androidHardwareBack";
 import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
+import {
+  handleColdStartNotificationResponse,
+  handleFirebaseInitialNotification
+} from "./src/push/registerNotificationHandlers";
 import { OtaUpdateBanner } from "./src/components/OtaUpdateBanner";
 import { warmUpServer } from "./src/services/api";
 
@@ -152,6 +156,10 @@ function AppShell() {
           installAndroidHardwareBackHandler();
           trackNavigationScreen();
           runPendingNotificationNavigation();
+          if (Platform.OS !== "web") {
+            void handleColdStartNotificationResponse().catch(() => undefined);
+            void handleFirebaseInitialNotification();
+          }
         }}
         onStateChange={() => {
           trackNavigationScreen();
