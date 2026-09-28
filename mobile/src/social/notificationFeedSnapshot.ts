@@ -39,6 +39,38 @@ function dedupePostLikeNotifications(rows: any[]) {
   });
 }
 
+/** A re-request after decline reuses the follow row, so older request notifications look pending again. */
+function dedupeFollowRequests(rows: any[]) {
+  const byKey = new Map<string, any>();
+  let droppedUnread = 0;
+  for (const row of rows) {
+    const followId = Number(row.followId);
+    const actorId = Number(row.actorId);
+    const key =
+      Number.isFinite(followId) && followId > 0
+        ? `f:${followId}`
+        : Number.isFinite(actorId) && actorId > 0
+          ? `a:${actorId}`
+          : `row:${String(row.id ?? "")}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, row);
+      continue;
+    }
+    const existingTs = Date.parse(String(existing.createdAt || "")) || 0;
+    const rowTs = Date.parse(String(row.createdAt || "")) || 0;
+    const dropped = rowTs > existingTs ? existing : row;
+    if (rowTs > existingTs) byKey.set(key, row);
+    if (!dropped.isLocal && dropped.isRead === false) droppedUnread += 1;
+  }
+  const rowsOut = [...byKey.values()].sort((a, b) => {
+    const ta = Date.parse(String(a?.createdAt || "")) || 0;
+    const tb = Date.parse(String(b?.createdAt || "")) || 0;
+    return tb - ta;
+  });
+  return { rows: rowsOut, droppedUnread };
+}
+
 export async function fetchNotificationFeedSnapshot(params: {
   token: string | null;
   userFullName: string;
@@ -63,10 +95,10 @@ export async function fetchNotificationFeedSnapshot(params: {
   const remotePostComments = remote?.postComments || [];
   const remoteLiveStarts = remote?.liveStarts || [];
 
-  const mergedPending = [
+  const { rows: mergedPending, droppedUnread: droppedPendingUnread } = dedupeFollowRequests([
     ...(remoteReq || []),
     ...(local.pendingRequests || []).map((n) => ({ ...n, isLocal: true, actorName: n.actorName, followId: n.id, id: n.id }))
-  ];
+  ]);
   const accepted = [
     ...(remoteAccepted || []),
     ...(local.acceptedForActor || []).map((n) => ({ ...n, isLocal: true, actorName: n.targetName, id: n.id }))
@@ -111,7 +143,7 @@ export async function fetchNotificationFeedSnapshot(params: {
     postLikes,
     postComments,
     liveStarts: remoteLiveStarts,
-    unreadCount: Math.max(0, Number(remote?.unreadCount || 0))
+    unreadCount: Math.max(0, Number(remote?.unreadCount || 0) - droppedPendingUnread)
   };
 }
 

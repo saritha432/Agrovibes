@@ -1,4 +1,5 @@
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { handleNotificationResponse } from "./notificationNavigation";
 
 let registered = false;
@@ -49,4 +50,79 @@ export async function handleColdStartNotificationResponse(options?: { authToken?
   if (!claimNotificationResponse(response)) return;
   await handleNotificationResponse(response, options);
   await clearLastResponseSafe();
+}
+
+type FirebaseRemoteMessage = {
+  messageId?: string;
+  sentTime?: number;
+  data?: Record<string, unknown>;
+  notification?: { title?: string; body?: string };
+};
+
+type FirebaseMessagingFactory = () => {
+  onNotificationOpenedApp: (handler: (message: FirebaseRemoteMessage | null) => void) => () => void;
+  getInitialNotification: () => Promise<FirebaseRemoteMessage | null>;
+};
+
+let firebaseOpenRegistered = false;
+const handledFirebaseMessageIds = new Set<string>();
+
+function getFirebaseMessaging(): FirebaseMessagingFactory | null {
+  if (Platform.OS === "web") return null;
+  try {
+    const messaging = require("@react-native-firebase/messaging").default as FirebaseMessagingFactory;
+    return typeof messaging === "function" ? messaging : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Android shows FCM `notification` pushes itself; their taps come through Firebase, not expo. */
+function handleFirebaseOpenedMessage(message: FirebaseRemoteMessage | null | undefined) {
+  if (!message) return;
+  const messageId = String(message.messageId || "").trim();
+  if (messageId) {
+    if (handledFirebaseMessageIds.has(messageId)) return;
+    handledFirebaseMessageIds.add(messageId);
+  }
+  const data = message.data || {};
+  const response = {
+    actionIdentifier: Notifications.DEFAULT_ACTION_IDENTIFIER,
+    notification: {
+      date: Number(message.sentTime) || Date.now(),
+      request: {
+        identifier: `fcm-${messageId}`,
+        content: {
+          title: message.notification?.title ?? String(data.title || ""),
+          body: message.notification?.body ?? String(data.message || data.body || ""),
+          data
+        },
+        trigger: null
+      }
+    }
+  } as unknown as Notifications.NotificationResponse;
+  if (!claimNotificationResponse(response)) return;
+  void handleNotificationResponse(response);
+}
+
+export function registerFirebaseNotificationOpenHandler() {
+  if (firebaseOpenRegistered) return;
+  const messaging = getFirebaseMessaging();
+  if (!messaging) return;
+  try {
+    messaging().onNotificationOpenedApp(handleFirebaseOpenedMessage);
+    firebaseOpenRegistered = true;
+  } catch {
+    // Native Firebase Messaging unavailable in this binary.
+  }
+}
+
+export async function handleFirebaseInitialNotification() {
+  const messaging = getFirebaseMessaging();
+  if (!messaging) return;
+  try {
+    handleFirebaseOpenedMessage(await messaging().getInitialNotification());
+  } catch {
+    // no-op
+  }
 }

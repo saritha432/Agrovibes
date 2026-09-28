@@ -1,5 +1,5 @@
 import * as Notifications from "expo-notifications";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { presentDirectMessageNotification } from "./dmNotificationThread";
 import { ANDROID_CHANNELS, NOTIFICATION_SOUNDS, ensureAndroidChannels, setupDirectMessageNotificationCategory } from "./pushNotifications";
 import { reportDmDeliveredOnDevice } from "./reportDmDelivered";
@@ -14,8 +14,12 @@ export async function displayFcmDataNotification(remoteMessage: FcmRemoteMessage
   const type = String(data.type || "").trim();
   const isDirectMessage = type === "direct_message";
 
-  // System FCM notification payloads cannot show Expo action buttons (Reply / Answer).
-  if (remoteMessage?.notification && !isDirectMessage) return;
+  // In background Android already shows FCM notification payloads; in foreground FCM hands them
+  // to onMessage without displaying anything, so present them locally.
+  if (remoteMessage?.notification && !isDirectMessage) {
+    // live_share has a "received" listener that auto-joins the live; don't trigger it mid-use.
+    if (AppState.currentState !== "active" || type === "live_share") return;
+  }
   if (type === "call_cancelled") return;
 
   const title = String(data.title || remoteMessage?.notification?.title || "").trim();

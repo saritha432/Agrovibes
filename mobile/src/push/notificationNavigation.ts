@@ -1,7 +1,14 @@
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { sendDirectMessage, fetchHomePost } from "../services/api";
-import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToJoinLive } from "../navigation/navigationRef";
+import {
+  navigationRef,
+  navigateToDirectChat,
+  navigateToDirectInbox,
+  navigateToHome,
+  navigateToJoinLive
+} from "../navigation/navigationRef";
+import { requestOpenNotificationSheet } from "../navigation/notificationSheetBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
 import { presentIncomingCallFromPush } from "./GlobalIncomingCallHost";
@@ -36,7 +43,38 @@ const AUTH_FLOW_ROUTES = new Set([
 ]);
 
 let pendingAction: (() => void) | null = null;
+let pendingRetryTimer: ReturnType<typeof setInterval> | null = null;
+const PENDING_RETRY_MS = 250;
+const PENDING_RETRY_MAX_MS = 20000;
 const replyInFlight = new Set<string>();
+const FOLLOW_NOTIFICATION_TYPES = new Set(["follow_request", "follow_accept", "new_follow"]);
+/** Same push can arrive via expo-notifications and Firebase "opened app" hooks. */
+const TAP_DEDUPE_MS = 5000;
+let lastTapKey = "";
+let lastTapAt = 0;
+
+function isDuplicateTap(data: Record<string, unknown>, actionId: string) {
+  const key = [
+    String(data.type || ""),
+    String(data.postId || ""),
+    String(data.followId || ""),
+    String(data.actorId || data.senderId || data.callerId || ""),
+    String(data.messageId || ""),
+    actionId
+  ].join("|");
+  const now = Date.now();
+  if (key === lastTapKey && now - lastTapAt < TAP_DEDUPE_MS) return true;
+  lastTapKey = key;
+  lastTapAt = now;
+  return false;
+}
+
+function scheduleOpenNotificationsSheet() {
+  scheduleNotificationNavigation(() => {
+    navigateToHome();
+    requestOpenNotificationSheet();
+  });
+}
 
 function isReplyAction(actionId: string) {
   return actionId === "REPLY" || actionId.endsWith(":REPLY") || actionId.endsWith(".REPLY");
@@ -79,18 +117,42 @@ function isAppReadyForNotificationNavigation() {
   return !AUTH_FLOW_ROUTES.has(route);
 }
 
+function stopPendingRetry() {
+  if (pendingRetryTimer) {
+    clearInterval(pendingRetryTimer);
+    pendingRetryTimer = null;
+  }
+}
+
 export function runPendingNotificationNavigation() {
   if (!pendingAction || !isAppReadyForNotificationNavigation()) return;
   const action = pendingAction;
   pendingAction = null;
+  stopPendingRetry();
+  if (__DEV__) console.log("[notif] running pending navigation");
   action();
+}
+
+/** Tap can arrive before the navigator is mounted; keep retrying until it can navigate. */
+function startPendingRetry() {
+  stopPendingRetry();
+  const startedAt = Date.now();
+  pendingRetryTimer = setInterval(() => {
+    if (!pendingAction || Date.now() - startedAt > PENDING_RETRY_MAX_MS) {
+      stopPendingRetry();
+      return;
+    }
+    runPendingNotificationNavigation();
+  }, PENDING_RETRY_MS);
 }
 
 export function scheduleNotificationNavigation(action: () => void) {
   pendingAction = action;
   if (isAppReadyForNotificationNavigation()) {
     runPendingNotificationNavigation();
+    return;
   }
+  startPendingRetry();
 }
 
 function peerIdFromData(data: Record<string, unknown>) {
@@ -264,11 +326,16 @@ export async function handleNotificationResponse(
   const title = String(response.notification.request.content.title || "").trim() || "Someone";
   const type = String(data.type || "");
   const actionId = response.actionIdentifier;
+  if (__DEV__) {
+    console.log("[notif] tap received", { type, actionId, peer: peerIdFromData(data) });
+  }
 
   if (isReplyAction(actionId)) {
     await handleInlineReply(response, options);
     return;
   }
+
+  if (isDuplicateTap(data, actionId)) return;
 
   if (type === "incoming_call" && isDeclineCallAction(actionId)) {
     await clearNotificationReplyUi(response);
@@ -347,9 +414,10 @@ export async function handleNotificationResponse(
     }
   } else if (type === "direct_message") {
     const senderId = peerIdFromData(data);
+    const peerName = String(data.peerName || data.actorName || title).trim() || title;
     if (senderId) {
       schedule(() => {
-        navigateToDirectChat({ peerUserId: senderId, peerName: title });
+        navigateToDirectChat({ peerUserId: senderId, peerName });
       });
     } else {
       schedule(() => navigateToDirectInbox());
@@ -366,8 +434,13 @@ export async function handleNotificationResponse(
     const postId = Number(data.postId);
     if (Number.isFinite(postId) && postId > 0) {
       scheduleOpenPost(postId, options?.authToken);
-      scheduled = true;
+    } else {
+      scheduleOpenNotificationsSheet();
     }
+    scheduled = true;
+  } else if (FOLLOW_NOTIFICATION_TYPES.has(type)) {
+    scheduleOpenNotificationsSheet();
+    scheduled = true;
   }
 
   if (scheduled) {
