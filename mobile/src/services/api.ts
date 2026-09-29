@@ -563,10 +563,12 @@ export async function updateMyProfile(
   })) as AuthResponse;
 }
 
-export async function fetchMapsConfig(token: string) {
+export async function fetchMapsConfig(token?: string | null) {
   const envKey = String((process.env as Record<string, string | undefined>).EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "").trim();
+  const auth = String(token || "").trim();
+  if (!auth) return { configured: Boolean(envKey), key: envKey };
   try {
-    const data = (await fetchWithAuth(`${API_BASE_URL}/v1/places/maps-config`, token)) as {
+    const data = (await fetchWithAuth(`${API_BASE_URL}/v1/places/maps-config`, auth)) as {
       configured?: boolean;
       key?: string;
     };
