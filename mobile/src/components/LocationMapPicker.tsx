@@ -1,13 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "../auth/AuthContext";
+import { fetchMapsConfig } from "../services/api";
 import { APP_BLACK, APP_TEXT } from "../theme/appColors";
-import { DEFAULT_WEB_APP_ORIGIN } from "../utils/webAppOrigin";
-
-/** Maps JS API reads this as the HTTP referrer. Must match the browser key restriction. */
-const MAPS_WEBVIEW_ORIGIN = DEFAULT_WEB_APP_ORIGIN;
+const FALLBACK_LAT = 20.5937;
+const FALLBACK_LNG = 78.9629;
 
 export type PickedMapLocation = {
   label: string;
@@ -25,6 +25,15 @@ type Props = {
   onSelect: (value: PickedMapLocation) => void;
 };
 
+function hasSavedMapCoords(lat?: number | null, lng?: number | null) {
+  if (lat == null || lng == null) return false;
+  const la = Number(lat);
+  const ln = Number(lng);
+  if (!Number.isFinite(la) || !Number.isFinite(ln)) return false;
+  if (Math.abs(la) < 0.05 && Math.abs(ln) < 0.05) return false;
+  return la >= -90 && la <= 90 && ln >= -180 && ln <= 180;
+}
+
 function escapeHtml(value: string) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -33,35 +42,28 @@ function escapeHtml(value: string) {
 }
 
 function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng?: number | null) {
-  const startLat = Number.isFinite(Number(lat)) ? Number(lat) : 20.5937;
-  const startLng = Number.isFinite(Number(lng)) ? Number(lng) : 78.9629;
-  const startZoom = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng)) ? 16 : 5;
-  const hasPoint = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
-  const initialPicked = hasPoint
+  const saved = hasSavedMapCoords(lat, lng);
+  const startLat = saved ? Number(lat) : FALLBACK_LAT;
+  const startLng = saved ? Number(lng) : FALLBACK_LNG;
+  const startZoom = saved ? 16 : 5;
+  const initialPicked = saved
     ? JSON.stringify({ label: label || `${startLat}, ${startLng}`, lat: startLat, lng: startLng })
     : "null";
-  const useGoogle = Boolean(apiKey);
 
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-  ${
-    useGoogle
-      ? ""
-      : '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>'
-  }
   <style>
     html,body{margin:0;height:100%;background:#111;color:#fff;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}
     .wrap{display:flex;flex-direction:column;height:100%}
     .search{display:flex;gap:8px;padding:10px}
     #q{flex:1;min-width:0;border:1px solid #3a3a3a;background:#1d1d1d;color:#fff;border-radius:10px;padding:10px 12px;font-size:16px}
     #me,#go{border:1px solid #3a3a3a;background:transparent;color:#fff;border-radius:10px;padding:10px;font-weight:700}
-    #map{flex:1;min-height:240px;background:#d7d3c8}
-    .leaflet-container{background:#d7d3c8;height:100%;width:100%}
+    #map{flex:1;min-height:240px;background:#1a1a1a}
     .bar{padding:10px 12px 16px}
-    #addr{margin:0 0 10px;font-size:13px;color:#c4c4c4}
+    #hint,#addr{margin:0 0 8px;font-size:13px;color:#c4c4c4}
     #ok{width:100%;border:none;background:#c9ff35;color:#111;font-weight:800;border-radius:12px;padding:12px;font-size:15px}
     #ok:disabled{opacity:.45}
     .pac-container{z-index:10000}
@@ -70,14 +72,15 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
 <body>
   <div class="wrap">
     <div class="search">
-      <input id="q" placeholder="Search maps" value=${JSON.stringify(label)} autocomplete="off"/>
+      <input id="q" placeholder="Search Google Maps" value=${JSON.stringify(label)} autocomplete="off"/>
       <button id="go" type="button">Search</button>
       <button id="me" type="button">My location</button>
     </div>
     <div id="map"></div>
     <div class="bar">
+      <p id="hint"></p>
       <p id="addr">${escapeHtml(label) || "Search, tap the map, or drag the pin."}</p>
-      <button id="ok" type="button" ${hasPoint ? "" : "disabled"}>Use this location</button>
+      <button id="ok" type="button" ${saved ? "" : "disabled"}>Use this location</button>
     </div>
   </div>
   <script>
@@ -90,6 +93,10 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
       }
     }
     var picked = ${initialPicked};
+    var hasSaved = ${saved ? "true" : "false"};
+    function setHint(text) {
+      document.getElementById("hint").textContent = text || "";
+    }
     function setPicked(next) {
       picked = next;
       var addr = document.getElementById("addr");
@@ -100,10 +107,6 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
     document.getElementById("ok").onclick = function() {
       if (picked) send({ t: "ok", label: picked.label, lat: picked.lat, lng: picked.lng });
     };
-  </script>
-  ${
-    useGoogle
-      ? `<script>
     window.gm_authFailure = function() {
       send({ t: "maps-error" });
     };
@@ -117,9 +120,10 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
         var map = new maps.Map(document.getElementById("map"), {
           center: start, zoom: ${startZoom}, mapTypeControl: false, streetViewControl: false, fullscreenControl: false
         });
-        var marker = new maps.Marker({ map: map, position: start, draggable: true });
+        var marker = new maps.Marker({ map: map, position: start, draggable: true, visible: hasSaved });
         var geocoder = new maps.Geocoder();
         function applyPoint(nextLat, nextLng, nextLabel) {
+          marker.setVisible(true);
           marker.setPosition({ lat: nextLat, lng: nextLng });
           map.setCenter({ lat: nextLat, lng: nextLng });
           map.setZoom(16);
@@ -142,10 +146,30 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
           geocoder.geocode({ address: q }, function(results, status) {
             if (status !== "OK" || !results || !results[0] || !results[0].geometry) return;
             var loc = results[0].geometry.location;
+            setHint("");
             applyPoint(loc.lat(), loc.lng(), results[0].formatted_address);
           });
         }
-        map.addListener("click", function(e) { if (e.latLng) applyPoint(e.latLng.lat(), e.latLng.lng()); });
+        function onLocationDenied() {
+          marker.setVisible(false);
+          setPicked(null);
+          setHint("Location permission denied. Search for your place.");
+          try { document.getElementById("q").focus(); } catch (_e) {}
+        }
+        function requestDeviceLocation() {
+          if (!navigator.geolocation) {
+            onLocationDenied();
+            return;
+          }
+          setHint("Finding your current location…");
+          navigator.geolocation.getCurrentPosition(function(pos) {
+            setHint("");
+            applyPoint(pos.coords.latitude, pos.coords.longitude);
+          }, function() {
+            onLocationDenied();
+          }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+        }
+        map.addListener("click", function(e) { if (e.latLng) { setHint(""); applyPoint(e.latLng.lat(), e.latLng.lng()); } });
         marker.addListener("dragend", function() {
           var p = marker.getPosition();
           if (p) applyPoint(p.lat(), p.lng());
@@ -158,31 +182,94 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
             var place = autocomplete.getPlace();
             if (!place || !place.geometry || !place.geometry.location) return;
             var loc = place.geometry.location;
+            setHint("");
             applyPoint(loc.lat(), loc.lng(), place.formatted_address || place.name);
           });
-        } catch (_placesErr) {
-          // Places library can fail independently; Search still uses Geocoder.
-        }
+        } catch (_placesErr) {}
         document.getElementById("go").onclick = searchPlace;
         document.getElementById("q").addEventListener("keydown", function(e) {
           if (e.key === "Enter") { e.preventDefault(); searchPlace(); }
         });
-        document.getElementById("me").onclick = function() {
-          if (!navigator.geolocation) return;
-          navigator.geolocation.getCurrentPosition(function(pos) {
-            applyPoint(pos.coords.latitude, pos.coords.longitude);
-          });
-        };
-        if (picked) setPicked(picked);
+        document.getElementById("me").onclick = requestDeviceLocation;
+        if (hasSaved) {
+          setPicked(picked);
+        } else {
+          requestDeviceLocation();
+        }
       } catch (_err) {
         send({ t: "maps-error" });
       }
     }
   </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=initGoogle&loading=async" async onerror="send({ t: 'maps-error' })"></script>`
-      : `<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=initGoogle&loading=async" async onerror="send({ t: 'maps-error' })"></script>
+</body>
+</html>`;
+}
+
+function embedSrc(lat: number, lng: number, zoom: number) {
+  return `https://maps.google.com/maps?q=${lat},${lng}&z=${zoom}&output=embed`;
+}
+
+function buildEmbedPickerHtml(label: string, lat?: number | null, lng?: number | null) {
+  const saved = hasSavedMapCoords(lat, lng);
+  const startLat = saved ? Number(lat) : FALLBACK_LAT;
+  const startLng = saved ? Number(lng) : FALLBACK_LNG;
+  const startZoom = saved ? 16 : 5;
+  const initialPicked = saved
+    ? JSON.stringify({ label: label || `${startLat}, ${startLng}`, lat: startLat, lng: startLng })
+    : "null";
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <style>
+    html,body{margin:0;height:100%;background:#111;color:#fff;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}
+    .wrap{display:flex;flex-direction:column;height:100%}
+    .search{display:flex;gap:8px;padding:10px}
+    #q{flex:1;min-width:0;border:1px solid #3a3a3a;background:#1d1d1d;color:#fff;border-radius:10px;padding:10px 12px;font-size:16px}
+    #me,#go{border:1px solid #3a3a3a;background:transparent;color:#fff;border-radius:10px;padding:10px;font-weight:700}
+    #map{flex:1;min-height:240px;border:0;background:#1a1a1a}
+    .bar{padding:10px 12px 16px}
+    #hint,#addr{margin:0 0 8px;font-size:13px;color:#c4c4c4}
+    #ok{width:100%;border:none;background:#c9ff35;color:#111;font-weight:800;border-radius:12px;padding:12px;font-size:15px}
+    #ok:disabled{opacity:.45}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="search">
+      <input id="q" placeholder="Search Google Maps" value=${JSON.stringify(label)} autocomplete="off"/>
+      <button id="go" type="button">Search</button>
+      <button id="me" type="button">My location</button>
+    </div>
+    <iframe id="map" title="Google Map" src="${embedSrc(startLat, startLng, startZoom)}"></iframe>
+    <div class="bar">
+      <p id="hint"></p>
+      <p id="addr">${escapeHtml(label) || "Search or use My location."}</p>
+      <button id="ok" type="button" ${saved ? "" : "disabled"}>Use this location</button>
+    </div>
+  </div>
   <script>
-    function reverseOsm(nextLat, nextLng, nextLabel) {
+    function send(payload) {
+      var raw = JSON.stringify(payload);
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(raw);
+      } else if (window.parent && window.parent !== window) {
+        window.parent.postMessage(raw, "*");
+      }
+    }
+    var picked = ${initialPicked};
+    var hasSaved = ${saved ? "true" : "false"};
+    function setHint(text) { document.getElementById("hint").textContent = text || ""; }
+    function setPicked(next) {
+      picked = next;
+      document.getElementById("addr").textContent = next ? next.label : "Search or use My location.";
+      document.getElementById("ok").disabled = !next;
+    }
+    function showPoint(nextLat, nextLng, nextLabel, zoom) {
+      document.getElementById("map").src = "https://maps.google.com/maps?q=" + nextLat + "," + nextLng + "&z=" + (zoom || 16) + "&output=embed";
       if (nextLabel) {
         setPicked({ label: nextLabel, lat: nextLat, lng: nextLng });
         document.getElementById("q").value = nextLabel;
@@ -198,78 +285,102 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
         setPicked({ label: nextLat.toFixed(5) + ", " + nextLng.toFixed(5), lat: nextLat, lng: nextLng });
       });
     }
-    var map = L.map("map", { zoomControl: true }).setView([${startLat}, ${startLng}], ${startZoom});
-    var streetTiles = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
-      maxZoom: 19,
-      attribution: "Tiles &copy; Esri"
-    });
-    var cartoTiles = L.tileLayer("https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png", {
-      maxZoom: 20,
-      attribution: "&copy; OpenStreetMap, &copy; CARTO"
-    });
-    streetTiles.on("tileerror", function() {
-      if (!map.hasLayer(cartoTiles)) {
-        map.removeLayer(streetTiles);
-        cartoTiles.addTo(map);
-      }
-    });
-    streetTiles.addTo(map);
-    var marker = L.marker([${startLat}, ${startLng}], { draggable: true }).addTo(map);
-    function applyPoint(nextLat, nextLng, nextLabel) {
-      marker.setLatLng([nextLat, nextLng]);
-      map.setView([nextLat, nextLng], Math.max(map.getZoom(), 16));
-      reverseOsm(nextLat, nextLng, nextLabel);
+    function onLocationDenied() {
+      setPicked(null);
+      setHint("Location permission denied. Search for your place.");
+      document.getElementById("map").src = "${embedSrc(FALLBACK_LAT, FALLBACK_LNG, 5)}";
+      try { document.getElementById("q").focus(); } catch (_e) {}
     }
-    map.on("click", function(e) { applyPoint(e.latlng.lat, e.latlng.lng); });
-    marker.on("dragend", function() {
-      var p = marker.getLatLng();
-      applyPoint(p.lat, p.lng);
-    });
+    function requestDeviceLocation() {
+      if (!navigator.geolocation) { onLocationDenied(); return; }
+      setHint("Finding your current location…");
+      navigator.geolocation.getCurrentPosition(function(pos) {
+        setHint("");
+        showPoint(pos.coords.latitude, pos.coords.longitude);
+      }, function() { onLocationDenied(); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+    }
     function searchPlace() {
       var q = String(document.getElementById("q").value || "").trim();
       if (!q) return;
       fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q), {
         headers: { "Accept": "application/json" }
       }).then(function(r){ return r.json(); }).then(function(rows) {
-        if (!rows || !rows[0]) return;
-        applyPoint(Number(rows[0].lat), Number(rows[0].lon), rows[0].display_name);
-      }).catch(function(){});
+        if (!rows || !rows[0]) { setHint("No matching place found."); return; }
+        setHint("");
+        showPoint(Number(rows[0].lat), Number(rows[0].lon), rows[0].display_name);
+      }).catch(function() { setHint("Search failed. Try another place name."); });
     }
+    document.getElementById("ok").onclick = function() {
+      if (picked) send({ t: "ok", label: picked.label, lat: picked.lat, lng: picked.lng });
+    };
     document.getElementById("go").onclick = searchPlace;
     document.getElementById("q").addEventListener("keydown", function(e) {
       if (e.key === "Enter") { e.preventDefault(); searchPlace(); }
     });
-    document.getElementById("me").onclick = function() {
-      if (!navigator.geolocation) return;
-      navigator.geolocation.getCurrentPosition(function(pos) {
-        applyPoint(pos.coords.latitude, pos.coords.longitude);
-      });
-    };
-    if (picked) setPicked(picked);
-    function resizeMap() {
-      map.invalidateSize();
-    }
-    setTimeout(resizeMap, 80);
-    setTimeout(resizeMap, 300);
-    setTimeout(resizeMap, 800);
-  </script>`
-  }
+    document.getElementById("me").onclick = requestDeviceLocation;
+    if (hasSaved) setPicked(picked);
+    else requestDeviceLocation();
+  </script>
 </body>
 </html>`;
 }
 
+const MAPS_WEBVIEW_ORIGINS = ["https://www.cropvibe.com/", "https://cropvibe.com/"];
+
 export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSelect }: Props) {
   const insets = useSafeAreaInsets();
-  const [googleFailed, setGoogleFailed] = useState(false);
-  const effectiveKey = googleFailed ? "" : String(apiKey || "");
-  const html = useMemo(
-    () => buildPickerHtml(effectiveKey, label, lat, lng),
-    [effectiveKey, label, lat, lng]
-  );
+  const { token } = useAuth();
+  const saved = hasSavedMapCoords(lat, lng);
+  const [androidGeoReady, setAndroidGeoReady] = useState(saved || Platform.OS !== "android");
+  const [configReady, setConfigReady] = useState(false);
+  const [resolvedKey, setResolvedKey] = useState("");
+  const [originIndex, setOriginIndex] = useState(0);
+  const [useEmbed, setUseEmbed] = useState(false);
 
   useEffect(() => {
-    if (!open) setGoogleFailed(false);
-  }, [open]);
+    if (!open) {
+      setConfigReady(false);
+      setResolvedKey("");
+      setOriginIndex(0);
+      setUseEmbed(false);
+      setAndroidGeoReady(hasSavedMapCoords(lat, lng) || Platform.OS !== "android");
+      return;
+    }
+    let active = true;
+    void fetchMapsConfig(token)
+      .then((config) => {
+        if (!active) return;
+        const key = String(config.key || apiKey || "").trim();
+        setResolvedKey(key);
+        setUseEmbed(!key);
+        setConfigReady(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        const key = String(apiKey || "").trim();
+        setResolvedKey(key);
+        setUseEmbed(!key);
+        setConfigReady(true);
+      });
+    if (hasSavedMapCoords(lat, lng) || Platform.OS !== "android") {
+      setAndroidGeoReady(true);
+    } else {
+      setAndroidGeoReady(false);
+      void PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION).finally(() => {
+        if (active) setAndroidGeoReady(true);
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [open, token, apiKey, lat, lng]);
+
+  const html = useMemo(() => {
+    if (useEmbed || !resolvedKey) return buildEmbedPickerHtml(label, lat, lng);
+    return buildPickerHtml(resolvedKey, label, lat, lng);
+  }, [useEmbed, resolvedKey, label, lat, lng]);
+
+  const baseUrl = MAPS_WEBVIEW_ORIGINS[Math.min(originIndex, MAPS_WEBVIEW_ORIGINS.length - 1)];
 
   useEffect(() => {
     if (!open || Platform.OS !== "web") return;
@@ -277,7 +388,11 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
       try {
         const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
         if (data?.t === "maps-error") {
-          setGoogleFailed(true);
+          if (originIndex < MAPS_WEBVIEW_ORIGINS.length - 1) {
+            setOriginIndex((i) => i + 1);
+            return;
+          }
+          setUseEmbed(true);
           return;
         }
         if (data?.t === "ok" && typeof data.label === "string") {
@@ -289,13 +404,17 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [open, onSelect]);
+  }, [open, onSelect, originIndex]);
 
   const onWebViewMessage = (raw: string) => {
     try {
       const data = JSON.parse(raw) as { t?: string; label?: string; lat?: number; lng?: number };
       if (data?.t === "maps-error") {
-        setGoogleFailed(true);
+        if (originIndex < MAPS_WEBVIEW_ORIGINS.length - 1) {
+          setOriginIndex((i) => i + 1);
+          return;
+        }
+        setUseEmbed(true);
         return;
       }
       if (data?.t === "ok" && data.label && Number.isFinite(Number(data.lat)) && Number.isFinite(Number(data.lng))) {
@@ -305,6 +424,8 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
       // ignore
     }
   };
+
+  const showMap = configReady && androidGeoReady;
 
   return (
     <Modal visible={open} animationType="slide" onRequestClose={onClose}>
@@ -316,15 +437,20 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
           <Text style={styles.title}>Select location</Text>
           <View style={styles.headBtn} />
         </View>
-        {Platform.OS === "web"
-          ? React.createElement("iframe", {
-              title: "Map location picker",
-              srcDoc: html,
-              style: { flex: 1, width: "100%", border: "none", backgroundColor: APP_BLACK }
-            })
-          : (
+        {!showMap ? (
+          <View style={styles.fallback}>
+            <Text style={styles.fallbackBody}>Loading Google Maps…</Text>
+          </View>
+        ) : Platform.OS === "web" ? (
+          React.createElement("iframe", {
+            title: "Map location picker",
+            srcDoc: html,
+            style: { flex: 1, width: "100%", border: "none", backgroundColor: APP_BLACK }
+          })
+        ) : (
           <WebView
-            source={{ html, baseUrl: `${MAPS_WEBVIEW_ORIGIN}/` }}
+            key={`${useEmbed ? "embed" : "js"}-${originIndex}-${resolvedKey ? "k" : "n"}`}
+            source={{ html, baseUrl }}
             originWhitelist={["*"]}
             javaScriptEnabled
             domStorageEnabled
@@ -354,5 +480,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8
   },
   headBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  title: { color: APP_TEXT, fontSize: 16, fontWeight: "800" }
+  title: { color: APP_TEXT, fontSize: 16, fontWeight: "800" },
+  fallback: { flex: 1, justifyContent: "center", paddingHorizontal: 24 },
+  fallbackBody: { color: "#c4c4c4", fontSize: 14, lineHeight: 20, textAlign: "center" }
 });
