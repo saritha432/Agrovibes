@@ -45,8 +45,9 @@ export function WeatherPage() {
       setReport(next);
       setQuery("");
       setSuggestions([]);
-    } catch {
-      setError("Could not load weather. Try another location.");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      setError(msg === "LOCATION_REQUIRED" ? "Set your location in profile or search a place to see live weather." : "Could not load weather. Try another location.");
     } finally {
       setLoading(false);
     }
@@ -149,6 +150,15 @@ export function WeatherPage() {
             {report.location.district || report.location.label} · {report.disclaimer} {report.source} ·{" "}
             {report.updatedLabel}.
           </p>
+          {report.current ? (
+            <section className="weather-page__now" aria-label="Current weather">
+              <span className="weather-page__day-name">Now</span>
+              <WeatherGlyph icon={report.current.icon} />
+              <strong>{report.current.tempC}°</strong>
+              <span>{report.current.condition}</span>
+              <small>Rain {report.current.rainChance}%</small>
+            </section>
+          ) : null}
           {report.alert ? (
             <div className="weather-page__alert" role="status">
               <strong>{report.alert.title}</strong>

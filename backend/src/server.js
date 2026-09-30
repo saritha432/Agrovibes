@@ -80,6 +80,11 @@ initSocketChat(server, { corsOrigins: allowedOrigins });
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`Cropvibe backend running on port ${PORT} (PostgreSQL + Socket.IO)`);
+  try {
+    require("./googleMaps").logMapsConfigStatus();
+  } catch {
+    // ignore
+  }
 
   // Ensure default admin login exists (info@cropvibe.com) unless disabled.
   if (String(process.env.ADMIN_ENSURE_DEFAULT || "true").toLowerCase() !== "false") {
@@ -126,5 +131,12 @@ server.listen(PORT, () => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.warn("[hls] init skipped:", error?.message || error);
+  }
+
+  try {
+    require("./weatherAlerts").startWeatherAlertPolling();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[weather-alerts] init skipped:", error?.message || error);
   }
 });

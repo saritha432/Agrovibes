@@ -469,6 +469,8 @@ function socialPushCopy({ type, actorName, commentExcerpt }) {
       return { title: actor, body: excerpt || "Message" };
     case "live_share":
       return { title: actor, body: excerpt || "Live video" };
+    case "weather_alert":
+      return { title: "Weather alert", body: excerpt || "Check today's farm weather." };
     default:
       return { title: "Cropvibe", body: `${actor} sent you a notification` };
   }

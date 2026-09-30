@@ -40,6 +40,7 @@ function profilePath(actorId: number, viewerId?: number | null) {
 }
 
 function postPath(entry: SocialPostActivityNotification) {
+  if (String(entry.type || "") === "weather_alert") return "/weather";
   const postId = Number(entry.postId);
   if (!Number.isFinite(postId) || postId <= 0) return profilePath(entry.actorId);
   if (entry.postIsReel || String(entry.type || "").startsWith("live_")) return `/watch/${postId}`;

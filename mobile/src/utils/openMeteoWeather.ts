@@ -35,13 +35,6 @@ export type WeatherReport = {
   alert: { title: string; body: string } | null;
 };
 
-const DEFAULT_LOCATION: WeatherPlace = {
-  label: "India",
-  district: "India",
-  lat: 20.5937,
-  lng: 78.9629
-};
-
 export function isUsableLatLng(lat?: number | null, lng?: number | null): boolean {
   if (lat == null || lng == null) return false;
   const la = Number(lat);
@@ -54,7 +47,9 @@ export function isUsableLatLng(lat?: number | null, lng?: number | null): boolea
 function wmoMeta(code: unknown): { condition: string; icon: WeatherIconName; summary: string } {
   const n = Number(code);
   if (n === 0) return { condition: "Clear", icon: "sunny", summary: "Clear" };
-  if (n <= 3) return { condition: n === 1 ? "Mostly clear" : "Partly cloudy", icon: "partly-cloudy", summary: "Haze" };
+  if (n === 1) return { condition: "Mostly clear", icon: "partly-cloudy", summary: "Mostly clear" };
+  if (n === 2) return { condition: "Partly cloudy", icon: "partly-cloudy", summary: "Partly cloudy" };
+  if (n === 3) return { condition: "Overcast", icon: "cloudy", summary: "Overcast" };
   if (n <= 48) return { condition: "Fog", icon: "fog", summary: "Fog" };
   if (n <= 57) return { condition: "Drizzle", icon: "rain", summary: "Drizzle" };
   if (n <= 67) return { condition: "Rain", icon: "rain", summary: "Showers" };
@@ -92,8 +87,9 @@ function fieldWorkHint(rainChance: number, icon: WeatherIconName) {
   if (icon === "storm") return "Storm risk — pause outdoor work";
   if (rainChance >= 60) return "Rain — delay field work";
   if (rainChance >= 35) return "Possible showers";
-  if (icon === "sunny") return "Hot afternoon";
-  return "Clear";
+  if (icon === "sunny") return "Good for field work";
+  if (icon === "cloudy" || icon === "partly-cloudy") return "Overcast";
+  return "Fair";
 }
 
 function buildAlert(days: WeatherDay[]) {
@@ -132,6 +128,21 @@ async function fetchJson(url: string) {
   return res.json();
 }
 
+function nearestHourIndex(times: string[] | undefined, iso: string | undefined) {
+  if (!Array.isArray(times) || !times.length) return -1;
+  const target = Date.parse(iso || "") || Date.now();
+  let best = 0;
+  let bestDiff = Infinity;
+  for (let i = 0; i < times.length; i++) {
+    const diff = Math.abs(Date.parse(times[i] || "") - target);
+    if (Number.isFinite(diff) && diff < bestDiff) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
+}
+
 export async function searchOpenMeteoPlaces(query: string, limit = 6): Promise<WeatherPlace[]> {
   const q = String(query || "").trim();
   if (q.length < 2) return [];
@@ -161,7 +172,7 @@ async function resolvePlace(params?: { q?: string; lat?: number; lng?: number })
     const hits = await searchOpenMeteoPlaces(query, 1);
     if (hits[0]) return hits[0];
   }
-  return DEFAULT_LOCATION;
+  throw new Error("LOCATION_REQUIRED");
 }
 
 export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; lng?: number }): Promise<WeatherReport> {
@@ -169,14 +180,28 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
   const search = new URLSearchParams({
     latitude: String(place.lat),
     longitude: String(place.lng),
-    current: "temperature_2m,weather_code,precipitation_probability",
+    current: "temperature_2m,weather_code,precipitation,cloud_cover,is_day",
+    hourly: "precipitation_probability,weather_code,temperature_2m",
     daily: "weather_code,temperature_2m_max,precipitation_probability_max",
     forecast_days: "5",
     timezone: "auto"
   });
   const data = (await fetchJson(`https://api.open-meteo.com/v1/forecast?${search.toString()}`)) as {
     timezone?: string;
-    current?: { time?: string; temperature_2m?: number; weather_code?: number; precipitation_probability?: number };
+    current?: {
+      time?: string;
+      temperature_2m?: number;
+      weather_code?: number;
+      precipitation?: number;
+      cloud_cover?: number;
+      is_day?: number;
+    };
+    hourly?: {
+      time?: string[];
+      precipitation_probability?: number[];
+      weather_code?: number[];
+      temperature_2m?: number[];
+    };
     daily?: {
       time?: string[];
       weather_code?: number[];
@@ -204,6 +229,11 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
   });
   const currentMeta = wmoMeta(data?.current?.weather_code);
   const generated = data?.current?.time || new Date().toISOString();
+  const hourIndex = nearestHourIndex(data?.hourly?.time, generated);
+  const hourlyRain = hourIndex >= 0 ? Number(data?.hourly?.precipitation_probability?.[hourIndex]) : NaN;
+  const currentRain = Number.isFinite(hourlyRain)
+    ? hourlyRain
+    : Number(days[0]?.rainChance || 0);
   return {
     location: place,
     updatedAt: generated,
@@ -212,10 +242,7 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
     disclaimer: "CropVibe is not a government service.",
     current: {
       tempC: Math.round(Number(data?.current?.temperature_2m || days[0]?.tempC || 0)),
-      rainChance: Math.max(
-        0,
-        Math.min(100, Number(data?.current?.precipitation_probability || days[0]?.rainChance || 0))
-      ),
+      rainChance: Math.max(0, Math.min(100, currentRain)),
       condition: currentMeta.condition,
       icon: currentMeta.icon
     },
