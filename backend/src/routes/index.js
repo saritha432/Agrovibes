@@ -327,6 +327,7 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS phone TEXT UNIQUE`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS avatar_url TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS cover_url TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS bio TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS website TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
@@ -962,6 +963,7 @@ function authUserFromRow(row) {
     phone: row.phone || undefined,
     username,
     avatarUrl: stripLegacyCloudinaryUrl(row.avatarUrl) || undefined,
+    coverUrl: stripLegacyCloudinaryUrl(row.coverUrl) || undefined,
     bio: row.bio || undefined,
     website: row.website || undefined,
     locationLabel: row.locationLabel || undefined,
@@ -980,6 +982,7 @@ const authUserSelect = `
   phone,
   username,
   avatar_url AS "avatarUrl",
+  cover_url AS "coverUrl",
   bio,
   website,
   location_label AS "locationLabel",
@@ -2670,7 +2673,63 @@ async function ensureHomeStoriesTable() {
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS user_id INT REFERENCES learn_users(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS video_url TEXT`);
   await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS image_url TEXT`);
+  await query(`ALTER TABLE home_stories ADD COLUMN IF NOT EXISTS creative_meta JSONB`);
   homeStoriesTableReady = true;
+}
+
+/** Text overlay + fit for stories whose media can't be baked (videos / shared reels). */
+function sanitizeStoryCreativeMeta(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const text = String(raw.text || "").trim().slice(0, 220);
+  const color = /^#[0-9a-f]{6}$/i.test(String(raw.textColor || "")) ? String(raw.textColor) : "#ffffff";
+  const position = ["top", "center", "bottom"].includes(raw.textPosition) ? raw.textPosition : "center";
+  const fit = raw.fit === "cover" ? "cover" : "contain";
+  const sourcePostId = Number(raw.sourcePostId);
+  const fraction = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
+  };
+  const textX = fraction(raw.textX);
+  const textY = fraction(raw.textY);
+  const stickers = (Array.isArray(raw.stickers) ? raw.stickers : [])
+    .slice(0, 20)
+    .map((s, i) => ({
+      id: String(s?.id || i).slice(0, 40),
+      emoji: String(s?.emoji || "").trim().slice(0, 16),
+      x: fraction(s?.x) ?? 0.5,
+      y: fraction(s?.y) ?? 0.5
+    }))
+    .filter((s) => s.emoji);
+  const meta = {
+    text,
+    textColor: color,
+    textBackground: Boolean(raw.textBackground),
+    textPosition: position,
+    ...(textX != null && textY != null ? { textX, textY } : {}),
+    ...(stickers.length ? { stickers } : {}),
+    fit,
+    sourcePostId: Number.isFinite(sourcePostId) && sourcePostId > 0 ? sourcePostId : null
+  };
+  if (!meta.text && !stickers.length && meta.fit === "contain" && !meta.sourcePostId) return null;
+  return meta;
+}
+
+let homeStoryLikesTableReady = false;
+async function ensureHomeStoryLikesTable() {
+  if (homeStoryLikesTableReady) return;
+  await ensureHomeStoriesTable();
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS home_story_likes (
+      story_id INT NOT NULL REFERENCES home_stories(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (story_id, user_id)
+    )
+    `
+  );
+  homeStoryLikesTableReady = true;
 }
 
 let homeStoryViewsTableReady = false;
@@ -2690,6 +2749,7 @@ async function ensureHomeStoryViewsTable() {
     `
   );
   await query(`CREATE INDEX IF NOT EXISTS idx_home_story_views_story ON home_story_views(story_id, created_at DESC)`);
+  await ensureHomeStoryLikesTable();
   homeStoryViewsTableReady = true;
 }
 
@@ -4413,6 +4473,11 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
     const locationLat = locationLabel ? parseMapCoord(req.body?.locationLat, -90, 90) : null;
     const locationLng = locationLabel ? parseMapCoord(req.body?.locationLng, -180, 180) : null;
     const avatarUrl = stripLegacyCloudinaryUrl(String(req.body?.avatarUrl || "").trim().slice(0, 1000));
+    // Older app builds never send coverUrl; only touch the column when the field is present.
+    const hasCoverField = Object.prototype.hasOwnProperty.call(req.body || {}, "coverUrl");
+    const coverUrl = hasCoverField
+      ? stripLegacyCloudinaryUrl(String(req.body?.coverUrl || "").trim().slice(0, 1000)) || null
+      : null;
 
     if (!fullName) {
       res.status(400).json({ message: "Name is required" });
@@ -4447,11 +4512,24 @@ router.put("/v1/auth/me", authRequired, async (req, res) => {
         location_label = $5,
         location_lat = $6,
         location_lng = $7,
-        avatar_url = $8
+        avatar_url = $8,
+        cover_url = CASE WHEN $10::BOOLEAN THEN $11 ELSE cover_url END
       WHERE id = $9
       RETURNING ${authUserSelect}
       `,
-      [fullName, nextUsername, bio, website, locationLabel, locationLat, locationLng, avatarUrl, req.user.userId]
+      [
+        fullName,
+        nextUsername,
+        bio,
+        website,
+        locationLabel,
+        locationLat,
+        locationLng,
+        avatarUrl,
+        req.user.userId,
+        hasCoverField,
+        coverUrl
+      ]
     );
     const user = authUserFromRow(updated.rows[0]);
     if (!user) {
@@ -4524,6 +4602,7 @@ router.get("/v1/social/profile-stats/:userId", authRequired, async (req, res) =>
         u.full_name AS "fullName",
         u.username,
         u.avatar_url AS "avatarUrl",
+        u.cover_url AS "coverUrl",
         u.bio,
         u.website,
         u.location_label AS "locationLabel",
@@ -6280,8 +6359,15 @@ async function loadVisibleStoriesForViewer(viewerId, { authorUserIds = null, aut
         WHERE hsv.story_id = s.id
           AND hsv.viewer_id = $1::integer
       ) AS viewed,
+      EXISTS (
+        SELECT 1
+        FROM home_story_likes hsl
+        WHERE hsl.story_id = s.id
+          AND hsl.user_id = $1::integer
+      ) AS "viewerHasLiked",
       s.video_url AS "videoUrl",
       s.image_url AS "imageUrl",
+      s.creative_meta AS "creativeMeta",
       s.created_at AS "createdAt",
       COALESCE(
         NULLIF(TRIM(lu.avatar_url), ''),
@@ -6408,6 +6494,7 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
   try {
     await ensureHomeStoriesTable();
     const { userName, district, videoUrl, imageUrl } = req.body || {};
+    const creativeMeta = sanitizeStoryCreativeMeta(req.body?.creativeMeta);
     if (!userName || !district) {
       res.status(400).json({ message: "userName and district are required" });
       return;
@@ -6426,8 +6513,8 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
     }
     const result = await query(
       `
-      INSERT INTO home_stories (user_id, user_name, district, avatar_label, has_new, viewed, video_url, image_url)
-      VALUES ($1, $2, $3, $4, true, false, $5, $6)
+      INSERT INTO home_stories (user_id, user_name, district, avatar_label, has_new, viewed, video_url, image_url, creative_meta)
+      VALUES ($1, $2, $3, $4, true, false, $5, $6, $7::jsonb)
       RETURNING
         id,
         user_id AS "userId",
@@ -6438,6 +6525,7 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
         viewed,
         video_url AS "videoUrl",
         image_url AS "imageUrl",
+        creative_meta AS "creativeMeta",
         created_at AS "createdAt"
       `,
       [
@@ -6446,7 +6534,8 @@ router.post("/v1/home/stories", authOptional, async (req, res) => {
         district,
         avatarLabel,
         stripLegacyCloudinaryUrl(videoUrl),
-        stripLegacyCloudinaryUrl(imageUrl)
+        stripLegacyCloudinaryUrl(imageUrl),
+        creativeMeta ? JSON.stringify(creativeMeta) : null
       ]
     );
 
@@ -6576,25 +6665,40 @@ router.get("/v1/home/stories/:storyId/viewers", authRequired, async (req, res) =
           u.full_name AS "fullName",
           NULLIF(TRIM(u.username), '') AS "username",
           NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
-          v.created_at AS "viewedAt"
+          v.created_at AS "viewedAt",
+          l.created_at AS "likedAt"
         FROM home_story_views v
         JOIN learn_users u ON u.id = v.viewer_id
+        LEFT JOIN home_story_likes l ON l.story_id = v.story_id AND l.user_id = v.viewer_id
         WHERE v.story_id = $1
-        ORDER BY v.created_at DESC
+        ORDER BY (l.created_at IS NOT NULL) DESC, v.created_at DESC
         LIMIT 200
         `,
         [storyId]
       ),
-      query(`SELECT COUNT(*)::int AS count FROM home_story_views WHERE story_id = $1`, [storyId])
+      query(
+        `
+        SELECT
+          (SELECT COUNT(*)::int FROM home_story_views WHERE story_id = $1) AS count,
+          (SELECT COUNT(*)::int FROM home_story_likes WHERE story_id = $1) AS "likesCount"
+        `,
+        [storyId]
+      )
     ]);
     const viewers = result.rows.map((row) => ({
       userId: row.userId,
       fullName: sanitizePersonDisplayName(row.fullName, row.username),
       username: row.username || null,
       avatarUrl: row.avatarUrl || null,
-      viewedAt: row.viewedAt
+      viewedAt: row.viewedAt,
+      liked: row.likedAt != null,
+      likedAt: row.likedAt || null
     }));
-    res.json({ viewers, count: Number(countRes.rows[0]?.count) || viewers.length });
+    res.json({
+      viewers,
+      count: Number(countRes.rows[0]?.count) || viewers.length,
+      likesCount: Number(countRes.rows[0]?.likesCount) || 0
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to load story viewers", error: error.message });
   }
@@ -6676,24 +6780,44 @@ router.post("/v1/home/stories/:storyId/like", authRequired, async (req, res) => 
       res.status(400).json({ message: "You cannot like your own story" });
       return;
     }
-    const message = await insertStoryDm({
-      me,
-      ownerId: story.ownerId,
-      storyId,
-      text: "❤️",
-      previewUrl: story.imageUrl || story.previewUrl,
-      imageUrl: story.imageUrl,
-      videoUrl: story.videoUrl,
-      userName: story.userName,
-      kind: "like"
-    });
-    res.status(201).json({ ok: true, liked: true, message });
+    await ensureHomeStoryViewsTable();
+    // Likes show next to the viewer in the author's viewers list (not as a DM).
+    await query(
+      `INSERT INTO home_story_views (story_id, viewer_id) VALUES ($1, $2) ON CONFLICT (story_id, viewer_id) DO NOTHING`,
+      [storyId, me]
+    );
+    await query(
+      `INSERT INTO home_story_likes (story_id, user_id) VALUES ($1, $2) ON CONFLICT (story_id, user_id) DO NOTHING`,
+      [storyId, me]
+    );
+    const gen = await cacheGenString("home:stories:gen");
+    await cacheDel(`v3:home:stories:${gen}:${me}`);
+    emitStoryViewed({ viewerId: me, storyId, storyUserId: story.ownerId });
+    res.status(201).json({ ok: true, liked: true });
   } catch (error) {
     if (error && error.statusCode === 404) {
       res.status(404).json({ message: error.message || "Story author not found" });
       return;
     }
     res.status(500).json({ message: "Failed to like story", error: error.message });
+  }
+});
+
+router.delete("/v1/home/stories/:storyId/like", authRequired, async (req, res) => {
+  try {
+    await ensureHomeStoryLikesTable();
+    const storyId = Number(req.params.storyId);
+    const me = Number(req.user.userId);
+    if (!Number.isFinite(storyId) || storyId <= 0) {
+      res.status(400).json({ message: "Valid storyId is required" });
+      return;
+    }
+    await query(`DELETE FROM home_story_likes WHERE story_id = $1 AND user_id = $2`, [storyId, me]);
+    const gen = await cacheGenString("home:stories:gen");
+    await cacheDel(`v3:home:stories:${gen}:${me}`);
+    res.json({ ok: true, liked: false });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to unlike story", error: error.message });
   }
 });
 
@@ -10214,12 +10338,14 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
       FROM home_posts p
       LEFT JOIN learn_users owner ON owner.id = p.user_id
       WHERE p.id = $1
+        AND p.deleted_at IS NULL
       LIMIT 1
       `,
       [postId]
     );
     if (!result.rows[0]) {
-      res.status(404).send("Post not found");
+      res.setHeader("Cache-Control", "no-store");
+      res.status(404).send("This post is no longer available");
       return;
     }
     let post = sanitizeHomePostRowMedia(normalizeHomePostRow(result.rows[0]));
@@ -10235,7 +10361,8 @@ async function handleSharePostPage(req, res, sharePath = "reel") {
       };
     }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=300");
+    // Short TTL so a deleted post stops being served from caches soon after deletion.
+    res.setHeader("Cache-Control", "public, max-age=60");
     res.send(
       buildShareReelHtml(post, {
         postId,

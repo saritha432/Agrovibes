@@ -581,7 +581,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingVertical: 28
   },
-  footerScroll: { flexGrow: 0, marginTop: 4 },
+  // ScrollView shrinks by default; keep the labels under the icons from being clipped by a long recipients list.
+  footerScroll: { flexGrow: 0, flexShrink: 0, marginTop: 4 },
   footerRow: {
     paddingTop: 14,
     paddingBottom: 2,

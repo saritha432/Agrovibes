@@ -163,6 +163,7 @@ export interface AuthResponse {
     phone?: string;
     username?: string;
     avatarUrl?: string;
+    coverUrl?: string;
     bio?: string;
     website?: string;
     locationLabel?: string;
@@ -554,6 +555,8 @@ export async function updateMyProfile(
     locationLat?: number | null;
     locationLng?: number | null;
     avatarUrl?: string;
+    /** Send `null` to remove the cover; omit to leave it unchanged. */
+    coverUrl?: string | null;
   }
 ) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me`, token, {
@@ -867,8 +870,26 @@ export interface HomeStory {
   videoUrl?: string | null;
   imageUrl?: string | null;
   musicLabel?: string | null;
+  creativeMeta?: StoryCreativeMeta | null;
+  viewerHasLiked?: boolean;
   createdAt?: string;
 }
+
+export type StorySticker = { id: string; emoji: string; x: number; y: number };
+
+export type StoryCreativeMeta = {
+  text?: string;
+  textColor?: string;
+  textBackground?: boolean;
+  textPosition?: "top" | "center" | "bottom";
+  /** Dragged text centre as a 0–1 fraction of the story frame (overrides textPosition). */
+  textX?: number;
+  textY?: number;
+  stickers?: StorySticker[];
+  /** "contain" shows the whole media; "cover" crops it to fill the screen. */
+  fit?: "contain" | "cover";
+  sourcePostId?: number | null;
+};
 
 export interface HomePost {
   id: number;
@@ -1103,7 +1124,14 @@ export async function fetchActiveHomeStories(token: string, userIds: number[]) {
 }
 
 export async function createHomeStory(
-  payload: { userName: string; district: string; videoUrl?: string; imageUrl?: string; musicLabel?: string },
+  payload: {
+    userName: string;
+    district: string;
+    videoUrl?: string;
+    imageUrl?: string;
+    musicLabel?: string;
+    creativeMeta?: StoryCreativeMeta | null;
+  },
   token?: string | null
 ) {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -1125,6 +1153,8 @@ export type StoryViewer = {
   username?: string | null;
   avatarUrl?: string | null;
   viewedAt?: string;
+  liked?: boolean;
+  likedAt?: string | null;
 };
 
 export async function deleteHomeStory(token: string, storyId: number) {
@@ -1143,6 +1173,7 @@ export async function fetchHomeStoryViewers(token: string, storyId: number) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/viewers`, token)) as {
     viewers: StoryViewer[];
     count: number;
+    likesCount?: number;
   };
 }
 
@@ -1824,6 +1855,7 @@ export async function fetchProfileStats(token: string, userId: number) {
     fullName: string;
     username?: string | null;
     avatarUrl?: string | null;
+    coverUrl?: string | null;
     bio?: string | null;
     website?: string | null;
     locationLabel?: string | null;
@@ -2143,18 +2175,17 @@ export async function replyToHomeStory(token: string, storyId: number, text: str
   }
 }
 
-export async function likeHomeStory(token: string, storyId: number, ctx?: StoryDmContext) {
-  try {
-    return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/like`, token, {
-      method: "POST"
-    })) as { ok: boolean; liked: boolean; message: DirectMessageItem };
-  } catch (error: unknown) {
-    const status = (error as { status?: number })?.status;
-    if (status === 404) {
-      return sendStoryDmViaThread(token, storyId, "❤️", "like", ctx);
-    }
-    throw error;
-  }
+/** Likes are shown in the author's viewers list; they are not sent to chat. */
+export async function likeHomeStory(token: string, storyId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/like`, token, {
+    method: "POST"
+  })) as { ok: boolean; liked: boolean };
+}
+
+export async function unlikeHomeStory(token: string, storyId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/home/stories/${encodeURIComponent(String(storyId))}/like`, token, {
+    method: "DELETE"
+  })) as { ok: boolean; liked: boolean };
 }
 
 export async function deleteDirectMessage(
