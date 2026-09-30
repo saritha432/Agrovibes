@@ -613,6 +613,13 @@ export function DirectChatScreen() {
     };
   }, [peerUserId, peerUsernameParam, token]);
 
+  const [sharedPostRevalidateTick, setSharedPostRevalidateTick] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setSharedPostRevalidateTick((n) => n + 1);
+    }, [])
+  );
+
   useEffect(() => {
     if (!token || !messages.length) return;
     const ids = Array.from(
@@ -628,19 +635,39 @@ export function DirectChatScreen() {
       if (cancelled) return;
       if (Object.keys(posts).length) {
         setHydratedPostsById((prev) => ({ ...prev, ...posts }));
+        setUnavailablePostIds((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          for (const id of Object.keys(posts)) {
+            if (next[Number(id)]) {
+              delete next[Number(id)];
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
       }
       if (unavailableIds.length) {
+        const gone = new Set(unavailableIds);
         setUnavailablePostIds((prev) => {
           const next = { ...prev };
           for (const id of unavailableIds) next[id] = true;
           return next;
         });
+        setHydratedPostsById((prev) => {
+          const next = { ...prev };
+          for (const id of unavailableIds) delete next[id];
+          return next;
+        });
+        setSharedReelViewer((current) =>
+          current && current.posts.some((post) => gone.has(Number(post.id))) ? null : current
+        );
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [messages, token]);
+  }, [messages, token, sharedPostRevalidateTick]);
 
   useEffect(() => {
     return subscribePostDeleted((postId) => {
@@ -1910,7 +1937,7 @@ export function DirectChatScreen() {
                     </Pressable>
                     {storyReply.kind === "like" ? (
                       <Text style={styles.storyLikeHeart}>❤️</Text>
-                    ) : (
+                    ) : !storyReply.text ? null : (
                       <Text style={[styles.bubbleText, isSelf ? styles.bubbleTextSelf : styles.bubbleTextPeer]}>
                         {storyReply.text}
                       </Text>

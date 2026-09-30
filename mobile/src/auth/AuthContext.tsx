@@ -14,6 +14,7 @@ export interface AuthUser {
   phone?: string;
   username?: string;
   avatarUrl?: string;
+  coverUrl?: string;
   bio?: string;
   website?: string;
   dateOfBirth?: string;
@@ -159,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         phone: data.user.phone,
         username: data.user.username,
         avatarUrl: data.user.avatarUrl,
+        coverUrl: data.user.coverUrl,
         bio: data.user.bio,
         website: data.user.website,
         locationLabel: data.user.locationLabel,

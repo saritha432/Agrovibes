@@ -15,6 +15,7 @@ import type { HomeStory } from "../services/api";
 import { APP_LIME } from "../theme/appColors";
 import { videoPlaybackUrl } from "../utils/videoPlaybackUrl";
 import { UserAvatar } from "./UserAvatar";
+import { StoryTextOverlay } from "./StoryTextOverlay";
 
 const STORY_IMAGE_MS = 5000;
 const APP_DARK_BG = "#0b0b0b";
@@ -164,7 +165,7 @@ export function StoryViewerModal({ visible, stories, initialIndex = 0, onClose }
             <AppVideo
               source={videoPlaybackUrl(activeStory.videoUrl)}
               style={styles.media}
-              contentFit="contain"
+              contentFit={activeStory.creativeMeta?.fit === "cover" ? "cover" : "contain"}
               shouldPlay
               isLooping={false}
               nativeControls={false}
@@ -174,8 +175,13 @@ export function StoryViewerModal({ visible, stories, initialIndex = 0, onClose }
               }}
             />
           ) : activeStory?.imageUrl ? (
-            <Image source={{ uri: activeStory.imageUrl }} style={styles.media} resizeMode="contain" />
+            <Image
+              source={{ uri: activeStory.imageUrl }}
+              style={styles.media}
+              resizeMode={activeStory.creativeMeta?.fit === "cover" ? "cover" : "contain"}
+            />
           ) : null}
+          <StoryTextOverlay meta={activeStory?.creativeMeta} />
 
           <View style={styles.tapZones} pointerEvents="box-none">
             <Pressable style={styles.tapZone} onPress={goPrev} />

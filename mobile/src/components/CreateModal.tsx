@@ -30,6 +30,8 @@ import { captureRef } from "react-native-view-shot";
 import { FeedImage } from "./FeedImage";
 import { AppVideo } from "./AppVideo";
 import { AppEmojiPicker } from "./AppEmojiPicker";
+import { DraggableOverlay, OverlayTrashZone, type OverlayPoint } from "./DraggableOverlay";
+import { StorySticker as StoryStickerGlyph } from "./StoryTextOverlay";
 import {
   createHomePost,
   createHomeStory,
@@ -40,7 +42,8 @@ import {
   updateHomePostLiveVideo,
   uploadImageFile,
   uploadPickedMedia,
-  type HomePost
+  type HomePost,
+  type StorySticker
 } from "../services/api";
 import { launchWebCameraAsyncWithFacing } from "../utils/webCameraPicker";
 import { useAuth } from "../auth/AuthContext";
@@ -428,6 +431,20 @@ type MediaCreativeProps = {
   textBackground: boolean;
   musicLabel?: string;
   shouldPlay?: boolean;
+  /** When set, text / stickers / music tag are draggable (story editor). */
+  drag?: CreativeDragProps;
+};
+
+type CreativeDragProps = {
+  textPoint: OverlayPoint;
+  onTextMove: (p: OverlayPoint) => void;
+  onTextPress: () => void;
+  onTextRemove: () => void;
+  stickers: StorySticker[];
+  onStickerMove: (id: string, p: OverlayPoint) => void;
+  onStickerRemove: (id: string) => void;
+  musicPoint: OverlayPoint;
+  onMusicMove: (p: OverlayPoint) => void;
 };
 
 function PostComposeThumbnail({ uri, isVideo }: { uri: string; isVideo?: boolean }) {
@@ -460,25 +477,98 @@ function PostComposeThumbnail({ uri, isVideo }: { uri: string; isVideo?: boolean
 }
 
 const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
-  { uri, isVideo, filter, overlayText, font, textColor, textBackground, musicLabel, shouldPlay = true },
+  { uri, isVideo, filter, overlayText, font, textColor, textBackground, musicLabel, shouldPlay = true, drag },
   ref
 ) {
   const tint = filterTint(filter);
+  const [frame, setFrame] = React.useState({ width: 0, height: 0 });
+  const [dragState, setDragState] = React.useState({ active: false, overTrash: false });
+  const onDragActiveChange = React.useCallback(
+    (active: boolean, overTrash: boolean) =>
+      setDragState((prev) => (prev.active === active && prev.overTrash === overTrash ? prev : { active, overTrash })),
+    []
+  );
+  const media = (
+    <View style={StyleSheet.absoluteFillObject}>
+      {isVideo ? (
+        <AppVideo
+          style={{ width: "100%", height: "100%" }}
+          source={uri}
+          shouldPlay={shouldPlay}
+          isLooping
+          contentFit="contain"
+        />
+      ) : (
+        <Image style={{ width: "100%", height: "100%" }} source={{ uri }} resizeMode="contain" />
+      )}
+    </View>
+  );
+
+  if (drag) {
+    const text = overlayText.trim();
+    return (
+      <View
+        ref={ref}
+        collapsable={false}
+        style={{ flex: 1, width: "100%" }}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setFrame((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+        }}
+      >
+        {media}
+        {tint ? <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: tint }]} /> : null}
+        {frame.width > 0 ? (
+          <>
+            {text ? (
+              <DraggableOverlay
+                position={drag.textPoint}
+                containerWidth={frame.width}
+                containerHeight={frame.height}
+                onMove={drag.onTextMove}
+                onPress={drag.onTextPress}
+                onRemove={drag.onTextRemove}
+                onDragActiveChange={onDragActiveChange}
+              >
+                <Text style={[{ textAlign: "center" }, creativeFontStyle(font, textColor, textBackground)]}>{text}</Text>
+              </DraggableOverlay>
+            ) : null}
+            {drag.stickers.map((s) => (
+              <DraggableOverlay
+                key={s.id}
+                position={{ x: s.x, y: s.y }}
+                containerWidth={frame.width}
+                containerHeight={frame.height}
+                onMove={(p) => drag.onStickerMove(s.id, p)}
+                onRemove={() => drag.onStickerRemove(s.id)}
+                onDragActiveChange={onDragActiveChange}
+              >
+                <StoryStickerGlyph emoji={s.emoji} />
+              </DraggableOverlay>
+            ))}
+            {musicLabel ? (
+              <DraggableOverlay
+                position={drag.musicPoint}
+                containerWidth={frame.width}
+                containerHeight={frame.height}
+                onMove={drag.onMusicMove}
+                onDragActiveChange={onDragActiveChange}
+              >
+                <View style={styles.creativeMusicPill}>
+                  <Text style={styles.creativeMusicPillText} numberOfLines={1}>♪ {musicLabel}</Text>
+                </View>
+              </DraggableOverlay>
+            ) : null}
+            <OverlayTrashZone visible={dragState.active} active={dragState.overTrash} />
+          </>
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View ref={ref} collapsable={false} style={{ flex: 1, width: "100%" }}>
-      <View style={StyleSheet.absoluteFillObject}>
-        {isVideo ? (
-          <AppVideo
-            style={{ width: "100%", height: "100%" }}
-            source={uri}
-            shouldPlay={shouldPlay}
-            isLooping
-            contentFit="contain"
-          />
-        ) : (
-          <Image style={{ width: "100%", height: "100%" }} source={{ uri }} resizeMode="contain" />
-        )}
-      </View>
+      {media}
       {tint ? <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: tint }]} /> : null}
       {overlayText.trim().length > 0 ? (
         <Text
@@ -682,6 +772,9 @@ export function CreateModal({
   const [creativeFont, setCreativeFont] = useState<CreativeFontId>("classic");
   const [creativeTextColor, setCreativeTextColor] = useState<CreativeTextColor>("white");
   const [creativeTextBackground, setCreativeTextBackground] = useState(false);
+  const [storyTextPoint, setStoryTextPoint] = useState<OverlayPoint>({ x: 0.5, y: 0.5 });
+  const [storyMusicPoint, setStoryMusicPoint] = useState<OverlayPoint>({ x: 0.5, y: 0.9 });
+  const [storyStickers, setStoryStickers] = useState<StorySticker[]>([]);
   const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
   const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
   const [showStickerPanel, setShowStickerPanel] = useState(false);
@@ -781,17 +874,25 @@ export function CreateModal({
     }
   }
 
+  /** Bumped on every start/stop so a preview that finishes loading after Remove/Done never plays. */
+  const audioPreviewRequestRef = useRef(0);
+
   const stopAudioPreview = React.useCallback(async () => {
+    audioPreviewRequestRef.current += 1;
+    setAudioPreviewTrackId(null);
     const sound = audioPreviewRef.current;
+    audioPreviewRef.current = null;
     if (!sound) return;
     try {
       await sound.stopAsync();
+    } catch {
+      // ignore preview cleanup errors
+    }
+    try {
       await sound.unloadAsync();
     } catch {
       // ignore preview cleanup errors
     }
-    audioPreviewRef.current = null;
-    setAudioPreviewTrackId(null);
   }, []);
 
   const previewAudioTrack = React.useCallback(
@@ -801,6 +902,8 @@ export function CreateModal({
         return;
       }
       await stopAudioPreview();
+      const requestId = audioPreviewRequestRef.current;
+      setAudioPreviewTrackId(track.id);
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -809,15 +912,32 @@ export function CreateModal({
           playThroughEarpieceAndroid: false
         });
         const sound = new Audio.Sound();
-        await sound.loadAsync({ uri: track.previewUrl }, { shouldPlay: true, isLooping: true });
+        await sound.loadAsync({ uri: track.previewUrl }, { shouldPlay: false, isLooping: true });
+        if (audioPreviewRequestRef.current !== requestId) {
+          await sound.unloadAsync().catch(() => {});
+          return;
+        }
         audioPreviewRef.current = sound;
-        setAudioPreviewTrackId(track.id);
+        await sound.playAsync();
       } catch {
-        setErrorText(t("createErrAudioPreview"));
+        if (audioPreviewRequestRef.current === requestId) {
+          setAudioPreviewTrackId(null);
+          setErrorText(t("createErrAudioPreview"));
+        }
       }
     },
     [audioPreviewTrackId, stopAudioPreview]
   );
+
+  const removeSelectedAudio = React.useCallback(() => {
+    Keyboard.dismiss();
+    setSelectedAudioTrackId(null);
+    setAudioQuery("");
+    setAudioSearchResults([]);
+    setAudioSearchError("");
+    setShowAudioPanel(false);
+    void stopAudioPreview();
+  }, [stopAudioPreview]);
 
   React.useEffect(() => {
     if (!visible) {
@@ -886,6 +1006,9 @@ export function CreateModal({
     setCreativeFont("classic");
     setCreativeTextColor("white");
     setCreativeTextBackground(false);
+    setStoryTextPoint({ x: 0.5, y: 0.5 });
+    setStoryMusicPoint({ x: 0.5, y: 0.9 });
+    setStoryStickers([]);
     setShowCreativeTextPanel(false);
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
@@ -1225,6 +1348,21 @@ export function CreateModal({
       return null;
     }
   }
+
+  const storyDrag: CreativeDragProps = {
+    textPoint: storyTextPoint,
+    onTextMove: setStoryTextPoint,
+    onTextPress: () => openCreativePanel("text"),
+    onTextRemove: () => {
+      setCreativeText("");
+      setStoryTextPoint({ x: 0.5, y: 0.5 });
+    },
+    stickers: storyStickers,
+    onStickerMove: (id, p) => setStoryStickers((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s))),
+    onStickerRemove: (id) => setStoryStickers((prev) => prev.filter((s) => s.id !== id)),
+    musicPoint: storyMusicPoint,
+    onMusicMove: setStoryMusicPoint
+  };
 
   const proceedToCompose = async () => {
     let composed: string | null = null;
@@ -1965,7 +2103,9 @@ export function CreateModal({
         const storyIsImage = shouldUseImageUpload(pickedStoryVideoUri, pickedStoryAsset);
         let storyUri = pickedStoryVideoUri;
         let storyAssetForUpload: ImagePicker.ImagePickerAsset | undefined = pickedStoryAsset ?? undefined;
-        if (storyIsImage && (creativeText.trim() || creativeFilter !== "none")) {
+        const hasStoryOverlays = !!creativeText.trim() || storyStickers.length > 0;
+        if (storyIsImage && (hasStoryOverlays || creativeFilter !== "none" || selectedAudioLabel)) {
+          // Image stories bake the dragged text/stickers into the uploaded picture.
           const snap = await snapshotComposedImage();
           if (snap) {
             storyUri = snap;
@@ -1974,11 +2114,27 @@ export function CreateModal({
         }
         if (!storyIsImage) await validateVideoSize(storyUri, 30);
         const { url: storyUrl } = await uploadPickedMedia(storyUri, storyAssetForUpload);
+        // Video can't be baked on-device, so overlays + their positions ride along as metadata.
+        const videoStoryMeta =
+          !storyIsImage && hasStoryOverlays
+            ? {
+                creativeMeta: {
+                  text: creativeText.trim(),
+                  textColor: creativeTextColorHex(creativeTextColor).toLowerCase(),
+                  textBackground: creativeTextBackground,
+                  textX: storyTextPoint.x,
+                  textY: storyTextPoint.y,
+                  stickers: storyStickers,
+                  fit: "contain" as const
+                }
+              }
+            : {};
         await createHomeStory({
           userName: user?.fullName?.trim() || "Farmer",
           district: user?.locationLabel?.trim() || "Unknown",
           ...(selectedAudioLabel ? { musicLabel: selectedAudioLabel } : {}),
-          ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl })
+          ...(storyIsImage ? { imageUrl: storyUrl } : { videoUrl: storyUrl }),
+          ...videoStoryMeta
         }, token ?? null);
       } else {
         if (!caption.trim()) {
@@ -3471,6 +3627,7 @@ export function CreateModal({
                       textColor={creativeTextColor}
                       textBackground={creativeTextBackground}
                       musicLabel={selectedAudioLabel}
+                      drag={storyDrag}
                     />
                   ) : (
                     <MediaWithCreative
@@ -3483,6 +3640,7 @@ export function CreateModal({
                       textColor={creativeTextColor}
                       textBackground={creativeTextBackground}
                       musicLabel={selectedAudioLabel}
+                      drag={storyDrag}
                     />
                   )
                 ) : (
@@ -3998,12 +4156,7 @@ export function CreateModal({
               <Pressable
                 style={styles.secondaryBtn}
                 hitSlop={8}
-                onPress={() => {
-                  Keyboard.dismiss();
-                  setSelectedAudioTrackId(null);
-                  setShowAudioPanel(false);
-                  void stopAudioPreview();
-                }}
+                onPress={removeSelectedAudio}
                 accessibilityRole="button"
                 accessibilityLabel="Remove audio"
               >
@@ -4203,7 +4356,17 @@ export function CreateModal({
       open={showStickerPanel}
       allowMultiple
       onClose={() => setShowStickerPanel(false)}
-      onSelect={(emoji) => setCreativeText((t) => (t ? `${t} ${emoji}` : emoji))}
+      onSelect={(emoji) => {
+        if (createType === "story") {
+          setStoryStickers((prev) =>
+            prev.length >= 20
+              ? prev
+              : [...prev, { id: `${Date.now()}-${prev.length}`, emoji, x: 0.5, y: 0.35 + (prev.length % 5) * 0.06 }]
+          );
+          return;
+        }
+        setCreativeText((t) => (t ? `${t} ${emoji}` : emoji));
+      }}
     />
 
     <Modal visible={showEditPanel} transparent animationType="fade" onRequestClose={() => setShowEditPanel(false)}>
@@ -4396,6 +4559,13 @@ export function CreateModal({
 }
 
 const styles = StyleSheet.create({
+  creativeMusicPill: {
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(0,0,0,0.5)"
+  },
+  creativeMusicPillText: { color: "#fff", fontSize: 12, fontWeight: "700", textAlign: "center" },
   igPostEntryRoot: {
     flex: 1,
     backgroundColor: "#262626"

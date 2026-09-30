@@ -225,22 +225,23 @@ function optionalUrl(value: unknown): string | null {
 function storyPayloadFromRow(parsed: Record<string, unknown>): StoryDmPayload | null {
   if (!looksLikeStoryPayload(parsed)) return null;
   const kind = String(parsed.kind || "").toLowerCase() === "like" ? "like" : "reply";
+  const forwarded =
+    parsed.forwarded === true ||
+    parsed.forwarded === "true" ||
+    String(parsed.kind || "").toLowerCase() === "forward";
   const text = String(parsed.text || "").trim() || (kind === "like" ? "❤️" : "");
-  if (!text && kind !== "like") return null;
+  if (!text && kind !== "like" && !forwarded) return null;
   const imageUrl = optionalUrl(parsed.imageUrl);
   return {
     storyId: Number(parsed.storyId) > 0 ? Number(parsed.storyId) : undefined,
     ownerId: Number(parsed.ownerId) > 0 ? Number(parsed.ownerId) : undefined,
-    text: text || "❤️",
+    text,
     kind,
     previewUrl: optionalUrl(parsed.previewUrl) || imageUrl,
     imageUrl,
     videoUrl: optionalUrl(parsed.videoUrl),
     userName: String(parsed.userName || "").trim() || "Story",
-    forwarded:
-      parsed.forwarded === true ||
-      parsed.forwarded === "true" ||
-      String(parsed.kind || "").toLowerCase() === "forward"
+    forwarded
   };
 }
 
@@ -316,6 +317,27 @@ export function markStoryDmForwarded(body: string): string {
     videoUrl: story.videoUrl || null,
     userName: story.userName || "Story",
     kind: story.kind,
+    forwarded: true
+  })}`;
+}
+
+/** Body for sharing a story into a chat from the story viewer (no reply text). */
+export function buildStoryForwardDmBody(story: {
+  storyId: number;
+  ownerId?: number | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  userName?: string | null;
+}): string {
+  return `${DM_STORY_PREFIX} ${JSON.stringify({
+    storyId: story.storyId,
+    ownerId: story.ownerId || null,
+    text: "",
+    previewUrl: story.imageUrl || null,
+    imageUrl: story.imageUrl || null,
+    videoUrl: story.videoUrl || null,
+    userName: story.userName || "Story",
+    kind: "forward",
     forwarded: true
   })}`;
 }

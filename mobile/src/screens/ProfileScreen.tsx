@@ -200,6 +200,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const [mutualsSheetOpen, setMutualsSheetOpen] = useState(false);
   const [incomingFollowId, setIncomingFollowId] = useState<number | null>(null);
   const [publicAvatarUrl, setPublicAvatarUrl] = useState<string | null | undefined>(publicAvatarFromRoute);
+  const [publicCoverUrl, setPublicCoverUrl] = useState<string | null>(null);
   const [publicBio, setPublicBio] = useState("");
   const [followPublicBusy, setFollowPublicBusy] = useState(false);
   const [userPosts, setUserPosts] = useState<HomePost[]>([]);
@@ -252,6 +253,10 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
   const displayAvatarUrl = useMemo(
     () => stripLegacyCloudinaryUrl(isPublicProfileView ? publicAvatarUrl : user?.avatarUrl),
     [isPublicProfileView, publicAvatarUrl, user?.avatarUrl]
+  );
+  const displayCoverUrl = useMemo(
+    () => stripLegacyCloudinaryUrl(isPublicProfileView ? publicCoverUrl : user?.coverUrl) || null,
+    [isPublicProfileView, publicCoverUrl, user?.coverUrl]
   );
   const avatarPreviewSize = Math.min(320, Math.max(200, Math.min(width, windowHeight) * 0.68));
 
@@ -700,6 +705,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           ? String(publicAvatarFromRoute).trim()
           : null;
       setPublicAvatarUrl(fromApi ?? fromRoute);
+      setPublicCoverUrl(String(stats.coverUrl || "").trim() || null);
     } catch {
       setFollowersCount(0);
       setFollowingCount(0);
@@ -1584,6 +1590,9 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       <DeactivatedChromeWrap active={showDeactivatedGallery}>
       <>
         <View style={styles.profileCard}>
+          {displayCoverUrl ? (
+            <Image source={{ uri: displayCoverUrl }} style={styles.coverImage} resizeMode="cover" />
+          ) : null}
           <View style={styles.headerMidRow}>
             <View style={styles.avatarPresenceWrap}>
               <StoryRingAvatar
@@ -1804,6 +1813,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
       profileSubject?.avatarUrl,
       profileSubject?.bio,
       profileSubject?.fullName,
+      displayCoverUrl,
       profileHeaderHandle,
       publicFollowLabel,
       publicFollowDisabled,
@@ -1930,7 +1940,6 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
           </ScrollView>
         ) : profileSubject ? (
           <FlatList
-            key={activeGalleryTab}
             style={styles.screen}
             contentContainerStyle={styles.scrollBottom}
             data={showDeactivatedGallery || galleryLoading ? [] : visiblePosts}
@@ -2418,6 +2427,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     backgroundColor: PAGE_BG,
     paddingBottom: 4
+  },
+  coverImage: {
+    width: "100%",
+    aspectRatio: 5 / 2,
+    borderRadius: 14,
+    marginBottom: 14,
+    backgroundColor: "#1f1f1f"
   },
   headerMidRow: { flexDirection: "row", alignItems: "center", gap: 16 },
   headerInfo: { flex: 1, minWidth: 0 },

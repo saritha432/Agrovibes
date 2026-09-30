@@ -146,6 +146,10 @@ export function EditProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || "");
   const [pendingAvatarUri, setPendingAvatarUri] = useState<string | null>(null);
   const [removeAvatarPending, setRemoveAvatarPending] = useState(false);
+  const [coverUrl] = useState(user?.coverUrl || "");
+  const [pendingCoverUri, setPendingCoverUri] = useState<string | null>(null);
+  const [removeCoverPending, setRemoveCoverPending] = useState(false);
+  const [coverOptionsOpen, setCoverOptionsOpen] = useState(false);
   const [isSaving, setSaving] = useState(false);
   const [photoOptionsOpen, setPhotoOptionsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -200,6 +204,7 @@ export function EditProfileScreen() {
     locationLat?: number | null;
     locationLng?: number | null;
     avatarUrl?: string;
+    coverUrl?: string;
   };
 
   const buildPersistedUser = (serverUser: any, patch: payloadFallback) => {
@@ -226,6 +231,7 @@ export function EditProfileScreen() {
   );
 
   const displayAvatarUri = removeAvatarPending ? "" : pendingAvatarUri || avatarUrl;
+  const displayCoverUri = removeCoverPending ? "" : pendingCoverUri || coverUrl;
 
   const save = async () => {
     const name = fullName.trim();
@@ -264,13 +270,22 @@ export function EditProfileScreen() {
     };
     setSaving(true);
     try {
+      let finalCoverUrl: string | null = removeCoverPending ? null : coverUrl || null;
+      if (!removeCoverPending && pendingCoverUri) {
+        try {
+          finalCoverUrl = (await uploadImageFile(pendingCoverUri)).url;
+        } catch {
+          throw new Error("Could not upload the cover photo. Please try again.");
+        }
+      }
+      const persistedPatch = { ...payload, coverUrl: finalCoverUrl || undefined };
       if (token) {
-        const updated = await updateMyProfile(token, payload);
+        const updated = await updateMyProfile(token, { ...payload, coverUrl: finalCoverUrl });
         const nextToken = updated.token || token;
-        const mergedUser = buildPersistedUser(updated.user, payload);
+        const mergedUser = buildPersistedUser(updated.user, persistedPatch);
         await signIn({ token: nextToken, user: mergedUser });
       } else {
-        await updateUser(payload);
+        await updateUser(persistedPatch);
       }
       if (gender) {
         await AsyncStorage.setItem(genderStorageKey(user?.id), gender);
@@ -342,6 +357,36 @@ export function EditProfileScreen() {
     setPhotoOptionsOpen(true);
   };
 
+  const openCoverOptions = () => {
+    if (isSaving) return;
+    setCoverOptionsOpen(true);
+  };
+
+  const pickCoverPhoto = async () => {
+    setCoverOptionsOpen(false);
+    const access = await ensureMediaLibraryAccess();
+    if (!access.granted) {
+      Alert.alert(t("permissionNeeded"), t("photoLibraryPermission"));
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+      // iOS editing only offers a square crop, which would cut most of a wide banner.
+      allowsEditing: Platform.OS === "android",
+      aspect: [5, 2]
+    });
+    if (picked.canceled || !picked.assets?.[0]?.uri) return;
+    setPendingCoverUri(picked.assets[0].uri);
+    setRemoveCoverPending(false);
+  };
+
+  const removeCoverPhoto = () => {
+    setPendingCoverUri(null);
+    setRemoveCoverPending(true);
+    setCoverOptionsOpen(false);
+  };
+
   const inputProps = Platform.OS === "web" ? ({ outlineStyle: "none" } as const) : null;
 
   return (
@@ -376,7 +421,27 @@ export function EditProfileScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.heroWrap}>
-              <ProfileBannerBackground />
+              <Pressable
+                onPress={openCoverOptions}
+                disabled={isSaving}
+                style={({ pressed }) => (pressed ? styles.avatarWrapPressed : null)}
+                accessibilityRole="button"
+                accessibilityLabel={displayCoverUri ? "Change cover photo" : "Add cover photo"}
+              >
+                {displayCoverUri ? (
+                  <View style={styles.banner}>
+                    <Image source={{ uri: displayCoverUri }} style={styles.coverImage} resizeMode="cover" />
+                  </View>
+                ) : (
+                  <ProfileBannerBackground />
+                )}
+                <View style={styles.coverEditPill} pointerEvents="none">
+                  <Ionicons name={displayCoverUri ? "pencil" : "image-outline"} size={14} color="#fff" />
+                  <Text style={styles.coverEditPillText} numberOfLines={1}>
+                    {displayCoverUri ? "Edit cover" : "Add cover"}
+                  </Text>
+                </View>
+              </Pressable>
 
               <Pressable
                 onPress={openPhotoOptions}
@@ -545,6 +610,33 @@ export function EditProfileScreen() {
         </Pressable>
       </Modal>
 
+      <Modal visible={coverOptionsOpen} transparent animationType="fade" onRequestClose={() => setCoverOptionsOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setCoverOptionsOpen(false)}>
+          <Pressable style={styles.photoSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.photoSheetTitle}>{displayCoverUri ? "Change cover photo" : "Add cover photo"}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.photoSheetAction, pressed ? styles.pickerOptionPressed : null]}
+              onPress={() => void pickCoverPhoto()}
+            >
+              <Ionicons name="images-outline" size={20} color={TEXT} />
+              <Text style={styles.photoSheetActionText}>Gallery</Text>
+            </Pressable>
+            {displayCoverUri ? (
+              <Pressable
+                style={({ pressed }) => [styles.photoSheetAction, pressed ? styles.pickerOptionPressed : null]}
+                onPress={removeCoverPhoto}
+              >
+                <Ionicons name="trash-outline" size={20} color="#f87171" />
+                <Text style={styles.pickerOptionDanger}>Remove cover photo</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.photoSheetCancel} onPress={() => setCoverOptionsOpen(false)}>
+              <Text style={styles.photoSheetCancelText}>{t("cancel")}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {mapOpen ? (
         <LocationMapPicker
           open={mapOpen}
@@ -666,6 +758,20 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#ffffff"
   },
+  coverImage: { width: "100%", height: "100%" },
+  coverEditPill: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.55)"
+  },
+  coverEditPillText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   bannerGlowTopLeft: {
     position: "absolute",
     top: 0,

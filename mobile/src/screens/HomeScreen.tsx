@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Easing,
   FlatList,
   Image,
   InteractionManager,
@@ -73,6 +74,10 @@ import { AppVideo, type AppVideoHandle } from "../components/AppVideo";
 import { ContainedAppVideo, type ContainedAppVideoHandle } from "../components/ContainedAppVideo";
 import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
 import { PostsReelViewerModal } from "../components/PostsReelViewerModal";
+import { StoryTextOverlay } from "../components/StoryTextOverlay";
+import { ReelStoryComposerModal } from "../components/ReelStoryComposerModal";
+import { ForwardMessageModal } from "./messaging/ForwardMessageModal";
+import { buildStoryForwardDmBody } from "./messaging/dmMessageFormats";
 import { DeactivatedContentPlaceholder, DeactivatedChromeWrap, useIsAccountDeactivated } from "../components/DeactivatedAccountGate";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -82,6 +87,8 @@ import {
   fetchHomeStoryViewers,
   replyToHomeStory,
   likeHomeStory,
+  unlikeHomeStory,
+  type StoryCreativeMeta,
   createHomePostComment,
   deleteHomePost,
   deleteHomePostComment,
@@ -789,6 +796,13 @@ function normalizeStoryRow(raw: Partial<HomeStory> & Record<string, unknown>): H
     viewed: !!raw.viewed,
     videoUrl: video || undefined,
     imageUrl: image || undefined,
+    creativeMeta:
+      raw.creativeMeta && typeof raw.creativeMeta === "object"
+        ? (raw.creativeMeta as HomeStory["creativeMeta"])
+        : raw["creative_meta"] && typeof raw["creative_meta"] === "object"
+          ? (raw["creative_meta"] as HomeStory["creativeMeta"])
+          : null,
+    viewerHasLiked: !!raw.viewerHasLiked,
     createdAt:
       typeof raw.createdAt === "string"
         ? raw.createdAt
@@ -1285,6 +1299,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   const [storyViewersOpen, setStoryViewersOpen] = useState(false);
   const [storyViewers, setStoryViewers] = useState<StoryViewer[]>([]);
   const [storyViewersCount, setStoryViewersCount] = useState(0);
+  const [storyViewersLikesCount, setStoryViewersLikesCount] = useState(0);
+  const [storyForwardBody, setStoryForwardBody] = useState<string | null>(null);
+  const [reelStoryComposerPost, setReelStoryComposerPost] = useState<HomePost | null>(null);
   const [storyViewersLoading, setStoryViewersLoading] = useState(false);
   const [storyDeleteBusy, setStoryDeleteBusy] = useState(false);
   const [storyLikedIds, setStoryLikedIds] = useState<Set<number>>(() => new Set());
@@ -2294,6 +2311,8 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     setStoryViewersOpen(false);
     setStoryViewers([]);
     setStoryViewersCount(0);
+    setStoryViewersLikesCount(0);
+    setStoryForwardBody(null);
     storyPausedRef.current = false;
     setStoryHoldPaused(false);
     storyAnimRef.current?.stop();
@@ -2313,9 +2332,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const data = await fetchHomeStoryViewers(token, storyId);
         setStoryViewers(Array.isArray(data.viewers) ? data.viewers : []);
         setStoryViewersCount(Number(data.count) || 0);
+        setStoryViewersLikesCount(Number(data.likesCount) || 0);
       } catch {
         setStoryViewers([]);
         setStoryViewersCount(0);
+        setStoryViewersLikesCount(0);
       } finally {
         setStoryViewersLoading(false);
       }
@@ -2387,23 +2408,74 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   nextStoryRef.current = nextStory;
 
   const STORY_SEGMENT_MS = 7000;
+  const STORY_VIDEO_MAX_MS = 3 * 60 * 1000;
+  /** Image stories use a fixed segment; video stories use the clip length once it's known. */
+  const storySegmentMsRef = useRef(STORY_SEGMENT_MS);
+  /** Video stories advance on playback end, not when the progress timer runs out. */
+  const storyWaitsForVideoEndRef = useRef(false);
+  const storyVideoTimingKnownRef = useRef(false);
+  const storyAnimStartRef = useRef<{ at: number; from: number; remaining: number } | null>(null);
+  const storyAdvanceTokenRef = useRef(0);
 
   const startStoryProgress = useCallback(
     (from = 0) => {
       progress.setValue(from);
-      const remaining = Math.max(250, (1 - from) * STORY_SEGMENT_MS);
+      const remaining = Math.max(250, (1 - from) * storySegmentMsRef.current);
       storyAnimRef.current?.stop();
       const anim = Animated.timing(progress, {
         toValue: 1,
         duration: remaining,
+        easing: Easing.linear,
         useNativeDriver: false
       });
       storyAnimRef.current = anim;
+      storyAnimStartRef.current = { at: Date.now(), from, remaining };
+      const token = storyAdvanceTokenRef.current;
       anim.start(({ finished }) => {
-        if (finished && !storyPausedRef.current) nextStoryRef.current();
+        if (!finished || storyPausedRef.current) return;
+        if (!storyWaitsForVideoEndRef.current) {
+          nextStoryRef.current();
+          return;
+        }
+        // Safety net if the player never reports the end (stall / missing event).
+        setTimeout(() => {
+          if (storyAdvanceTokenRef.current === token && !storyPausedRef.current) nextStoryRef.current();
+        }, 2500);
       });
     },
     [progress]
+  );
+
+  const onStoryVideoStatus = useCallback(
+    (status: AppPlaybackStatus) => {
+      if (!status.isLoaded) return;
+      if (status.didJustFinish) {
+        if (storyWaitsForVideoEndRef.current && !storyPausedRef.current) {
+          storyWaitsForVideoEndRef.current = false;
+          nextStoryRef.current();
+        }
+        return;
+      }
+      const dur = Number(status.durationMillis) || 0;
+      if (dur <= 0) return;
+      const segment = Math.min(dur, STORY_VIDEO_MAX_MS);
+      const ratio = Math.min(0.995, Math.max(0, (Number(status.positionMillis) || 0) / segment));
+      if (!storyVideoTimingKnownRef.current) {
+        storyVideoTimingKnownRef.current = true;
+        storySegmentMsRef.current = segment;
+        storyWaitsForVideoEndRef.current = dur <= STORY_VIDEO_MAX_MS;
+        if (!storyPausedRef.current) startStoryProgress(ratio);
+        return;
+      }
+      if (storyPausedRef.current) return;
+      // Keep the bar in sync with buffering stalls.
+      const started = storyAnimStartRef.current;
+      if (!started) return;
+      const elapsed = Math.min(1, (Date.now() - started.at) / Math.max(1, started.remaining));
+      const expected = started.from + elapsed * (1 - started.from);
+      if (Math.abs(expected - ratio) * segment > 1200) startStoryProgress(ratio);
+    },
+    [startStoryProgress]
   );
 
   const pauseStoryHold = useCallback(() => {
@@ -2447,24 +2519,37 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     }
   }, [activeStory, isOwnActiveStory, resumeStoryHold, storyReplyBusy, storyReplyDraft, token]);
 
-  const likeActiveStory = useCallback(async () => {
+  useEffect(() => {
+    if (!activeStory?.id || !activeStory.viewerHasLiked) return;
+    setStoryLikedIds((prev) => {
+      if (prev.has(activeStory.id)) return prev;
+      const next = new Set(prev);
+      next.add(activeStory.id);
+      return next;
+    });
+  }, [activeStory?.id, activeStory?.viewerHasLiked]);
+
+  const toggleActiveStoryLike = useCallback(async () => {
     if (!token || !activeStory?.id || isOwnActiveStory || storyLikeBusy) return;
-    if (storyLikedIds.has(activeStory.id)) return;
-    setStoryLikeBusy(true);
-    try {
-      await likeHomeStory(token, activeStory.id, {
-        peerUserId: activeStory.userId,
-        previewUrl: activeStory.imageUrl || null,
-        imageUrl: activeStory.imageUrl || null,
-        videoUrl: activeStory.videoUrl || null,
-        userName: activeStory.userName
-      });
+    const storyId = activeStory.id;
+    const wasLiked = storyLikedIds.has(storyId);
+    const setLiked = (liked: boolean) =>
       setStoryLikedIds((prev) => {
         const next = new Set(prev);
-        next.add(activeStory.id);
+        if (liked) next.add(storyId);
+        else next.delete(storyId);
         return next;
       });
+    setLiked(!wasLiked);
+    setStoryLikeBusy(true);
+    try {
+      if (wasLiked) await unlikeHomeStory(token, storyId);
+      else await likeHomeStory(token, storyId);
+      const patch = (s: HomeStory) => (s.id === storyId ? { ...s, viewerHasLiked: !wasLiked } : s);
+      setStories((prev) => prev.map(patch));
+      setStoryPlaybackQueue((prev) => prev.map(patch));
     } catch (error) {
+      setLiked(wasLiked);
       const msg = error instanceof Error ? error.message : "Could not like story.";
       if (Platform.OS === "web" && typeof window !== "undefined") window.alert(msg);
       else Alert.alert("Like failed", msg);
@@ -2472,6 +2557,25 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
       setStoryLikeBusy(false);
     }
   }, [activeStory, isOwnActiveStory, storyLikeBusy, storyLikedIds, token]);
+
+  const openStoryForward = useCallback(() => {
+    if (!activeStory?.id || activeStory.id <= 0) return;
+    pauseStoryHold();
+    setStoryForwardBody(
+      buildStoryForwardDmBody({
+        storyId: activeStory.id,
+        ownerId: activeStory.userId ?? null,
+        imageUrl: activeStory.imageUrl || null,
+        videoUrl: activeStory.videoUrl || null,
+        userName: activeStory.userName
+      })
+    );
+  }, [activeStory, pauseStoryHold]);
+
+  const closeStoryForward = useCallback(() => {
+    setStoryForwardBody(null);
+    if (isStoryOpen) resumeStoryHold();
+  }, [isStoryOpen, resumeStoryHold]);
 
   const openStoryViewersSheet = useCallback(() => {
     if (!activeStory?.id || !isOwnActiveStory) return;
@@ -2485,15 +2589,34 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
     if (isStoryOpen) resumeStoryHold();
   }, [isStoryOpen, resumeStoryHold]);
 
+  const activeStoryIsVideo = !!activeStory?.videoUrl;
   useEffect(() => {
     if (!isStoryOpen || storyPlaybackQueue.length === 0) return;
     storyPausedRef.current = false;
     setStoryHoldPaused(false);
-    startStoryProgress(0);
+    storyAdvanceTokenRef.current += 1;
+    storySegmentMsRef.current = STORY_SEGMENT_MS;
+    storyVideoTimingKnownRef.current = false;
+    storyWaitsForVideoEndRef.current = activeStoryIsVideo;
+    if (!activeStoryIsVideo) {
+      startStoryProgress(0);
+      return () => {
+        storyAnimRef.current?.stop();
+      };
+    }
+    storyAnimRef.current?.stop();
+    progress.setValue(0);
+    // Progress starts once the clip length is known; fall back to the default timer if it never loads.
+    const fallback = setTimeout(() => {
+      if (storyVideoTimingKnownRef.current) return;
+      storyWaitsForVideoEndRef.current = false;
+      if (!storyPausedRef.current) startStoryProgress(0);
+    }, 10000);
     return () => {
+      clearTimeout(fallback);
       storyAnimRef.current?.stop();
     };
-  }, [isStoryOpen, activeStoryIndex, storyPlaybackQueue.length, startStoryProgress]);
+  }, [isStoryOpen, activeStoryIndex, activeStoryIsVideo, storyPlaybackQueue.length, startStoryProgress, progress]);
 
   useEffect(() => {
     if (!optimisticStories.length) return;
@@ -3246,12 +3369,26 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
   );
 
   const onAddReelToStory = useCallback(
-    async (post: HomePost) => {
-      const media = post.videoUrl ? { videoUrl: post.videoUrl } : post.imageUrl ? { imageUrl: post.imageUrl } : null;
+    (post: HomePost) => {
+      const hasMedia = !!(post.videoUrl || post.imageUrl || post.imageUrls?.length);
+      if (!hasMedia) {
+        Alert.alert(t("noMediaTitle"), t("noMediaStory"));
+        return;
+      }
+      setReelStoryComposerPost(post);
+    },
+    [t]
+  );
+
+  const publishReelStory = useCallback(
+    async (post: HomePost, creativeMeta: StoryCreativeMeta) => {
+      const image = post.imageUrl || post.imageUrls?.[0] || null;
+      const media = post.videoUrl ? { videoUrl: post.videoUrl } : image ? { imageUrl: image } : null;
       if (!media) {
         Alert.alert(t("noMediaTitle"), t("noMediaStory"));
         return;
       }
+      setReelStoryComposerPost(null);
       const optimistic: HomeStory = normalizeStoryRow({
         id: Date.now() * -1,
         userId: Number(user?.id) || undefined,
@@ -3262,6 +3399,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         hasNew: true,
         viewed: false,
         ...media,
+        creativeMeta,
         createdAt: new Date().toISOString()
       });
       setOptimisticStories((prev) => [optimistic, ...prev].slice(0, 20));
@@ -3270,13 +3408,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         const created = await createHomeStory({
           userName: user?.fullName || "You",
           district: post.location || "My Farm",
-          ...media
+          ...media,
+          creativeMeta
         }, token ?? null);
         const normalizedCreated = normalizeStoryRow(created.story as HomeStory & Record<string, unknown>);
         const serverStory: HomeStory = {
           ...normalizedCreated,
           videoUrl: normalizedCreated.videoUrl || optimistic.videoUrl,
           imageUrl: normalizedCreated.imageUrl || optimistic.imageUrl,
+          creativeMeta: normalizedCreated.creativeMeta || creativeMeta,
           createdAt: normalizedCreated.createdAt || optimistic.createdAt
         };
         setOptimisticStories((prev) =>
@@ -3285,10 +3425,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         setStories((prev) => applyViewedStories(mergeStories([serverStory, ...prev], [])));
         Alert.alert(t("addedTitle"), t("addedToStory"));
       } catch {
-        onOpenCreate?.("story");
+        setOptimisticStories((prev) => prev.filter((s) => Number(s.id) !== Number(optimistic.id)));
+        setStories((prev) => prev.filter((s) => Number(s.id) !== Number(optimistic.id)));
+        Alert.alert(t("addToStory"), "Could not add to your story. Please try again.");
       }
     },
-    [applyViewedStories, onOpenCreate, token, user?.avatarUrl, user?.fullName, user?.id, t]
+    [applyViewedStories, token, user?.avatarUrl, user?.fullName, user?.id, t]
   );
 
   const readPostEngagement = useCallback((postId: number, fallback?: HomePost) => {
@@ -5348,18 +5490,26 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
           >
             {activeStory?.videoUrl ? (
               <ContainedAppVideo
+                key={`story-${activeStory.id}`}
                 uri={activeStory.videoUrl}
-                shouldPlay={!storyHoldPaused && !storyViewersOpen}
+                shouldPlay={!storyHoldPaused && !storyViewersOpen && storyForwardBody == null}
                 containerWidth={storyViewport.width || windowWidth}
                 containerHeight={storyViewport.height || windowHeight}
-                fit="contain"
+                fit={activeStory.creativeMeta?.fit === "cover" ? "cover" : "contain"}
                 isLooping={false}
                 isMuted={false}
                 useNativeControls={false}
+                onStatusUpdate={onStoryVideoStatus}
               />
             ) : activeStory?.imageUrl ? (
-              <Image style={styles.storyVideo} source={{ uri: activeStory.imageUrl }} resizeMode="contain" />
+              <Image
+                style={styles.storyVideo}
+                source={{ uri: activeStory.imageUrl }}
+                resizeMode={activeStory.creativeMeta?.fit === "cover" ? "cover" : "contain"}
+              />
             ) : null}
+            <StoryTextOverlay meta={activeStory?.creativeMeta} />
+
 
             <View style={styles.storyTapZones} pointerEvents={storyViewersOpen ? "none" : "box-none"}>
               <Pressable
@@ -5387,6 +5537,15 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   {storyViewersLoading ? "..." : `${storyViewersCount} viewer${storyViewersCount === 1 ? "" : "s"}`}
                 </Text>
               </Pressable>
+              <View style={{ flex: 1 }} />
+              <Pressable
+                style={styles.storyLikeBtn}
+                onPress={openStoryForward}
+                disabled={!activeStory?.id || activeStory.id <= 0}
+                accessibilityLabel="Forward story"
+              >
+                <Ionicons name="paper-plane-outline" size={26} color="#fff" />
+              </Pressable>
             </View>
           ) : (
             <View style={[styles.storyBottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
@@ -5407,22 +5566,24 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                 returnKeyType="send"
                 onSubmitEditing={() => void sendStoryReply()}
               />
-              <Pressable
-                style={[styles.storyReplySend, !storyReplyDraft.trim() || storyReplyBusy ? styles.storyReplySendDisabled : null]}
-                disabled={!storyReplyDraft.trim() || storyReplyBusy}
-                onPress={() => void sendStoryReply()}
-                accessibilityLabel="Send reply"
-              >
-                {storyReplyBusy ? (
-                  <ActivityIndicator color="#111" size="small" />
-                ) : (
-                  <Ionicons name="paper-plane" size={18} color="#111" />
-                )}
-              </Pressable>
+              {storyReplyDraft.trim() ? (
+                <Pressable
+                  style={[styles.storyReplySend, storyReplyBusy ? styles.storyReplySendDisabled : null]}
+                  disabled={storyReplyBusy}
+                  onPress={() => void sendStoryReply()}
+                  accessibilityLabel="Send reply"
+                >
+                  {storyReplyBusy ? (
+                    <ActivityIndicator color="#111" size="small" />
+                  ) : (
+                    <Ionicons name="paper-plane" size={18} color="#111" />
+                  )}
+                </Pressable>
+              ) : null}
               <Pressable
                 style={styles.storyLikeBtn}
-                onPress={() => void likeActiveStory()}
-                disabled={storyLikeBusy || (activeStory?.id != null && storyLikedIds.has(activeStory.id))}
+                onPress={() => void toggleActiveStoryLike()}
+                disabled={storyLikeBusy}
                 accessibilityLabel="Like story"
               >
                 {storyLikeBusy ? (
@@ -5435,9 +5596,27 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                   />
                 )}
               </Pressable>
+              {!storyReplyDraft.trim() ? (
+                <Pressable
+                  style={styles.storyLikeBtn}
+                  onPress={openStoryForward}
+                  disabled={!activeStory?.id || activeStory.id <= 0}
+                  accessibilityLabel="Forward story"
+                >
+                  <Ionicons name="paper-plane-outline" size={26} color="#fff" />
+                </Pressable>
+              ) : null}
             </View>
           )}
         </KeyboardAvoidingView>
+
+        <ForwardMessageModal
+          visible={storyForwardBody != null}
+          messageBody={storyForwardBody || ""}
+          excludeUserId={Number(activeStory?.userId) || undefined}
+          onClose={closeStoryForward}
+          onSent={() => Alert.alert("Sent", "Story shared in chat.")}
+        />
 
         <Modal visible={storyViewersOpen} transparent animationType="slide" onRequestClose={closeStoryViewersSheet}>
           <View style={styles.storyViewersModalRoot}>
@@ -5446,6 +5625,7 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
               <View style={styles.storyViewersHandle} />
               <Text style={styles.storyViewersTitle}>
                 Viewers · {storyViewersCount}
+                {storyViewersLikesCount > 0 ? `  ·  ❤ ${storyViewersLikesCount}` : ""}
               </Text>
               {storyViewersLoading ? (
                 <ActivityIndicator color={APP_LIME} style={{ marginTop: 18 }} />
@@ -5475,6 +5655,9 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
                           </Text>
                         ) : null}
                       </View>
+                      {item.liked ? (
+                        <Ionicons name="heart" size={22} color="#ff2d55" accessibilityLabel="Liked your story" />
+                      ) : null}
                     </View>
                   )}
                 />
@@ -5560,6 +5743,12 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
         }}
         followingPeers={followingSharePeers}
         onAddToStory={onAddReelToStory}
+      />
+
+      <ReelStoryComposerModal
+        post={reelStoryComposerPost}
+        onClose={() => setReelStoryComposerPost(null)}
+        onShare={publishReelStory}
       />
 
       <Modal
