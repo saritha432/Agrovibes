@@ -11,6 +11,7 @@ export type NotificationFeedSnapshot = {
   postLikes: any[];
   postComments: any[];
   liveStarts: any[];
+  weatherAlerts?: any[];
   unreadCount?: number;
 };
 
@@ -94,6 +95,7 @@ export async function fetchNotificationFeedSnapshot(params: {
   const remotePostLikes = remote?.postLikes || [];
   const remotePostComments = remote?.postComments || [];
   const remoteLiveStarts = remote?.liveStarts || [];
+  const remoteWeatherAlerts = remote?.weatherAlerts || [];
 
   const { rows: mergedPending, droppedUnread: droppedPendingUnread } = dedupeFollowRequests([
     ...(remoteReq || []),
@@ -143,6 +145,7 @@ export async function fetchNotificationFeedSnapshot(params: {
     postLikes,
     postComments,
     liveStarts: remoteLiveStarts,
+    weatherAlerts: remoteWeatherAlerts,
     unreadCount: Math.max(0, Number(remote?.unreadCount || 0) - droppedPendingUnread)
   };
 }
@@ -155,7 +158,8 @@ export function flattenNotificationFeedSnapshot(snap: NotificationFeedSnapshot):
     ...snap.newFollows,
     ...snap.postLikes,
     ...snap.postComments,
-    ...snap.liveStarts
+    ...snap.liveStarts,
+    ...(snap.weatherAlerts || [])
   ];
 }
 

@@ -1904,6 +1904,7 @@ export async function fetchSocialNotifications(token: string) {
     postLikes?: SocialPostActivityNotification[];
     postComments?: SocialPostActivityNotification[];
     liveStarts?: SocialPostActivityNotification[];
+    weatherAlerts?: SocialPostActivityNotification[];
     unreadCount: number;
   };
 }

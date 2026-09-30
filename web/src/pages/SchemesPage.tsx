@@ -38,7 +38,7 @@ function SchemeList() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<TabId>("relevant");
+  const [tab, setTab] = useState<TabId>("browse");
   const [filter, setFilter] = useState<GovSchemeCategory | "all">("all");
   const [savedIds, setSavedIds] = useState<string[]>(() => readSaved());
 

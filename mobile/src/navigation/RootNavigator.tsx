@@ -148,7 +148,11 @@ export function RootNavigator() {
       <Stack.Screen
         name="Weather"
         getComponent={() => require("../screens/WeatherScreen").WeatherScreen}
-        options={slideRightBg}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#262626" }
+        }}
       />
       <Stack.Screen
         name="Schemes"

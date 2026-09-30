@@ -22,12 +22,7 @@ import {
   type WeatherReport
 } from "../services/api";
 import { isUsableLatLng } from "../utils/openMeteoWeather";
-import { APP_LIME } from "../theme/appColors";
-
-const PAGE_BG = "#eef1f4";
-const CARD = "#ffffff";
-const TEXT = "#1f2c29";
-const MUTED = "#6b7780";
+import { APP_DARK_BG, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
 function weatherIonicon(icon: WeatherIconName): keyof typeof Ionicons.glyphMap {
   if (icon === "sunny") return "sunny-outline";
@@ -60,8 +55,9 @@ export function WeatherScreen() {
         setReport(next);
         setQuery("");
         setSuggestions([]);
-      } catch {
-        setError(t("weatherLoadFailed"));
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "";
+        setError(msg === "LOCATION_REQUIRED" ? t("weatherNeedLocation") : t("weatherLoadFailed"));
       } finally {
         setLoading(false);
       }
@@ -113,21 +109,21 @@ export function WeatherScreen() {
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <View style={styles.head}>
         <Pressable onPress={() => navigation.goBack()} hitSlop={10} style={styles.headBtn} accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={24} color={TEXT} />
+          <Ionicons name="chevron-back" size={24} color={APP_TEXT} />
         </Pressable>
         <Text style={styles.title}>{t("weatherTitle")}</Text>
         <Pressable onPress={useMyLocation} hitSlop={10} style={styles.headBtn} accessibilityLabel={t("weatherUseMyLocation")}>
-          <Ionicons name="locate-outline" size={22} color={TEXT} />
+          <Ionicons name="locate-outline" size={22} color={APP_TEXT} />
         </Pressable>
       </View>
 
       <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color={MUTED} />
+        <Ionicons name="search" size={16} color={APP_TEXT_MUTED} />
         <TextInput
           value={query}
           onChangeText={onChangeQuery}
           placeholder={t("weatherSearchPlaceholder")}
-          placeholderTextColor="#9aa3ab"
+          placeholderTextColor={APP_TEXT_MUTED}
           style={styles.searchInput}
           returnKeyType="search"
           onSubmitEditing={() => {
@@ -163,6 +159,14 @@ export function WeatherScreen() {
                 {report.updatedLabel}.
               </Text>
 
+              <View style={styles.nowCard}>
+                <Text style={styles.nowLabel}>{t("weatherNow")}</Text>
+                <Ionicons name={weatherIonicon(report.current.icon)} size={36} color={APP_LIME} />
+                <Text style={styles.nowTemp}>{report.current.tempC}°</Text>
+                <Text style={styles.nowCondition}>{report.current.condition}</Text>
+                <Text style={styles.rain}>Rain {report.current.rainChance}%</Text>
+              </View>
+
               {report.alert ? (
                 <View style={styles.alert}>
                   <Text style={styles.alertTitle}>{report.alert.title}</Text>
@@ -176,7 +180,7 @@ export function WeatherScreen() {
                     <Text style={styles.dayName}>
                       {day.weekday} {day.day}
                     </Text>
-                    <Ionicons name={weatherIonicon(day.icon)} size={28} color="#5b6b75" />
+                    <Ionicons name={weatherIonicon(day.icon)} size={28} color={APP_LIME} />
                     <Text style={styles.temp}>{day.tempC}°</Text>
                     <Text style={styles.rain}>Rain {day.rainChance}%</Text>
                     <Text style={styles.hint}>{day.hint}</Text>
@@ -192,7 +196,7 @@ export function WeatherScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: PAGE_BG },
+  safe: { flex: 1, backgroundColor: APP_DARK_BG },
   head: {
     flexDirection: "row",
     alignItems: "center",
@@ -201,56 +205,66 @@ const styles = StyleSheet.create({
     paddingBottom: 8
   },
   headBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 20, fontWeight: "700", color: TEXT },
+  title: { fontSize: 20, fontWeight: "700", color: APP_TEXT },
   searchWrap: {
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: CARD,
+    backgroundColor: APP_SURFACE,
     borderRadius: 22,
     paddingHorizontal: 14,
     minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderColor: "#e2e8ee"
+    gap: 8
   },
-  searchInput: { flex: 1, color: TEXT, fontSize: 15, paddingVertical: 10 },
+  searchInput: { flex: 1, color: APP_TEXT, fontSize: 15, paddingVertical: 10 },
   suggestBox: {
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: CARD,
+    backgroundColor: APP_SURFACE,
     borderRadius: 12,
     overflow: "hidden"
   },
-  suggestRow: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#edf1f4" },
-  suggestText: { color: TEXT, fontSize: 14 },
+  suggestRow: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#3a3a3a" },
+  suggestText: { color: APP_TEXT, fontSize: 14 },
   scroll: { paddingHorizontal: 16, paddingBottom: 40 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { color: "#b45309", marginBottom: 12 },
-  meta: { color: MUTED, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  error: { color: APP_LIME, marginBottom: 12 },
+  meta: { color: APP_TEXT_MUTED, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  nowCard: {
+    backgroundColor: APP_SURFACE,
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 16
+  },
+  nowLabel: { fontSize: 12, fontWeight: "700", color: APP_TEXT_MUTED, letterSpacing: 0.6 },
+  nowTemp: { fontSize: 36, fontWeight: "800", color: APP_TEXT },
+  nowCondition: { fontSize: 16, fontWeight: "700", color: APP_TEXT },
   alert: {
-    backgroundColor: "#fff4e5",
-    borderColor: "#f5d0a9",
+    backgroundColor: "rgba(201, 255, 53, 0.12)",
+    borderColor: APP_LIME,
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
     marginBottom: 16
   },
-  alertTitle: { color: "#9a3412", fontWeight: "700", marginBottom: 4 },
-  alertBody: { color: "#7c2d12", fontSize: 13, lineHeight: 18 },
+  alertTitle: { color: APP_LIME, fontWeight: "700", marginBottom: 4 },
+  alertBody: { color: APP_TEXT, fontSize: 13, lineHeight: 18 },
   daysRow: { gap: 10, paddingRight: 8 },
   dayCard: {
     width: 118,
-    backgroundColor: CARD,
+    backgroundColor: APP_SURFACE,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 10,
     alignItems: "center",
     gap: 6
   },
-  dayName: { fontSize: 11, fontWeight: "700", color: MUTED },
-  temp: { fontSize: 22, fontWeight: "800", color: TEXT },
-  rain: { fontSize: 12, color: MUTED },
-  hint: { fontSize: 11, color: MUTED, textAlign: "center" }
+  dayName: { fontSize: 11, fontWeight: "700", color: APP_TEXT_MUTED },
+  temp: { fontSize: 22, fontWeight: "800", color: APP_TEXT },
+  rain: { fontSize: 12, color: APP_TEXT_MUTED },
+  hint: { fontSize: 11, color: APP_TEXT_MUTED, textAlign: "center" }
 });

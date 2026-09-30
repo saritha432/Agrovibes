@@ -6,7 +6,9 @@ export type GovSchemeCategory =
   | "credit"
   | "soil"
   | "market"
-  | "pension";
+  | "pension"
+  | "development"
+  | "advisory";
 
 export type GovScheme = {
   id: string;
@@ -34,7 +36,9 @@ export const GOV_SCHEME_CATEGORIES: { id: GovSchemeCategory | "all"; label: stri
   { id: "credit", label: "Credit" },
   { id: "soil", label: "Soil & inputs" },
   { id: "market", label: "Market" },
-  { id: "pension", label: "Pension" }
+  { id: "pension", label: "Pension" },
+  { id: "development", label: "Agri development" },
+  { id: "advisory", label: "Farmer services" }
 ];
 
 /** Curated central agri schemes with official Government of India URLs only. */
@@ -99,7 +103,8 @@ export const GOV_SCHEMES: GovScheme[] = [
     documents: "Aadhaar, bank, land record, and irrigation quotation — confirm on the official site",
     officialUrl: "https://pmksy.gov.in/",
     deadlineLabel: "31 Dec 2026",
-    verifiedLabel: "12 Sep 2026"
+    verifiedLabel: "12 Sep 2026",
+    alwaysRelevant: true
   },
   {
     id: "kcc",
@@ -128,7 +133,8 @@ export const GOV_SCHEMES: GovScheme[] = [
     documents: "Aadhaar and land / plot details — confirm on the official site",
     officialUrl: "https://www.soilhealth.dac.gov.in/",
     deadlineLabel: "Open window",
-    verifiedLabel: "12 Sep 2026"
+    verifiedLabel: "12 Sep 2026",
+    alwaysRelevant: true
   },
   {
     id: "enam",
@@ -142,7 +148,8 @@ export const GOV_SCHEMES: GovScheme[] = [
     documents: "Aadhaar, bank, and APMC / FPO registration as required on the official site",
     officialUrl: "https://www.enam.gov.in/web/",
     deadlineLabel: "Open window",
-    verifiedLabel: "12 Sep 2026"
+    verifiedLabel: "12 Sep 2026",
+    alwaysRelevant: true
   },
   {
     id: "pmkmy",
@@ -156,7 +163,53 @@ export const GOV_SCHEMES: GovScheme[] = [
     documents: "Aadhaar, bank, and land record — confirm on the official site",
     officialUrl: "https://maandhan.in/",
     deadlineLabel: "Open window",
-    verifiedLabel: "12 Sep 2026"
+    verifiedLabel: "12 Sep 2026",
+    alwaysRelevant: true
+  },
+  {
+    id: "rkvy",
+    name: "Rashtriya Krishi Vikas Yojana",
+    category: "development",
+    categoryLabel: "Agri development",
+    summary: "State-led agriculture development projects. Guidelines and MIS are only on the official RKVY site.",
+    description:
+      "RKVY (Rashtriya Krishi Vikas Yojana) funds state agriculture and allied-sector projects. CropVibe does not process state project applications.",
+    whoFor: "farmers and allied groups as notified in each state's RKVY projects",
+    documents: "Aadhaar, bank, and project / land papers as listed on the official site",
+    officialUrl: "https://rkvy.nic.in/",
+    deadlineLabel: "Open window",
+    verifiedLabel: "29 Sep 2026",
+    alwaysRelevant: true
+  },
+  {
+    id: "kisan-suvidha",
+    name: "Kisan Suvidha",
+    category: "advisory",
+    categoryLabel: "Farmer services",
+    summary: "Official farmer app and portal for weather, markets, and scheme information.",
+    description:
+      "Kisan Suvidha is a Government of India farmer services portal and app. CropVibe links only to the official site.",
+    whoFor: "farmers seeking official weather, mandi, and scheme information",
+    documents: "Register on the official Kisan Suvidha site or app",
+    officialUrl: "https://kisansuvidha.gov.in/",
+    deadlineLabel: "Open window",
+    verifiedLabel: "29 Sep 2026",
+    alwaysRelevant: true
+  },
+  {
+    id: "mkisan",
+    name: "mKisan",
+    category: "advisory",
+    categoryLabel: "Farmer services",
+    summary: "Official SMS and mobile advisories from the Ministry of Agriculture.",
+    description:
+      "mKisan delivers government agri advisories to registered mobile numbers. Subscription and messages are only on the official mKisan portal.",
+    whoFor: "farmers who want official crop and weather SMS advisories",
+    documents: "Mobile number registration on the official mKisan site",
+    officialUrl: "https://mkisan.gov.in/",
+    deadlineLabel: "Open window",
+    verifiedLabel: "29 Sep 2026",
+    alwaysRelevant: true
   }
 ];
 
