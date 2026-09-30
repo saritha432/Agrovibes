@@ -132,4 +132,11 @@ server.listen(PORT, () => {
     // eslint-disable-next-line no-console
     console.warn("[hls] init skipped:", error?.message || error);
   }
+
+  try {
+    require("./weatherAlerts").startWeatherAlertPolling();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[weather-alerts] init skipped:", error?.message || error);
+  }
 });

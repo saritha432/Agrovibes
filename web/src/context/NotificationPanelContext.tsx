@@ -50,6 +50,7 @@ function activityLabel(entry: SocialPostActivityNotification) {
   const kind = entry.postIsReel ? "reel" : "post";
   const excerpt = entry.commentExcerpt?.trim() ? `: "${entry.commentExcerpt.trim()}"` : "";
   if (entry.type === "comment_reply") return `${name} replied to your comment${excerpt}`;
+  if (entry.type === "weather_alert") return String(entry.commentExcerpt || "").trim() || "Weather alert";
   if (entry.type === "post_comment") return `${name} commented on your ${kind}${excerpt}`;
   if (entry.type === "post_tag") return `${name} tagged you in a ${kind}`;
   if (entry.type === "live_host_reminder") return "It's time to start your scheduled live";
@@ -166,7 +167,7 @@ export function NotificationPanelProvider({ children }: { children: ReactNode })
       const nextNewFollows = data.newFollows || [];
       const nextPostLikes = data.postLikes || [];
       const nextPostComments = data.postComments || [];
-      const nextLiveStarts = data.liveStarts || [];
+      const nextLiveStarts = [...(data.liveStarts || []), ...(data.weatherAlerts || [])];
       setFollowRequests(nextFollowRequests);
       setFollowAccepted(nextFollowAccepted);
       setNewFollows(nextNewFollows);

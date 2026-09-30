@@ -3909,6 +3909,10 @@ router.get("/v1/weather", authRequired, async (req, res) => {
     const report = await loadForecast(place);
     res.json(report);
   } catch (error) {
+    if (String(error?.message || "") === "LOCATION_REQUIRED") {
+      res.status(400).json({ message: "Set a location to load weather" });
+      return;
+    }
     res.status(502).json({ message: "Could not load weather", error: error.message });
   }
 });
@@ -5337,6 +5341,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         r.type === "live_reminder" ||
         r.type === "live_host_reminder"
     );
+    const weatherAlerts = result.rows.filter((r) => r.type === "weather_alert");
     // Expire abandoned live_start posts so notifications don't keep showing "Join live".
     const staleLivePostIds = [];
     for (const row of liveStarts) {
@@ -5374,7 +5379,8 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
         r.type === "live_start" ||
         r.type === "live_scheduled" ||
         r.type === "live_reminder" ||
-        r.type === "live_host_reminder"
+        r.type === "live_host_reminder" ||
+        r.type === "weather_alert"
       );
     }).length;
     res.json({
@@ -5384,6 +5390,7 @@ router.get("/v1/social/notifications", authRequired, async (req, res) => {
       postLikes,
       postComments,
       liveStarts,
+      weatherAlerts,
       unreadCount
     });
   } catch (error) {

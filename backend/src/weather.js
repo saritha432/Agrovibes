@@ -1,9 +1,3 @@
-const DEFAULT_LOCATION = {
-  label: "India",
-  lat: 20.5937,
-  lng: 78.9629
-};
-
 const forecastCache = new Map();
 const CACHE_MS = 10 * 60 * 1000;
 
@@ -19,7 +13,9 @@ function parseLatLng(lat, lng) {
 function wmoMeta(code) {
   const n = Number(code);
   if (n === 0) return { condition: "Clear", icon: "sunny", summary: "Clear" };
-  if (n <= 3) return { condition: n === 1 ? "Mostly clear" : "Partly cloudy", icon: "partly-cloudy", summary: "Haze" };
+  if (n === 1) return { condition: "Mostly clear", icon: "partly-cloudy", summary: "Mostly clear" };
+  if (n === 2) return { condition: "Partly cloudy", icon: "partly-cloudy", summary: "Partly cloudy" };
+  if (n === 3) return { condition: "Overcast", icon: "cloudy", summary: "Overcast" };
   if (n <= 48) return { condition: "Fog", icon: "fog", summary: "Fog" };
   if (n <= 57) return { condition: "Drizzle", icon: "rain", summary: "Drizzle" };
   if (n <= 67) return { condition: "Rain", icon: "rain", summary: "Showers" };
@@ -57,8 +53,9 @@ function fieldWorkHint(rainChance, icon) {
   if (icon === "storm") return "Storm risk — pause outdoor work";
   if (rainChance >= 60) return "Rain — delay field work";
   if (rainChance >= 35) return "Possible showers";
-  if (icon === "sunny") return "Hot afternoon";
-  return "Clear";
+  if (icon === "sunny") return "Good for field work";
+  if (icon === "cloudy" || icon === "partly-cloudy") return "Overcast";
+  return "Fair";
 }
 
 function buildAlert(days) {
@@ -120,7 +117,22 @@ async function resolvePlace({ q, lat, lng, fallbackLabel }) {
     const hits = await searchPlaces(query, 1);
     if (hits[0]) return hits[0];
   }
-  return { ...DEFAULT_LOCATION, district: "India" };
+  throw new Error("LOCATION_REQUIRED");
+}
+
+function nearestHourIndex(times, iso) {
+  if (!Array.isArray(times) || !times.length) return -1;
+  const target = Date.parse(iso || "") || Date.now();
+  let best = 0;
+  let bestDiff = Infinity;
+  for (let i = 0; i < times.length; i++) {
+    const diff = Math.abs(Date.parse(times[i] || "") - target);
+    if (Number.isFinite(diff) && diff < bestDiff) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
 }
 
 async function loadForecast(place) {
@@ -131,7 +143,8 @@ async function loadForecast(place) {
   const params = new URLSearchParams({
     latitude: String(place.lat),
     longitude: String(place.lng),
-    current: "temperature_2m,weather_code,precipitation_probability",
+    current: "temperature_2m,weather_code,precipitation,cloud_cover,is_day",
+    hourly: "precipitation_probability,weather_code,temperature_2m",
     daily: "weather_code,temperature_2m_max,precipitation_probability_max",
     forecast_days: "5",
     timezone: "auto"
@@ -159,6 +172,9 @@ async function loadForecast(place) {
   });
   const currentMeta = wmoMeta(data?.current?.weather_code);
   const generated = data?.current?.time || new Date().toISOString();
+  const hourIndex = nearestHourIndex(data?.hourly?.time, generated);
+  const hourlyRain = hourIndex >= 0 ? Number(data?.hourly?.precipitation_probability?.[hourIndex]) : NaN;
+  const currentRain = Number.isFinite(hourlyRain) ? hourlyRain : Number(days[0]?.rainChance || 0);
   const payload = {
     location: place,
     updatedAt: generated,
@@ -167,7 +183,7 @@ async function loadForecast(place) {
     disclaimer: "CropVibe is not a government service.",
     current: {
       tempC: Math.round(Number(data?.current?.temperature_2m || days[0]?.tempC || 0)),
-      rainChance: Math.max(0, Math.min(100, Number(data?.current?.precipitation_probability || days[0]?.rainChance || 0))),
+      rainChance: Math.max(0, Math.min(100, currentRain)),
       condition: currentMeta.condition,
       icon: currentMeta.icon
     },
@@ -178,8 +194,32 @@ async function loadForecast(place) {
   return payload;
 }
 
+function significantWeatherAlert(report) {
+  const today = Array.isArray(report?.days) ? report.days[0] : null;
+  const icon = String(report?.current?.icon || today?.icon || "");
+  const rain = Math.max(Number(report?.current?.rainChance || 0), Number(today?.rainChance || 0));
+  const dateKey = String(today?.date || new Date().toISOString().slice(0, 10));
+  const place = String(report?.location?.district || report?.location?.label || "your area");
+  if (icon === "storm" || today?.icon === "storm") {
+    return {
+      key: `${dateKey}:storm`,
+      title: "Storm risk today",
+      body: `Thunderstorm risk near ${place}. Pause outdoor farm work if you can.`
+    };
+  }
+  if (icon === "rain" || rain >= 55) {
+    return {
+      key: `${dateKey}:rain`,
+      title: "Rain likely today",
+      body: `About ${Math.round(rain)}% chance of rain near ${place}. Plan field work accordingly.`
+    };
+  }
+  return null;
+}
+
 module.exports = {
   searchPlaces,
   resolvePlace,
-  loadForecast
+  loadForecast,
+  significantWeatherAlert
 };

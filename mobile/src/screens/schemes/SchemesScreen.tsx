@@ -35,7 +35,7 @@ export function SchemesScreen() {
   const { user } = useAuth();
   const { t } = useLanguage();
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<TabId>("relevant");
+  const [tab, setTab] = useState<TabId>("browse");
   const [filter, setFilter] = useState<GovSchemeCategory | "all">("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [savedIds, setSavedIds] = useState<string[]>([]);

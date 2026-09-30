@@ -37,7 +37,7 @@ import { NotificationPostThumb } from "../components/NotificationPostThumb";
 import { SwipeActionsRow, type SwipeAction } from "../components/SwipeActionsRow";
 import { StoryRingAvatar } from "../components/StoryRingAvatar";
 import { useLanguage } from "../localization/LanguageContext";
-import { navigateToJoinLive, navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
+import { navigateToJoinLive, navigateToMyProfile, navigateToPublicProfile, navigateToWeather } from "../navigation/navigationRef";
 import {
   hasSharedPostViewerListener,
   queueOpenSharedPostViewer
@@ -293,7 +293,11 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     setNewFollows((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.newFollows || [])));
     setPostLikes((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postLikes)));
     setPostComments((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.postComments)));
-    setLiveStarts((prev) => filterDismissedNotifications(mergeNotificationEntries(prev, snap.liveStarts)));
+    setLiveStarts((prev) =>
+      filterDismissedNotifications(
+        mergeNotificationEntries(prev, [...(snap.liveStarts || []), ...(snap.weatherAlerts || [])])
+      )
+    );
     const remoteUnread = Math.max(0, Number(snap.unreadCount || 0));
     if (sheetOpenRef.current) {
       setServerUnreadCount(0);
@@ -307,6 +311,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
             postLikes: snap.postLikes,
             postComments: snap.postComments,
             liveStarts: snap.liveStarts,
+            weatherAlerts: snap.weatherAlerts || [],
             unreadCount: remoteUnread
           })
         )
@@ -493,7 +498,8 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     newFollows,
     postLikes,
     postComments,
-    liveStarts
+    liveStarts,
+    weatherAlerts: [] as any[]
   });
   feedSnapshotRef.current = {
     pending,
@@ -502,7 +508,8 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     newFollows,
     postLikes,
     postComments,
-    liveStarts
+    liveStarts,
+    weatherAlerts: []
   };
 
   const notificationUnreadCount = useMemo(() => {
@@ -943,6 +950,9 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
   };
 
   const liveStartLabel = (n: any) => {
+    if (n.type === "weather_alert") {
+      return String(n.commentExcerpt || "").trim() || "Weather alert";
+    }
     const meta = parseLiveNotifMeta(n);
     const name = String(n.actorName || "Someone");
     const topic = meta.topic ? `: ${meta.topic}` : "";
@@ -1143,6 +1153,7 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
     if (kind === "follow_back" || kind === "new_follow" || kind === "pending") return "person-add";
     if (kind === "accepted") return "checkmark";
     if (kind === "declined") return "close";
+    if (kind === "weather_alert") return "rainy";
     if (kind.startsWith("live")) return "radio";
     return "heart";
   }, []);
@@ -1347,6 +1358,18 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                         },
                                         { onPressRest: openPostFromRow || undefined }
                                       )
+                                  : item.kind === "weather_alert"
+                                    ? (
+                                      <Text
+                                        style={styles.figMessageText}
+                                        onPress={() => {
+                                          closeNotificationSheet();
+                                          navigateToWeather();
+                                        }}
+                                      >
+                                        {String(n.commentExcerpt || "Weather alert")}
+                                      </Text>
+                                    )
                                     : renderNamedMessage(n, (m) => liveStartLabel({ ...n, actorName: m }))}
                           <Text style={styles.figTimeText}>{relativeTimeLabel(item.createdAt)}</Text>
                         </View>
@@ -1399,6 +1422,16 @@ export function NotificationPanelProvider({ children }: { children: React.ReactN
                                 }
                                 return <View style={styles.figPostPlaceholder} />;
                               })()
+                            ) : item.kind === "weather_alert" ? (
+                              <Pressable
+                                style={styles.joinLiveBtn}
+                                onPress={() => {
+                                  closeNotificationSheet();
+                                  navigateToWeather();
+                                }}
+                              >
+                                <Text style={styles.joinLiveText}>Weather</Text>
+                              </Pressable>
                             ) : item.kind === "post_like" ||
                               item.kind === "post_tag" ||
                               item.kind === "post_comment" ||
