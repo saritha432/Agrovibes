@@ -695,6 +695,7 @@ async function ensureDirectMessagesTable() {
   await query(`ALTER TABLE direct_messages ALTER COLUMN is_delivered SET DEFAULT false`);
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_sender BOOLEAN NOT NULL DEFAULT false`);
   await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS hidden_for_receiver BOOLEAN NOT NULL DEFAULT false`);
+  await query(`ALTER TABLE direct_messages ADD COLUMN IF NOT EXISTS is_forwarded BOOLEAN NOT NULL DEFAULT false`);
   await query(
     `
     CREATE TABLE IF NOT EXISTS dm_thread_states (
@@ -2602,9 +2603,9 @@ async function enrichHomePostsLiveState(posts) {
     if (info === null) {
       post.liveStatus = dbActive || !post.liveStatus ? "active" : post.liveStatus;
       if (post.liveStatus === "active") {
-        post.liveViewerCount = Number(post.liveViewerCount || 0);
+      post.liveViewerCount = Number(post.liveViewerCount || 0);
         post.liveStartedAt = post.liveStartedAt || post.createdAt;
-        out.push(post);
+      out.push(post);
       } else {
         const hidden = await hideEndedLiveWithoutReplay(post);
         if (hidden.persisted) hidAny = true;
@@ -2620,9 +2621,9 @@ async function enrichHomePostsLiveState(posts) {
       if (hidden.persisted) hidAny = true;
       continue;
     }
-    post.liveStatus = "active";
-    post.liveViewerCount = info.viewerCount;
-    post.liveStartedAt = post.liveStartedAt || post.createdAt;
+      post.liveStatus = "active";
+      post.liveViewerCount = info.viewerCount;
+      post.liveStartedAt = post.liveStartedAt || post.createdAt;
     out.push(post);
   }
   if (hidAny) await cacheIncr("home:posts:gen");
@@ -5646,23 +5647,23 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
           AND ${dmVisibleToUserSql("dm", "$1")}
       ),
       classified AS (
-        SELECT
-          t.peer_id AS "peerUserId",
-          u.full_name AS "peerName",
-          u.email AS "peerEmail",
-          NULLIF(TRIM(u.username), '') AS "peerUsername",
-          NULLIF(TRIM(u.avatar_url), '') AS "peerAvatarUrl",
-          t.sender_id AS "lastSenderId",
-          t.receiver_id AS "lastReceiverId",
-          t.body AS "lastMessage",
-          t.created_at AS "lastAt",
+      SELECT
+        t.peer_id AS "peerUserId",
+        u.full_name AS "peerName",
+        u.email AS "peerEmail",
+        NULLIF(TRIM(u.username), '') AS "peerUsername",
+        NULLIF(TRIM(u.avatar_url), '') AS "peerAvatarUrl",
+        t.sender_id AS "lastSenderId",
+        t.receiver_id AS "lastReceiverId",
+        t.body AS "lastMessage",
+        t.created_at AS "lastAt",
           t.is_read AS "lastMessageIsRead",
-          COALESCE((
-            SELECT COUNT(*)::INT
-            FROM direct_messages dm2
-            WHERE dm2.sender_id = t.peer_id
-              AND dm2.receiver_id = $1
-              AND dm2.is_read = false
+        COALESCE((
+          SELECT COUNT(*)::INT
+          FROM direct_messages dm2
+          WHERE dm2.sender_id = t.peer_id
+            AND dm2.receiver_id = $1
+            AND dm2.is_read = false
               AND ${dmVisibleToUserSql("dm2", "$1")}
           ), 0) AS "unreadCount",
           CASE
@@ -5671,8 +5672,8 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
             WHEN dts.bucket IN ('primary', 'accepted') THEN false
             ELSE true
           END AS "isMessageRequest"
-        FROM thread_rows t
-        JOIN learn_users u ON u.id = t.peer_id
+      FROM thread_rows t
+      JOIN learn_users u ON u.id = t.peer_id
         JOIN learn_users me_user ON me_user.id = $1
         LEFT JOIN dm_thread_states dts
           ON dts.user_id = $1 AND dts.peer_id = t.peer_id
@@ -5680,7 +5681,7 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
           ON sf.follower_id = $1
           AND sf.following_id = t.peer_id
           AND sf.status = 'accepted'
-        WHERE t.rn = 1
+      WHERE t.rn = 1
       )
       SELECT *
       FROM classified
@@ -5726,8 +5727,8 @@ router.get("/v1/messages/threads", authRequired, async (req, res) => {
             OR dts.bucket = 'request'
           )
         `,
-        [me]
-      );
+      [me]
+    );
       requestCountOut = Number(reqOnly.rows[0]?.count || 0);
     }
     res.json({ threads, requestCount: requestCountOut });
@@ -5797,7 +5798,8 @@ router.get("/v1/messages/thread/:peerUserId", authRequired, async (req, res) => 
         body,
         created_at AS "createdAt",
         COALESCE(dm.is_read, false) AS "isRead",
-        COALESCE(dm.is_delivered, true) AS "isDelivered"
+        COALESCE(dm.is_delivered, true) AS "isDelivered",
+        COALESCE(dm.is_forwarded, false) AS "isForwarded"
       FROM direct_messages dm
       WHERE ((dm.sender_id = $1 AND dm.receiver_id = $2)
          OR (dm.sender_id = $2 AND dm.receiver_id = $1))
@@ -6096,6 +6098,7 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
     const me = Number(req.user.userId);
     const peerUserId = Number(req.params.peerUserId);
     const body = String(req.body?.text || "").trim();
+    const isForwarded = req.body?.forwarded === true;
     if (!Number.isFinite(peerUserId) || peerUserId <= 0 || peerUserId === me) {
       res.status(400).json({ message: "Valid peerUserId is required" });
       return;
@@ -6124,8 +6127,8 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
 
     const ins = await query(
       `
-      INSERT INTO direct_messages (sender_id, receiver_id, body, is_read, is_delivered)
-      VALUES ($1, $2, $3, false, false)
+      INSERT INTO direct_messages (sender_id, receiver_id, body, is_read, is_delivered, is_forwarded)
+      VALUES ($1, $2, $3, false, false, $4)
       RETURNING
         id,
         sender_id AS "senderId",
@@ -6133,9 +6136,10 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
         body,
         created_at AS "createdAt",
         COALESCE(is_read, false) AS "isRead",
-        COALESCE(is_delivered, false) AS "isDelivered"
+        COALESCE(is_delivered, false) AS "isDelivered",
+        COALESCE(is_forwarded, false) AS "isForwarded"
       `,
-      [me, peerUserId, body]
+      [me, peerUserId, body, isForwarded]
     );
     const message = await attachDeliveryStatus(ins.rows[0], peerUserId);
     await ensureDmInboxBucketsOnSend({ senderId: me, receiverId: peerUserId });
@@ -6151,6 +6155,13 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
       }
     }
     const dmPush = directMessagePushPayload(body);
+    const pushExcerpt = !isForwarded
+      ? dmPush.excerpt
+      : String(body).startsWith("[Cropvibe Story]")
+        ? "Forwarded a story"
+        : /^(photo|video)$/i.test(String(dmPush.excerpt || ""))
+          ? `Forwarded ${String(dmPush.excerpt).toLowerCase()}`
+          : `Forwarded: ${dmPush.excerpt}`;
     const isCallHistory = String(body).startsWith("[Cropvibe Call]");
     if (!isCallHistory) {
       fireSocialPush({
@@ -6159,7 +6170,7 @@ router.post("/v1/messages/thread/:peerUserId", authRequired, async (req, res) =>
         actorId: me,
         actorName: await actorDisplayName(me),
         postId: livePostId,
-        commentExcerpt: dmPush.excerpt,
+        commentExcerpt: pushExcerpt,
         imageUrl: dmPush.imageUrl,
         messageId: message?.id
       });
@@ -6209,7 +6220,7 @@ router.delete("/v1/messages/:messageId", authRequired, async (req, res) => {
         res.status(403).json({ message: "Only the sender can delete this message for everyone" });
         return;
       }
-      await query(`DELETE FROM direct_messages WHERE id = $1`, [messageId]);
+    await query(`DELETE FROM direct_messages WHERE id = $1`, [messageId]);
       emitDirectMessageDeleted({ messageId, senderId, receiverId, scope: "everyone" });
       res.json({ ok: true, messageId, mode });
       return;
@@ -6659,22 +6670,22 @@ router.get("/v1/home/stories/:storyId/viewers", authRequired, async (req, res) =
     }
     const [result, countRes] = await Promise.all([
       query(
-        `
-        SELECT
-          u.id AS "userId",
-          u.full_name AS "fullName",
-          NULLIF(TRIM(u.username), '') AS "username",
-          NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
+      `
+      SELECT
+        u.id AS "userId",
+        u.full_name AS "fullName",
+        NULLIF(TRIM(u.username), '') AS "username",
+        NULLIF(TRIM(u.avatar_url), '') AS "avatarUrl",
           v.created_at AS "viewedAt",
           l.created_at AS "likedAt"
-        FROM home_story_views v
-        JOIN learn_users u ON u.id = v.viewer_id
+      FROM home_story_views v
+      JOIN learn_users u ON u.id = v.viewer_id
         LEFT JOIN home_story_likes l ON l.story_id = v.story_id AND l.user_id = v.viewer_id
-        WHERE v.story_id = $1
+      WHERE v.story_id = $1
         ORDER BY (l.created_at IS NOT NULL) DESC, v.created_at DESC
-        LIMIT 200
-        `,
-        [storyId]
+      LIMIT 200
+      `,
+      [storyId]
       ),
       query(
         `

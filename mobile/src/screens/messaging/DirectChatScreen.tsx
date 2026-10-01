@@ -98,6 +98,8 @@ import {
   parseDmVoiceMessage,
   parseStoryDmMessage,
   isStoryDmForwarded,
+  forwardedDmLabel,
+  isDmBodyForwarded,
   storyDmChatLabel,
   isPeerCallEndSignal,
   isCalleeRingCancelledSignal,
@@ -748,6 +750,21 @@ export function DirectChatScreen() {
       return;
     }
     const list = await fetchMessageThread(token, peerUserId, { limit: 40 });
+    const lastFew = (list.messages || []).slice(-3);
+    console.log(
+      "[fwd-debug] thread loaded",
+      JSON.stringify({
+        me: user?.id,
+        peer: peerUserId,
+        last: lastFew.map((m) => ({
+          id: m.id,
+          from: m.senderId,
+          marked: isDmBodyForwarded(m.body),
+          flag: m.isForwarded,
+          head: String(m.body || "").slice(0, 50)
+        }))
+      })
+    );
     setMessages(list.messages || []);
     setHasMoreOlder(!!list.hasMore);
     if (typeof list.isMessageRequest === "boolean") {
@@ -809,6 +826,17 @@ export function DirectChatScreen() {
 
   useEffect(() => {
     return onDirectMessage((payload) => {
+      console.log(
+        "[fwd-debug] socket message",
+        JSON.stringify({
+          me: user?.id,
+          screenPeer: peerUserId,
+          payloadPeer: payload.peerUserId,
+          id: payload.message?.id,
+          marked: isDmBodyForwarded(String(payload.message?.body || "")),
+          head: String(payload.message?.body || "").slice(0, 50)
+        })
+      );
       if (payload.peerUserId !== peerUserId) return;
       if (peerEndsOutgoingCall(payload.message)) {
         endCallForPeerSignal();
@@ -1833,6 +1861,10 @@ export function DirectChatScreen() {
               {storyReply && isStoryDmForwarded(storyReply, messageItem) ? (
                 <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
                   ↪ Forwarded
+                </Text>
+              ) : (messageItem.isForwarded || isDmBodyForwarded(messageItem.body)) && !storyReply ? (
+                <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
+                  ↪ {forwardedDmLabel(messageItem.body)}
                 </Text>
               ) : sharedReply ? (
                 <Text style={[styles.repliedToLabel, isSelf ? styles.repliedToLabelSelf : styles.repliedToLabelPeer]}>
