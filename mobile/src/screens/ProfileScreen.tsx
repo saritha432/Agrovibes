@@ -1594,7 +1594,7 @@ export function ProfileScreen({ route: routeProp }: { route?: any }) {
             <Image source={{ uri: displayCoverUrl }} style={styles.coverImage} resizeMode="cover" />
           ) : null}
           <View style={styles.headerMidRow}>
-            <View style={styles.avatarPresenceWrap}>
+            <View style={[styles.avatarPresenceWrap, displayCoverUrl ? styles.avatarOnCover : null]}>
               <StoryRingAvatar
                 uri={profileSubject?.avatarUrl}
                 name={profileSubject?.fullName || profileSubject?.username || "U"}
@@ -2432,8 +2432,15 @@ const styles = StyleSheet.create({
     width: "100%",
     aspectRatio: 5 / 2,
     borderRadius: 14,
-    marginBottom: 14,
     backgroundColor: "#1f1f1f"
+  },
+  /** Pulls the avatar up so its top half sits on the cover, ringed in the page colour (Edit Profile layout). */
+  avatarOnCover: {
+    marginTop: -48,
+    marginLeft: 10,
+    padding: 3,
+    borderRadius: 47,
+    backgroundColor: PAGE_BG
   },
   headerMidRow: { flexDirection: "row", alignItems: "center", gap: 16 },
   headerInfo: { flex: 1, minWidth: 0 },
