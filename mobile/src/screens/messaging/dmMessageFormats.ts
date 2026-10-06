@@ -181,8 +181,55 @@ function asJsonRecord(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * Invisible prefix marking a forwarded plain-text message. Zero-width so older app builds
+ * (and push previews) still show the text unchanged.
+ */
+const DM_FORWARD_TEXT_MARK = "\u2063\u2063\u2063";
+const DM_STRUCTURED_PREFIX_RE = /^\[(?:Cropvibe|AgroVibe) [A-Za-z]+\]/;
+
+export function stripDmForwardMark(body: string): string {
+  const text = String(body ?? "");
+  return text.startsWith(DM_FORWARD_TEXT_MARK) ? text.slice(DM_FORWARD_TEXT_MARK.length) : text;
+}
+
+/** Marks a chat body as forwarded inside the body itself, so it works without backend support. */
+export function markDmBodyForwarded(body: string): string {
+  const text = String(body ?? "");
+  const prefix = text.match(DM_STRUCTURED_PREFIX_RE)?.[0];
+  if (!prefix) {
+    return text.startsWith(DM_FORWARD_TEXT_MARK) ? text : `${DM_FORWARD_TEXT_MARK}${text}`;
+  }
+  const rest = text.slice(prefix.length);
+  const start = rest.indexOf("{");
+  const end = rest.lastIndexOf("}");
+  if (start < 0 || end <= start) return text;
+  try {
+    const parsed = asJsonRecord(JSON.parse(rest.slice(start, end + 1)));
+    if (!parsed) return text;
+    return `${prefix}${rest.slice(0, start)}${JSON.stringify({ ...parsed, forwarded: true })}${rest.slice(end + 1)}`;
+  } catch {
+    return text;
+  }
+}
+
+export function isDmBodyForwarded(body: string): boolean {
+  const text = String(body ?? "");
+  if (text.startsWith(DM_FORWARD_TEXT_MARK)) return true;
+  if (!DM_STRUCTURED_PREFIX_RE.test(text)) return false;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return false;
+  try {
+    const parsed = asJsonRecord(JSON.parse(text.slice(start, end + 1)));
+    return parsed?.forwarded === true;
+  } catch {
+    return false;
+  }
+}
+
 function messageBodyText(body: unknown): string {
-  if (typeof body === "string") return body.replace(/^\uFEFF/, "").trim();
+  if (typeof body === "string") return stripDmForwardMark(body.replace(/^\uFEFF/, "")).trim();
   const record = asJsonRecord(body);
   if (record) {
     try {
@@ -256,6 +303,8 @@ export function parseStoryDmMessage(body: unknown): StoryDmPayload | null {
   if (!raw) return null;
 
   const prefixRe = /\[(?:Cropvibe|AgroVibe)\s+Story\]/i;
+  // Media/post/profile payloads can carry `forwarded: true`; never read those as stories.
+  if (DM_STRUCTURED_PREFIX_RE.test(raw) && !/^\[(?:Cropvibe|AgroVibe)\s+Story\]/i.test(raw)) return null;
   const prefixMatch = raw.match(prefixRe);
   if (prefixMatch && prefixMatch.index != null) {
     const after = raw.slice(prefixMatch.index + prefixMatch[0].length).trim();
@@ -340,6 +389,24 @@ export function buildStoryForwardDmBody(story: {
     kind: "forward",
     forwarded: true
   })}`;
+}
+
+/** WhatsApp-style label shown above a forwarded bubble ("Forwarded photo", "Forwarded message", …). */
+export function forwardedDmLabel(body: string): string {
+  const text = String(body || "");
+  const media = parseDmMediaMessage(text);
+  if (media) {
+    if (dmMediaIsAlbum(media)) {
+      return media.items.every((item) => item.kind === "video") ? "Forwarded videos" : "Forwarded photos";
+    }
+    return media.kind === "video" ? "Forwarded video" : "Forwarded photo";
+  }
+  if (parseDmVoiceMessage(text)) return "Forwarded voice message";
+  if (text.startsWith("[Cropvibe Reel]") || text.startsWith("[AgroVibe Reel]")) return "Forwarded reel";
+  if (text.startsWith("[Cropvibe Post]")) return "Forwarded post";
+  if (text.startsWith("[Cropvibe Profile]")) return "Forwarded profile";
+  if (text.startsWith("[Cropvibe Live]")) return "Forwarded live";
+  return "Forwarded message";
 }
 
 export function storyDmChatLabel(story: StoryDmPayload, forwarded: boolean): string {

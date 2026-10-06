@@ -1001,6 +1001,7 @@ export interface DirectMessageItem {
   createdAt: string;
   isRead?: boolean;
   isDelivered?: boolean;
+  isForwarded?: boolean;
 }
 
 export interface SocialNotificationItem {
@@ -2122,11 +2123,16 @@ export async function fetchCallRingingStatus(token: string, roomName: string) {
   };
 }
 
-export async function sendDirectMessage(token: string, peerUserId: number, text: string) {
+export async function sendDirectMessage(
+  token: string,
+  peerUserId: number,
+  text: string,
+  options?: { forwarded?: boolean }
+) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/messages/thread/${encodeURIComponent(String(peerUserId))}`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
+    body: JSON.stringify(options?.forwarded ? { text, forwarded: true } : { text })
   })) as { message: DirectMessageItem };
 }
 
