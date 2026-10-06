@@ -141,6 +141,12 @@ function SchemeList() {
 function SchemeDetail({ schemeId }: { schemeId: string }) {
   const scheme = getGovSchemeById(schemeId);
   const [saved, setSaved] = useState(() => readSaved().includes(schemeId));
+  const [eligibleOpen, setEligibleOpen] = useState(false);
+
+  useEffect(() => {
+    setEligibleOpen(false);
+    setSaved(readSaved().includes(schemeId));
+  }, [schemeId]);
 
   if (!scheme) {
     return (
@@ -158,10 +164,6 @@ function SchemeDetail({ schemeId }: { schemeId: string }) {
     const next = saved ? ids.filter((id) => id !== selected.id) : [...ids, selected.id];
     writeSaved(next);
     setSaved(!saved);
-  }
-
-  function checkEligible() {
-    window.alert(`${selected.whoFor}\n\nThis is not an official check. Confirm on the government website.`);
   }
 
   return (
@@ -187,9 +189,26 @@ function SchemeDetail({ schemeId }: { schemeId: string }) {
       </p>
       {selected.note ? <p className="schemes-page__note">{selected.note}</p> : null}
       <div className="schemes-page__actions">
-        <button type="button" className="schemes-page__primary" onClick={checkEligible}>
+        <button type="button" className="schemes-page__primary" onClick={() => setEligibleOpen(true)}>
           Check if likely eligible
         </button>
+        {eligibleOpen ? (
+          <section className="schemes-page__eligible" aria-live="polite">
+            <h2>Likely eligibility</h2>
+            <p>
+              <strong>Who it is for: </strong>
+              {selected.whoFor}
+            </p>
+            <p>
+              <strong>Documents typically needed: </strong>
+              {selected.documents}
+            </p>
+            <p className="schemes-page__note">This is not an official check. Confirm on the government website.</p>
+            <button type="button" className="schemes-page__secondary-btn" onClick={() => setEligibleOpen(false)}>
+              Done
+            </button>
+          </section>
+        ) : null}
         <a className="schemes-page__secondary" href={selected.officialUrl} target="_blank" rel="noreferrer">
           Official site (external)
         </a>

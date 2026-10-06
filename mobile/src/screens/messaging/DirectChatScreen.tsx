@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   Image,
   Keyboard,
@@ -18,7 +19,8 @@ import {
   Text,
   TextInput,
   useWindowDimensions,
-  View
+  View,
+  type KeyboardEvent
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system";
@@ -150,6 +152,43 @@ function ChatAssetIcon({ icon, size = COMPOSER_ICON, color = TEXT }: { icon: Cha
   return (
     <SvgAssetIcon module={CHAT_ASSETS[icon]} size={size} color={color} fallbackName={CHAT_ICON_NAMES[icon]} />
   );
+}
+
+/** Suggestion-strip and animation frames are shorter than a real keyboard. */
+const ANDROID_IME_MIN_HEIGHT = 100;
+/** Composer is already flush with the keyboard inside this tolerance. */
+const ANDROID_IME_ALIGN_SLOP = 12;
+
+function readAndroidKeyboardFrame(e: KeyboardEvent): { top: number; height: number } | null {
+  const height = Math.max(0, Math.round(e.endCoordinates?.height || 0));
+  const top = Math.round(e.endCoordinates?.screenY || 0);
+  if (height < ANDROID_IME_MIN_HEIGHT || top <= 0) return null;
+  return { top, height };
+}
+
+/**
+ * Padding still needed after Android's own resize.
+ * Same result on API 24–36: 0 when the window already sits on the keyboard,
+ * otherwise only the part of the IME that still covers the window.
+ */
+function androidKeyboardPad(
+  frame: { top: number; height: number },
+  windowHeight: number,
+  restingWindowHeight: number,
+  screenHeight: number
+): number {
+  const shrink = Math.max(0, Math.round(restingWindowHeight - windowHeight));
+  if (shrink >= frame.height * 0.6) return 0;
+
+  const frameLift = Math.round(screenHeight - frame.top);
+  // RN's height omits the nav bar. Allow that extra sliver, not another keyboard.
+  const maxLift = frame.height + 48;
+  if (frameLift >= frame.height * 0.5) {
+    const overlap = Math.max(0, Math.round(windowHeight - frame.top));
+    return Math.max(0, Math.min(overlap, maxLift - shrink));
+  }
+
+  return Math.max(0, Math.min(maxLift, frame.height - shrink));
 }
 
 function formatDateSeparator(ts: number) {
@@ -575,22 +614,144 @@ export function DirectChatScreen() {
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [composerInputHeight, setComposerInputHeight] = useState(COMPOSER_INPUT_MIN_HEIGHT);
   const [socketConnected, setSocketConnected] = useState(isSocketChatConnected());
-  /** Track IME open so we drop safe-area padding (Android adjustResize already sits on the keyboard). */
+  /** Track IME so the composer sits on it the same way on every Android version. */
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [androidKbPad, setAndroidKbPad] = useState(0);
+  const screenRootRef = useRef<View>(null);
+  const composerBarRef = useRef<View>(null);
+  const androidKbPadRef = useRef(0);
+  const keyboardSyncGenRef = useRef(0);
+  const lastAndroidKbFrameRef = useRef<{ top: number; height: number } | null>(null);
+  const restingWindowHeightRef = useRef(Dimensions.get("window").height);
+
+  const setAndroidKeyboardPad = useCallback((next: number) => {
+    const rounded = Math.max(0, Math.round(next));
+    if (Math.abs(rounded - androidKbPadRef.current) <= 4) return;
+    androidKbPadRef.current = rounded;
+    setAndroidKbPad(rounded);
+  }, []);
+
+  const alignAndroidComposer = useCallback(
+    (frame: { top: number; height: number }, generation: number) => {
+      const screenH = Dimensions.get("screen").height;
+      const windowH = Dimensions.get("window").height;
+      const formula = androidKeyboardPad(frame, windowH, restingWindowHeightRef.current, screenH);
+      const frameLift = Math.round(screenH - frame.top);
+      const screenYIsKeyboardTop = frameLift >= frame.height * 0.5;
+
+      const applyFromMeasure = (rootY: number, barBottom: number) => {
+        if (generation !== keyboardSyncGenRef.current) return;
+        // measureInWindow subtracts the visible-frame top; keyboard screenY does not.
+        const frameTop = Math.max(0, Math.round(-rootY));
+        const keyboardTop = frame.top - frameTop;
+        const overflow = Math.round(barBottom - keyboardTop);
+        const current = androidKbPadRef.current;
+
+        if (!screenYIsKeyboardTop) {
+          // Some Android versions leave screenY at the bottom of the screen.
+          // The formula (keyboard height minus any resize) is the real lift.
+          setAndroidKeyboardPad(Math.min(formula, frame.height));
+          return;
+        }
+
+        if (overflow > ANDROID_IME_ALIGN_SLOP) {
+          setAndroidKeyboardPad(Math.min(frame.height + 48, current + overflow));
+          return;
+        }
+        if (overflow < -ANDROID_IME_ALIGN_SLOP) {
+          setAndroidKeyboardPad(Math.max(0, current + overflow));
+        }
+      };
+
+      const root = screenRootRef.current;
+      const bar = composerBarRef.current;
+      if (!root || !bar) {
+        setAndroidKeyboardPad(formula);
+        return;
+      }
+      root.measureInWindow((_x, rootY) => {
+        bar.measureInWindow((_bx, barY, _bw, barH) => {
+          if (barH <= 0) {
+            setAndroidKeyboardPad(formula);
+            return;
+          }
+          applyFromMeasure(rootY, barY + barH);
+        });
+      });
+    },
+    [setAndroidKeyboardPad]
+  );
 
   useEffect(() => {
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
+    let confirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearScheduled = () => {
+      if (syncTimer) clearTimeout(syncTimer);
+      if (confirmTimer) clearTimeout(confirmTimer);
+      syncTimer = null;
+      confirmTimer = null;
+    };
+
+    const scheduleAlign = (frame: { top: number; height: number }) => {
+      lastAndroidKbFrameRef.current = frame;
+      const generation = keyboardSyncGenRef.current;
+      clearScheduled();
+      const windowH = Dimensions.get("window").height;
+      const screenH = Dimensions.get("screen").height;
+      // Resize already finished: keep the bar where the window put it.
+      // Otherwise wait for layout, then lift only the covered part.
+      const immediate = androidKeyboardPad(frame, windowH, restingWindowHeightRef.current, screenH);
+      if (immediate === 0) setAndroidKeyboardPad(0);
+      syncTimer = setTimeout(() => alignAndroidComposer(frame, generation), 60);
+      confirmTimer = setTimeout(() => alignAndroidComposer(frame, generation), 240);
+    };
+
+    const onShow = (e: KeyboardEvent) => {
+      setKeyboardOpen(true);
+      if (Platform.OS === "android") {
+        const frame = readAndroidKeyboardFrame(e);
+        if (frame) scheduleAlign(frame);
+      }
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    };
+    const onHide = () => {
+      keyboardSyncGenRef.current += 1;
+      clearScheduled();
+      lastAndroidKbFrameRef.current = null;
+      restingWindowHeightRef.current = Dimensions.get("window").height;
+      androidKbPadRef.current = 0;
+      setKeyboardOpen(false);
+      setAndroidKbPad(0);
+    };
+
     const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvt, () => {
-      setKeyboardOpen(true);
-      listRef.current?.scrollToOffset({ offset: 0, animated: true });
-    });
-    const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardOpen(false));
+    const showSub = Keyboard.addListener(showEvt, onShow);
+    const hideSub = Keyboard.addListener(hideEvt, onHide);
+    const frameSub =
+      Platform.OS === "android"
+        ? Keyboard.addListener("keyboardDidChangeFrame", (e) => {
+            const frame = readAndroidKeyboardFrame(e);
+            if (!frame) return;
+            setKeyboardOpen(true);
+            scheduleAlign(frame);
+          })
+        : null;
+
     return () => {
+      keyboardSyncGenRef.current += 1;
+      clearScheduled();
       showSub.remove();
       hideSub.remove();
+      frameSub?.remove();
     };
-  }, []);
+  }, [alignAndroidComposer, setAndroidKeyboardPad]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || keyboardOpen) return;
+    restingWindowHeightRef.current = windowHeight;
+  }, [keyboardOpen, windowHeight]);
 
   useEffect(() => {
     if (peerUsernameParam) {
@@ -1651,9 +1812,18 @@ export function DirectChatScreen() {
     [peerUserId, token, user?.id]
   );
 
-  // Nav/home-indicator only when the keyboard is closed. With Android resize, the
-  // window already sits on the IME — extra padding leaves a gap above the keyboard.
-  const bottomPad = keyboardOpen ? 0 : Math.min(Math.max(insets.bottom, 8), 34);
+  // Keep the composer clear of the nav bar, and of the IME when Android does not resize.
+  const closedBottomPad = Math.max(insets.bottom, 8);
+  const bottomPad =
+    Platform.OS === "android"
+      ? androidKbPad > 0
+        ? androidKbPad
+        : keyboardOpen
+          ? 0
+          : closedBottomPad
+      : keyboardOpen
+        ? 0
+        : closedBottomPad;
 
   const openSharedCropvibeCard = useCallback(
     async (body: string) => {
@@ -1713,7 +1883,7 @@ export function DirectChatScreen() {
   );
 
   return (
-    <View style={styles.flex}>
+    <View ref={screenRootRef} collapsable={false} style={styles.flex}>
       <View style={[styles.header, { paddingTop: topChromeInset }]}>
         <Pressable hitSlop={12} style={styles.headerBack} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={28} color={TEXT} />
@@ -1759,7 +1929,7 @@ export function DirectChatScreen() {
         keyExtractor={(item) => item.id}
         inverted
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         contentContainerStyle={styles.listContent}
         initialNumToRender={18}
         maxToRenderPerBatch={12}
@@ -2092,7 +2262,7 @@ export function DirectChatScreen() {
             </Pressable>
           </View>
         ) : null}
-        <View style={styles.composerBar}>
+        <View ref={composerBarRef} collapsable={false} style={styles.composerBar}>
           {pendingPasteImages.length > 0 && !isRecordingVoice ? (
             <View style={styles.pastePreviewRow}>
               {pendingPasteImages.map((image, index) => (
@@ -2162,7 +2332,9 @@ export function DirectChatScreen() {
                     onChangeText={handleDraftChange}
                     placeholder="Message"
                     placeholderTextColor={MUTED}
+                    maxFontSizeMultiplier={1.15}
                     showSoftInputOnFocus
+                    disableFullscreenUI
                     style={[
                       styles.input,
                       {

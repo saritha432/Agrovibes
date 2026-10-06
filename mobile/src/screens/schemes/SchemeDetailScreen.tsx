@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, Linking, Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { getGovSchemeById, type GovScheme } from "../../data/govSchemes";
 import { useLanguage } from "../../localization/LanguageContext";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
@@ -18,9 +18,12 @@ export function SchemeDetailView({
   onBack: () => void;
 }) {
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
   const [saved, setSaved] = useState(false);
+  const [eligibleOpen, setEligibleOpen] = useState(false);
 
   useEffect(() => {
+    setEligibleOpen(false);
     void readSavedSchemeIds().then((ids) => setSaved(ids.includes(scheme.id)));
   }, [scheme.id]);
 
@@ -40,11 +43,8 @@ export function SchemeDetailView({
   }, [scheme.officialUrl, t]);
 
   const checkEligible = useCallback(() => {
-    Alert.alert(t("schemesEligibilityTitle"), `${scheme.whoFor}\n\n${t("schemesEligibilityHint")}`, [
-      { text: t("schemesOfficialSite"), onPress: () => void openOfficialSite() },
-      { text: "OK", style: "cancel" }
-    ]);
-  }, [openOfficialSite, scheme.whoFor, t]);
+    setEligibleOpen(true);
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -57,7 +57,7 @@ export function SchemeDetailView({
           <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={22} color={APP_LIME} />
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: 28 + insets.bottom }]}>
         <Text style={styles.kicker}>{scheme.categoryLabel.toUpperCase()}</Text>
         <Text style={styles.title}>{scheme.name}</Text>
         <Text style={styles.lead}>{scheme.description}</Text>
@@ -71,14 +71,47 @@ export function SchemeDetailView({
         </Text>
         {scheme.note ? <Text style={styles.note}>{scheme.note}</Text> : null}
         <View style={styles.actions}>
-          <Pressable style={styles.primary} onPress={checkEligible}>
+          <Pressable style={styles.primary} onPress={checkEligible} accessibilityRole="button">
             <Text style={styles.primaryText}>{t("schemesCheckEligible")}</Text>
           </Pressable>
-          <Pressable style={styles.secondary} onPress={() => void openOfficialSite()}>
+          <Pressable style={styles.secondary} onPress={() => void openOfficialSite()} accessibilityRole="button">
             <Text style={styles.secondaryText}>{t("schemesOfficialSite")}</Text>
           </Pressable>
         </View>
       </ScrollView>
+      <Modal visible={eligibleOpen} transparent animationType="fade" onRequestClose={() => setEligibleOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setEligibleOpen(false)}>
+          <Pressable style={[styles.modalCard, { paddingBottom: 20 + insets.bottom }]} onPress={() => undefined}>
+            <Text style={styles.modalTitle}>{t("schemesEligibilityTitle")}</Text>
+            <Text style={styles.modalBody}>
+              <Text style={styles.bulletLabel}>{t("schemesWhoFor")}: </Text>
+              {scheme.whoFor}
+            </Text>
+            <Text style={styles.modalBody}>
+              <Text style={styles.bulletLabel}>{t("schemesDocuments")}: </Text>
+              {scheme.documents}
+            </Text>
+            <Text style={styles.modalHint}>{t("schemesEligibilityHint")}</Text>
+            <Pressable
+              style={styles.primary}
+              accessibilityRole="button"
+              onPress={() => {
+                setEligibleOpen(false);
+                void openOfficialSite();
+              }}
+            >
+              <Text style={styles.primaryText}>{t("schemesOfficialSite")}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondary}
+              accessibilityRole="button"
+              onPress={() => setEligibleOpen(false)}
+            >
+              <Text style={styles.secondaryText}>{t("done")}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -148,5 +181,21 @@ const styles = StyleSheet.create({
     borderColor: "#4a4a4a",
     backgroundColor: APP_SURFACE
   },
-  secondaryText: { color: APP_TEXT, fontWeight: "700", fontSize: 15 }
+  secondaryText: { color: APP_TEXT, fontWeight: "700", fontSize: 15 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end"
+  },
+  modalCard: {
+    backgroundColor: APP_SURFACE,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    gap: 10
+  },
+  modalTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800" },
+  modalBody: { color: APP_TEXT, fontSize: 15, lineHeight: 22 },
+  modalHint: { color: APP_TEXT_MUTED, fontSize: 13, lineHeight: 18, marginBottom: 6 }
 });

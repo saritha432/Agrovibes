@@ -172,6 +172,54 @@
   justify-items: center;
   gap: 6px;
   text-align: center;
+  border: 1px solid transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+}
+
+.weather-page__day--selected {
+  border-color: #c9ff35;
+}
+
+.weather-page__detail {
+  margin-top: 14px;
+  background: #303030;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.weather-page__detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.weather-page__detail-head strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 16px;
+}
+
+.weather-page__detail-head span {
+  color: #c9ff35;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.weather-page__detail-stats {
+  margin: 10px 0 0;
+  color: #a8b0b8;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.weather-page__detail-body {
+  margin: 8px 0 0;
+  color: #f8fafc;
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 .weather-page__day-name {
