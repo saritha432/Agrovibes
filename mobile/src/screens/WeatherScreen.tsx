@@ -43,6 +43,7 @@ export function WeatherScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState<WeatherReport | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<WeatherPlace[]>([]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -53,6 +54,7 @@ export function WeatherScreen() {
       try {
         const next = await fetchWeatherReport(token, params);
         setReport(next);
+        setSelectedDate(null);
         setQuery("");
         setSuggestions([]);
       } catch (error) {
@@ -104,6 +106,8 @@ export function WeatherScreen() {
       { enableHighAccuracy: false, timeout: 8000 }
     );
   };
+
+  const selectedDay = report?.days.find((day) => day.date === selectedDate) ?? null;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -175,18 +179,45 @@ export function WeatherScreen() {
               ) : null}
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysRow}>
-                {report.days.map((day) => (
-                  <View key={day.date} style={styles.dayCard}>
-                    <Text style={styles.dayName}>
-                      {day.weekday} {day.day}
-                    </Text>
-                    <Ionicons name={weatherIonicon(day.icon)} size={28} color={APP_LIME} />
-                    <Text style={styles.temp}>{day.tempC}°</Text>
-                    <Text style={styles.rain}>Rain {day.rainChance}%</Text>
-                    <Text style={styles.hint}>{day.hint}</Text>
-                  </View>
-                ))}
+                {report.days.map((day) => {
+                  const selected = selectedDate === day.date;
+                  return (
+                    <Pressable
+                      key={day.date}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => setSelectedDate(day.date)}
+                      style={[styles.dayCard, selected ? styles.dayCardSelected : null]}
+                    >
+                      <Text style={styles.dayName}>
+                        {day.weekday} {day.day}
+                      </Text>
+                      <Ionicons name={weatherIonicon(day.icon)} size={28} color={APP_LIME} />
+                      <Text style={styles.temp}>{day.tempC}°</Text>
+                      <Text style={styles.rain}>Rain {day.rainChance}%</Text>
+                      <Text style={styles.hint}>{day.hint}</Text>
+                    </Pressable>
+                  );
+                })}
               </ScrollView>
+              {selectedDay ? (
+                <View style={styles.detailCard}>
+                  <View style={styles.detailHead}>
+                    <Ionicons name={weatherIonicon(selectedDay.icon)} size={28} color={APP_LIME} />
+                    <View style={styles.detailHeadText}>
+                      <Text style={styles.detailTitle}>
+                        {selectedDay.weekday} {selectedDay.day}
+                      </Text>
+                      <Text style={styles.detailCondition}>{selectedDay.condition}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.detailStats}>
+                    High {selectedDay.tempC}° · Low {selectedDay.tempMinC}° · Rain {selectedDay.rainChance}%
+                    {selectedDay.windKmh > 0 ? ` · Wind ${selectedDay.windKmh} km/h` : ""}
+                  </Text>
+                  <Text style={styles.detailBody}>{selectedDay.description}</Text>
+                </View>
+              ) : null}
             </>
           ) : null}
         </ScrollView>
@@ -261,8 +292,26 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 10,
     alignItems: "center",
-    gap: 6
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "transparent"
   },
+  dayCardSelected: {
+    borderColor: APP_LIME
+  },
+  detailCard: {
+    marginTop: 14,
+    backgroundColor: APP_SURFACE,
+    borderRadius: 16,
+    padding: 16,
+    gap: 8
+  },
+  detailHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+  detailHeadText: { flex: 1 },
+  detailTitle: { color: APP_TEXT, fontSize: 16, fontWeight: "800" },
+  detailCondition: { color: APP_LIME, fontSize: 14, fontWeight: "700", marginTop: 2 },
+  detailStats: { color: APP_TEXT_MUTED, fontSize: 13, lineHeight: 18 },
+  detailBody: { color: APP_TEXT, fontSize: 15, lineHeight: 22 },
   dayName: { fontSize: 11, fontWeight: "700", color: APP_TEXT_MUTED },
   temp: { fontSize: 22, fontWeight: "800", color: APP_TEXT },
   rain: { fontSize: 12, color: APP_TEXT_MUTED },

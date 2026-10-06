@@ -12,11 +12,16 @@ export type WeatherDay = {
   weekday: string;
   day: string;
   tempC: number;
+  tempMinC: number;
   rainChance: number;
+  precipMm: number;
+  windKmh: number;
   condition: string;
   summary: string;
   icon: WeatherIconName;
   hint: string;
+  /** Short forecast paragraph, in the style of a weather site day summary. */
+  description: string;
 };
 
 export type WeatherReport = {
@@ -90,6 +95,38 @@ function fieldWorkHint(rainChance: number, icon: WeatherIconName) {
   if (icon === "sunny") return "Good for field work";
   if (icon === "cloudy" || icon === "partly-cloudy") return "Overcast";
   return "Fair";
+}
+
+function dayBrief(input: {
+  condition: string;
+  tempMax: number;
+  tempMin: number;
+  rainChance: number;
+  windKmh: number;
+  precipMm: number;
+  hint: string;
+}) {
+  const rain =
+    input.rainChance >= 70
+      ? `Rain is likely, with a ${input.rainChance}% chance.`
+      : input.rainChance >= 40
+        ? `Showers are possible, with a ${input.rainChance}% chance of rain.`
+        : input.rainChance >= 15
+          ? `A slight chance of rain (${input.rainChance}%).`
+          : `Rain is unlikely (${input.rainChance}%).`;
+  const wet =
+    input.precipMm >= 1
+      ? ` About ${input.precipMm >= 10 ? Math.round(input.precipMm) : input.precipMm.toFixed(1)} mm of rain is expected.`
+      : "";
+  const wind =
+    input.windKmh >= 40
+      ? ` Winds could reach ${input.windKmh} km/h.`
+      : input.windKmh > 0
+        ? ` Winds up to ${input.windKmh} km/h.`
+        : "";
+  const low = Number.isFinite(input.tempMin) ? `, low ${input.tempMin}°` : "";
+  const advice = /work|storm/i.test(input.hint) ? ` ${input.hint}.` : "";
+  return `${input.condition}. High ${input.tempMax}°${low}. ${rain}${wet}${wind}${advice}`.replace(/\s+/g, " ").trim();
 }
 
 function buildAlert(days: WeatherDay[]) {
@@ -182,7 +219,8 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
     longitude: String(place.lng),
     current: "temperature_2m,weather_code,precipitation,cloud_cover,is_day",
     hourly: "precipitation_probability,weather_code,temperature_2m",
-    daily: "weather_code,temperature_2m_max,precipitation_probability_max",
+    daily:
+      "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max",
     forecast_days: "5",
     timezone: "auto"
   });
@@ -206,7 +244,10 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
       time?: string[];
       weather_code?: number[];
       temperature_2m_max?: number[];
+      temperature_2m_min?: number[];
       precipitation_probability_max?: number[];
+      precipitation_sum?: number[];
+      wind_speed_10m_max?: number[];
     };
   };
   const timeZone = String(data?.timezone || "Asia/Kolkata");
@@ -215,16 +256,34 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
   const days: WeatherDay[] = dates.map((date, index) => {
     const meta = wmoMeta(daily.weather_code?.[index]);
     const rainChance = Math.max(0, Math.min(100, Number(daily.precipitation_probability_max?.[index] || 0)));
+    const tempC = Math.round(Number(daily.temperature_2m_max?.[index] || 0));
+    const rawMin = Number(daily.temperature_2m_min?.[index]);
+    const tempMinC = Number.isFinite(rawMin) ? Math.round(rawMin) : tempC;
+    const precipMm = Math.max(0, Number(daily.precipitation_sum?.[index] || 0));
+    const windKmh = Math.max(0, Math.round(Number(daily.wind_speed_10m_max?.[index] || 0)));
+    const hint = fieldWorkHint(rainChance, meta.icon);
     return {
       date,
       weekday: weekdayLabel(date, timeZone).toUpperCase(),
       day: dayMonthLabel(date, timeZone),
-      tempC: Math.round(Number(daily.temperature_2m_max?.[index] || 0)),
+      tempC,
+      tempMinC,
       rainChance,
+      precipMm,
+      windKmh,
       condition: meta.condition,
       summary: meta.summary,
       icon: meta.icon,
-      hint: fieldWorkHint(rainChance, meta.icon)
+      hint,
+      description: dayBrief({
+        condition: meta.condition,
+        tempMax: tempC,
+        tempMin: tempMinC,
+        rainChance,
+        windKmh,
+        precipMm,
+        hint
+      })
     };
   });
   const currentMeta = wmoMeta(data?.current?.weather_code);

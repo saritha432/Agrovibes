@@ -34,6 +34,7 @@ export function WeatherPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState<WeatherReport | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<WeatherPlace[]>([]);
   const searchTimer = useRef<number | null>(null);
 
@@ -43,6 +44,7 @@ export function WeatherPage() {
     try {
       const next = await fetchWeatherReport(token, params);
       setReport(next);
+      setSelectedDate(null);
       setQuery("");
       setSuggestions([]);
     } catch (error) {
@@ -89,6 +91,8 @@ export function WeatherPage() {
       { enableHighAccuracy: false, timeout: 8000 }
     );
   }
+
+  const selectedDay = report?.days.find((day) => day.date === selectedDate) ?? null;
 
   return (
     <div className="weather-page">
@@ -166,18 +170,45 @@ export function WeatherPage() {
             </div>
           ) : null}
           <div className="weather-page__days">
-            {report.days.map((day) => (
-              <article key={day.date} className="weather-page__day">
-                <span className="weather-page__day-name">
-                  {day.weekday} {day.day}
-                </span>
-                <WeatherGlyph icon={day.icon} />
-                <strong>{day.tempC}°</strong>
-                <span>Rain {day.rainChance}%</span>
-                <small>{day.hint}</small>
-              </article>
-            ))}
+            {report.days.map((day) => {
+              const selected = selectedDate === day.date;
+              return (
+                <button
+                  key={day.date}
+                  type="button"
+                  className={selected ? "weather-page__day weather-page__day--selected" : "weather-page__day"}
+                  aria-pressed={selected}
+                  onClick={() => setSelectedDate(day.date)}
+                >
+                  <span className="weather-page__day-name">
+                    {day.weekday} {day.day}
+                  </span>
+                  <WeatherGlyph icon={day.icon} />
+                  <strong>{day.tempC}°</strong>
+                  <span>Rain {day.rainChance}%</span>
+                  <small>{day.hint}</small>
+                </button>
+              );
+            })}
           </div>
+          {selectedDay ? (
+            <section className="weather-page__detail" aria-live="polite">
+              <div className="weather-page__detail-head">
+                <WeatherGlyph icon={selectedDay.icon} />
+                <div>
+                  <strong>
+                    {selectedDay.weekday} {selectedDay.day}
+                  </strong>
+                  <span>{selectedDay.condition}</span>
+                </div>
+              </div>
+              <p className="weather-page__detail-stats">
+                High {selectedDay.tempC}° · Low {selectedDay.tempMinC}° · Rain {selectedDay.rainChance}%
+                {selectedDay.windKmh > 0 ? ` · Wind ${selectedDay.windKmh} km/h` : ""}
+              </p>
+              <p className="weather-page__detail-body">{selectedDay.description}</p>
+            </section>
+          ) : null}
         </>
       ) : null}
     </div>
