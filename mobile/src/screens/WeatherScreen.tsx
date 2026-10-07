@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View
@@ -24,14 +25,16 @@ import {
 import { isUsableLatLng } from "../utils/openMeteoWeather";
 import { APP_DARK_BG, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
-function weatherIonicon(icon: WeatherIconName): keyof typeof Ionicons.glyphMap {
-  if (icon === "sunny") return "sunny-outline";
-  if (icon === "rain") return "rainy-outline";
-  if (icon === "storm") return "thunderstorm-outline";
-  if (icon === "fog") return "cloud-outline";
-  if (icon === "snow") return "snow-outline";
-  if (icon === "cloudy") return "cloudy-outline";
-  return "partly-sunny-outline";
+function weatherIonicon(icon: WeatherIconName, night = false): keyof typeof Ionicons.glyphMap {
+  if (night && icon === "sunny") return "moon";
+  if (night && (icon === "partly-cloudy" || icon === "cloudy")) return "cloudy-night";
+  if (icon === "sunny") return "sunny";
+  if (icon === "rain") return "rainy";
+  if (icon === "storm") return "thunderstorm";
+  if (icon === "fog") return "cloud";
+  if (icon === "snow") return "snow";
+  if (icon === "cloudy") return "cloudy";
+  return "partly-sunny";
 }
 
 export function WeatherScreen() {
@@ -44,6 +47,7 @@ export function WeatherScreen() {
   const [error, setError] = useState("");
   const [report, setReport] = useState<WeatherReport | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [feelsLike, setFeelsLike] = useState(false);
   const [suggestions, setSuggestions] = useState<WeatherPlace[]>([]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,7 +58,9 @@ export function WeatherScreen() {
       try {
         const next = await fetchWeatherReport(token, params);
         setReport(next);
-        setSelectedDate(null);
+        const today = next.days.find((day) => day.dayLabel === "Today") ?? next.days[0];
+        setSelectedDate(today?.date ?? null);
+        setFeelsLike(false);
         setQuery("");
         setSuggestions([]);
       } catch (error) {
@@ -180,7 +186,8 @@ export function WeatherScreen() {
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysRow}>
                 {report.days.map((day) => {
-                  const selected = selectedDate === day.date;
+                  const selected = selectedDay?.date === day.date;
+                  const showNight = day.nightIcon !== day.icon;
                   return (
                     <Pressable
                       key={day.date}
@@ -189,32 +196,53 @@ export function WeatherScreen() {
                       onPress={() => setSelectedDate(day.date)}
                       style={[styles.dayCard, selected ? styles.dayCardSelected : null]}
                     >
-                      <Text style={styles.dayName}>
-                        {day.weekday} {day.day}
-                      </Text>
-                      <Ionicons name={weatherIonicon(day.icon)} size={28} color={APP_LIME} />
-                      <Text style={styles.temp}>{day.tempC}°</Text>
-                      <Text style={styles.rain}>Rain {day.rainChance}%</Text>
-                      <Text style={styles.hint}>{day.hint}</Text>
+                      <View style={styles.dayTop}>
+                        <Text style={styles.dayNum}>{day.day}</Text>
+                        <Text style={styles.dayName}>{day.dayLabel}</Text>
+                      </View>
+                      <View style={styles.dayBody}>
+                        <View style={styles.dayIcons}>
+                          <Ionicons name={weatherIonicon(day.icon)} size={26} color="#f5a524" />
+                          {showNight ? (
+                            <Ionicons name={weatherIonicon(day.nightIcon, true)} size={26} color="#3d4db8" />
+                          ) : null}
+                        </View>
+                        <View style={styles.dayTemps}>
+                          <Text style={styles.tempHigh}>{day.tempC}°</Text>
+                          <Text style={styles.tempLow}>{day.tempMinC}°</Text>
+                        </View>
+                      </View>
                     </Pressable>
                   );
                 })}
               </ScrollView>
               {selectedDay ? (
-                <View style={styles.detailCard}>
-                  <View style={styles.detailHead}>
-                    <Ionicons name={weatherIonicon(selectedDay.icon)} size={28} color={APP_LIME} />
-                    <View style={styles.detailHeadText}>
-                      <Text style={styles.detailTitle}>
-                        {selectedDay.weekday} {selectedDay.day}
-                      </Text>
-                      <Text style={styles.detailCondition}>{selectedDay.condition}</Text>
+                <View style={styles.overview}>
+                  <View style={styles.overviewHead}>
+                    <Text style={styles.overviewTitle}>Overview</Text>
+                    <View style={styles.feelsRow}>
+                      <Switch
+                        value={feelsLike}
+                        onValueChange={setFeelsLike}
+                        trackColor={{ false: "#d5dbe3", true: "#8ab4f8" }}
+                        thumbColor="#ffffff"
+                      />
+                      <Text style={styles.feelsLabel}>Feels like</Text>
                     </View>
                   </View>
-                  <Text style={styles.detailStats}>
-                    High {selectedDay.tempC}° · Low {selectedDay.tempMinC}° · Rain {selectedDay.rainChance}%
-                    {selectedDay.windKmh > 0 ? ` · Wind ${selectedDay.windKmh} km/h` : ""}
-                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hoursRow}>
+                    {selectedDay.hours.map((hour) => (
+                      <View key={hour.time} style={styles.hourCol}>
+                        <Text style={styles.hourLabel}>{hour.label}</Text>
+                        <Ionicons
+                          name={weatherIonicon(hour.icon, !hour.isDay)}
+                          size={22}
+                          color={hour.isDay ? "#f5a524" : "#3d4db8"}
+                        />
+                        <Text style={styles.hourTemp}>{feelsLike ? hour.feelsC : hour.tempC}°</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
                   <Text style={styles.detailBody}>{selectedDay.description}</Text>
                 </View>
               ) : null}
@@ -284,36 +312,40 @@ const styles = StyleSheet.create({
   },
   alertTitle: { color: APP_LIME, fontWeight: "700", marginBottom: 4 },
   alertBody: { color: APP_TEXT, fontSize: 13, lineHeight: 18 },
-  daysRow: { gap: 10, paddingRight: 8 },
+  daysRow: { gap: 10, paddingRight: 8, paddingVertical: 4 },
   dayCard: {
-    width: 118,
-    backgroundColor: APP_SURFACE,
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 10,
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderColor: "transparent"
+    width: 132,
+    backgroundColor: "#f7f9fc",
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1.5,
+    borderColor: "#e6ebf2"
   },
-  dayCardSelected: {
-    borderColor: APP_LIME
-  },
-  detailCard: {
+  dayCardSelected: { borderColor: "#8ab4f8" },
+  dayTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  dayNum: { fontSize: 18, fontWeight: "700", color: "#1f2430" },
+  dayName: { fontSize: 13, fontWeight: "600", color: "#5c6570", marginLeft: 6, flexShrink: 1 },
+  dayBody: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12 },
+  dayIcons: { flexDirection: "row", alignItems: "center", gap: 2 },
+  dayTemps: { alignItems: "flex-end" },
+  tempHigh: { fontSize: 20, fontWeight: "700", color: "#1f2430" },
+  tempLow: { marginTop: 2, fontSize: 15, fontWeight: "500", color: "#5c6570" },
+  overview: {
     marginTop: 14,
-    backgroundColor: APP_SURFACE,
-    borderRadius: 16,
-    padding: 16,
-    gap: 8
+    backgroundColor: "#f4f7fb",
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 12
   },
-  detailHead: { flexDirection: "row", alignItems: "center", gap: 10 },
-  detailHeadText: { flex: 1 },
-  detailTitle: { color: APP_TEXT, fontSize: 16, fontWeight: "800" },
-  detailCondition: { color: APP_LIME, fontSize: 14, fontWeight: "700", marginTop: 2 },
-  detailStats: { color: APP_TEXT_MUTED, fontSize: 13, lineHeight: 18 },
-  detailBody: { color: APP_TEXT, fontSize: 15, lineHeight: 22 },
-  dayName: { fontSize: 11, fontWeight: "700", color: APP_TEXT_MUTED },
-  temp: { fontSize: 22, fontWeight: "800", color: APP_TEXT },
-  rain: { fontSize: 12, color: APP_TEXT_MUTED },
-  hint: { fontSize: 11, color: APP_TEXT_MUTED, textAlign: "center" }
+  overviewHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  overviewTitle: { fontSize: 18, fontWeight: "700", color: "#1f2430" },
+  feelsRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  feelsLabel: { fontSize: 14, fontWeight: "600", color: "#1f2430" },
+  hoursRow: { gap: 18, paddingRight: 8, paddingBottom: 4 },
+  hourCol: { width: 64, alignItems: "center", gap: 8 },
+  hourLabel: { fontSize: 12, fontWeight: "600", color: "#5c6570", textAlign: "center", minHeight: 32 },
+  hourTemp: { fontSize: 16, fontWeight: "700", color: "#1f2430" },
+  detailBody: { marginTop: 12, color: "#3c4450", fontSize: 14, lineHeight: 20 },
+  rain: { fontSize: 12, color: APP_TEXT_MUTED }
 });

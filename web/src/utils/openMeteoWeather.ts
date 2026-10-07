@@ -7,9 +7,21 @@ export type WeatherPlace = {
   lng: number;
 };
 
+export type WeatherHour = {
+  time: string;
+  /** "3 PM", or "Wed 7\\n3 AM" when the slot crosses into the next day. */
+  label: string;
+  tempC: number;
+  feelsC: number;
+  icon: WeatherIconName;
+  isDay: boolean;
+};
+
 export type WeatherDay = {
   date: string;
   weekday: string;
+  /** Today, Yesterday, or a short weekday such as Wed. */
+  dayLabel: string;
   day: string;
   tempC: number;
   tempMinC: number;
@@ -19,9 +31,11 @@ export type WeatherDay = {
   condition: string;
   summary: string;
   icon: WeatherIconName;
+  nightIcon: WeatherIconName;
   hint: string;
   /** Short forecast paragraph, in the style of a weather site day summary. */
   description: string;
+  hours: WeatherHour[];
 };
 
 export type WeatherReport = {
@@ -129,6 +143,96 @@ function dayBrief(input: {
   return `${input.condition}. High ${input.tempMax}°${low}. ${rain}${wet}${wind}${advice}`.replace(/\s+/g, " ").trim();
 }
 
+function zoneDateISO(timeZone: string, dayOffset = 0) {
+  const shifted = new Date(Date.now() + dayOffset * 86400000);
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(shifted);
+  } catch {
+    return shifted.toISOString().slice(0, 10);
+  }
+}
+
+type RawHour = {
+  time: string;
+  date: string;
+  hour: number;
+  tempC: number;
+  feelsC: number;
+  icon: WeatherIconName;
+  isDay: boolean;
+};
+
+function parseHours(
+  hourly:
+    | {
+        time?: string[];
+        weather_code?: number[];
+        temperature_2m?: number[];
+        apparent_temperature?: number[];
+        is_day?: number[];
+      }
+    | undefined
+): RawHour[] {
+  const times = Array.isArray(hourly?.time) ? hourly.time : [];
+  return times.map((time, index) => {
+    const hour = Number(String(time).slice(11, 13));
+    const tempC = Math.round(Number(hourly?.temperature_2m?.[index] || 0));
+    const feelsRaw = Number(hourly?.apparent_temperature?.[index]);
+    return {
+      time: String(time),
+      date: String(time).slice(0, 10),
+      hour: Number.isFinite(hour) ? hour : 0,
+      tempC,
+      feelsC: Number.isFinite(feelsRaw) ? Math.round(feelsRaw) : tempC,
+      icon: wmoMeta(hourly?.weather_code?.[index]).icon,
+      isDay: Number(hourly?.is_day?.[index]) !== 0
+    };
+  });
+}
+
+function hourClockLabel(hour: number) {
+  const h12 = hour % 12 || 12;
+  return `${h12} ${hour < 12 ? "AM" : "PM"}`;
+}
+
+function slotStartHour(nowHour: number) {
+  const slots = [3, 7, 11, 15, 19, 23];
+  let chosen = slots[0] ?? 3;
+  for (const slot of slots) {
+    if (slot <= nowHour) chosen = slot;
+  }
+  if (nowHour < 3) return 3;
+  return chosen;
+}
+
+function hoursForDay(all: RawHour[], date: string, isToday: boolean, nowHour: number, timeZone: string): WeatherHour[] {
+  const startHour = isToday ? slotStartHour(nowHour) : 3;
+  const startIndex = all.findIndex((row) => row.date === date && row.hour === startHour);
+  const picked: WeatherHour[] = [];
+  if (startIndex < 0) return picked;
+  for (let index = startIndex; index < all.length && picked.length < 6; index += 4) {
+    const row = all[index];
+    if (!row) break;
+    const clock = hourClockLabel(row.hour);
+    const label =
+      row.date === date ? clock : `${weekdayLabel(row.date, timeZone)} ${dayMonthLabel(row.date, timeZone)}\n${clock}`;
+    picked.push({
+      time: row.time,
+      label,
+      tempC: row.tempC,
+      feelsC: row.feelsC,
+      icon: row.icon,
+      isDay: row.isDay
+    });
+  }
+  return picked;
+}
+
 function buildAlert(days: WeatherDay[]) {
   const wet = days
     .slice(0, 3)
@@ -218,10 +322,11 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
     latitude: String(place.lat),
     longitude: String(place.lng),
     current: "temperature_2m,weather_code,precipitation,cloud_cover,is_day",
-    hourly: "precipitation_probability,weather_code,temperature_2m",
+    hourly: "precipitation_probability,weather_code,temperature_2m,apparent_temperature,is_day",
     daily:
       "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max",
     forecast_days: "5",
+    past_days: "1",
     timezone: "auto"
   });
   const data = (await fetchJson(`https://api.open-meteo.com/v1/forecast?${search.toString()}`)) as {
@@ -239,6 +344,8 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
       precipitation_probability?: number[];
       weather_code?: number[];
       temperature_2m?: number[];
+      apparent_temperature?: number[];
+      is_day?: number[];
     };
     daily?: {
       time?: string[];
@@ -251,6 +358,10 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
     };
   };
   const timeZone = String(data?.timezone || "Asia/Kolkata");
+  const todayISO = zoneDateISO(timeZone, 0);
+  const yesterdayISO = zoneDateISO(timeZone, -1);
+  const hourlyRows = parseHours(data?.hourly);
+  const nowHour = Number(String(data?.current?.time || "").slice(11, 13));
   const daily = data?.daily || {};
   const dates = Array.isArray(daily.time) ? daily.time : [];
   const days: WeatherDay[] = dates.map((date, index) => {
@@ -262,9 +373,14 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
     const precipMm = Math.max(0, Number(daily.precipitation_sum?.[index] || 0));
     const windKmh = Math.max(0, Math.round(Number(daily.wind_speed_10m_max?.[index] || 0)));
     const hint = fieldWorkHint(rainChance, meta.icon);
+    const sameDay = hourlyRows.filter((row) => row.date === date);
+    const daySample = sameDay.find((row) => row.hour === 15) || sameDay.find((row) => row.isDay);
+    const nightSample = sameDay.find((row) => row.hour === 21) || sameDay.find((row) => !row.isDay);
+    const dayLabel = date === todayISO ? "Today" : date === yesterdayISO ? "Yesterday" : weekdayLabel(date, timeZone);
     return {
       date,
       weekday: weekdayLabel(date, timeZone).toUpperCase(),
+      dayLabel,
       day: dayMonthLabel(date, timeZone),
       tempC,
       tempMinC,
@@ -273,7 +389,8 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
       windKmh,
       condition: meta.condition,
       summary: meta.summary,
-      icon: meta.icon,
+      icon: daySample?.icon || meta.icon,
+      nightIcon: nightSample?.icon || meta.icon,
       hint,
       description: dayBrief({
         condition: meta.condition,
@@ -283,7 +400,8 @@ export async function loadOpenMeteoWeather(params?: { q?: string; lat?: number; 
         windKmh,
         precipMm,
         hint
-      })
+      }),
+      hours: hoursForDay(hourlyRows, date, date === todayISO, Number.isFinite(nowHour) ? nowHour : 12, timeZone)
     };
   });
   const currentMeta = wmoMeta(data?.current?.weather_code);
