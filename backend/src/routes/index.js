@@ -2678,6 +2678,29 @@ async function ensureHomeStoriesTable() {
   homeStoriesTableReady = true;
 }
 
+function sanitizeStickerList(raw) {
+  const fraction = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : null;
+  };
+  return (Array.isArray(raw) ? raw : [])
+    .slice(0, 20)
+    .map((s, i) => {
+      const scaleRaw = Number(s?.scale);
+      const scale = Number.isFinite(scaleRaw)
+        ? Math.min(1.8, Math.max(0.4, Math.round(scaleRaw * 100) / 100))
+        : 1;
+      return {
+        id: String(s?.id || i).slice(0, 40),
+        emoji: String(s?.emoji || "").trim().slice(0, 16),
+        x: fraction(s?.x) ?? 0.5,
+        y: fraction(s?.y) ?? 0.5,
+        scale
+      };
+    })
+    .filter((s) => s.emoji);
+}
+
 /** Text overlay + fit for stories whose media can't be baked (videos / shared reels). */
 function sanitizeStoryCreativeMeta(raw) {
   if (!raw || typeof raw !== "object") return null;
@@ -2692,15 +2715,7 @@ function sanitizeStoryCreativeMeta(raw) {
   };
   const textX = fraction(raw.textX);
   const textY = fraction(raw.textY);
-  const stickers = (Array.isArray(raw.stickers) ? raw.stickers : [])
-    .slice(0, 20)
-    .map((s, i) => ({
-      id: String(s?.id || i).slice(0, 40),
-      emoji: String(s?.emoji || "").trim().slice(0, 16),
-      x: fraction(s?.x) ?? 0.5,
-      y: fraction(s?.y) ?? 0.5
-    }))
-    .filter((s) => s.emoji);
+  const stickers = sanitizeStickerList(raw.stickers);
   const meta = {
     text,
     textColor: color,
@@ -7124,7 +7139,11 @@ router.post("/v1/home/posts", authOptional, async (req, res) => {
             ...(typeof creativeMeta.font === "string" && creativeMeta.font.trim()
               ? { font: creativeMeta.font.trim().slice(0, 32) }
               : {}),
-            ...(typeof creativeMeta.textBackground === "boolean" ? { textBackground: creativeMeta.textBackground } : {})
+            ...(typeof creativeMeta.textBackground === "boolean" ? { textBackground: creativeMeta.textBackground } : {}),
+            ...(() => {
+              const stickers = sanitizeStickerList(creativeMeta.stickers);
+              return stickers.length ? { stickers } : {};
+            })()
           }
         : {};
 

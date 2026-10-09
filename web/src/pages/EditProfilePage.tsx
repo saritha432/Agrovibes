@@ -173,16 +173,16 @@ export function EditProfilePage() {
         >
           <span className="edit-profile__avatar">
             {displayAvatar ? <img src={displayAvatar} alt="" /> : userInitials(fullName || user.fullName)}
-          </span>
-          <span className="edit-profile__avatar-badge" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M4 8h3l1.5-2h7L17 8h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"
-                stroke="#111"
-                strokeWidth="2"
-              />
-              <circle cx="12" cy="13" r="3.5" stroke="#111" strokeWidth="2" />
-            </svg>
+            <span className="edit-profile__avatar-badge" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M4 8h3l1.5-2h7L17 8h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"
+                  stroke="#111"
+                  strokeWidth="2"
+                />
+                <circle cx="12" cy="13" r="3.5" stroke="#111" strokeWidth="2" />
+              </svg>
+            </span>
           </span>
           <em>{uploadingAvatar ? "Uploading…" : "Change photo"}</em>
         </button>

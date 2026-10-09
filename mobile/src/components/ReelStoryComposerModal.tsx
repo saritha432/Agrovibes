@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContainedAppVideo } from "./ContainedAppVideo";
-import { StorySticker, StoryTextLabel } from "./StoryTextOverlay";
+import { StickerSizeBar, StorySticker, StoryTextLabel } from "./StoryTextOverlay";
 import { DraggableOverlay, OverlayTrashZone, type OverlayPoint } from "./DraggableOverlay";
 import { AppEmojiPicker } from "./AppEmojiPicker";
 import type { HomePost, StoryCreativeMeta, StorySticker as StoryStickerItem } from "../services/api";
@@ -40,6 +40,7 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
   const [textBackground, setTextBackground] = useState(false);
   const [textPoint, setTextPoint] = useState<OverlayPoint>(DEFAULT_TEXT_POINT);
   const [stickers, setStickers] = useState<StoryStickerItem[]>([]);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const [dragState, setDragState] = useState({ active: false, overTrash: false });
   const [fit, setFit] = useState<"contain" | "cover">("contain");
@@ -54,6 +55,7 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
     setTextBackground(false);
     setTextPoint(DEFAULT_TEXT_POINT);
     setStickers([]);
+    setSelectedStickerId(null);
     setDragState({ active: false, overTrash: false });
     setFit("contain");
     setSharing(false);
@@ -75,6 +77,7 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
   };
   const onDragActiveChange = (active: boolean, overTrash: boolean) =>
     setDragState((prev) => (prev.active === active && prev.overTrash === overTrash ? prev : { active, overTrash }));
+  const selectedSticker = stickers.find((s) => s.id === selectedStickerId) ?? null;
 
   const share = async () => {
     if (sharing) return;
@@ -157,10 +160,14 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
                   containerWidth={frame.width}
                   containerHeight={frame.height}
                   onMove={(p) => setStickers((prev) => prev.map((row) => (row.id === s.id ? { ...row, ...p } : row)))}
-                  onRemove={() => setStickers((prev) => prev.filter((row) => row.id !== s.id))}
+                  onPress={() => setSelectedStickerId(s.id)}
+                  onRemove={() => {
+                    setStickers((prev) => prev.filter((row) => row.id !== s.id));
+                    setSelectedStickerId((cur) => (cur === s.id ? null : cur));
+                  }}
                   onDragActiveChange={onDragActiveChange}
                 >
-                  <StorySticker emoji={s.emoji} />
+                  <StorySticker emoji={s.emoji} scale={s.scale} />
                 </DraggableOverlay>
               ))}
               <OverlayTrashZone visible={dragState.active} active={dragState.overTrash} />
@@ -220,7 +227,18 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
             </View>
           </View>
         ) : (
-          <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+          <View style={{ backgroundColor: "#000" }}>
+            {selectedSticker ? (
+              <StickerSizeBar
+                emoji={selectedSticker.emoji}
+                scale={selectedSticker.scale}
+                onChange={(scale) =>
+                  setStickers((prev) => prev.map((row) => (row.id === selectedSticker.id ? { ...row, scale } : row)))
+                }
+                onDone={() => setSelectedStickerId(null)}
+              />
+            ) : null}
+            <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
             <Text style={styles.fitHint}>{fit === "cover" ? "Cropped to fill" : "Full reel"}</Text>
             <Pressable style={styles.shareBtn} onPress={() => void share()} disabled={sharing}>
               {sharing ? (
@@ -232,6 +250,7 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
                 </>
               )}
             </Pressable>
+            </View>
           </View>
         )}
       </KeyboardAvoidingView>
@@ -239,13 +258,15 @@ export function ReelStoryComposerModal({ post, onClose, onShare }: Props) {
         open={stickerPickerOpen}
         allowMultiple
         onClose={() => setStickerPickerOpen(false)}
-        onSelect={(emoji) =>
-          setStickers((prev) =>
-            prev.length >= 20
-              ? prev
-              : [...prev, { id: `${Date.now()}-${prev.length}`, emoji, x: 0.5, y: 0.35 + (prev.length % 5) * 0.06 }]
-          )
-        }
+        onSelect={(emoji) => {
+          if (stickers.length >= 20) return;
+          const id = `${Date.now()}-${stickers.length}`;
+          setStickers((prev) => [
+            ...prev,
+            { id, emoji, x: 0.5, y: 0.35 + (prev.length % 5) * 0.06, scale: 1 }
+          ]);
+          setSelectedStickerId(id);
+        }}
       />
     </Modal>
   );
