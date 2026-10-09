@@ -4596,6 +4596,11 @@ export function HomeScreen({ refreshToken = 0, onOpenCreate, takePendingFeedPost
             </View>
           ) : null}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
+          {Array.isArray(creativeMeta.stickers) && creativeMeta.stickers.length > 0 ? (
+            <View style={mediaFrameStyle} pointerEvents="none">
+              <StoryTextOverlay meta={{ stickers: creativeMeta.stickers }} />
+            </View>
+          ) : null}
           {reelOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">
               <Text

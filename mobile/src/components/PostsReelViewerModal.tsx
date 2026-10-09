@@ -32,6 +32,7 @@ import { ContainedAppVideo, type ContainedAppVideoHandle } from "./ContainedAppV
 import { prefetchPostMedia, prefetchUpcomingPosts } from "../utils/feedMediaPrefetch";
 import type { AppPlaybackStatus } from "../utils/videoPlaybackStatus";
 import { StoryRingAvatar } from "./StoryRingAvatar";
+import { StoryTextOverlay } from "./StoryTextOverlay";
 import { CommentComposerBar, commentPlaceholderForPost } from "./CommentComposerBar";
 import { PostShareSheet, type SharePeer } from "./PostShareSheet";
 import * as Clipboard from "expo-clipboard";
@@ -1102,6 +1103,11 @@ export function PostsReelViewerModal({
             </View>
           ) : null}
           {creativeTint ? <View style={[styles.reelCreativeFilterLayer, { backgroundColor: creativeTint }]} pointerEvents="none" /> : null}
+          {Array.isArray(creativeMeta.stickers) && creativeMeta.stickers.length > 0 ? (
+            <View style={mediaFrameStyle} pointerEvents="none">
+              <StoryTextOverlay meta={{ stickers: creativeMeta.stickers }} />
+            </View>
+          ) : null}
           {reelOverlayText ? (
             <View style={styles.reelCreativeTextWrap} pointerEvents="none">
               <Text style={[styles.reelCreativeText, { color: creativeTextColor }]} numberOfLines={2}>

@@ -875,7 +875,7 @@ export interface HomeStory {
   createdAt?: string;
 }
 
-export type StorySticker = { id: string; emoji: string; x: number; y: number };
+export type StorySticker = { id: string; emoji: string; x: number; y: number; scale?: number };
 
 export type StoryCreativeMeta = {
   text?: string;
@@ -921,6 +921,7 @@ export interface HomePost {
     textColor?: string;
     textBackground?: boolean;
     font?: string;
+    stickers?: StorySticker[];
   };
   /** User ids tagged in this post (Instagram-style). */
   taggedUserIds?: number[];
@@ -1643,6 +1644,7 @@ export async function createHomePost(payload: {
     textColor?: string;
     textBackground?: boolean;
     font?: string;
+    stickers?: StorySticker[];
   };
   farmingTopic?: string;
   farmingConfirmed?: boolean;

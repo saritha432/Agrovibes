@@ -10,21 +10,25 @@ import {
 } from "../api/weather";
 import "./WeatherPage.css";
 
-function WeatherGlyph({ icon }: { icon: WeatherIconName }) {
+function WeatherGlyph({ icon, night = false }: { icon: WeatherIconName; night?: boolean }) {
   const label =
-    icon === "sunny"
-      ? "☀️"
-      : icon === "rain"
-        ? "🌧️"
-        : icon === "storm"
-          ? "⛈️"
-          : icon === "snow"
-            ? "❄️"
-            : icon === "fog"
-              ? "🌫️"
-              : icon === "cloudy"
-                ? "☁️"
-                : "⛅";
+    night && icon === "sunny"
+      ? "🌙"
+      : night && (icon === "partly-cloudy" || icon === "cloudy")
+        ? "🌙"
+        : icon === "sunny"
+          ? "☀️"
+          : icon === "rain"
+            ? "🌧️"
+            : icon === "storm"
+              ? "⛈️"
+              : icon === "snow"
+                ? "❄️"
+                : icon === "fog"
+                  ? "🌫️"
+                  : icon === "cloudy"
+                    ? "☁️"
+                    : "⛅";
   return <span className="weather-page__glyph" aria-hidden>{label}</span>;
 }
 
@@ -35,6 +39,7 @@ export function WeatherPage() {
   const [error, setError] = useState("");
   const [report, setReport] = useState<WeatherReport | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [feelsLike, setFeelsLike] = useState(false);
   const [suggestions, setSuggestions] = useState<WeatherPlace[]>([]);
   const searchTimer = useRef<number | null>(null);
 
@@ -44,7 +49,9 @@ export function WeatherPage() {
     try {
       const next = await fetchWeatherReport(token, params);
       setReport(next);
-      setSelectedDate(null);
+      const today = next.days.find((day) => day.dayLabel === "Today") ?? next.days[0];
+      setSelectedDate(today?.date ?? null);
+      setFeelsLike(false);
       setQuery("");
       setSuggestions([]);
     } catch (error) {
@@ -171,7 +178,8 @@ export function WeatherPage() {
           ) : null}
           <div className="weather-page__days">
             {report.days.map((day) => {
-              const selected = selectedDate === day.date;
+              const selected = selectedDay?.date === day.date;
+              const showNight = day.nightIcon !== day.icon;
               return (
                 <button
                   key={day.date}
@@ -180,32 +188,42 @@ export function WeatherPage() {
                   aria-pressed={selected}
                   onClick={() => setSelectedDate(day.date)}
                 >
-                  <span className="weather-page__day-name">
-                    {day.weekday} {day.day}
+                  <span className="weather-page__day-top">
+                    <span className="weather-page__day-num">{day.day}</span>
+                    <span className="weather-page__day-name">{day.dayLabel}</span>
                   </span>
-                  <WeatherGlyph icon={day.icon} />
-                  <strong>{day.tempC}°</strong>
-                  <span>Rain {day.rainChance}%</span>
-                  <small>{day.hint}</small>
+                  <span className="weather-page__day-body">
+                    <span className="weather-page__day-icons">
+                      <WeatherGlyph icon={day.icon} />
+                      {showNight ? <WeatherGlyph icon={day.nightIcon} night /> : null}
+                    </span>
+                    <span className="weather-page__day-temps">
+                      <strong className="weather-page__temp-high">{day.tempC}°</strong>
+                      <span className="weather-page__temp-low">{day.tempMinC}°</span>
+                    </span>
+                  </span>
                 </button>
               );
             })}
           </div>
           {selectedDay ? (
-            <section className="weather-page__detail" aria-live="polite">
-              <div className="weather-page__detail-head">
-                <WeatherGlyph icon={selectedDay.icon} />
-                <div>
-                  <strong>
-                    {selectedDay.weekday} {selectedDay.day}
-                  </strong>
-                  <span>{selectedDay.condition}</span>
-                </div>
+            <section className="weather-page__overview" aria-live="polite">
+              <div className="weather-page__overview-head">
+                <h2>Overview</h2>
+                <label className="weather-page__feels">
+                  <input type="checkbox" checked={feelsLike} onChange={(event) => setFeelsLike(event.target.checked)} />
+                  Feels like
+                </label>
               </div>
-              <p className="weather-page__detail-stats">
-                High {selectedDay.tempC}° · Low {selectedDay.tempMinC}° · Rain {selectedDay.rainChance}%
-                {selectedDay.windKmh > 0 ? ` · Wind ${selectedDay.windKmh} km/h` : ""}
-              </p>
+              <div className="weather-page__hours">
+                {selectedDay.hours.map((hour) => (
+                  <div key={hour.time} className="weather-page__hour">
+                    <span className="weather-page__hour-label">{hour.label}</span>
+                    <WeatherGlyph icon={hour.icon} night={!hour.isDay} />
+                    <strong>{feelsLike ? hour.feelsC : hour.tempC}°</strong>
+                  </div>
+                ))}
+              </div>
               <p className="weather-page__detail-body">{selectedDay.description}</p>
             </section>
           ) : null}

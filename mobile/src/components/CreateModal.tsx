@@ -31,7 +31,7 @@ import { FeedImage } from "./FeedImage";
 import { AppVideo } from "./AppVideo";
 import { AppEmojiPicker } from "./AppEmojiPicker";
 import { DraggableOverlay, OverlayTrashZone, type OverlayPoint } from "./DraggableOverlay";
-import { StorySticker as StoryStickerGlyph } from "./StoryTextOverlay";
+import { StickerSizeBar, StorySticker as StoryStickerGlyph } from "./StoryTextOverlay";
 import {
   createHomePost,
   createHomeStory,
@@ -433,16 +433,22 @@ type MediaCreativeProps = {
   shouldPlay?: boolean;
   /** When set, text / stickers / music tag are draggable (story editor). */
   drag?: CreativeDragProps;
+  /** Emoji stickers on a post or reel preview, without moving the caption text. */
+  stickerLayer?: CreativeStickerLayer;
 };
 
-type CreativeDragProps = {
+type CreativeStickerLayer = {
+  stickers: StorySticker[];
+  onStickerMove: (id: string, p: OverlayPoint) => void;
+  onStickerRemove: (id: string) => void;
+  onStickerPress: (id: string) => void;
+};
+
+type CreativeDragProps = CreativeStickerLayer & {
   textPoint: OverlayPoint;
   onTextMove: (p: OverlayPoint) => void;
   onTextPress: () => void;
   onTextRemove: () => void;
-  stickers: StorySticker[];
-  onStickerMove: (id: string, p: OverlayPoint) => void;
-  onStickerRemove: (id: string) => void;
   musicPoint: OverlayPoint;
   onMusicMove: (p: OverlayPoint) => void;
 };
@@ -477,7 +483,7 @@ function PostComposeThumbnail({ uri, isVideo }: { uri: string; isVideo?: boolean
 }
 
 const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function MediaWithCreative(
-  { uri, isVideo, filter, overlayText, font, textColor, textBackground, musicLabel, shouldPlay = true, drag },
+  { uri, isVideo, filter, overlayText, font, textColor, textBackground, musicLabel, shouldPlay = true, drag, stickerLayer },
   ref
 ) {
   const tint = filterTint(filter);
@@ -540,10 +546,11 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
                 containerWidth={frame.width}
                 containerHeight={frame.height}
                 onMove={(p) => drag.onStickerMove(s.id, p)}
+                onPress={() => drag.onStickerPress(s.id)}
                 onRemove={() => drag.onStickerRemove(s.id)}
                 onDragActiveChange={onDragActiveChange}
               >
-                <StoryStickerGlyph emoji={s.emoji} />
+                <StoryStickerGlyph emoji={s.emoji} scale={s.scale} />
               </DraggableOverlay>
             ))}
             {musicLabel ? (
@@ -566,10 +573,36 @@ const MediaWithCreative = React.forwardRef<View, MediaCreativeProps>(function Me
     );
   }
 
+  const looseStickers = stickerLayer?.stickers ?? [];
   return (
-    <View ref={ref} collapsable={false} style={{ flex: 1, width: "100%" }}>
+    <View
+      ref={ref}
+      collapsable={false}
+      style={{ flex: 1, width: "100%" }}
+      onLayout={(e) => {
+        const { width, height } = e.nativeEvent.layout;
+        setFrame((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+      }}
+    >
       {media}
       {tint ? <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: tint }]} /> : null}
+      {frame.width > 0 && stickerLayer
+        ? looseStickers.map((s) => (
+            <DraggableOverlay
+              key={s.id}
+              position={{ x: s.x, y: s.y }}
+              containerWidth={frame.width}
+              containerHeight={frame.height}
+              onMove={(p) => stickerLayer.onStickerMove(s.id, p)}
+              onPress={() => stickerLayer.onStickerPress(s.id)}
+              onRemove={() => stickerLayer.onStickerRemove(s.id)}
+              onDragActiveChange={onDragActiveChange}
+            >
+              <StoryStickerGlyph emoji={s.emoji} scale={s.scale} />
+            </DraggableOverlay>
+          ))
+        : null}
+      {frame.width > 0 && stickerLayer ? <OverlayTrashZone visible={dragState.active} active={dragState.overTrash} /> : null}
       {overlayText.trim().length > 0 ? (
         <Text
           style={[
@@ -775,6 +808,7 @@ export function CreateModal({
   const [storyTextPoint, setStoryTextPoint] = useState<OverlayPoint>({ x: 0.5, y: 0.5 });
   const [storyMusicPoint, setStoryMusicPoint] = useState<OverlayPoint>({ x: 0.5, y: 0.9 });
   const [storyStickers, setStoryStickers] = useState<StorySticker[]>([]);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [showCreativeTextPanel, setShowCreativeTextPanel] = useState(false);
   const [showCreativeFilterPanel, setShowCreativeFilterPanel] = useState(false);
   const [showStickerPanel, setShowStickerPanel] = useState(false);
@@ -1009,6 +1043,7 @@ export function CreateModal({
     setStoryTextPoint({ x: 0.5, y: 0.5 });
     setStoryMusicPoint({ x: 0.5, y: 0.9 });
     setStoryStickers([]);
+    setSelectedStickerId(null);
     setShowCreativeTextPanel(false);
     setShowCreativeFilterPanel(false);
     setShowStickerPanel(false);
@@ -1359,16 +1394,21 @@ export function CreateModal({
     },
     stickers: storyStickers,
     onStickerMove: (id, p) => setStoryStickers((prev) => prev.map((s) => (s.id === id ? { ...s, ...p } : s))),
-    onStickerRemove: (id) => setStoryStickers((prev) => prev.filter((s) => s.id !== id)),
+    onStickerPress: (id) => setSelectedStickerId(id),
+    onStickerRemove: (id) => {
+      setStoryStickers((prev) => prev.filter((s) => s.id !== id));
+      setSelectedStickerId((cur) => (cur === id ? null : cur));
+    },
     musicPoint: storyMusicPoint,
     onMusicMove: setStoryMusicPoint
   };
+  const selectedSticker = storyStickers.find((s) => s.id === selectedStickerId) ?? null;
 
   const proceedToCompose = async () => {
     let composed: string | null = null;
     if (pickedPostAssets.length === 1) {
       const a = pickedPostAssets[0];
-      if (shouldUseImageUpload(a.uri, a) && (creativeText.trim() || creativeFilter !== "none")) {
+      if (shouldUseImageUpload(a.uri, a) && (creativeText.trim() || creativeFilter !== "none" || storyStickers.length > 0)) {
         composed = await snapshotComposedImage();
       }
     }
@@ -2199,17 +2239,25 @@ export function CreateModal({
               : {};
           const reelCreative =
             createType === "reel" &&
-            (creativeFilter !== "none" || creativeText.trim() || creativeTextBackground || creativeTextColor !== "white" || creativeFont !== "classic")
+            (creativeFilter !== "none" ||
+              creativeText.trim() ||
+              creativeTextBackground ||
+              creativeTextColor !== "white" ||
+              creativeFont !== "classic" ||
+              storyStickers.length > 0)
               ? {
                   creativeMeta: {
                     filter: creativeFilter,
                     overlayText: creativeText.trim(),
                     textColor: creativeTextColor,
                     textBackground: creativeTextBackground,
-                    font: creativeFont
+                    font: creativeFont,
+                    ...(storyStickers.length ? { stickers: storyStickers } : {})
                   }
                 }
-              : {};
+              : singleVideoPost && storyStickers.length > 0
+                ? { creativeMeta: { stickers: storyStickers } }
+                : {};
           const { post: newPost } = await createHomePost(
             {
               userId: user?.id,
@@ -3676,29 +3724,31 @@ export function CreateModal({
                 />
               ) : pickedPostAssets.length === 1 ? (
                 isSelectedVideo ? (
-                  <MediaWithCreative
-                    uri={selectedUri}
-                    isVideo
-                    filter={creativeFilter}
-                    overlayText={creativeText}
-                    font={creativeFont}
-                    textColor={creativeTextColor}
-                    textBackground={creativeTextBackground}
-                    musicLabel={selectedAudioLabel}
-                  />
-                ) : (
-                  <MediaWithCreative
-                    ref={previewCaptureRef}
-                    uri={selectedUri}
-                    isVideo={false}
-                    filter={creativeFilter}
-                    overlayText={creativeText}
-                    font={creativeFont}
-                    textColor={creativeTextColor}
-                    textBackground={creativeTextBackground}
-                    musicLabel={selectedAudioLabel}
-                  />
-                )
+                    <MediaWithCreative
+                      uri={selectedUri}
+                      isVideo
+                      filter={creativeFilter}
+                      overlayText={creativeText}
+                      font={creativeFont}
+                      textColor={creativeTextColor}
+                      textBackground={creativeTextBackground}
+                      musicLabel={selectedAudioLabel}
+                      stickerLayer={storyDrag}
+                    />
+                  ) : (
+                    <MediaWithCreative
+                      ref={previewCaptureRef}
+                      uri={selectedUri}
+                      isVideo={false}
+                      filter={creativeFilter}
+                      overlayText={creativeText}
+                      font={creativeFont}
+                      textColor={creativeTextColor}
+                      textBackground={creativeTextBackground}
+                      musicLabel={selectedAudioLabel}
+                      stickerLayer={storyDrag}
+                    />
+                  )
               ) : (
                 <View style={styles.igEmptyPreview}>
                   <Ionicons name="image-outline" size={42} color="rgba(255,255,255,0.7)" />
@@ -3706,6 +3756,16 @@ export function CreateModal({
                 </View>
               )}
             </View>
+            {selectedSticker ? (
+              <StickerSizeBar
+                emoji={selectedSticker.emoji}
+                scale={selectedSticker.scale}
+                onChange={(scale) =>
+                  setStoryStickers((prev) => prev.map((s) => (s.id === selectedSticker.id ? { ...s, scale } : s)))
+                }
+                onDone={() => setSelectedStickerId(null)}
+              />
+            ) : null}
             {createType === "story" ? (
               <View style={styles.igStoryShareRow}>
                 <Pressable
@@ -4357,12 +4417,15 @@ export function CreateModal({
       allowMultiple
       onClose={() => setShowStickerPanel(false)}
       onSelect={(emoji) => {
-        if (createType === "story") {
-          setStoryStickers((prev) =>
-            prev.length >= 20
-              ? prev
-              : [...prev, { id: `${Date.now()}-${prev.length}`, emoji, x: 0.5, y: 0.35 + (prev.length % 5) * 0.06 }]
-          );
+        const asSticker = createType === "story" || ((createType === "post" || createType === "reel") && pickedPostAssets.length <= 1);
+        if (asSticker) {
+          if (storyStickers.length >= 20) return;
+          const id = `${Date.now()}-${storyStickers.length}`;
+          setStoryStickers((prev) => [
+            ...prev,
+            { id, emoji, x: 0.5, y: 0.35 + (prev.length % 5) * 0.06, scale: 1 }
+          ]);
+          setSelectedStickerId(id);
           return;
         }
         setCreativeText((t) => (t ? `${t} ${emoji}` : emoji));

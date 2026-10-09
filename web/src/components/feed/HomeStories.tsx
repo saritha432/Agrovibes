@@ -461,17 +461,6 @@ function StoryViewer({
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--left" onClick={onPrev} aria-label="Previous" />
           <button type="button" className="story-viewer__nav-zone story-viewer__nav-zone--right" onClick={onNext} aria-label="Next" />
         </div>
-        {canViewViewers ? (
-          <button type="button" className="story-viewer__viewers-overlay" onClick={onOpenViewers}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            <span>
-              {viewersLoading ? "Viewers" : `${viewersCount} viewer${viewersCount === 1 ? "" : "s"}`}
-            </span>
-          </button>
-        ) : null}
         {canInteract ? (
           <form className="story-viewer__actions" onSubmit={onSend} onClick={(e) => e.stopPropagation()}>
             <input
