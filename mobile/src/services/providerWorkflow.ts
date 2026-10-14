@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetchProviderKycStatus, submitProviderKyc, uploadImageFile } from "./api";
+import { fetchProviderKycStatus, submitProviderKyc } from "./api";
 
 export type ProviderApprovalStatus = "not_submitted" | "pending" | "approved" | "rejected";
 export type ListingApprovalStatus = "pending" | "approved" | "rejected";
@@ -35,6 +35,16 @@ export type ProviderRegistrationDraft = {
   upi?: string;
   documentLabels: string[];
   documents: ProviderKycDocument[];
+  /** Full Aadhaar is kept only until KYC submit, then cleared. */
+  aadhaarNumber?: string;
+  panNumber?: string;
+  panName?: string;
+  kycAadhaarVerified?: boolean;
+  digilockerVerified?: boolean;
+  aadhaarName?: string;
+  aadhaarMasked?: string;
+  panMatched?: boolean;
+  bankVerified?: boolean;
 };
 
 export type ProviderListingRecord = {
@@ -112,7 +122,16 @@ async function readState(): Promise<ProviderWorkflowState> {
               : [],
             documents: Array.isArray(parsed.registrationDraft.documents)
               ? parsed.registrationDraft.documents
-              : []
+              : [],
+            aadhaarNumber: parsed.registrationDraft.aadhaarNumber || "",
+            panNumber: parsed.registrationDraft.panNumber || "",
+            panName: parsed.registrationDraft.panName || "",
+            kycAadhaarVerified: Boolean(parsed.registrationDraft.kycAadhaarVerified),
+            digilockerVerified: Boolean(parsed.registrationDraft.digilockerVerified),
+            aadhaarName: parsed.registrationDraft.aadhaarName || "",
+            aadhaarMasked: parsed.registrationDraft.aadhaarMasked || "",
+            panMatched: Boolean(parsed.registrationDraft.panMatched),
+            bankVerified: Boolean(parsed.registrationDraft.bankVerified)
           }
         : null,
       listings: Array.isArray(parsed.listings) ? parsed.listings : [],
@@ -211,7 +230,10 @@ export async function updateProviderRegistrationDraft(
     gstNumber: "",
     yearsExperience: "",
     documentLabels: [],
-    documents: []
+    documents: [],
+    aadhaarNumber: "",
+    panNumber: "",
+    kycAadhaarVerified: false
   };
   await writeState({
     ...state,
@@ -232,36 +254,14 @@ export async function getProviderRegistrationDraft(): Promise<ProviderRegistrati
 export async function submitProviderRegistrationForApproval(token?: string | null): Promise<void> {
   const state = await readState();
   const draft = state.registrationDraft;
-  const localDocs = Array.isArray(draft?.documents) ? draft.documents : [];
-  if (localDocs.length === 0) {
-    throw new Error("Upload KYC documents before submitting for review.");
+  const panNumber = String(draft?.panNumber || "").trim().toUpperCase();
+  if (!draft?.digilockerVerified || !draft?.panMatched || !draft?.bankVerified || !panNumber) {
+    throw new Error("Complete DigiLocker, PAN match, and bank verification before submitting.");
   }
   if (!token) {
     throw new Error("Please sign in again, then submit for review.");
   }
 
-  const uploadedDocs: Array<{ key: string; label: string; url: string }> = [];
-  for (const doc of localDocs) {
-    const label = String(doc.label || "Document").trim();
-    const key = String(doc.key || "document").trim();
-    const uri = String(doc.uri || "").trim();
-    if (!uri) continue;
-    if (/^https?:\/\//i.test(uri)) {
-      uploadedDocs.push({ key, label, url: uri });
-      continue;
-    }
-    const uploaded = await uploadImageFile(uri);
-    if (!uploaded?.url) {
-      throw new Error(`Failed to upload ${label}. Please try again.`);
-    }
-    uploadedDocs.push({ key, label, url: uploaded.url });
-  }
-  if (uploadedDocs.length === 0) {
-    throw new Error("Upload KYC documents before submitting for review.");
-  }
-
-  const documentSummary =
-    (draft?.documentLabels || []).join(", ").trim() || uploadedDocs.map((d) => d.label).join(", ");
   const address = [draft?.street, draft?.village, draft?.district, draft?.state]
     .filter(Boolean)
     .join(", ");
@@ -269,14 +269,16 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
     applicantName: draft?.fullName || "Provider",
     role: draft?.track || "rental",
     registrationType: draft?.registrationType || "individual",
-    documentSummary,
-    documents: uploadedDocs,
+    documentSummary: "DigiLocker Aadhaar, PAN, and bank verified",
+    documents: [],
     businessName: draft?.businessName || undefined,
     gstNumber: draft?.gstNumber || undefined,
     email: draft?.email || undefined,
     phone: draft?.phone || undefined,
     address: address || undefined,
-    priority: "Medium"
+    priority: "Medium",
+    otpVerified: true,
+    panNumber
   });
 
   let next = {
@@ -285,8 +287,7 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
     registrationDraft: draft
       ? {
           ...draft,
-          documents: uploadedDocs.map((d) => ({ key: d.key, label: d.label, uri: d.url })),
-          documentLabels: uploadedDocs.map((d) => d.label)
+          aadhaarNumber: ""
         }
       : draft
   };

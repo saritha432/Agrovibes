@@ -34,7 +34,10 @@ export function queueOpenSharedPostsViewer(posts: HomePost[], initialIndex = 0, 
     returnToNotifications: !!opts?.returnToNotifications
   };
   pending = next;
-  listeners.forEach((fn) => fn(next));
+  if (listeners.size) {
+    listeners.forEach((fn) => fn(next));
+    pending = null;
+  }
 }
 
 export function takePendingSharedPostViewer(): Pending | null {
@@ -45,6 +48,11 @@ export function takePendingSharedPostViewer(): Pending | null {
 
 export function subscribeOpenSharedPostsViewer(handler: (pending: Pending) => void) {
   listeners.add(handler);
+  if (pending) {
+    const next = pending;
+    pending = null;
+    handler(next);
+  }
   return () => {
     listeners.delete(handler);
   };

@@ -17,6 +17,14 @@ export function navigateToDirectInbox() {
 
 export function navigateToDirectChat(params: RootStackParamList["DirectChat"]) {
   if (!navigationRef.isReady()) return;
+  const root = navigationRef.getRootState();
+  const alreadyOnStack = root?.routes?.some((route) => route.name === "DirectChat") ?? false;
+  // Cold start only has Main on the stack. `push` in that first moment is dropped
+  // and the app stays on Home. `navigate` inserts DirectChat once the stack exists.
+  if (!alreadyOnStack) {
+    navigationRef.navigate("DirectChat", params);
+    return;
+  }
   navigationRef.dispatch(StackActions.push("DirectChat", params));
 }
 

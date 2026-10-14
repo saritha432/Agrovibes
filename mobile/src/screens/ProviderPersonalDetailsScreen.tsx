@@ -68,7 +68,7 @@ export function ProviderPersonalDetailsScreen() {
       gstNumber: isBusiness ? gstNumber.trim().toUpperCase() : "",
       yearsExperience: isBusiness ? yearsExperience.trim() : ""
     });
-    navigation.navigate("ProviderBankDetails", { track, registrationType });
+    navigation.navigate("ProviderKycVerification", { track, registrationType });
   };
 
   return (
@@ -84,7 +84,8 @@ export function ProviderPersonalDetailsScreen() {
       >
         {isBusiness ? (
           <>
-            <Text style={pf.sectionTitle}>Business Details</Text>
+            <Text style={pf.sectionTitle}>Basic Details</Text>
+            <Text style={pf.sectionSub}>Name, phone, email, address, and business details</Text>
 
             <TextInput
               style={pf.input}
@@ -167,7 +168,8 @@ export function ProviderPersonalDetailsScreen() {
           </>
         ) : (
           <>
-            <Text style={pf.sectionTitle}>Personal Information</Text>
+            <Text style={pf.sectionTitle}>Basic Details</Text>
+            <Text style={pf.sectionSub}>Name, phone, email, and address</Text>
 
             <TextInput
               style={pf.input}

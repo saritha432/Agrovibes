@@ -1,250 +1,297 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
+import { WebView } from "react-native-webview";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { APP_LIME } from "../theme/appColors";
-import {
-  PROVIDER_CARD,
-  PROVIDER_MUTED,
-  PROVIDER_TEXT,
-  ProviderContinueButton,
-  ProviderFormHeader,
-  ProviderStepBar,
-  providerFormStyles as pf
-} from "./provider/providerFormUi";
-import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
-
-type DocKey = "aadhaarFront" | "aadhaarBack" | "panCard" | "gstCertificate";
-
-type DocField = {
-  key: DocKey;
-  label: string;
-  placeholder: string;
-  required: boolean;
-};
-
-const INDIVIDUAL_DOC_FIELDS: DocField[] = [
-  {
-    key: "aadhaarFront",
-    label: "Aadhaar Card Front *",
-    placeholder: "Upload Aadhaar card front",
-    required: true
-  },
-  {
-    key: "aadhaarBack",
-    label: "Aadhaar Card Back *",
-    placeholder: "Upload Aadhaar card back",
-    required: true
-  },
-  {
-    key: "panCard",
-    label: "PAN Card *",
-    placeholder: "Upload PAN card",
-    required: true
-  }
-];
-
-const BUSINESS_DOC_FIELDS: DocField[] = [
-  {
-    key: "aadhaarFront",
-    label: "Aadhaar Card Front *",
-    placeholder: "Upload authorized person Aadhaar front",
-    required: true
-  },
-  {
-    key: "aadhaarBack",
-    label: "Aadhaar Card Back *",
-    placeholder: "Upload authorized person Aadhaar back",
-    required: true
-  },
-  {
-    key: "panCard",
-    label: "PAN Card *",
-    placeholder: "Upload business / authorized person PAN",
-    required: true
-  },
-  {
-    key: "gstCertificate",
-    label: "GST Certificate (if applicable)",
-    placeholder: "Upload GST certificate",
-    required: false
-  }
-];
-
-function UploadDocCard({
-  field,
-  uri,
-  onPick
-}: {
-  field: DocField;
-  uri?: string;
-  onPick: () => void;
-}) {
-  return (
-    <View style={styles.fieldBlock}>
-      <Text style={styles.fieldLabel}>{field.label}</Text>
-      <Pressable
-        style={[styles.uploadBox, uri ? styles.uploadBoxDone : null]}
-        onPress={onPick}
-        accessibilityRole="button"
-        accessibilityLabel={field.placeholder}
-      >
-        {uri ? (
-          <Image source={{ uri }} style={styles.preview} resizeMode="cover" />
-        ) : (
-          <View style={styles.uploadInner}>
-            <Text style={styles.uploadPlaceholder}>{field.placeholder}</Text>
-          </View>
-        )}
-        {uri ? (
-          <View style={styles.doneBadge}>
-            <Ionicons name="checkmark" size={12} color="#000" />
-          </View>
-        ) : null}
-      </Pressable>
-    </View>
-  );
-}
+import { useAuth } from "../auth/AuthContext";
+import { fetchProviderDigilockerResult, startProviderDigilocker } from "../services/api";
+import { getProviderRegistrationDraft, updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
 export function ProviderKycVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const route = useRoute<any>();
+  const { token } = useAuth();
   const track = route.params?.track === "service" || route.params?.track === "both" ? route.params.track : "rental";
   const registrationType =
     route.params?.registrationType === "business" ? "business" : "individual";
-  const fields = useMemo(
-    () => (registrationType === "business" ? BUSINESS_DOC_FIELDS : INDIVIDUAL_DOC_FIELDS),
-    [registrationType]
-  );
-  const [docs, setDocs] = useState<Partial<Record<DocKey, string>>>({});
 
-  const pickDoc = useCallback(async (key: DocKey) => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow photo access to upload KYC documents.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-      allowsEditing: true
-    });
-    const asset = result.assets?.[0];
-    if (result.canceled || !asset?.uri) return;
-    setDocs((prev) => ({ ...prev, [key]: asset.uri }));
+  const [starting, setStarting] = useState(false);
+  const [gatewayUrl, setGatewayUrl] = useState("");
+  const [error, setError] = useState("");
+  const [kycStatus, setKycStatus] = useState<"idle" | "pending" | "verified" | "failed">("idle");
+  const [result, setResult] = useState<{ name: string; maskedAadhaar: string; dob: string } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const draft = await getProviderRegistrationDraft();
+      if (draft?.digilockerVerified && draft.aadhaarName) {
+        setKycStatus("verified");
+        setResult({
+          name: draft.aadhaarName,
+          maskedAadhaar: draft.aadhaarMasked || "Verified",
+          dob: ""
+        });
+      }
+    })();
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
-  const requiredOk = fields.filter((f) => f.required).every((f) => !!docs[f.key]);
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const readResult = async (activeSessionId: string) => {
+    if (!token || !activeSessionId) return;
+    try {
+      const next = await fetchProviderDigilockerResult(token, activeSessionId);
+      if (next.status === "failed") {
+        stopPolling();
+        setGatewayUrl("");
+        setKycStatus("failed");
+        setError(next.message || "DigiLocker verification failed.");
+        return;
+      }
+      if (next.status !== "verified" || !next.name) {
+        setKycStatus("pending");
+        return;
+      }
+      stopPolling();
+      setGatewayUrl("");
+      setKycStatus("verified");
+      setResult({
+        name: next.name,
+        maskedAadhaar: next.maskedAadhaar || "Verified",
+        dob: next.dob || ""
+      });
+      await updateProviderRegistrationDraft({
+        digilockerVerified: true,
+        aadhaarName: next.name,
+        aadhaarMasked: next.maskedAadhaar || "",
+        panMatched: false,
+        bankVerified: false
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read DigiLocker result.");
+    }
+  };
+
+  const startLogin = async () => {
+    if (starting || kycStatus === "verified") return;
+    if (!token) {
+      setError("Please sign in again, then continue with DigiLocker.");
+      return;
+    }
+    setStarting(true);
+    setError("");
+    setResult(null);
+    setKycStatus("idle");
+    try {
+      const draft = await getProviderRegistrationDraft();
+      const started = await startProviderDigilocker(token, {
+        fullName: draft?.fullName,
+        phone: draft?.phone
+      });
+      setKycStatus("pending");
+      setGatewayUrl(started.gatewayUrl);
+      stopPolling();
+      pollRef.current = setInterval(() => {
+        void readResult(started.sessionId);
+      }, 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start DigiLocker.");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const badge = kycStatus === "failed" ? "Failed" : "Pending";
+  const aadhaarDone = Boolean(result);
 
   return (
-    <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
-      <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={3} />
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
+      <View style={styles.topBar}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={12} accessibilityLabel="Back">
+          <Ionicons name="chevron-back" size={22} color="#1a1a1a" />
+        </Pressable>
+      </View>
 
-      <ScrollView
-        style={pf.scroll}
-        contentContainerStyle={pf.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.title}>KYC Verification</Text>
-        <Text style={styles.sub}>
-          {registrationType === "business"
-            ? "Upload Aadhaar, PAN, and GST certificate if applicable"
-            : "Upload Aadhaar and PAN for verification"}
-        </Text>
+      <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={styles.cardTitle}>Provider Verification</Text>
+            <View style={[styles.badge, kycStatus === "failed" && styles.badgeFailed]}>
+              <Text style={[styles.badgeText, kycStatus === "failed" && styles.badgeTextFailed]}>{badge}</Text>
+            </View>
+          </View>
 
-        {fields.map((field) => (
-          <UploadDocCard
-            key={field.key}
-            field={field}
-            uri={docs[field.key]}
-            onPick={() => void pickDoc(field.key)}
-          />
-        ))}
+          <View style={styles.stepRow}>
+            <Text style={styles.stepTitle}>Aadhaar Verification</Text>
+            <Text style={styles.stepCount}>Step 1 of 3</Text>
+          </View>
+          <View style={styles.track}>
+            <View style={[styles.trackFill, aadhaarDone && styles.trackFillDone]} />
+          </View>
 
-        <View style={{ height: 16 }} />
+          <View style={styles.identityRow}>
+            <Ionicons name="checkmark-circle" size={18} color={GREEN} />
+            <Text style={styles.identityTitle}>Verify your identity</Text>
+          </View>
+          <Text style={styles.identitySub}>
+            Securely verify your Aadhaar using DigiLocker to continue provider registration.
+          </Text>
+
+          <Pressable
+            style={[styles.primaryBtn, (starting || aadhaarDone) && styles.primaryBtnBusy]}
+            disabled={starting || aadhaarDone}
+            onPress={() => {
+              void startLogin();
+            }}
+          >
+            {starting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryBtnText}>
+                {aadhaarDone ? "Aadhaar Verified" : "Verify with DigiLocker"}
+              </Text>
+            )}
+          </Pressable>
+
+          <View style={styles.outcomeRow}>
+            <Ionicons
+              name={aadhaarDone ? "checkmark-circle" : "ellipse-outline"}
+              size={18}
+              color={aadhaarDone ? GREEN : "#9aa0a6"}
+            />
+            <View style={styles.outcomeCopy}>
+              <Text style={styles.outcomeText}>After successful verification: Aadhaar Verified</Text>
+              {result ? (
+                <Text style={styles.outcomeMeta}>
+                  {result.name}
+                  {result.maskedAadhaar ? ` · ${result.maskedAadhaar}` : ""}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          <Pressable
+            style={styles.outcomeRow}
+            disabled={!aadhaarDone}
+            onPress={() => {
+              navigation.navigate("ProviderPanVerification", { track, registrationType });
+            }}
+          >
+            <Ionicons name="ellipse-outline" size={18} color="#9aa0a6" />
+            <Text style={[styles.outcomeText, aadhaarDone && styles.outcomeLink]}>
+              Next: PAN and Bank Account Verification
+            </Text>
+          </Pressable>
+
+          {kycStatus === "failed" ? (
+            <Text style={styles.error}>{error || "DigiLocker did not share Aadhaar. You can try again."}</Text>
+          ) : null}
+          {error && kycStatus !== "failed" ? <Text style={styles.error}>{error}</Text> : null}
+        </View>
       </ScrollView>
 
-      <ProviderContinueButton
-        disabled={!requiredOk}
-        onPress={() => {
-          const selected = fields
-            .filter((f) => !!docs[f.key])
-            .map((f) => ({
-              key: f.key,
-              label: f.label.replace(/\s*\*$/, "").replace(/\s*\(if applicable\)/i, "").trim(),
-              uri: docs[f.key] as string
-            }));
-          void updateProviderRegistrationDraft({
-            track,
-            registrationType,
-            documentLabels: selected.map((d) => d.label),
-            documents: selected
-          });
-          navigation.navigate("ProviderVerification", { track, registrationType });
-        }}
-      />
+      <Modal visible={Boolean(gatewayUrl)} animationType="slide" onRequestClose={() => setGatewayUrl("")}>
+        <SafeAreaView style={styles.modal}>
+          <View style={styles.modalBar}>
+            <Pressable
+              onPress={() => {
+                setGatewayUrl("");
+              }}
+              hitSlop={12}
+            >
+              <Text style={styles.modalClose}>Close</Text>
+            </Pressable>
+            <Text style={styles.modalTitle}>DigiLocker</Text>
+            <View style={{ width: 48 }} />
+          </View>
+          {gatewayUrl ? (
+            <WebView
+              source={{ uri: gatewayUrl }}
+              style={styles.web}
+              thirdPartyCookiesEnabled
+              sharedCookiesEnabled
+              javaScriptEnabled
+              domStorageEnabled
+              setSupportMultipleWindows={false}
+            />
+          ) : null}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
+const GREEN = "#1B8A43";
+
 const styles = StyleSheet.create({
-  title: {
-    color: APP_LIME,
-    fontSize: 28,
-    fontWeight: "800",
-    marginBottom: 6
-  },
-  sub: {
-    color: PROVIDER_MUTED,
-    fontSize: 13,
-    marginBottom: 18
-  },
-  fieldBlock: { marginBottom: 14 },
-  fieldLabel: {
-    color: PROVIDER_TEXT,
-    fontSize: 13,
-    fontWeight: "600",
-    marginBottom: 8
-  },
-  uploadBox: {
-    height: 120,
+  screen: { flex: 1, backgroundColor: "#f3f4f6" },
+  topBar: { paddingHorizontal: 12, paddingVertical: 8 },
+  page: { paddingHorizontal: 16, paddingBottom: 24 },
+  card: {
+    backgroundColor: "#fff",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: PROVIDER_CARD,
-    overflow: "hidden",
-    justifyContent: "center"
-  },
-  uploadBoxDone: {
-    borderColor: "rgba(201,255,53,0.45)"
-  },
-  uploadInner: {
+    borderColor: "#e6e8eb",
     paddingHorizontal: 16,
-    alignItems: "center"
+    paddingTop: 16,
+    paddingBottom: 18
   },
-  uploadPlaceholder: {
-    color: PROVIDER_MUTED,
-    fontSize: 13,
-    textAlign: "center"
+  cardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
+  cardTitle: { color: "#1a1a1a", fontSize: 16, fontWeight: "700" },
+  badge: {
+    backgroundColor: "#f8e6d4",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4
   },
-  preview: {
-    width: "100%",
-    height: "100%"
-  },
-  doneBadge: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: APP_LIME,
+  badgeFailed: { backgroundColor: "#fde2e2" },
+  badgeText: { color: "#c56a1a", fontSize: 12, fontWeight: "700" },
+  badgeTextFailed: { color: "#c24141" },
+  stepRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  stepTitle: { color: "#1a1a1a", fontSize: 15, fontWeight: "700" },
+  stepCount: { color: "#8b9198", fontSize: 12 },
+  track: { height: 4, borderRadius: 4, backgroundColor: "#e6e8eb", marginBottom: 16, overflow: "hidden" },
+  trackFill: { width: "34%", height: 4, borderRadius: 4, backgroundColor: GREEN },
+  trackFillDone: { width: "34%" },
+  identityRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
+  identityTitle: { color: "#1a1a1a", fontSize: 14, fontWeight: "700" },
+  identitySub: { color: "#6b7280", fontSize: 13, lineHeight: 18, marginBottom: 16, marginLeft: 26 },
+  primaryBtn: {
+    backgroundColor: GREEN,
+    borderRadius: 8,
+    minHeight: 48,
     alignItems: "center",
-    justifyContent: "center"
-  }
+    justifyContent: "center",
+    marginBottom: 16
+  },
+  primaryBtnBusy: { opacity: 0.85 },
+  primaryBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  outcomeRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 10 },
+  outcomeCopy: { flex: 1 },
+  outcomeText: { color: "#3f3f46", fontSize: 13, lineHeight: 18, flex: 1 },
+  outcomeLink: { color: GREEN, fontWeight: "700" },
+  outcomeMeta: { color: "#6b7280", fontSize: 12, marginTop: 2 },
+  error: { color: "#c24141", fontSize: 13, marginTop: 4 },
+  modal: { flex: 1, backgroundColor: "#111" },
+  modalBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  modalTitle: { color: "#f8fafc", fontSize: 16, fontWeight: "700" },
+  modalClose: { color: "#C9FF35", fontSize: 15, fontWeight: "700" },
+  web: { flex: 1, backgroundColor: "#fff" }
 });

@@ -90,7 +90,7 @@ const PROCESS_STEPS = [
   {
     icon: "shield-checkmark-outline" as const,
     title: "Verify",
-    body: "Upload ID, bank details, and any business registration or certifications you hold."
+    body: "Basic details, DigiLocker Aadhaar, PAN match, then bank account verification."
   },
   {
     icon: "document-text-outline" as const,

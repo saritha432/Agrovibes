@@ -36,10 +36,23 @@ const AUTH_FLOW_ROUTES = new Set([
   "SecurityVerification"
 ]);
 
-let pendingAction: (() => void) | null = null;
+type PendingNav = {
+  action: () => void;
+  expectRoute?: string;
+  attempts: number;
+};
+
+let pendingNav: PendingNav | null = null;
 let pendingRetryTimer: ReturnType<typeof setInterval> | null = null;
+let verifyTimer: ReturnType<typeof setTimeout> | null = null;
+let navigationReadyAt = 0;
+let verifyInFlight = false;
+const settleWaiters: Array<() => void> = [];
 const PENDING_RETRY_MS = 250;
 const PENDING_RETRY_MAX_MS = 20000;
+/** Native stack drops a push dispatched in the same turn as NavigationContainer onReady. */
+const NAV_SETTLE_MS = 450;
+const MAX_NAV_ATTEMPTS = 8;
 const replyInFlight = new Set<string>();
 const FOLLOW_NOTIFICATION_TYPES = new Set(["follow_request", "follow_accept", "new_follow"]);
 /** Same push can arrive via expo-notifications and Firebase "opened app" hooks. */
@@ -106,9 +119,11 @@ function dismissIncomingCallUi(roomName: string) {
 
 function isAppReadyForNotificationNavigation() {
   if (!navigationRef.isReady()) return false;
+  if (!navigationReadyAt || Date.now() - navigationReadyAt < NAV_SETTLE_MS) return false;
   const route = navigationRef.getCurrentRoute()?.name;
   if (!route) return false;
-  return !AUTH_FLOW_ROUTES.has(route);
+  if (AUTH_FLOW_ROUTES.has(route)) return false;
+  return Boolean(navigationRef.getRootState()?.routes?.length);
 }
 
 function stopPendingRetry() {
@@ -118,30 +133,103 @@ function stopPendingRetry() {
   }
 }
 
+function stopVerify() {
+  if (verifyTimer) {
+    clearTimeout(verifyTimer);
+    verifyTimer = null;
+  }
+}
+
+function releaseNavigationWaiters() {
+  verifyInFlight = false;
+  if (pendingNav) return;
+  const waiters = settleWaiters.splice(0);
+  for (const waiter of waiters) waiter();
+}
+
+/** Called from NavigationContainer onReady. Cold-start taps wait until the stack can accept a screen. */
+export function markNavigationContainerReady() {
+  if (!navigationReadyAt) navigationReadyAt = Date.now();
+  startPendingRetry();
+}
+
+/** Resolves once a killed-state tap has been applied, or there was nothing to apply. */
+export function whenNotificationNavigationSettled(fn: () => void) {
+  if (!pendingNav && !verifyInFlight) {
+    fn();
+    return;
+  }
+  settleWaiters.push(fn);
+}
+
 export function runPendingNotificationNavigation() {
-  if (!pendingAction || !isAppReadyForNotificationNavigation()) return;
-  const action = pendingAction;
-  pendingAction = null;
+  if (!pendingNav || verifyInFlight || !isAppReadyForNotificationNavigation()) return;
+  const current = pendingNav;
+  pendingNav = null;
   stopPendingRetry();
-  if (__DEV__) console.log("[notif] running pending navigation");
-  action();
+  if (current.expectRoute) verifyInFlight = true;
+  if (__DEV__) console.log("[notif] running pending navigation", current.expectRoute || "");
+  try {
+    current.action();
+  } catch {
+    verifyInFlight = false;
+    releaseNavigationWaiters();
+    return;
+  }
+  if (!current.expectRoute) {
+    releaseNavigationWaiters();
+    return;
+  }
+  const expectRoute = current.expectRoute;
+  const started = Date.now();
+  const check = () => {
+    verifyTimer = null;
+    if (navigationRef.getCurrentRoute()?.name === expectRoute) {
+      releaseNavigationWaiters();
+      return;
+    }
+    if (Date.now() - started < 1200) {
+      verifyTimer = setTimeout(check, 150);
+      return;
+    }
+    verifyInFlight = false;
+    if (current.attempts + 1 >= MAX_NAV_ATTEMPTS) {
+      releaseNavigationWaiters();
+      return;
+    }
+    if (!pendingNav) {
+      pendingNav = { ...current, attempts: current.attempts + 1 };
+      startPendingRetry();
+    } else {
+      releaseNavigationWaiters();
+    }
+  };
+  verifyTimer = setTimeout(check, 150);
 }
 
 /** Tap can arrive before the navigator is mounted; keep retrying until it can navigate. */
 function startPendingRetry() {
   stopPendingRetry();
+  if (!pendingNav) return;
   const startedAt = Date.now();
   pendingRetryTimer = setInterval(() => {
-    if (!pendingAction || Date.now() - startedAt > PENDING_RETRY_MAX_MS) {
+    if (!pendingNav || Date.now() - startedAt > PENDING_RETRY_MAX_MS) {
+      const gaveUp = Boolean(pendingNav) && Date.now() - startedAt > PENDING_RETRY_MAX_MS;
       stopPendingRetry();
+      if (gaveUp) {
+        pendingNav = null;
+        releaseNavigationWaiters();
+      }
       return;
     }
     runPendingNotificationNavigation();
   }, PENDING_RETRY_MS);
 }
 
-export function scheduleNotificationNavigation(action: () => void) {
-  pendingAction = action;
+export function scheduleNotificationNavigation(action: () => void, expectRoute?: string) {
+  stopVerify();
+  verifyInFlight = false;
+  pendingNav = { action, expectRoute, attempts: 0 };
   if (isAppReadyForNotificationNavigation()) {
     runPendingNotificationNavigation();
     return;
@@ -338,9 +426,9 @@ export async function handleNotificationResponse(
   }
 
   let scheduled = false;
-  const schedule = (action: () => void) => {
+  const schedule = (action: () => void, expectRoute?: string) => {
     scheduled = true;
-    scheduleNotificationNavigation(action);
+    scheduleNotificationNavigation(action, expectRoute);
   };
 
   if (type === "missed_call") {
@@ -357,7 +445,7 @@ export async function handleNotificationResponse(
           peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined,
           autoStartCall: mode
         });
-      });
+      }, "DirectChat");
     } else if (isMessageAction(actionId) && callerId) {
       schedule(() => {
         navigateToDirectChat({
@@ -365,7 +453,7 @@ export async function handleNotificationResponse(
           peerName: title,
           peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined
         });
-      });
+      }, "DirectChat");
     } else if (callerId) {
       schedule(() => {
         navigateToDirectChat({
@@ -373,7 +461,7 @@ export async function handleNotificationResponse(
           peerName: title,
           peerAvatarUrl: String(data.callerAvatarUrl || "").trim() || undefined
         });
-      });
+      }, "DirectChat");
     }
     if (scheduled) {
       runPendingNotificationNavigation();
@@ -402,9 +490,9 @@ export async function handleNotificationResponse(
     } else if (senderId) {
       schedule(() => {
         navigateToDirectChat({ peerUserId: senderId, peerName: title });
-      });
+      }, "DirectChat");
     } else {
-      schedule(() => navigateToDirectInbox());
+      schedule(() => navigateToDirectInbox(), "Messages");
     }
   } else if (type === "direct_message") {
     const senderId = peerIdFromData(data);
@@ -412,9 +500,9 @@ export async function handleNotificationResponse(
     if (senderId) {
       schedule(() => {
         navigateToDirectChat({ peerUserId: senderId, peerName });
-      });
+      }, "DirectChat");
     } else {
-      schedule(() => navigateToDirectInbox());
+      schedule(() => navigateToDirectInbox(), "Messages");
     }
   } else if (type === "live_start" || type === "live_scheduled" || type === "live_reminder") {
     const postId = Number(data.postId);
@@ -433,7 +521,7 @@ export async function handleNotificationResponse(
     }
     scheduled = true;
   } else if (type === "weather_alert") {
-    schedule(() => navigateToWeather());
+    schedule(() => navigateToWeather(), "Weather");
   } else if (FOLLOW_NOTIFICATION_TYPES.has(type)) {
     scheduleOpenNotificationsSheet();
     scheduled = true;
