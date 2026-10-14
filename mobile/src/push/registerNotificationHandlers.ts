@@ -1,6 +1,6 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { handleNotificationResponse } from "./notificationNavigation";
+import { handleNotificationResponse, whenNotificationNavigationSettled } from "./notificationNavigation";
 
 let registered = false;
 let lastHandledResponseKey = "";
@@ -43,13 +43,48 @@ export function registerNotificationResponseHandler() {
   });
 }
 
+const COLD_START_POLL_MS = 400;
+const COLD_START_POLL_MAX_MS = 6000;
+let coldStartCaptureStarted = false;
+let coldStartAuthToken: string | null = null;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Killed-state taps are often missing for the first moments after process start.
+ * Poll until the OS hands over the response, then keep it until navigation lands.
+ */
+export function captureColdStartNotificationResponse(options?: { authToken?: string | null }) {
+  if (options?.authToken) coldStartAuthToken = options.authToken;
+  if (coldStartCaptureStarted || Platform.OS === "web") return;
+  coldStartCaptureStarted = true;
+  void (async () => {
+    const started = Date.now();
+    while (Date.now() - started < COLD_START_POLL_MAX_MS) {
+      let response: Notifications.NotificationResponse | null = null;
+      try {
+        response = await Notifications.getLastNotificationResponseAsync();
+      } catch {
+        return;
+      }
+      if (response) {
+        if (!claimNotificationResponse(response)) return;
+        await handleNotificationResponse(response, { authToken: coldStartAuthToken });
+        whenNotificationNavigationSettled(() => {
+          void clearLastResponseSafe();
+        });
+        return;
+      }
+      await delay(COLD_START_POLL_MS);
+    }
+  })();
+}
+
 /** Cold-start: process last notification action if the early listener did not. */
 export async function handleColdStartNotificationResponse(options?: { authToken?: string | null }) {
-  const response = await Notifications.getLastNotificationResponseAsync();
-  if (!response) return;
-  if (!claimNotificationResponse(response)) return;
-  await handleNotificationResponse(response, options);
-  await clearLastResponseSafe();
+  captureColdStartNotificationResponse(options);
 }
 
 type FirebaseRemoteMessage = {
@@ -65,6 +100,7 @@ type FirebaseMessagingFactory = () => {
 };
 
 let firebaseOpenRegistered = false;
+let firebaseInitialCapture: Promise<FirebaseRemoteMessage | null> | null = null;
 const handledFirebaseMessageIds = new Set<string>();
 
 function getFirebaseMessaging(): FirebaseMessagingFactory | null {
@@ -117,12 +153,35 @@ export function registerFirebaseNotificationOpenHandler() {
   }
 }
 
-export async function handleFirebaseInitialNotification() {
+/**
+ * Android often returns null from getInitialNotification on the first call after a
+ * killed launch. Keep the message until navigation can open the target screen.
+ */
+export function captureFirebaseInitialNotification() {
+  if (firebaseInitialCapture || Platform.OS === "web") return firebaseInitialCapture;
   const messaging = getFirebaseMessaging();
-  if (!messaging) return;
-  try {
-    handleFirebaseOpenedMessage(await messaging().getInitialNotification());
-  } catch {
-    // no-op
+  if (!messaging) {
+    firebaseInitialCapture = Promise.resolve(null);
+    return firebaseInitialCapture;
   }
+  firebaseInitialCapture = (async () => {
+    const started = Date.now();
+    while (Date.now() - started < COLD_START_POLL_MAX_MS) {
+      try {
+        const message = await messaging().getInitialNotification();
+        if (message) return message;
+      } catch {
+        return null;
+      }
+      await delay(COLD_START_POLL_MS);
+    }
+    return null;
+  })();
+  return firebaseInitialCapture;
+}
+
+export async function handleFirebaseInitialNotification() {
+  const message = await captureFirebaseInitialNotification();
+  if (!message) return;
+  handleFirebaseOpenedMessage(message);
 }

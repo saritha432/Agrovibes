@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,15 +22,14 @@ import {
   providerFormStyles as pf
 } from "./provider/providerFormUi";
 import { APP_LIME } from "../theme/appColors";
-import { lookupIfsc, resolveBankAccountName } from "../services/api";
-import {
-  getProviderRegistrationDraft,
-  updateProviderRegistrationDraft
-} from "../services/providerWorkflow";
+import { useAuth } from "../auth/AuthContext";
+import { lookupIfsc, verifyProviderBankAccount } from "../services/api";
+import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
 export function ProviderBankDetailsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const route = useRoute<any>();
+  const { token } = useAuth();
   const track = route.params?.track === "service" || route.params?.track === "both" ? route.params.track : "rental";
   const registrationType =
     route.params?.registrationType === "business" ? "business" : "individual";
@@ -44,9 +44,8 @@ export function ProviderBankDetailsScreen() {
   const [ifscError, setIfscError] = useState<string | null>(null);
   const [nameLoading, setNameLoading] = useState(false);
   const [nameHint, setNameHint] = useState<string | null>(null);
+  const [bankVerified, setBankVerified] = useState(false);
   const ifscTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const nameAutoFilledFor = useRef<string>("");
 
   const accountDigits = accountNumber.replace(/\D/g, "");
   const ifscCode = ifsc.trim().toUpperCase();
@@ -90,48 +89,42 @@ export function ProviderBankDetailsScreen() {
     }
   }, []);
 
-  const runAccountNameResolve = useCallback(async (account: string, code: string) => {
-    if (account.length < 6 || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) return;
-    const key = `${account}:${code}`;
-    if (nameAutoFilledFor.current === key) return;
+  const verifyAccount = useCallback(async () => {
+    if (accountDigits.length < 6 || !ifscFormatOk || nameLoading) return;
+    if (!token) {
+      setNameHint("Please sign in again, then verify the account.");
+      return;
+    }
     setNameLoading(true);
     setNameHint(null);
+    setBankVerified(false);
     try {
-      const draft = await getProviderRegistrationDraft();
-      const suggested = draft?.fullName?.trim() || "";
-      const result = await resolveBankAccountName({
-        accountNumber: account,
-        ifsc: code,
-        suggestedName: suggested || undefined
+      const result = await verifyProviderBankAccount(token, {
+        accountNumber: accountDigits,
+        ifsc: ifscCode
       });
-      if (result.holderName) {
-        setHolderName(result.holderName);
-        nameAutoFilledFor.current = key;
-        setNameHint(
-          result.verified
-            ? "Account holder name verified from bank."
-            : "Account holder name suggested. Please confirm it matches your bank records."
-        );
-      } else if (suggested) {
-        setHolderName(suggested);
-        nameAutoFilledFor.current = key;
-        setNameHint("Suggested from your profile name. Please confirm with bank records.");
-      } else {
-        setNameHint("Enter the account holder name exactly as on the passbook.");
+      setHolderName(result.holderName);
+      setBankVerified(result.matched);
+      setNameHint(
+        result.matched
+          ? "Account holder matches the Aadhaar name."
+          : `Bank name is ${result.holderName}. It does not match ${result.aadhaarName}.`
+      );
+      if (result.matched) {
+        await updateProviderRegistrationDraft({
+          holderName: result.holderName,
+          accountNumber: accountDigits,
+          ifsc: ifscCode,
+          bankVerified: true
+        });
       }
-    } catch {
-      const draft = await getProviderRegistrationDraft();
-      if (draft?.fullName) {
-        setHolderName(draft.fullName);
-        nameAutoFilledFor.current = key;
-        setNameHint("Suggested from your profile name. Please confirm with bank records.");
-      } else {
-        setNameHint("Enter the account holder name exactly as on the passbook.");
-      }
+    } catch (error) {
+      setBankVerified(false);
+      setNameHint(error instanceof Error ? error.message : "Could not verify the bank account.");
     } finally {
       setNameLoading(false);
     }
-  }, []);
+  }, [accountDigits, ifscCode, ifscFormatOk, nameLoading, token]);
 
   useEffect(() => {
     if (ifscTimer.current) clearTimeout(ifscTimer.current);
@@ -143,29 +136,14 @@ export function ProviderBankDetailsScreen() {
     };
   }, [ifscCode, runIfscLookup]);
 
-  useEffect(() => {
-    if (nameTimer.current) clearTimeout(nameTimer.current);
-    nameTimer.current = setTimeout(() => {
-      void runAccountNameResolve(accountDigits, ifscCode);
-    }, 700);
-    return () => {
-      if (nameTimer.current) clearTimeout(nameTimer.current);
-    };
-  }, [accountDigits, ifscCode, runAccountNameResolve]);
-
-  const canContinue =
-    holderName.trim().length > 1 &&
-    accountDigits.length >= 6 &&
-    ifscFormatOk &&
-    bankName.trim().length > 1 &&
-    !ifscLoading;
+  const canContinue = bankVerified && accountDigits.length >= 6 && ifscFormatOk && bankName.trim().length > 1;
 
   const continueHint = !ifscFormatOk
     ? "Enter a complete 11-character IFSC code to continue."
     : accountDigits.length < 6
       ? "Enter a valid account number."
-      : holderName.trim().length <= 1
-        ? "Enter account holder name."
+      : !bankVerified
+        ? "Verify the account holder before continuing."
         : bankName.trim().length <= 1
           ? "Enter or wait for bank name from IFSC lookup."
           : null;
@@ -188,13 +166,13 @@ export function ProviderBankDetailsScreen() {
       accountNumber: accountDigits,
       ifsc: ifscCode
     });
-    navigation.navigate("ProviderKycVerification", { track, registrationType });
+    navigation.navigate("ProviderVerification", { track, registrationType });
   };
 
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={2} />
+      <ProviderStepBar currentStep={4} />
 
       <ScrollView
         style={pf.scroll}
@@ -202,13 +180,17 @@ export function ProviderBankDetailsScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={pf.sectionTitle}>Bank Details</Text>
-        <Text style={pf.sectionSub}>For receiving your earnings</Text>
+        <Text style={pf.sectionTitle}>Bank Account Verification</Text>
+        <Text style={pf.sectionSub}>Account number + IFSC → Verify account holder</Text>
 
         <TextInput
           style={pf.input}
           value={ifsc}
-          onChangeText={(v) => setIfsc(v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))}
+          onChangeText={(v) => {
+            setIfsc(v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11));
+            setBankVerified(false);
+            setNameHint(null);
+          }}
           placeholder="IFSC Code * (11 characters)"
           placeholderTextColor={PROVIDER_MUTED}
           autoCapitalize="characters"
@@ -249,20 +231,43 @@ export function ProviderBankDetailsScreen() {
         <TextInput
           style={pf.input}
           value={accountNumber}
-          onChangeText={setAccountNumber}
+          onChangeText={(value) => {
+            setAccountNumber(value);
+            setBankVerified(false);
+            setNameHint(null);
+          }}
           placeholder="Account Number *"
           placeholderTextColor={PROVIDER_MUTED}
           keyboardType="number-pad"
         />
 
-        <TextInput
-          style={pf.input}
-          value={holderName}
-          onChangeText={setHolderName}
-          placeholder="Account Holder Name *"
-          placeholderTextColor={PROVIDER_MUTED}
-          autoCapitalize="words"
-        />
+        <Pressable
+          style={[styles.verifyBtn, (accountDigits.length < 6 || !ifscFormatOk || nameLoading) && styles.verifyBtnDisabled]}
+          disabled={accountDigits.length < 6 || !ifscFormatOk || nameLoading}
+          onPress={() => {
+            void verifyAccount();
+          }}
+        >
+          {nameLoading ? (
+            <ActivityIndicator color="#000" />
+          ) : (
+            <Text
+              style={[
+                styles.verifyBtnText,
+                (accountDigits.length < 6 || !ifscFormatOk || nameLoading) && styles.verifyBtnTextDisabled
+              ]}
+            >
+              Verify account holder
+            </Text>
+          )}
+        </Pressable>
+
+        {holderName ? (
+          <View style={styles.bankCard}>
+            <Text style={styles.bankLabel}>Account holder</Text>
+            <Text style={styles.bankValue}>{holderName}</Text>
+          </View>
+        ) : null}
         {nameLoading ? (
           <View style={styles.infoRow}>
             <ActivityIndicator color={APP_LIME} size="small" />
@@ -322,6 +327,17 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 2
   },
+  verifyBtn: {
+    backgroundColor: APP_LIME,
+    borderRadius: 8,
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12
+  },
+  verifyBtnDisabled: { backgroundColor: PROVIDER_CARD },
+  verifyBtnText: { color: "#000", fontSize: 14, fontWeight: "800" },
+  verifyBtnTextDisabled: { color: PROVIDER_MUTED },
   bankInput: {
     marginTop: 4,
     color: PROVIDER_TEXT,

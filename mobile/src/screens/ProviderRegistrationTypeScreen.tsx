@@ -15,12 +15,12 @@ const TYPE_OPTIONS: Array<{ id: ProviderRegistrationType; title: string; subtitl
   {
     id: "individual",
     title: "Individual",
-    subtitle: "Register as a person with Aadhaar and personal KYC documents."
+    subtitle: "Basic details, DigiLocker Aadhaar, PAN, then bank verification."
   },
   {
     id: "business",
     title: "Business / Company",
-    subtitle: "Register as a firm or company with business details and documents."
+    subtitle: "Business details, DigiLocker Aadhaar, PAN, then bank verification."
   }
 ];
 

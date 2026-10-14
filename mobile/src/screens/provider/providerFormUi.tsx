@@ -10,10 +10,10 @@ export const PROVIDER_MUTED = APP_TEXT_MUTED;
 export const PROVIDER_DIVIDER = "rgba(255,255,255,0.08)";
 
 export const PROVIDER_STEPS = [
-  { id: 1, label: "Personal Details", sub: "Description Text" },
-  { id: 2, label: "Bank Details", sub: "For earnings" },
-  { id: 3, label: "KYC Verification", sub: "Upload documents" },
-  { id: 4, label: "Verification", sub: "Submit for review" }
+  { id: 1, label: "Basic Details", sub: "Name and address" },
+  { id: 2, label: "DigiLocker", sub: "Aadhaar" },
+  { id: 3, label: "PAN", sub: "Match identity" },
+  { id: 4, label: "Bank Account", sub: "Verify holder" }
 ] as const;
 
 /** Show current step ±1 to match compact App Store-style step chips. */
