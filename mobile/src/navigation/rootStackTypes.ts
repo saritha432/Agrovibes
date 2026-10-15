@@ -69,6 +69,9 @@ export type RootStackParamList = {
   ProviderKycVerification:
     | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
     | undefined;
+  ProviderPanVerification:
+    | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
+    | undefined;
   ProviderVerification:
     | { track?: "rental" | "service" | "both"; registrationType?: "individual" | "business" }
     | undefined;

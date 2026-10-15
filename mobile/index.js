@@ -3,6 +3,8 @@ import "./src/push/notificationBackgroundTask";
 import { registerBackgroundNotificationTask } from "./src/push/notificationBackgroundTask";
 import { registerIncomingCallMessagingBackground } from "./src/push/incomingCallMessagingBackground";
 import {
+  captureColdStartNotificationResponse,
+  captureFirebaseInitialNotification,
   registerFirebaseNotificationOpenHandler,
   registerNotificationResponseHandler
 } from "./src/push/registerNotificationHandlers";
@@ -11,6 +13,8 @@ import {
 registerIncomingCallMessagingBackground();
 registerNotificationResponseHandler();
 registerFirebaseNotificationOpenHandler();
+captureColdStartNotificationResponse();
+captureFirebaseInitialNotification();
 void registerBackgroundNotificationTask();
 
 import { registerRootComponent } from "expo";

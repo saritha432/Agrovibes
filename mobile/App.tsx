@@ -16,7 +16,10 @@ import { EnsureIosSafeAreaInsets } from "./src/safeArea/EnsureIosSafeAreaInsets"
 import { APP_BLACK } from "./src/theme/appColors";
 import { trackNavigationScreen } from "./src/navigation/analyticsNavigation";
 import { installAndroidHardwareBackHandler } from "./src/navigation/androidHardwareBack";
-import { runPendingNotificationNavigation } from "./src/push/notificationNavigation";
+import {
+  markNavigationContainerReady,
+  runPendingNotificationNavigation
+} from "./src/push/notificationNavigation";
 import {
   handleColdStartNotificationResponse,
   handleFirebaseInitialNotification
@@ -155,7 +158,7 @@ function AppShell() {
         onReady={() => {
           installAndroidHardwareBackHandler();
           trackNavigationScreen();
-          runPendingNotificationNavigation();
+          markNavigationContainerReady();
           if (Platform.OS !== "web") {
             void handleColdStartNotificationResponse().catch(() => undefined);
             void handleFirebaseInitialNotification();

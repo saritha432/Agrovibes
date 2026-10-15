@@ -69,10 +69,10 @@ export function ProviderVerificationScreen() {
 
         <View style={styles.card}>
           <Ionicons name="shield-checkmark-outline" size={36} color={APP_LIME} />
-          <Text style={styles.cardTitle}>Documents ready for review</Text>
+          <Text style={styles.cardTitle}>Identity checks complete</Text>
           <Text style={styles.cardBody}>
-            Our team will verify your KYC document photos and activate your rental listing. This usually
-            takes 1–2 business days.
+            DigiLocker Aadhaar, PAN, and the bank account holder are verified. Submit to send this
+            application for admin review.
           </Text>
         </View>
       </ScrollView>

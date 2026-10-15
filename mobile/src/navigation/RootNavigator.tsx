@@ -253,6 +253,11 @@ export function RootNavigator() {
         options={slideRightBg}
       />
       <Stack.Screen
+        name="ProviderPanVerification"
+        getComponent={() => require("../screens/ProviderPanVerificationScreen").ProviderPanVerificationScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
         name="ProviderVerification"
         getComponent={() => require("../screens/ProviderVerificationScreen").ProviderVerificationScreen}
         options={slideRightBg}

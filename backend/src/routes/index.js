@@ -85,6 +85,7 @@ let directMessagesTableReady = false;
 let scheduledLivesTableReady = false;
 let providerKycTableReady = false;
 const phoneOtpMemory = new Map();
+const kycOtpMemory = new Map();
 const phoneUserMemory = new Map();
 let homeFeedMaintenanceRunning = false;
 let homeFeedMaintenanceLastRunAt = 0;
@@ -517,7 +518,86 @@ async function ensureProviderKycTable() {
   await query(
     `CREATE INDEX IF NOT EXISTS provider_kyc_user_idx ON provider_kyc_submissions (user_id, created_at DESC)`
   );
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS provider_kyc_phone_checks (
+      user_id INT PRIMARY KEY REFERENCES learn_users(id) ON DELETE CASCADE,
+      phone TEXT NOT NULL,
+      verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+  await query(`ALTER TABLE provider_kyc_phone_checks ADD COLUMN IF NOT EXISTS aadhaar_hash TEXT`);
+  await query(`ALTER TABLE provider_kyc_phone_checks ADD COLUMN IF NOT EXISTS aadhaar_last4 TEXT`);
   providerKycTableReady = true;
+}
+
+function normalizeAadhaar(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!/^[2-9]\d{11}$/.test(digits)) return null;
+  return digits;
+}
+
+function normalizePan(raw) {
+  const pan = String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) return null;
+  return pan;
+}
+
+function normalizeGst(raw) {
+  const gst = String(raw || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  if (!gst) return null;
+  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gst)) return null;
+  return gst;
+}
+
+function hashAadhaar(aadhaar) {
+  const secret = String(process.env.OTP_HASH_SECRET || process.env.JWT_SECRET || "agrovibes-otp-secret");
+  return crypto.createHmac("sha256", secret).update(`aadhaar:${aadhaar}`).digest("hex");
+}
+
+function kycAadhaarOtpKey(aadhaar) {
+  return `kyc:${hashAadhaar(aadhaar)}`;
+}
+
+async function markProviderKycAadhaarVerified(userId, aadhaar) {
+  await ensureProviderKycTable();
+  const aadhaarHash = hashAadhaar(aadhaar);
+  const last4 = aadhaar.slice(-4);
+  await query(
+    `
+    INSERT INTO provider_kyc_phone_checks (user_id, phone, verified_at, aadhaar_hash, aadhaar_last4)
+    VALUES ($1, $2, NOW(), $3, $4)
+    ON CONFLICT (user_id) DO UPDATE
+      SET phone = EXCLUDED.phone,
+          verified_at = NOW(),
+          aadhaar_hash = EXCLUDED.aadhaar_hash,
+          aadhaar_last4 = EXCLUDED.aadhaar_last4
+    `,
+    [userId, `aadhaar:${last4}`, aadhaarHash, last4]
+  );
+}
+
+async function hasRecentProviderKycAadhaarVerification(userId, aadhaar) {
+  await ensureProviderKycTable();
+  const rows = await query(
+    `
+    SELECT aadhaar_last4 AS "aadhaarLast4"
+    FROM provider_kyc_phone_checks
+    WHERE user_id = $1
+      AND aadhaar_hash = $2
+      AND verified_at > NOW() - INTERVAL '30 minutes'
+    LIMIT 1
+    `,
+    [userId, hashAadhaar(aadhaar)]
+  );
+  return rows.rows[0] || null;
 }
 
 function normalizeKycDocuments(raw) {
@@ -3676,6 +3756,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
           WHERE phone = $1
             AND used = false
             AND expires_at > NOW()
+            AND COALESCE(channel, 'sms') <> 'kyc'
           ORDER BY created_at DESC
           LIMIT 1
           `,
@@ -3861,6 +3942,7 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
         WHERE phone = $1
           AND used = false
           AND expires_at > NOW()
+          AND COALESCE(channel, 'sms') <> 'kyc'
         ORDER BY created_at DESC
         LIMIT 1
         `,
@@ -10547,6 +10629,284 @@ router.post("/v1/bank/resolve-account", async (req, res) => {
   }
 });
 
+const providerKycIdentity = require("../providerKycIdentity");
+
+router.post("/v1/provider/kyc/digilocker/start", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    const started = await providerKycIdentity.startDigilockerSession({
+      userId,
+      fullName: String(req.body?.fullName || req.user.fullName || "").trim(),
+      phone: String(req.body?.phone || req.user.phone || "").trim()
+    });
+    res.json(started);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    res.status(status).json({ message: error?.message || "Could not start DigiLocker" });
+  }
+});
+
+router.post("/v1/provider/kyc/digilocker/result", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    const result = await providerKycIdentity.completeDigilockerSession({
+      userId,
+      sessionId: String(req.body?.sessionId || "")
+    });
+    res.json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    res.status(status).json({ message: error?.message || "Could not read DigiLocker result" });
+  }
+});
+
+router.post("/v1/provider/kyc/pan/verify", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    const result = await providerKycIdentity.verifyPanNumber({
+      userId,
+      panNumber: req.body?.panNumber
+    });
+    res.json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    res.status(status).json({ message: error?.message || "Could not verify PAN" });
+  }
+});
+
+router.post("/v1/provider/kyc/bank/verify", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    const result = await providerKycIdentity.verifyBankAccount({
+      userId,
+      accountNumber: req.body?.accountNumber,
+      ifsc: req.body?.ifsc
+    });
+    res.json(result);
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    res.status(status).json({ message: error?.message || "Could not verify bank account" });
+  }
+});
+
+router.post("/v1/provider/kyc/send-otp", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    const aadhaar = normalizeAadhaar(req.body?.aadhaar);
+    if (!aadhaar) {
+      res.status(400).json({ message: "Enter a valid 12-digit Aadhaar number" });
+      return;
+    }
+    const otpKey = kycAadhaarOtpKey(aadhaar);
+    let smsPhone = normalizeIndiaPhone(req.user?.phone) || normalizeIndiaPhone(req.body?.notifyPhone);
+    if (!smsPhone && Number.isFinite(userId)) {
+      try {
+        const userRow = await query(`SELECT phone FROM learn_users WHERE id = $1 LIMIT 1`, [userId]);
+        smsPhone = normalizeIndiaPhone(userRow.rows[0]?.phone);
+      } catch {
+        smsPhone = null;
+      }
+    }
+    if (isStaticOtpEnabled()) {
+      res.json({ success: true, aadhaarLast4: aadhaar.slice(-4), provider: "static", channel: "sms" });
+      return;
+    }
+    if (!smsPhone) {
+      res.status(400).json({ message: "Save a mobile number in personal details so the Aadhaar OTP can be sent." });
+      return;
+    }
+
+    let canSend = true;
+    try {
+      await ensurePhoneOtpTable();
+      const recentSendCheck = await query(
+        `
+        SELECT COUNT(*)::INT AS count
+        FROM phone_otp_codes
+        WHERE phone = $1
+          AND channel = 'kyc'
+          AND created_at >= NOW() - INTERVAL '15 minutes'
+        `,
+        [otpKey]
+      );
+      canSend = (recentSendCheck.rows[0]?.count || 0) < 3;
+    } catch (_e) {
+      const memoryRows = kycOtpMemory.get(otpKey) || [];
+      const recent = memoryRows.filter((row) => row.createdAt > Date.now() - 15 * 60 * 1000);
+      canSend = recent.length < 3;
+    }
+    if (!canSend) {
+      res.status(429).json({ message: "Too many OTP requests. Try again later." });
+      return;
+    }
+
+    const provider = otpProvider();
+    const otp = provider === "twilio" ? "" : randomOtp6();
+    const otpHash = hashOtp(otpKey, otp || `twilio:${Date.now()}`);
+    const sent = provider === "twilio" ? await sendTwilioVerifyOtp(smsPhone) : await sendSmsOtp(smsPhone, otp);
+    try {
+      await ensurePhoneOtpTable();
+      await query(
+        `
+        INSERT INTO phone_otp_codes (phone, otp_hash, expires_at, attempts, used, channel, provider_request_id, provider_status, provider_message)
+        VALUES ($1, $2, NOW() + INTERVAL '10 minutes', 0, false, 'kyc', $3, $4, $5)
+        `,
+        [otpKey, otpHash, sent.providerRequestId || null, sent.providerStatus || null, sent.providerMessage || null]
+      );
+    } catch (_e) {
+      const rows = kycOtpMemory.get(otpKey) || [];
+      rows.push({
+        otpHash,
+        smsPhone,
+        providerRequestId: sent.providerRequestId || null,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        attempts: 0,
+        used: false,
+        createdAt: Date.now()
+      });
+      kycOtpMemory.set(otpKey, rows.slice(-5));
+    }
+
+    res.json({
+      success: true,
+      aadhaarLast4: aadhaar.slice(-4),
+      provider,
+      channel: sent.channel || "sms"
+    });
+  } catch (error) {
+    const errorMessage = String(error?.message || "");
+    if (errorMessage.includes("SMS provider is not configured") || errorMessage.includes("Twilio Verify is not configured")) {
+      res.status(503).json({ message: "OTP service is not configured on this server" });
+      return;
+    }
+    res.status(500).json({ message: "Failed to send OTP" });
+  }
+});
+
+router.post("/v1/provider/kyc/verify-otp", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    const aadhaar = normalizeAadhaar(req.body?.aadhaar);
+    const code = String(req.body?.code || "").replace(/\D/g, "");
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    if (!aadhaar || code.length !== 6) {
+      res.status(400).json({ message: "Aadhaar number and 6-digit OTP are required" });
+      return;
+    }
+    const otpKey = kycAadhaarOtpKey(aadhaar);
+
+    const provider = otpProvider();
+    const isStaticOtp = matchesStaticOtp(code);
+    let otpRow = null;
+    let otpRowFromDb = false;
+    if (!isStaticOtp && provider !== "twilio") {
+      try {
+        await ensurePhoneOtpTable();
+        const otpRows = await query(
+          `
+          SELECT id, otp_hash AS "otpHash", attempts, provider_request_id AS "providerRequestId"
+          FROM phone_otp_codes
+          WHERE phone = $1
+            AND channel = 'kyc'
+            AND used = false
+            AND expires_at > NOW()
+          ORDER BY created_at DESC
+          LIMIT 1
+          `,
+          [otpKey]
+        );
+        otpRow = otpRows.rows[0] || null;
+        otpRowFromDb = Boolean(otpRow);
+      } catch (_e) {
+        const rows = kycOtpMemory.get(otpKey) || [];
+        otpRow = rows.find((row) => !row.used && row.expiresAt > Date.now()) || null;
+        otpRowFromDb = false;
+      }
+      if (!otpRow) {
+        res.status(400).json({ message: "OTP expired. Please request a new code." });
+        return;
+      }
+      if (Number(otpRow.attempts || 0) >= 5) {
+        res.status(429).json({ message: "Maximum attempts exceeded. Request OTP again." });
+        return;
+      }
+    }
+
+    let isValidOtp = false;
+    if (isStaticOtp) {
+      isValidOtp = true;
+    } else if (provider === "twilio") {
+      const smsPhone =
+        normalizeIndiaPhone(otpRow?.smsPhone) ||
+        normalizeIndiaPhone(req.user?.phone) ||
+        normalizeIndiaPhone(req.body?.notifyPhone);
+      isValidOtp = smsPhone ? await verifyTwilioOtp(smsPhone, code) : false;
+    } else if (msg91Mode() === "widget" && otpRow?.providerRequestId) {
+      const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
+      const widgetId = String(process.env.MSG91_WIDGET_ID || "").trim();
+      try {
+        const verifyResponse = await fetch("https://api.msg91.com/api/v5/widget/verifyOtp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", token: authKey },
+          body: JSON.stringify({
+            widgetId,
+            tokenAuth: authKey,
+            reqId: otpRow.providerRequestId,
+            otp: code
+          })
+        });
+        isValidOtp = verifyResponse.ok;
+      } catch (_e) {
+        isValidOtp = false;
+      }
+    } else if (otpRow) {
+      isValidOtp = hashOtp(otpKey, code) === otpRow.otpHash;
+    }
+
+    if (!isValidOtp) {
+      if (otpRowFromDb && otpRow?.id) {
+        await query(`UPDATE phone_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [otpRow.id]);
+      } else if (otpRow) {
+        otpRow.attempts = Number(otpRow.attempts || 0) + 1;
+      }
+      res.status(401).json({ message: "Invalid OTP" });
+      return;
+    }
+
+    if (!isStaticOtp && provider !== "twilio") {
+      if (otpRowFromDb && otpRow?.id) {
+        await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [otpRow.id]);
+      } else if (otpRow) {
+        otpRow.used = true;
+      }
+    }
+
+    await markProviderKycAadhaarVerified(userId, aadhaar);
+    res.json({ success: true, aadhaarLast4: aadhaar.slice(-4) });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to verify OTP" });
+  }
+});
+
 router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
   try {
     await ensureProviderKycTable();
@@ -10565,20 +10925,30 @@ router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
       documentSummary = documents.map((d) => d.label).join(", ").slice(0, 500);
     }
     const businessName = String(req.body?.businessName || "").trim().slice(0, 160) || null;
-    const gstNumber = String(req.body?.gstNumber || "").trim().toUpperCase().slice(0, 30) || null;
+    const gstInput = String(req.body?.gstNumber || "").trim();
+    const gstNumber = gstInput ? normalizeGst(gstInput) : null;
+    if (gstInput && !gstNumber) {
+      res.status(400).json({ message: "Enter a valid GST number" });
+      return;
+    }
     const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 160) || null;
-    const phone = String(req.body?.phone || "").trim().slice(0, 40) || null;
+    const phone = normalizeIndiaPhone(req.body?.phone) || String(req.body?.phone || "").trim().slice(0, 40) || null;
+    const otpVerified = req.body?.otpVerified === true;
     const address = String(req.body?.address || "").trim().slice(0, 400) || null;
     const priorityRaw = String(req.body?.priority || "Medium").trim();
     const priority = ["High", "Medium", "Low"].includes(priorityRaw) ? priorityRaw : "Medium";
 
-    if (!documentSummary && documents.length === 0) {
-      res.status(400).json({ message: "Upload KYC documents before submitting." });
-      return;
-    }
     if (documents.length === 0) {
-      res.status(400).json({ message: "Upload KYC document images before submitting." });
-      return;
+      const identity = await providerKycIdentity.getCompletedProviderKycIdentity(userId);
+      if (!identity) {
+        res.status(400).json({
+          message: "Complete DigiLocker Aadhaar, PAN match, and bank verification before submitting."
+        });
+        return;
+      }
+      const last4 = String(identity.aadhaarLast4 || "").replace(/\D/g, "").slice(-4);
+      documentSummary = `DigiLocker Aadhaar verified${last4 ? ` (ending ${last4})` : ""}, PAN ${identity.panNumber} matched, bank holder verified`
+        .slice(0, 500);
     }
 
     await query(

@@ -47,8 +47,8 @@ const PAGE_ONE: RuleSection[] = [
 
 const PAGE_TWO_EXTRA = [
   "• Availability schedule",
-  "• Government ID, Aadhaar, GST, Farmer ID, or other",
-  "I agree to the Rental Provider Terms & Conditions, confirm that the information and documents provided are accurate, and accept responsibility for the safety and condition of the listed equipment and services."
+  "• DigiLocker Aadhaar, PAN matched to that identity, and a verified bank account",
+  "I agree to the Rental Provider Terms & Conditions, confirm that the information provided is accurate, and accept responsibility for the safety and condition of the listed equipment and services."
 ];
 
 function TermsSection({ section }: { section: RuleSection }) {
