@@ -74,6 +74,8 @@ export function JoinProviderPage() {
   const [kycStatus, setKycStatus] = useState<"idle" | "pending" | "verified" | "failed">(
     readProviderDraft().digilockerVerified ? "verified" : "idle"
   );
+  const [panFullName, setPanFullName] = useState(readProviderDraft().aadhaarName || readProviderDraft().fullName);
+  const [panDob, setPanDob] = useState("");
   const [panMatch, setPanMatch] = useState<{ panName: string; aadhaarName: string; matched: boolean } | null>(
     readProviderDraft().panMatched
       ? { panName: readProviderDraft().panName, aadhaarName: readProviderDraft().aadhaarName, matched: true }
@@ -186,12 +188,17 @@ export function JoinProviderPage() {
     }
   };
 
+  const panFormOk = panOk && panFullName.trim().length > 2 && Boolean(panDob);
   const verifyPan = async () => {
-    if (!token || !panOk || busy) return;
+    if (!token || !panFormOk || busy) return;
     setBusy(true);
     setError("");
     try {
-      const result = await verifyProviderPan(token, draft.panNumber);
+      const result = await verifyProviderPan(token, {
+        panNumber: draft.panNumber,
+        fullName: panFullName.trim(),
+        dob: panDob
+      });
       setPanMatch({ panName: result.panName, aadhaarName: result.aadhaarName, matched: result.matched });
       patch({
         panNumber: result.pan,
@@ -535,12 +542,15 @@ export function JoinProviderPage() {
         ) : null}
 
         {step === "pan" ? (
-          <section>
-            <h2 className="join-title">PAN Verification</h2>
-            <p className="join-sub">Step 2 of 3. Enter PAN, then match it to the Aadhaar name.</p>
+          <section className="pan-card">
+            <h2>PAN Verify</h2>
+            <p className="pan-step">Step 2 of 3. Match the PAN, name, and date of birth.</p>
+            <label className="pan-label" htmlFor="pan-number">
+              PAN Number
+            </label>
             <input
-              className="join-input"
-              placeholder="ABCDE1234F"
+              id="pan-number"
+              className="pan-input"
               value={draft.panNumber}
               maxLength={10}
               onChange={(event) => {
@@ -548,19 +558,48 @@ export function JoinProviderPage() {
                 setPanMatch(null);
               }}
             />
-            <button type="button" className="join-btn" disabled={!panOk || busy} onClick={() => void verifyPan()}>
-              {busy ? "Verifying…" : "Verify PAN"}
-            </button>
+            <label className="pan-label" htmlFor="pan-name">
+              Full Name
+            </label>
+            <input
+              id="pan-name"
+              className="pan-input"
+              value={panFullName}
+              onChange={(event) => {
+                setPanFullName(event.target.value);
+                patch({ panMatched: false });
+                setPanMatch(null);
+              }}
+            />
+            <label className="pan-label" htmlFor="pan-dob">
+              DOB
+            </label>
+            <input
+              id="pan-dob"
+              className="pan-input"
+              type="date"
+              value={panDob}
+              onChange={(event) => {
+                setPanDob(event.target.value);
+                patch({ panMatched: false });
+                setPanMatch(null);
+              }}
+            />
+            <div className="pan-actions">
+              <button type="button" className="pan-submit" disabled={!panFormOk || busy} onClick={() => void verifyPan()}>
+                {busy ? "Submitting…" : "Submit"}
+              </button>
+            </div>
             {panMatch ? (
-              <div className="join-result">
-                <strong>{panMatch.matched ? "Identity matched" : "Name does not match"}</strong>
-                <p>PAN name: {panMatch.panName}</p>
-                <p>Aadhaar name: {panMatch.aadhaarName}</p>
-              </div>
+              <p className={panMatch.matched ? "pan-ok" : "pan-bad"}>
+                {panMatch.matched
+                  ? `Matched with Aadhaar name ${panMatch.aadhaarName}`
+                  : "PAN name or date of birth does not match Aadhaar."}
+              </p>
             ) : null}
             <button
               type="button"
-              className="join-btn join-btn--ghost"
+              className="pan-continue"
               disabled={!draft.panMatched}
               onClick={() => setStep("bank")}
             >

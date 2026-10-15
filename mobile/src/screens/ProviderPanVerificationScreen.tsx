@@ -31,14 +31,18 @@ export function ProviderPanVerificationScreen() {
     route.params?.registrationType === "business" ? "business" : "individual";
 
   const [pan, setPan] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [dob, setDob] = useState("");
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const [match, setMatch] = useState<{ panName: string; aadhaarName: string; matched: boolean } | null>(null);
 
   const panOk = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan);
+  const dobOk = /^\d{4}-\d{2}-\d{2}$/.test(dob) || /^\d{2}\/\d{2}\/\d{4}$/.test(dob);
+  const formOk = panOk && fullName.trim().length > 2 && dobOk;
 
   const onVerify = async () => {
-    if (!panOk || checking) return;
+    if (!formOk || checking) return;
     if (!token) {
       setError("Please sign in again, then verify PAN.");
       return;
@@ -47,7 +51,7 @@ export function ProviderPanVerificationScreen() {
     setError("");
     setMatch(null);
     try {
-      const result = await verifyProviderPan(token, pan);
+      const result = await verifyProviderPan(token, { panNumber: pan, fullName: fullName.trim(), dob });
       setMatch({ panName: result.panName, aadhaarName: result.aadhaarName, matched: result.matched });
       await updateProviderRegistrationDraft({
         panNumber: result.pan,
@@ -76,7 +80,7 @@ export function ProviderPanVerificationScreen() {
         <Text style={styles.title}>PAN Verification</Text>
         <Text style={styles.sub}>Enter PAN → API verification → Match identity</Text>
 
-        <Text style={pf.fieldLabel}>PAN *</Text>
+        <Text style={pf.fieldLabel}>PAN Number</Text>
         <TextInput
           style={pf.input}
           value={pan}
@@ -90,10 +94,35 @@ export function ProviderPanVerificationScreen() {
           autoCapitalize="characters"
           maxLength={10}
         />
+        <Text style={pf.fieldLabel}>Full Name</Text>
+        <TextInput
+          style={pf.input}
+          value={fullName}
+          onChangeText={(value) => {
+            setFullName(value);
+            setMatch(null);
+            setError("");
+          }}
+          placeholder="Name as on PAN"
+          placeholderTextColor={PROVIDER_MUTED}
+          autoCapitalize="words"
+        />
+        <Text style={pf.fieldLabel}>DOB</Text>
+        <TextInput
+          style={pf.input}
+          value={dob}
+          onChangeText={(value) => {
+            setDob(value);
+            setMatch(null);
+            setError("");
+          }}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={PROVIDER_MUTED}
+        />
 
         <Pressable
-          style={[styles.primaryBtn, (!panOk || checking) && styles.primaryBtnDisabled]}
-          disabled={!panOk || checking}
+          style={[styles.primaryBtn, (!formOk || checking) && styles.primaryBtnDisabled]}
+          disabled={!formOk || checking}
           onPress={() => {
             void onVerify();
           }}
@@ -101,7 +130,7 @@ export function ProviderPanVerificationScreen() {
           {checking ? (
             <ActivityIndicator color="#000" />
           ) : (
-            <Text style={[styles.primaryBtnText, !panOk && styles.primaryBtnTextDisabled]}>Verify PAN</Text>
+            <Text style={[styles.primaryBtnText, !formOk && styles.primaryBtnTextDisabled]}>Submit</Text>
           )}
         </Pressable>
 
