@@ -698,7 +698,7 @@ export type PlantInput = {
   locationLabel?: string | null;
 };
 
-const PLANT_SCAN_TIMEOUT_MS = 100_000;
+const PLANT_SCAN_TIMEOUT_MS = 180_000;
 
 export async function fetchPlantHealthPlants(token: string) {
   const data = (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/plants`, token)) as { plants?: PlantHealthPlant[] };
