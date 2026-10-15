@@ -113,7 +113,7 @@ export function SettingsMenuPage() {
           />
         </SettingsSection>
 
-        <PromoCard onClick={() => navigate("/learn")} />
+        <PromoCard onClick={() => navigate("/provider/join")} />
 
         <SettingsSection title="Provider">
           <SettingsRow

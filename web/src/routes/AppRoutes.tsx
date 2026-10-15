@@ -25,6 +25,7 @@ import { ChildSafety } from "../pages/ChildSafety";
 import { ContactSupportPage } from "../pages/ContactSupportPage";
 import { TermsOfUse } from "../pages/TermsOfUse";
 import { AdminReportsPage } from "../pages/AdminReportsPage";
+import { JoinProviderPage } from "../pages/provider/JoinProviderPage";
 
 function ProtectedLayout() {
   const { token, loading } = useAuth();
@@ -87,6 +88,7 @@ export function AppRoutes() {
         <Route path="u/:userId" element={<ProfilePage />} />
         <Route path="profile/edit" element={<EditProfilePage />} />
         <Route path="settings" element={<SettingsMenuPage />} />
+        <Route path="provider/join" element={<JoinProviderPage />} />
         <Route path="settings/account" element={<AccountCenterPage />} />
         <Route path="settings/about" element={<AboutSettingsPage />} />
         <Route
