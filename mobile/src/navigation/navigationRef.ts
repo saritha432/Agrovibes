@@ -40,6 +40,17 @@ export function navigateToWeather() {
   }
 }
 
+export function navigateToPlantHealth() {
+  if (navigationRef.isReady()) {
+    navigationRef.navigate("PlantHealth");
+  }
+}
+
+export function navigateToPlantHealthPlant(plantId: number) {
+  if (!navigationRef.isReady() || !plantId) return;
+  navigationRef.dispatch(StackActions.push("PlantHealthPlant", { plantId }));
+}
+
 export function navigateToSchemes() {
   if (navigationRef.isReady()) {
     navigationRef.navigate("Schemes");

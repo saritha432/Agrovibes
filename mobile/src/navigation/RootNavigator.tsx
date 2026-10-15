@@ -155,6 +155,26 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen
+        name="PlantHealth"
+        getComponent={() => require("../screens/plantHealth/PlantHealthHomeScreen").PlantHealthHomeScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="PlantHealthScan"
+        getComponent={() => require("../screens/plantHealth/PlantHealthScanScreen").PlantHealthScanScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="PlantHealthResult"
+        getComponent={() => require("../screens/plantHealth/PlantHealthResultScreen").PlantHealthResultScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
+        name="PlantHealthPlant"
+        getComponent={() => require("../screens/plantHealth/PlantHealthPlantScreen").PlantHealthPlantScreen}
+        options={slideRightBg}
+      />
+      <Stack.Screen
         name="Schemes"
         getComponent={() => require("../screens/schemes/SchemesScreen").SchemesScreen}
         options={{

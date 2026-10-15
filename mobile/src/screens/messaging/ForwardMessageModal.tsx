@@ -15,7 +15,6 @@ import { useAuth } from "../../auth/AuthContext";
 import { UserAvatar } from "../../components/UserAvatar";
 import { fetchSocialNetwork, sendDirectMessage } from "../../services/api";
 import {
-  isDmBodyForwarded,
   markDmBodyForwarded,
   markStoryDmForwarded,
   parseDmReplyMessage,
@@ -97,17 +96,7 @@ export function ForwardMessageModal({ visible, messageBody, excludeUserId, onClo
         : parseStoryDmMessage(messageBody)
           ? markStoryDmForwarded(messageBody)
           : markDmBodyForwarded(messageBody);
-      console.log("[fwd-debug] sending", {
-        to: person.userId,
-        marked: isDmBodyForwarded(outgoing),
-        head: JSON.stringify(outgoing.slice(0, 90))
-      });
-      const sent = await sendDirectMessage(token, person.userId, outgoing, { forwarded: true });
-      console.log("[fwd-debug] server stored", {
-        id: sent?.message?.id,
-        marked: isDmBodyForwarded(String(sent?.message?.body || "")),
-        head: JSON.stringify(String(sent?.message?.body || "").slice(0, 90))
-      });
+      await sendDirectMessage(token, person.userId, outgoing, { forwarded: true });
       onSent?.();
       onClose();
     } catch {
