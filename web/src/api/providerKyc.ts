@@ -38,13 +38,20 @@ export async function verifyProviderPan(
 
 export async function verifyProviderBankAccount(
   token: string,
-  payload: { accountNumber: string; ifsc: string }
+  payload: { accountNumber: string; ifsc: string; ifscDetails?: boolean }
 ) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/bank/verify`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
-  })) as { holderName: string; aadhaarName: string; matched: boolean; ifsc: string };
+  })) as {
+    holderName: string;
+    aadhaarName: string;
+    matched: boolean;
+    ifsc: string;
+    bankName?: string;
+    bankBranch?: string;
+  };
 }
 
 export async function submitProviderKyc(

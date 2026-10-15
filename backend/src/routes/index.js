@@ -10697,8 +10697,9 @@ router.post("/v1/provider/kyc/bank/verify", authRequired, async (req, res) => {
     }
     const result = await providerKycIdentity.verifyBankAccount({
       userId,
-      accountNumber: req.body?.accountNumber,
-      ifsc: req.body?.ifsc
+      accountNumber: req.body?.accountNumber || req.body?.idNumber,
+      ifsc: req.body?.ifsc,
+      ifscDetails: req.body?.ifscDetails !== false
     });
     res.json(result);
   } catch (error) {

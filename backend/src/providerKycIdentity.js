@@ -540,12 +540,13 @@ async function verifyPanNumber({ userId, panNumber, fullName, dob }) {
   };
 }
 
-async function verifyBankAccount({ userId, accountNumber, ifsc }) {
+async function verifyBankAccount({ userId, accountNumber, ifsc, ifscDetails = true }) {
   const account = String(accountNumber || "").replace(/\D/g, "");
   const code = String(ifsc || "")
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
+  const includeIfscDetails = ifscDetails !== false;
   if (account.length < 6) throw providerError("Enter a valid account number.", 400);
   if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) throw providerError("Enter a valid IFSC.", 400);
   const identity = await requireAadhaarIdentity(userId);
@@ -556,23 +557,23 @@ async function verifyBankAccount({ userId, accountNumber, ifsc }) {
   if (!provider) throw providerError("Bank verification is not configured.", 503);
 
   let holderName = "";
+  let bankName = "";
+  let bankBranch = "";
   if (provider === "surepass") {
-    let result = await surepassRequest("/api/v1/bank-verification/pennyless", {
-      id_number: account,
-      ifsc: code,
-      ifsc_details: true
-    });
-    if (result.response.status === 404) {
-      result = await surepassRequest("/api/v1/bank-verification/", {
-        id_number: account,
-        ifsc: code,
-        ifsc_details: true
-      });
+    const body = { id_number: account, ifsc: code, ifsc_details: includeIfscDetails };
+    const paths = ["/api/v1/bank-verification/pennyless", "/api/v1/bank-verification"];
+    let result = null;
+    for (const path of paths) {
+      result = await surepassRequest(path, body);
+      if (!surepassScopeMiss(result.response, result.payload)) break;
     }
-    const data = result.payload?.data || {};
+    const data = result?.payload?.data || {};
+    const details = data.ifsc_details && typeof data.ifsc_details === "object" ? data.ifsc_details : {};
     holderName = String(data.full_name || data.name_at_bank || data.account_holder_name || "").trim();
-    if (!result.response.ok || !holderName) {
-      throw providerError(result.payload?.message || "Bank account could not be verified.");
+    bankName = String(details.bank_name || details.bank || data.bank_name || "").trim();
+    bankBranch = String(details.branch || details.branch_name || "").trim();
+    if (!result?.response?.ok || !holderName) {
+      throw providerError(result?.payload?.message || "Bank account could not be verified.");
     }
   } else {
     const digio = digioCredentials();
@@ -609,7 +610,9 @@ async function verifyBankAccount({ userId, accountNumber, ifsc }) {
     holderName,
     aadhaarName: identity.aadhaarName,
     matched,
-    ifsc: code
+    ifsc: code,
+    bankName,
+    bankBranch
   };
 }
 
