@@ -64,6 +64,7 @@ const { mapsConfigHandler, parseMapCoord } = require("../googleMaps");
 const { searchPlaces, resolvePlace, loadForecast } = require("../weather");
 
 const router = express.Router();
+router.use(require("./plantHealth"));
 let homePostsTableReady = false;
 let homeStoriesTableReady = false;
 let learnCoursesTableReady = false;

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
-import { navigateToWeather } from "../navigation/navigationRef";
+import { navigateToPlantHealth, navigateToWeather } from "../navigation/navigationRef";
 import { APP_BLACK, APP_DARK_BG, APP_LIME, APP_TEXT } from "../theme/appColors";
 import { useTopChromeInset } from "../theme/topChromeInset";
 
@@ -31,6 +31,9 @@ export function AppTopBar() {
       <View style={[styles.topBarContent, compact ? styles.topBarContentCompact : null]}>
         <Image source={require("../../assets/crop vibe.png")} style={styles.logoImage} resizeMode="contain" />
         <View style={styles.actions}>
+          <Pressable style={styles.iconBadge} onPress={navigateToPlantHealth} accessibilityLabel="Plant Doctor">
+            <Ionicons name="leaf-outline" size={25} color={APP_TEXT} />
+          </Pressable>
           <Pressable style={styles.iconBadge} onPress={navigateToWeather} accessibilityLabel="Weather">
             <Ionicons name="partly-sunny-outline" size={26} color={APP_TEXT} />
           </Pressable>

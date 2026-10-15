@@ -600,6 +600,200 @@ export async function searchWeatherPlaces(_token: string | null, query: string) 
   return searchOpenMeteoPlaces(query);
 }
 
+export type PlantType = "crop" | "vegetable" | "fruit" | "tree" | "flower" | "houseplant" | "other";
+export type PlantHealthStatus = "healthy" | "mild" | "moderate" | "severe" | "critical";
+export type PlantCategoryKey = "leaf" | "color" | "pests" | "disease" | "water" | "nutrients";
+export type PlantIssueType = "disease" | "pest" | "nutrient" | "water" | "environment" | "physical" | "other";
+export type PlantIssueLikelihood = "possible" | "likely" | "very_likely";
+export type PlantActionPriority = "urgent" | "soon" | "monitor";
+
+export interface PlantHealthPlant {
+  id: number;
+  name: string;
+  plantType: PlantType;
+  species: string | null;
+  growthStage: string | null;
+  locationLabel: string | null;
+  imageUrl: string | null;
+  lastHealthScore: number | null;
+  lastHealthStatus: PlantHealthStatus | null;
+  lastScanAt: string | null;
+  nextScanDueAt: string | null;
+  createdAt: string;
+  scansCount: number;
+}
+
+export interface PlantDiagnosis {
+  isPlant: boolean;
+  imageQuality: "good" | "fair" | "poor";
+  imageQualityNotes: string;
+  plant: { commonName: string; scientificName: string; category: string; growthStage: string; confidence: number };
+  healthScore: number;
+  healthStatus: PlantHealthStatus;
+  overallConfidence: number;
+  summary: string;
+  categoryScores: { key: PlantCategoryKey; score: number; note: string }[];
+  observedSymptoms: string[];
+  issues: {
+    name: string;
+    type: PlantIssueType;
+    likelihood: PlantIssueLikelihood;
+    confidence: number;
+    severity: "low" | "medium" | "high";
+    evidence: string;
+    explanation: string;
+  }[];
+  actions: { priority: PlantActionPriority; title: string; detail: string; timeframe: string }[];
+  fertilizer: { needed: boolean; categories: { category: string; reason: string; howToApply: string }[]; caution: string };
+  pestControl: { ipmSteps: string[]; organicOptions: string[]; chemicalNote: string };
+  prevention: string[];
+  needsMorePhotos: boolean;
+  photoRequests: string[];
+  needsExpert: boolean;
+  expertReason: string;
+  rescanInDays: number;
+}
+
+export interface PlantScanContext {
+  plantName?: string;
+  plantType?: string;
+  growthStage?: string;
+  symptoms?: string;
+  recentInputs?: string;
+  watering?: string;
+  photoLabels?: string[];
+}
+
+export interface PlantHealthScan {
+  id: number;
+  plantId: number | null;
+  plantName: string | null;
+  imageUrls: string[];
+  context: PlantScanContext;
+  language: string;
+  healthScore: number;
+  healthStatus: PlantHealthStatus;
+  confidence: number;
+  result: PlantDiagnosis;
+  createdAt: string;
+}
+
+export interface PlantHealthScanSummary {
+  id: number;
+  plantId: number | null;
+  plantName: string | null;
+  imageUrl: string | null;
+  healthScore: number;
+  healthStatus: PlantHealthStatus;
+  confidence: number;
+  title: string;
+  topIssue: string;
+  createdAt: string;
+}
+
+export type PlantInput = {
+  name: string;
+  plantType?: PlantType;
+  growthStage?: string | null;
+  locationLabel?: string | null;
+};
+
+const PLANT_SCAN_TIMEOUT_MS = 100_000;
+
+export async function fetchPlantHealthPlants(token: string) {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/plants`, token)) as { plants?: PlantHealthPlant[] };
+  return Array.isArray(data?.plants) ? data.plants : [];
+}
+
+export async function createPlantHealthPlant(token: string, input: PlantInput) {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/plants`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  })) as { plant: PlantHealthPlant };
+  return data.plant;
+}
+
+export async function updatePlantHealthPlant(token: string, plantId: number, input: Partial<PlantInput>) {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/plants/${plantId}`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  })) as { plant: PlantHealthPlant };
+  return data.plant;
+}
+
+export async function deletePlantHealthPlant(token: string, plantId: number) {
+  await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/plants/${plantId}`, token, { method: "DELETE" });
+}
+
+export async function fetchPlantHealthPlant(token: string, plantId: number) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/plants/${plantId}`, token)) as {
+    plant: PlantHealthPlant;
+    scans: PlantHealthScanSummary[];
+  };
+}
+
+export async function fetchRecentPlantHealthScans(token: string, options?: { unsavedOnly?: boolean; limit?: number }) {
+  const qs = new URLSearchParams();
+  qs.set("limit", String(options?.limit ?? 20));
+  if (options?.unsavedOnly) qs.set("unsaved", "1");
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/scans?${qs.toString()}`, token)) as {
+    scans?: PlantHealthScanSummary[];
+  };
+  return Array.isArray(data?.scans) ? data.scans : [];
+}
+
+export async function fetchPlantHealthScan(token: string, scanId: number) {
+  const data = (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/scans/${scanId}`, token)) as { scan: PlantHealthScan };
+  return data.scan;
+}
+
+/** Runs the AI analysis. Single long request — never retried, so one tap is billed once. */
+export async function createPlantHealthScan(
+  token: string,
+  payload: { imageUrls: string[]; plantId?: number | null; language: string; context: PlantScanContext }
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PLANT_SCAN_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/plant-health/scans`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const data = (await parseJsonOrThrow(response)) as { scan: PlantHealthScan };
+    return data.scan;
+  } catch (error) {
+    const aborted = error instanceof Error && (error.name === "AbortError" || /abort/i.test(error.message));
+    if (aborted) throw new Error("The analysis is taking too long. Check your internet and try again.");
+    const err = error as { status?: number; payload?: { message?: string } | null };
+    if (err?.status === 404 && !err.payload?.message) {
+      throw new Error("Plant Doctor is not available on the server yet. Please try again later.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function assignPlantHealthScan(
+  token: string,
+  scanId: number,
+  target: { plantId: number } | { newPlant: PlantInput }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/scans/${scanId}/assign`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(target)
+  })) as { scan: PlantHealthScan; plant: PlantHealthPlant };
+}
+
+export async function deletePlantHealthScan(token: string, scanId: number) {
+  await fetchWithAuth(`${API_BASE_URL}/v1/plant-health/scans/${scanId}`, token, { method: "DELETE" });
+}
+
 export async function updateMyPrivacySettings(token: string, payload: { isPrivate: boolean }) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/privacy`, token, {
     method: "PUT",

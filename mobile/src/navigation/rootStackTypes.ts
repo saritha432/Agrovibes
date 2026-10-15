@@ -37,6 +37,10 @@ export type RootStackParamList = {
   InstructorStudio: undefined;
   EditProfile: undefined;
   Weather: undefined;
+  PlantHealth: undefined;
+  PlantHealthScan: { plantId?: number; plantName?: string; photoRequests?: string[] } | undefined;
+  PlantHealthResult: { scanId: number };
+  PlantHealthPlant: { plantId: number };
   Schemes: undefined;
   SchemeDetail: { schemeId: string };
   PublicProfile: { userId?: number; userName: string; userKey?: string; avatarUrl?: string | null };

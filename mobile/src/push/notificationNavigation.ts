@@ -1,7 +1,16 @@
 import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { sendDirectMessage, fetchHomePost } from "../services/api";
-import { navigationRef, navigateToDirectChat, navigateToDirectInbox, navigateToHome, navigateToJoinLive, navigateToWeather } from "../navigation/navigationRef";
+import {
+  navigationRef,
+  navigateToDirectChat,
+  navigateToDirectInbox,
+  navigateToHome,
+  navigateToJoinLive,
+  navigateToPlantHealth,
+  navigateToPlantHealthPlant,
+  navigateToWeather
+} from "../navigation/navigationRef";
 import { requestOpenNotificationSheet } from "../navigation/notificationSheetBridge";
 import { queueJoinLive } from "../navigation/liveJoinBridge";
 import { queueOpenSharedPostViewer } from "../navigation/sharedPostViewerBridge";
@@ -434,6 +443,9 @@ export async function handleNotificationResponse(
     scheduled = true;
   } else if (type === "weather_alert") {
     schedule(() => navigateToWeather());
+  } else if (type === "plant_rescan") {
+    const plantId = Number(data.plantId);
+    schedule(() => (Number.isFinite(plantId) && plantId > 0 ? navigateToPlantHealthPlant(plantId) : navigateToPlantHealth()));
   } else if (FOLLOW_NOTIFICATION_TYPES.has(type)) {
     scheduleOpenNotificationsSheet();
     scheduled = true;
