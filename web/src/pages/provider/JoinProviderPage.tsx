@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import {
   fetchProviderDigilockerResult,
-  lookupIfsc,
   startProviderDigilocker,
   submitProviderKyc,
   verifyProviderBankAccount,
@@ -74,6 +73,7 @@ export function JoinProviderPage() {
   const [kycStatus, setKycStatus] = useState<"idle" | "pending" | "verified" | "failed">(
     readProviderDraft().digilockerVerified ? "verified" : "idle"
   );
+  const [ifscDetails, setIfscDetails] = useState(true);
   const [panFullName, setPanFullName] = useState(readProviderDraft().aadhaarName || readProviderDraft().fullName);
   const [panDob, setPanDob] = useState("");
   const [panMatch, setPanMatch] = useState<{ panName: string; aadhaarName: string; matched: boolean } | null>(
@@ -214,21 +214,6 @@ export function JoinProviderPage() {
     }
   };
 
-  const lookupBank = async (code: string) => {
-    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) return;
-    try {
-      const data = await lookupIfsc(code);
-      const location = [data.city, data.district, data.state].filter(Boolean).join(", ");
-      patch({
-        bankName: data.bank || "",
-        bankBranch: data.branch || "",
-        bankLocation: location || data.address || ""
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not look up IFSC.");
-    }
-  };
-
   const verifyBank = async () => {
     if (!token || !accountOk || !ifscOk || busy) return;
     setBusy(true);
@@ -236,10 +221,13 @@ export function JoinProviderPage() {
     try {
       const result = await verifyProviderBankAccount(token, {
         accountNumber: draft.accountNumber.replace(/\D/g, ""),
-        ifsc: draft.ifsc
+        ifsc: draft.ifsc,
+        ifscDetails
       });
       patch({
         holderName: result.holderName,
+        bankName: result.bankName || draft.bankName,
+        bankBranch: result.bankBranch || draft.bankBranch,
         bankVerified: result.matched
       });
       if (!result.matched) setError("Account holder name does not match the Aadhaar name.");
@@ -609,46 +597,64 @@ export function JoinProviderPage() {
         ) : null}
 
         {step === "bank" ? (
-          <section>
-            <h2 className="join-title">Bank Account Verification</h2>
-            <p className="join-sub">Step 3 of 3. Account number and IFSC, then verify the account holder.</p>
+          <section className="pan-card">
+            <h2>Bank Account</h2>
+            <p className="pan-step">Step 3 of 3. Request parameters</p>
+            <label className="pan-label" htmlFor="bank-id">
+              ID Number
+            </label>
             <input
-              className="join-input"
-              placeholder="IFSC Code *"
+              id="bank-id"
+              className="pan-input"
+              inputMode="numeric"
+              value={draft.accountNumber}
+              onChange={(event) =>
+                patch({ accountNumber: event.target.value.replace(/\D/g, ""), bankVerified: false, holderName: "" })
+              }
+            />
+            <label className="pan-label" htmlFor="bank-ifsc">
+              IFSC
+            </label>
+            <input
+              id="bank-ifsc"
+              className="pan-input"
               value={draft.ifsc}
               maxLength={11}
               onChange={(event) => {
                 const ifsc = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
                 patch({ ifsc, bankVerified: false, holderName: "" });
-                if (ifsc.length === 11) void lookupBank(ifsc);
               }}
             />
-            {draft.bankName ? (
-              <p className="join-meta">
-                {draft.bankName}
-                {draft.bankBranch ? ` · ${draft.bankBranch}` : ""}
-                {draft.bankLocation ? ` · ${draft.bankLocation}` : ""}
+            <label className="pan-check">
+              <input
+                type="checkbox"
+                checked={ifscDetails}
+                onChange={(event) => setIfscDetails(event.target.checked)}
+              />
+              IFSC Details
+            </label>
+            <div className="pan-actions">
+              <button
+                type="button"
+                className="pan-submit"
+                disabled={!accountOk || !ifscOk || busy}
+                onClick={() => void verifyBank()}
+              >
+                {busy ? "Submitting…" : "Submit"}
+              </button>
+            </div>
+            {draft.holderName ? (
+              <p className={draft.bankVerified ? "pan-ok" : "pan-bad"}>
+                {draft.bankVerified
+                  ? `Account holder ${draft.holderName} matches Aadhaar.`
+                  : `Account holder ${draft.holderName} does not match Aadhaar.`}
+                {draft.bankName ? ` ${draft.bankName}${draft.bankBranch ? `, ${draft.bankBranch}` : ""}` : ""}
               </p>
             ) : null}
-            <input
-              className="join-input"
-              placeholder="Account Number *"
-              value={draft.accountNumber}
-              onChange={(event) => patch({ accountNumber: event.target.value, bankVerified: false, holderName: "" })}
-            />
             <button
               type="button"
-              className="join-btn"
-              disabled={!accountOk || !ifscOk || busy}
-              onClick={() => void verifyBank()}
-            >
-              {busy ? "Verifying…" : "Verify account holder"}
-            </button>
-            {draft.holderName ? <p className="join-meta">Account holder: {draft.holderName}</p> : null}
-            <button
-              type="button"
-              className="join-btn join-btn--ghost"
-              disabled={!draft.bankVerified || !draft.bankName}
+              className="pan-continue"
+              disabled={!draft.bankVerified}
               onClick={() => setStep("review")}
             >
               Continue

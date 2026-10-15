@@ -252,6 +252,16 @@
   background: #fff;
 }
 
+.pan-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: #1a1a1a;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .pan-actions {
   display: flex;
   justify-content: flex-end;
