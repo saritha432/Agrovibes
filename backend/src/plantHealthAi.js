@@ -2,7 +2,7 @@ const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models
 const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const IMAGE_FETCH_TIMEOUT_MS = 20_000;
-const GEMINI_TIMEOUT_MS = 75_000;
+const GEMINI_TIMEOUT_MS = Math.max(30_000, Number(process.env.PLANT_SCAN_AI_TIMEOUT_MS) || 150_000);
 
 const CATEGORY_KEYS = ["leaf", "color", "pests", "disease", "water", "nutrients"];
 const HEALTH_STATUSES = ["healthy", "mild", "moderate", "severe", "critical"];
@@ -24,7 +24,7 @@ function isPlantHealthAiConfigured() {
   return Boolean(geminiApiKey());
 }
 
-const stringArray = { type: "array", items: { type: "string" } };
+const stringArray = (maxItems) => ({ type: "array", maxItems, items: { type: "string" } });
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -49,6 +49,7 @@ const RESPONSE_SCHEMA = {
     summary: { type: "string" },
     categoryScores: {
       type: "array",
+      maxItems: CATEGORY_KEYS.length,
       items: {
         type: "object",
         properties: {
@@ -59,9 +60,10 @@ const RESPONSE_SCHEMA = {
         required: ["key", "score", "note"]
       }
     },
-    observedSymptoms: stringArray,
+    observedSymptoms: stringArray(5),
     issues: {
       type: "array",
+      maxItems: 3,
       items: {
         type: "object",
         properties: {
@@ -78,6 +80,7 @@ const RESPONSE_SCHEMA = {
     },
     actions: {
       type: "array",
+      maxItems: 5,
       items: {
         type: "object",
         properties: {
@@ -95,6 +98,7 @@ const RESPONSE_SCHEMA = {
         needed: { type: "boolean" },
         categories: {
           type: "array",
+          maxItems: 3,
           items: {
             type: "object",
             properties: {
@@ -112,15 +116,15 @@ const RESPONSE_SCHEMA = {
     pestControl: {
       type: "object",
       properties: {
-        ipmSteps: stringArray,
-        organicOptions: stringArray,
+        ipmSteps: stringArray(4),
+        organicOptions: stringArray(3),
         chemicalNote: { type: "string" }
       },
       required: ["ipmSteps", "organicOptions", "chemicalNote"]
     },
-    prevention: stringArray,
+    prevention: stringArray(3),
     needsMorePhotos: { type: "boolean" },
-    photoRequests: stringArray,
+    photoRequests: stringArray(3),
     needsExpert: { type: "boolean" },
     expertReason: { type: "string" },
     rescanInDays: { type: "integer" }
@@ -164,11 +168,13 @@ function buildPrompt({ language, context, locationLabel, monthLabel }) {
     "",
     "Rules:",
     "- Base every finding on what is actually visible. List visible symptoms in observedSymptoms, and put possible causes in issues. Never present a cause as certain from a photo.",
-    "- issues: at most 4, ordered from most to least likely. Use likelihood 'possible' unless the evidence is strong. confidence is 0-100.",
+    "- observedSymptoms: at most 5. issues: at most 3, ordered from most to least likely. Use likelihood 'possible' unless the evidence is strong. confidence is 0-100.",
     "- healthScore is 0-100 (100 = perfectly healthy). categoryScores must contain exactly one entry for each key: leaf, color, pests, disease, water, nutrients (each 0-100, higher is healthier).",
     "- healthStatus: healthy (85-100), mild (70-84), moderate (50-69), severe (30-49), critical (0-29).",
-    "- actions: 3-6 practical steps ordered by priority (urgent first). Prefer cultural, mechanical and biological measures first (integrated pest management).",
-    "- fertilizer: recommend fertilizer CATEGORIES only (e.g. 'Nitrogen-rich fertilizer', 'Organic compost / FYM', 'Micronutrient mix with zinc'), never a single brand. Mention that the right dose depends on crop, growth stage, soil and a soil test. If nutrients look fine, set needed=false.",
+    "- categoryScores.note: a few words only (empty string if nothing notable).",
+    "- actions: 3-5 practical steps ordered by priority (urgent first). Prefer cultural, mechanical and biological measures first (integrated pest management).",
+    "- pestControl: at most 4 ipmSteps and 3 organicOptions. prevention: at most 3 tips.",
+    "- fertilizer: at most 3 categories. Recommend fertilizer CATEGORIES only (e.g. 'Nitrogen-rich fertilizer', 'Organic compost / FYM', 'Micronutrient mix with zinc'), never a single brand. Mention that the right dose depends on crop, growth stage, soil and a soil test. If nutrients look fine, set needed=false.",
     "- pestControl.chemicalNote: if a chemical pesticide/fungicide might be required, name only the class of product and say to confirm with the local agriculture officer / Krishi Vigyan Kendra and follow the label. Never give dosages for chemicals.",
     "- If the images are blurry, too dark, too far, or do not show the affected part, set imageQuality accordingly, set needsMorePhotos=true and list the exact shots needed in photoRequests (e.g. 'Close-up of the underside of an affected leaf').",
     "- If overall confidence is below 60, set needsMorePhotos=true.",
@@ -177,7 +183,7 @@ function buildPrompt({ language, context, locationLabel, monthLabel }) {
     "- If the photo is not a plant, set isPlant=false, healthScore=0, keep arrays empty and explain in summary.",
     "",
     `Write every human-readable text value in ${language}. Keep JSON keys and enum values exactly as defined in English.`,
-    "Use simple words a farmer can understand. Keep each text field short (one or two sentences)."
+    "Use simple words a farmer can understand. Be brief: every text value is ONE short sentence (about 20 words or fewer); summary at most two sentences. Do not repeat the same advice in different sections."
   ];
 
   const facts = [];
@@ -386,12 +392,14 @@ async function analyzePlantImages({ imageUrls, language, context, locationLabel 
   const urls = (Array.isArray(imageUrls) ? imageUrls : []).filter(Boolean).slice(0, 4);
   if (!urls.length) throw aiError("At least one photo is required.", 400);
 
+  const startedAt = Date.now();
   let imageParts;
   try {
     imageParts = await Promise.all(urls.map((url) => fetchImageAsInlineData(url)));
   } catch (error) {
     throw aiError(`Could not read the uploaded photos: ${error?.message || error}`, 400);
   }
+  const imagesMs = Date.now() - startedAt;
 
   const monthLabel = new Intl.DateTimeFormat("en-IN", { month: "long", timeZone: "Asia/Kolkata" }).format(new Date());
   const prompt = buildPrompt({ language: language || "English", context, locationLabel, monthLabel });
@@ -417,8 +425,31 @@ async function analyzePlantImages({ imageUrls, language, context, locationLabel 
     }
   } catch (error) {
     const aborted = error?.name === "AbortError";
+    // eslint-disable-next-line no-console
+    console.warn("[plant-health] Gemini call failed", {
+      model,
+      language,
+      photos: urls.length,
+      imagesMs,
+      totalMs: Date.now() - startedAt,
+      error: aborted ? "timeout" : error?.message || String(error)
+    });
     throw aiError(aborted ? "The plant analysis took too long. Please try again." : "Could not reach the AI service.", 504);
   }
+
+  const usage = result.json?.usageMetadata || {};
+  // eslint-disable-next-line no-console
+  console.log("[plant-health] Gemini done", {
+    model,
+    language,
+    status: result.status,
+    photos: urls.length,
+    imagesMs,
+    totalMs: Date.now() - startedAt,
+    promptTokens: usage.promptTokenCount,
+    outputTokens: usage.candidatesTokenCount,
+    thinkingTokens: usage.thoughtsTokenCount
+  });
 
   if (!result.ok) {
     const detail = result.json?.error?.message || result.text.slice(0, 300);
