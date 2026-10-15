@@ -216,6 +216,87 @@
   color: #1b8a43;
 }
 
+.pan-card {
+  background: #fff;
+  color: #1a1a1a;
+  border: 1px solid #e6e8eb;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.pan-card h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.pan-step,
+.pan-label {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.pan-label {
+  display: block;
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+
+.pan-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d7dde3;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #1a1a1a;
+  background: #fff;
+}
+
+.pan-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.pan-submit,
+.pan-continue {
+  border: none;
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 0 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pan-submit {
+  background: #1e293b;
+  color: #fff;
+}
+
+.pan-submit:disabled,
+.pan-continue:disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.pan-continue {
+  width: 100%;
+  margin-top: 12px;
+  background: #1b8a43;
+  color: #fff;
+}
+
+.pan-ok {
+  color: #1b8a43;
+  font-weight: 700;
+}
+
+.pan-bad {
+  color: #c24141;
+  font-weight: 700;
+}
+
 .aadhaar-link {
   display: inline-block;
   margin-top: 8px;

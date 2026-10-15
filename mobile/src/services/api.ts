@@ -674,11 +674,14 @@ export async function fetchProviderDigilockerResult(token: string, sessionId: st
   };
 }
 
-export async function verifyProviderPan(token: string, panNumber: string) {
+export async function verifyProviderPan(
+  token: string,
+  payload: { panNumber: string; fullName: string; dob: string }
+) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/pan/verify`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ panNumber })
+    body: JSON.stringify(payload)
   })) as { pan: string; panName: string; aadhaarName: string; matched: boolean };
 }
 

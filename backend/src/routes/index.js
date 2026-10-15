@@ -10676,7 +10676,9 @@ router.post("/v1/provider/kyc/pan/verify", authRequired, async (req, res) => {
     }
     const result = await providerKycIdentity.verifyPanNumber({
       userId,
-      panNumber: req.body?.panNumber
+      panNumber: req.body?.panNumber,
+      fullName: req.body?.fullName,
+      dob: req.body?.dob
     });
     res.json(result);
   } catch (error) {

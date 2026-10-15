@@ -434,9 +434,32 @@ async function requireAadhaarIdentity(userId) {
   return rows.rows[0] || null;
 }
 
-async function verifyPanNumber({ userId, panNumber }) {
+function normalizeDob(raw) {
+  const value = String(raw || "").trim();
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = value.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  return null;
+}
+
+function surepassScopeMiss(response, payload) {
+  const message = `${payload?.message || ""} ${payload?.message_code || ""}`;
+  return (
+    response.status === 404 ||
+    response.status === 401 ||
+    response.status === 403 ||
+    /scope|not valid for this api|invalid token|not found/i.test(message)
+  );
+}
+
+async function verifyPanNumber({ userId, panNumber, fullName, dob }) {
   const pan = normalizePan(panNumber);
+  const holderName = String(fullName || "").trim();
+  const isoDob = normalizeDob(dob);
   if (!pan) throw providerError("Enter a valid PAN.", 400);
+  if (holderName.length < 3) throw providerError("Enter the full name as on the PAN.", 400);
+  if (!isoDob) throw providerError("Enter the date of birth as on the PAN.", 400);
   const identity = await requireAadhaarIdentity(userId);
   if (!identity?.aadhaarName) {
     throw providerError("Verify Aadhaar with DigiLocker before PAN.", 400);
@@ -444,12 +467,34 @@ async function verifyPanNumber({ userId, panNumber }) {
   const provider = activeKycProvider();
   if (!provider) throw providerError("PAN verification is not configured.", 503);
 
-  let panName = "";
+  let panName = holderName;
+  let nameMatchedByProvider = null;
+  let dobMatchedByProvider = null;
   if (provider === "surepass") {
-    const { response, payload } = await surepassRequest("/api/v1/pan/pan", { id_number: pan });
-    const data = payload?.data || {};
-    panName = String(data.full_name || data.fullName || data.name || "").trim();
-    if (!response.ok || !panName) {
+    const [year, month, day] = isoDob.split("-");
+    const body = {
+      id_number: pan,
+      full_name: holderName,
+      name: holderName,
+      dob: isoDob,
+      date_of_birth: `${day}-${month}-${year}`
+    };
+    const paths = ["/api/v1/pan/verify", "/api/v1/pan/pan", "/api/v1/pan/pan-comprehensive"];
+    let payload = null;
+    let response = null;
+    for (const path of paths) {
+      const result = await surepassRequest(path, body);
+      response = result.response;
+      payload = result.payload;
+      if (!surepassScopeMiss(response, payload)) break;
+    }
+    const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+    panName = String(data.full_name || data.fullName || data.name || holderName).trim();
+    if (typeof data.name_match === "boolean") nameMatchedByProvider = data.name_match;
+    if (typeof data.full_name_match === "boolean") nameMatchedByProvider = data.full_name_match;
+    if (typeof data.dob_match === "boolean") dobMatchedByProvider = data.dob_match;
+    if (typeof data.date_of_birth_match === "boolean") dobMatchedByProvider = data.date_of_birth_match;
+    if (!response?.ok || payload?.success === false) {
       throw providerError(payload?.message || "PAN could not be verified.");
     }
   } else {
@@ -466,7 +511,13 @@ async function verifyPanNumber({ userId, panNumber }) {
     }
   }
 
-  const matched = namesMatch(identity.aadhaarName, panName);
+  const enteredMatchesAadhaar = namesMatch(identity.aadhaarName, holderName);
+  const returnedMatchesAadhaar = namesMatch(identity.aadhaarName, panName);
+  const matched =
+    enteredMatchesAadhaar &&
+    returnedMatchesAadhaar &&
+    nameMatchedByProvider !== false &&
+    dobMatchedByProvider !== false;
   await query(
     `
     UPDATE provider_kyc_identity
