@@ -44,7 +44,8 @@ function resolveApiBaseUrl(): string {
   const envUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
   if (envUrl?.trim()) {
     const trimmed = envUrl.trim().replace(/\/$/, "");
-    if (!import.meta.env.DEV && isPrivateOrLocalApiUrl(trimmed)) {
+    const retiredHost = /onrender\.com/i.test(trimmed);
+    if (retiredHost || (!import.meta.env.DEV && isPrivateOrLocalApiUrl(trimmed))) {
       return PRODUCTION_API_BASE_URL;
     }
     return trimmed;
