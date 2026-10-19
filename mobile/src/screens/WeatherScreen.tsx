@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Audio } from "expo-av";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,6 +26,14 @@ import {
 import { isUsableLatLng } from "../utils/openMeteoWeather";
 import { APP_DARK_BG, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../theme/appColors";
 
+function rainIsComing(report: WeatherReport) {
+  const today = report.days.find((day) => day.dayLabel === "Today") ?? report.days[0];
+  const icons = [report.current?.icon, today?.icon];
+  if (icons.some((icon) => icon === "rain" || icon === "storm")) return true;
+  if ((today?.precipMm ?? 0) >= 0.2) return true;
+  return Math.max(report.current?.rainChance ?? 0, today?.rainChance ?? 0) >= 50;
+}
+
 function weatherIonicon(icon: WeatherIconName, night = false): keyof typeof Ionicons.glyphMap {
   if (night && icon === "sunny") return "moon";
   if (night && (icon === "partly-cloudy" || icon === "cloudy")) return "cloudy-night";
@@ -50,6 +59,13 @@ export function WeatherScreen() {
   const [feelsLike, setFeelsLike] = useState(false);
   const [suggestions, setSuggestions] = useState<WeatherPlace[]>([]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alarmRef = useRef<Audio.Sound | null>(null);
+  const silencedKey = useRef("");
+  const [alarmOn, setAlarmOn] = useState(false);
+  const rainComing = report ? rainIsComing(report) : false;
+  const alarmKey = rainComing
+    ? `${report?.location.lat},${report?.location.lng}:${report?.days[0]?.date ?? ""}`
+    : "";
 
   const loadReport = useCallback(
     async (params?: { q?: string; lat?: number; lng?: number }) => {
@@ -72,6 +88,55 @@ export function WeatherScreen() {
     },
     [t, token]
   );
+
+  const releaseAlarm = useCallback(async () => {
+    const sound = alarmRef.current;
+    alarmRef.current = null;
+    setAlarmOn(false);
+    if (sound) await sound.unloadAsync().catch(() => undefined);
+  }, []);
+
+  const playAlarm = useCallback(async () => {
+    await releaseAlarm();
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true
+    });
+    const created = await Audio.Sound.createAsync(require("../../assets/sounds/rain-alarm.wav"), {
+      shouldPlay: true,
+      isLooping: true,
+      volume: 1
+    });
+    alarmRef.current = created.sound;
+    setAlarmOn(true);
+  }, [releaseAlarm]);
+
+  useEffect(() => {
+    if (!alarmKey) {
+      silencedKey.current = "";
+      void releaseAlarm();
+      return;
+    }
+    if (silencedKey.current === alarmKey) return;
+    let cancelled = false;
+    void playAlarm()
+      .then(() => {
+        if (cancelled) void releaseAlarm();
+      })
+      .catch(() => {
+        if (!cancelled) setAlarmOn(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [alarmKey, playAlarm, releaseAlarm]);
+
+  useEffect(() => {
+    return () => {
+      void alarmRef.current?.unloadAsync().catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     void loadReport(
@@ -176,6 +241,27 @@ export function WeatherScreen() {
                 <Text style={styles.nowCondition}>{report.current.condition}</Text>
                 <Text style={styles.rain}>Rain {report.current.rainChance}%</Text>
               </View>
+
+              {rainComing ? (
+                <Pressable
+                  style={styles.alarm}
+                  onPress={() => {
+                    if (alarmOn) {
+                      silencedKey.current = alarmKey;
+                      void releaseAlarm();
+                      return;
+                    }
+                    silencedKey.current = "";
+                    void playAlarm();
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name={alarmOn ? "volume-high" : "volume-mute"} size={18} color="#111" />
+                  <Text style={styles.alarmText}>
+                    {alarmOn ? "Rain alarm is on. Tap to stop." : "Rain is coming. Tap to play the alarm."}
+                  </Text>
+                </Pressable>
+              ) : null}
 
               {report.alert ? (
                 <View style={styles.alert}>
@@ -302,6 +388,17 @@ const styles = StyleSheet.create({
   nowLabel: { fontSize: 12, fontWeight: "700", color: APP_TEXT_MUTED, letterSpacing: 0.6 },
   nowTemp: { fontSize: 36, fontWeight: "800", color: APP_TEXT },
   nowCondition: { fontSize: 16, fontWeight: "700", color: APP_TEXT },
+  alarm: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#c9ff35",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 16
+  },
+  alarmText: { color: "#111", fontWeight: "700", flex: 1 },
   alert: {
     backgroundColor: "rgba(201, 255, 53, 0.12)",
     borderColor: APP_LIME,

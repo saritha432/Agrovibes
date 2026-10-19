@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import {
+  addProviderEquipment,
   fetchProviderDigilockerResult,
+  fetchProviderEquipment,
+  fetchProviderKycStatus,
   startProviderDigilocker,
   submitProviderKyc,
   verifyProviderBankAccount,
@@ -19,7 +22,7 @@ import {
 } from "./providerDraft";
 import "./JoinProviderPage.css";
 
-type Step = "intro" | "terms" | "role" | "type" | "details" | "aadhaar" | "pan" | "bank" | "review" | "done";
+type Step = "intro" | "terms" | "role" | "type" | "details" | "aadhaar" | "pan" | "bank" | "review" | "awaiting" | "done";
 
 const TERMS = [
   {
@@ -64,6 +67,11 @@ export function JoinProviderPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
   const [step, setStep] = useState<Step>("intro");
+  const [approval, setApproval] = useState("pending");
+  const [equipment, setEquipment] = useState<Array<{ id: number; name: string; category: string; dailyRate?: string | null }>>([]);
+  const [equipName, setEquipName] = useState("");
+  const [equipCategory, setEquipCategory] = useState("Equipment");
+  const [equipRate, setEquipRate] = useState("");
   const [termsPage, setTermsPage] = useState(1);
   const [accepted, setAccepted] = useState(false);
   const [draft, setDraft] = useState<ProviderJoinDraft>(() => readProviderDraft());
@@ -88,6 +96,33 @@ export function JoinProviderPage() {
   }, [draft]);
 
   useEffect(() => {
+    if (!token) return;
+    let active = true;
+    const load = async () => {
+      try {
+        const row = await fetchProviderKycStatus(token);
+        if (!active) return;
+        if (row.status === "pending" || row.status === "approved" || row.status === "rejected") {
+          setApproval(row.status);
+          setStep((current) => (current === "intro" ? "awaiting" : current));
+        }
+        if (row.status === "approved") {
+          const list = await fetchProviderEquipment(token);
+          if (active) setEquipment(list.equipment);
+        }
+      } catch {
+        // A missing status should leave the signup wizard on its current step.
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 8000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [token]);
+
+  useEffect(() => {
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
@@ -109,7 +144,7 @@ export function JoinProviderPage() {
     else if (step === "aadhaar") setStep("details");
     else if (step === "pan") setStep("aadhaar");
     else if (step === "bank") setStep("pan");
-    else if (step === "review") setStep("bank");
+    else if (step === "review" || step === "awaiting") setStep("bank");
     else navigate("/settings");
   };
 
@@ -219,10 +254,19 @@ export function JoinProviderPage() {
     setBusy(true);
     setError("");
     try {
+      const address = [draft.street, draft.village, draft.district, draft.state].filter(Boolean).join(", ");
       const result = await verifyProviderBankAccount(token, {
         accountNumber: draft.accountNumber.replace(/\D/g, ""),
         ifsc: draft.ifsc,
-        ifscDetails
+        ifscDetails,
+        applicantName: draft.fullName || "Provider",
+        role: draft.track,
+        registrationType: draft.registrationType,
+        businessName: draft.businessName || undefined,
+        gstNumber: draft.gstNumber || undefined,
+        email: draft.email || undefined,
+        phone: draft.phone || undefined,
+        address: address || undefined
       });
       patch({
         holderName: result.holderName,
@@ -231,9 +275,33 @@ export function JoinProviderPage() {
         bankVerified: result.matched
       });
       if (!result.matched) setError("Account holder name does not match the Aadhaar name.");
+      else if (result.submitted) {
+        setApproval("pending");
+        setStep("awaiting");
+      }
     } catch (err) {
       patch({ bankVerified: false, holderName: "" });
       setError(err instanceof Error ? err.message : "Could not verify the bank account.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addEquipment = async () => {
+    if (!token || equipName.trim().length < 2 || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const created = await addProviderEquipment(token, {
+        name: equipName.trim(),
+        category: equipCategory.trim() || "Equipment",
+        dailyRate: equipRate.trim() || undefined
+      });
+      setEquipment((current) => [created.equipment, ...current]);
+      setEquipName("");
+      setEquipRate("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add equipment.");
     } finally {
       setBusy(false);
     }
@@ -659,6 +727,69 @@ export function JoinProviderPage() {
             >
               Continue
             </button>
+          </section>
+        ) : null}
+
+        {step === "awaiting" ? (
+          <section className="join-card">
+            <h2>
+              {approval === "approved"
+                ? "You are a provider"
+                : approval === "rejected"
+                  ? "Application rejected"
+                  : "Waiting for admin approval"}
+            </h2>
+            <p>
+              {approval === "approved"
+                ? "Admin approved the verified bank account. You can add equipment now."
+                : approval === "rejected"
+                  ? "Admin rejected this application. Verify the bank account again to send a new one."
+                  : "The verified bank account is in the admin KYC panel. After approval you can add equipment."}
+            </p>
+            {approval === "approved" ? (
+              <>
+                <label className="pan-label" htmlFor="equip-name">
+                  Equipment name
+                </label>
+                <input
+                  id="equip-name"
+                  className="pan-input"
+                  value={equipName}
+                  onChange={(event) => setEquipName(event.target.value)}
+                />
+                <label className="pan-label" htmlFor="equip-category">
+                  Category
+                </label>
+                <input
+                  id="equip-category"
+                  className="pan-input"
+                  value={equipCategory}
+                  onChange={(event) => setEquipCategory(event.target.value)}
+                />
+                <label className="pan-label" htmlFor="equip-rate">
+                  Daily rate
+                </label>
+                <input
+                  id="equip-rate"
+                  className="pan-input"
+                  value={equipRate}
+                  onChange={(event) => setEquipRate(event.target.value)}
+                />
+                <button type="button" className="join-btn" disabled={busy || equipName.trim().length < 2} onClick={() => void addEquipment()}>
+                  {busy ? "Saving…" : "Add equipment"}
+                </button>
+                {equipment.length ? (
+                  <ul>
+                    {equipment.map((item) => (
+                      <li key={item.id}>
+                        {item.name} · {item.category}
+                        {item.dailyRate ? ` · ${item.dailyRate}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            ) : null}
           </section>
         ) : null}
 

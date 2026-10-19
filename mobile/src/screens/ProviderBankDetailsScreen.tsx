@@ -24,7 +24,7 @@ import {
 import { APP_LIME } from "../theme/appColors";
 import { useAuth } from "../auth/AuthContext";
 import { lookupIfsc, verifyProviderBankAccount } from "../services/api";
-import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
+import { getProviderRegistrationDraft, updateProviderRegistrationDraft } from "../services/providerWorkflow";
 
 export function ProviderBankDetailsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
@@ -99,9 +99,20 @@ export function ProviderBankDetailsScreen() {
     setNameHint(null);
     setBankVerified(false);
     try {
+      const draft = await getProviderRegistrationDraft();
+      const address = [draft?.street, draft?.village, draft?.district, draft?.state].filter(Boolean).join(", ");
       const result = await verifyProviderBankAccount(token, {
         accountNumber: accountDigits,
-        ifsc: ifscCode
+        ifsc: ifscCode,
+        ifscDetails: true,
+        applicantName: draft?.fullName || "Provider",
+        role: track,
+        registrationType,
+        businessName: draft?.businessName,
+        gstNumber: draft?.gstNumber,
+        email: draft?.email,
+        phone: draft?.phone,
+        address
       });
       setHolderName(result.holderName);
       setBankVerified(result.matched);

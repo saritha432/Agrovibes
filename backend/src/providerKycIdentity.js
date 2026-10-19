@@ -114,16 +114,33 @@ async function surepassRequest(path, body) {
     error.status = 503;
     throw error;
   }
-  const response = await fetch(`${surepassBase()}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
+  let response;
+  try {
+    response = await fetch(`${surepassBase()}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(25000)
+    });
+  } catch {
+    throw providerError("Surepass did not respond. Try again in a moment.", 504);
+  }
   const payload = await response.json().catch(() => null);
   return { response, payload };
+}
+
+function surepassFailure(payload, fallback, response) {
+  const message = String(payload?.message || payload?.data?.remarks || "").trim();
+  if (/scope|not valid for this api/i.test(message)) {
+    return providerError(
+      "Surepass has not enabled this API for the current token. Turn on Bank Verification in the Surepass sandbox, then submit again.",
+      422
+    );
+  }
+  return providerError(message || fallback, 422);
 }
 
 function digioAuthHeader() {
@@ -495,7 +512,7 @@ async function verifyPanNumber({ userId, panNumber, fullName, dob }) {
     if (typeof data.dob_match === "boolean") dobMatchedByProvider = data.dob_match;
     if (typeof data.date_of_birth_match === "boolean") dobMatchedByProvider = data.date_of_birth_match;
     if (!response?.ok || payload?.success === false) {
-      throw providerError(payload?.message || "PAN could not be verified.");
+      throw surepassFailure(payload, "PAN could not be verified.", response);
     }
   } else {
     const digio = digioCredentials();
@@ -569,11 +586,16 @@ async function verifyBankAccount({ userId, accountNumber, ifsc, ifscDetails = tr
     }
     const data = result?.payload?.data || {};
     const details = data.ifsc_details && typeof data.ifsc_details === "object" ? data.ifsc_details : {};
-    holderName = String(data.full_name || data.name_at_bank || data.account_holder_name || "").trim();
+    holderName = String(
+      data.full_name || data.name_at_bank || data.account_holder_name || data.beneficiary_name || data.name || ""
+    ).trim();
     bankName = String(details.bank_name || details.bank || data.bank_name || "").trim();
     bankBranch = String(details.branch || details.branch_name || "").trim();
-    if (!result?.response?.ok || !holderName) {
-      throw providerError(result?.payload?.message || "Bank account could not be verified.");
+    if (!result?.response?.ok || result?.payload?.success === false || !holderName) {
+      if (data.account_exists === false) {
+        throw providerError("No account was found for this ID number and IFSC.", 422);
+      }
+      throw surepassFailure(result?.payload, "Bank account could not be verified.", result?.response);
     }
   } else {
     const digio = digioCredentials();
