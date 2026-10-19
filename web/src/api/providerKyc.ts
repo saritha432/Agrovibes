@@ -38,7 +38,19 @@ export async function verifyProviderPan(
 
 export async function verifyProviderBankAccount(
   token: string,
-  payload: { accountNumber: string; ifsc: string; ifscDetails?: boolean }
+  payload: {
+    accountNumber: string;
+    ifsc: string;
+    ifscDetails?: boolean;
+    applicantName?: string;
+    role?: string;
+    registrationType?: "individual" | "business";
+    businessName?: string;
+    gstNumber?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+  }
 ) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/bank/verify`, token, {
     method: "POST",
@@ -51,7 +63,32 @@ export async function verifyProviderBankAccount(
     ifsc: string;
     bankName?: string;
     bankBranch?: string;
+    submitted?: boolean;
+    submissionId?: number | null;
   };
+}
+
+export async function fetchProviderKycStatus(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/status`, token)) as {
+    status: "not_submitted" | "pending" | "approved" | "rejected" | string;
+  };
+}
+
+export async function fetchProviderEquipment(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/equipment`, token)) as {
+    equipment: Array<{ id: number; name: string; category: string; dailyRate?: string | null }>;
+  };
+}
+
+export async function addProviderEquipment(
+  token: string,
+  payload: { name: string; category: string; dailyRate?: string }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/equipment`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { equipment: { id: number; name: string; category: string; dailyRate?: string | null } };
 }
 
 export async function submitProviderKyc(

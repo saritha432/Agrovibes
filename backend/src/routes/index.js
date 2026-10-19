@@ -10687,6 +10687,52 @@ router.post("/v1/provider/kyc/pan/verify", authRequired, async (req, res) => {
   }
 });
 
+async function queueVerifiedProviderApplication(req, userId, identity, bank) {
+  await ensureProviderKycTable();
+  const applicantName = String(req.body?.applicantName || req.user.fullName || identity.aadhaarName || "Provider")
+    .trim()
+    .slice(0, 160);
+  const role = String(req.body?.role || "rental").trim().toLowerCase().slice(0, 40) || "rental";
+  const registrationType = String(req.body?.registrationType || "individual").trim().toLowerCase() === "business"
+    ? "business"
+    : "individual";
+  const businessName = String(req.body?.businessName || "").trim().slice(0, 160) || null;
+  const gstInput = String(req.body?.gstNumber || "").trim();
+  const gstNumber = gstInput ? normalizeGst(gstInput) : null;
+  const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 160) || null;
+  const phone = normalizeIndiaPhone(req.body?.phone) || String(req.body?.phone || "").trim().slice(0, 40) || null;
+  const address = String(req.body?.address || "").trim().slice(0, 400) || null;
+  const last4 = String(identity.aadhaarLast4 || "").replace(/\D/g, "").slice(-4);
+  const documentSummary = `DigiLocker Aadhaar verified${last4 ? ` (ending ${last4})` : ""}, PAN ${identity.panNumber} matched, bank ${bank.holderName} verified (${bank.ifsc})`
+    .slice(0, 500);
+
+  await query(
+    `
+    UPDATE provider_kyc_submissions
+    SET status = 'superseded', updated_at = NOW()
+    WHERE user_id = $1 AND status = 'pending'
+    `,
+    [userId]
+  );
+  const inserted = await query(
+    `
+    INSERT INTO provider_kyc_submissions (
+      user_id, applicant_name, role, registration_type, document_summary, documents, business_name, gst_number, email, phone, address, priority, status
+    )
+    VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, $7, $8, $9, $10, 'Medium', 'pending')
+    RETURNING id
+    `,
+    [userId, applicantName, role, registrationType, documentSummary, businessName, gstNumber, email, phone, address]
+  );
+  const submissionId = inserted.rows[0]?.id;
+  try {
+    await notifyAdminUsersOfKyc(userId, submissionId, applicantName, role);
+  } catch (notifyError) {
+    console.warn("[kyc] admin notify failed:", notifyError?.message || notifyError);
+  }
+  return submissionId;
+}
+
 router.post("/v1/provider/kyc/bank/verify", authRequired, async (req, res) => {
   try {
     const userId = Number(req.user.userId);
@@ -10700,7 +10746,14 @@ router.post("/v1/provider/kyc/bank/verify", authRequired, async (req, res) => {
       ifsc: req.body?.ifsc,
       ifscDetails: req.body?.ifscDetails !== false
     });
-    res.json(result);
+    let submissionId = null;
+    if (result.matched) {
+      const identity = await providerKycIdentity.getCompletedProviderKycIdentity(userId);
+      if (identity) {
+        submissionId = await queueVerifiedProviderApplication(req, userId, identity, result);
+      }
+    }
+    res.json({ ...result, submitted: Boolean(submissionId), submissionId });
   } catch (error) {
     const status = Number(error?.status) || 500;
     res.status(status).json({ message: error?.message || "Could not verify bank account" });
@@ -11071,6 +11124,90 @@ router.get("/v1/admin/kyc", authRequired, requireRole("admin"), async (req, res)
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load KYC submissions", error: error?.message || String(error) });
+  }
+});
+
+async function requireApprovedProvider(userId) {
+  await ensureProviderKycTable();
+  const result = await query(
+    `
+    SELECT id
+    FROM provider_kyc_submissions
+    WHERE user_id = $1 AND status = 'approved'
+    ORDER BY reviewed_at DESC NULLS LAST, created_at DESC
+    LIMIT 1
+    `,
+    [userId]
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function ensureProviderEquipmentTable() {
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS provider_equipment (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'Equipment',
+      daily_rate TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+}
+
+router.get("/v1/provider/equipment", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!(await requireApprovedProvider(userId))) {
+      res.status(403).json({ message: "Admin must approve your provider registration before you can add equipment." });
+      return;
+    }
+    await ensureProviderEquipmentTable();
+    const result = await query(
+      `
+      SELECT id, name, category, daily_rate AS "dailyRate", created_at AS "createdAt"
+      FROM provider_equipment
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100
+      `,
+      [userId]
+    );
+    res.json({ equipment: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load equipment", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/provider/equipment", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!(await requireApprovedProvider(userId))) {
+      res.status(403).json({ message: "Admin must approve your provider registration before you can add equipment." });
+      return;
+    }
+    const name = String(req.body?.name || "").trim().slice(0, 160);
+    const category = String(req.body?.category || "Equipment").trim().slice(0, 80) || "Equipment";
+    const dailyRate = String(req.body?.dailyRate || "").trim().slice(0, 40) || null;
+    if (name.length < 2) {
+      res.status(400).json({ message: "Enter the equipment name." });
+      return;
+    }
+    await ensureProviderEquipmentTable();
+    const inserted = await query(
+      `
+      INSERT INTO provider_equipment (user_id, name, category, daily_rate)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, name, category, daily_rate AS "dailyRate", created_at AS "createdAt"
+      `,
+      [userId, name, category, dailyRate]
+    );
+    res.status(201).json({ equipment: inserted.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to add equipment", error: error?.message || String(error) });
   }
 });
 
