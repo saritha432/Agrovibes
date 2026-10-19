@@ -10,6 +10,14 @@ import {
 } from "../api/weather";
 import "./WeatherPage.css";
 
+function rainIsComing(report: WeatherReport) {
+  const today = report.days.find((day) => day.dayLabel === "Today") ?? report.days[0];
+  const icons = [report.current?.icon, today?.icon];
+  if (icons.some((icon) => icon === "rain" || icon === "storm")) return true;
+  if ((today?.precipMm ?? 0) >= 0.2) return true;
+  return Math.max(report.current?.rainChance ?? 0, today?.rainChance ?? 0) >= 50;
+}
+
 function WeatherGlyph({ icon, night = false }: { icon: WeatherIconName; night?: boolean }) {
   const label =
     night && icon === "sunny"
@@ -42,6 +50,13 @@ export function WeatherPage() {
   const [feelsLike, setFeelsLike] = useState(false);
   const [suggestions, setSuggestions] = useState<WeatherPlace[]>([]);
   const searchTimer = useRef<number | null>(null);
+  const alarmRef = useRef<HTMLAudioElement | null>(null);
+  const [alarmOn, setAlarmOn] = useState(false);
+  const [alarmBlocked, setAlarmBlocked] = useState(false);
+  const rainComing = report ? rainIsComing(report) : false;
+  const alarmKey = rainComing
+    ? `${report?.location.lat},${report?.location.lng}:${report?.days[0]?.date ?? ""}`
+    : "";
 
   async function load(params?: { q?: string; lat?: number; lng?: number }) {
     setLoading(true);
@@ -61,6 +76,41 @@ export function WeatherPage() {
       setLoading(false);
     }
   }
+
+  function stopAlarm() {
+    const audio = alarmRef.current;
+    alarmRef.current = null;
+    setAlarmOn(false);
+    setAlarmBlocked(false);
+    if (!audio) return;
+    audio.pause();
+    audio.src = "";
+  }
+
+  function startAlarm() {
+    stopAlarm();
+    const audio = new Audio("/sounds/rain-alarm.wav");
+    audio.loop = true;
+    alarmRef.current = audio;
+    void audio.play().then(
+      () => {
+        setAlarmOn(true);
+        setAlarmBlocked(false);
+      },
+      () => setAlarmBlocked(true)
+    );
+  }
+
+  useEffect(() => {
+    if (!alarmKey) {
+      stopAlarm();
+      return;
+    }
+    startAlarm();
+    return () => stopAlarm();
+    // The alarm restarts only when the rainy place or day changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alarmKey]);
 
   useEffect(() => {
     void load(
@@ -169,6 +219,15 @@ export function WeatherPage() {
               <span>{report.current.condition}</span>
               <small>Rain {report.current.rainChance}%</small>
             </section>
+          ) : null}
+          {rainComing ? (
+            <button type="button" className="weather-page__alarm" onClick={alarmOn ? stopAlarm : startAlarm}>
+              {alarmOn
+                ? "Rain alarm is on. Tap to stop."
+                : alarmBlocked
+                  ? "Rain is coming. Tap to play the alarm."
+                  : "Play rain alarm"}
+            </button>
           ) : null}
           {report.alert ? (
             <div className="weather-page__alert" role="status">
