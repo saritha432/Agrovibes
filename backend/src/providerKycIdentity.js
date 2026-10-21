@@ -15,6 +15,39 @@ function surepassToken() {
   return String(process.env.SUREPASS_TOKEN || process.env.SUREPASS_API_TOKEN || "").trim();
 }
 
+let sandboxTokenCache = { token: "", expiresAt: 0 };
+
+function sandboxCredentials() {
+  return {
+    key: String(process.env.SANDBOX_API_KEY || "").trim(),
+    secret: String(process.env.SANDBOX_API_SECRET || "").trim()
+  };
+}
+
+function sandboxConfigured() {
+  const { key, secret } = sandboxCredentials();
+  return Boolean(key && secret);
+}
+
+function sandboxBase() {
+  const configured = String(process.env.SANDBOX_API_BASE_URL || process.env.SANDBOX_BASE_URL || "")
+    .trim()
+    .replace(/\/$/, "");
+  if (configured) return configured;
+  const env = String(process.env.SANDBOX_ENV || "").trim().toLowerCase();
+  if (env === "production" || env === "prod" || env === "live") return "https://api.sandbox.co.in";
+  return "https://test-api.sandbox.co.in";
+}
+
+function sandboxRedirectUrl() {
+  const configured = String(process.env.SANDBOX_DIGILOCKER_REDIRECT_URL || "").trim();
+  if (configured.startsWith("https://")) return configured;
+  const origin = String(process.env.API_PUBLIC_ORIGIN || "https://cropvibe-api-production.up.railway.app")
+    .trim()
+    .replace(/\/$/, "");
+  return `${origin}/api/v1/provider/kyc/digilocker/done`;
+}
+
 function digioCredentials() {
   return {
     clientId: String(process.env.DIGIO_CLIENT_ID || "").trim(),
@@ -25,7 +58,8 @@ function digioCredentials() {
 
 function activeKycProvider() {
   const forced = String(process.env.KYC_PROVIDER || "").trim().toLowerCase();
-  if (forced === "surepass" || forced === "digio") return forced;
+  if (forced === "sandbox" || forced === "surepass" || forced === "digio") return forced;
+  if (sandboxConfigured()) return "sandbox";
   if (surepassToken()) return "surepass";
   const digio = digioCredentials();
   if (digio.clientId && digio.clientSecret) return "digio";
@@ -130,6 +164,79 @@ async function surepassRequest(path, body) {
   }
   const payload = await response.json().catch(() => null);
   return { response, payload };
+}
+
+async function sandboxAccessToken(forceRefresh = false) {
+  if (!forceRefresh && sandboxTokenCache.token && Date.now() < sandboxTokenCache.expiresAt) {
+    return sandboxTokenCache.token;
+  }
+  const { key, secret } = sandboxCredentials();
+  if (!key || !secret) {
+    throw providerError("DigiLocker is not configured. Add SANDBOX_API_KEY and SANDBOX_API_SECRET on the server.", 503);
+  }
+  let response;
+  try {
+    response = await fetch(`${sandboxBase()}/authenticate`, {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "x-api-secret": secret,
+        "x-api-version": "1.0"
+      },
+      signal: AbortSignal.timeout(25000)
+    });
+  } catch {
+    throw providerError("Sandbox did not respond. Try again in a moment.", 504);
+  }
+  const payload = await response.json().catch(() => null);
+  const token = String(payload?.data?.access_token || "").trim();
+  if (!response.ok || !token) {
+    throw providerError(payload?.message || "Sandbox login failed. Check the API key and secret.", 503);
+  }
+  sandboxTokenCache = { token, expiresAt: Date.now() + 23 * 60 * 60 * 1000 };
+  return token;
+}
+
+async function sandboxRequest(path, { method = "GET", body } = {}, retry = true) {
+  const { key } = sandboxCredentials();
+  const token = await sandboxAccessToken(false);
+  let response;
+  try {
+    response = await fetch(`${sandboxBase()}${path}`, {
+      method,
+      headers: {
+        Authorization: token,
+        "x-api-key": key,
+        "x-api-version": "1.0",
+        ...(body ? { "Content-Type": "application/json" } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(25000)
+    });
+  } catch {
+    throw providerError("Sandbox did not respond. Try again in a moment.", 504);
+  }
+  if (response.status === 401 && retry) {
+    sandboxTokenCache = { token: "", expiresAt: 0 };
+    await sandboxAccessToken(true);
+    return sandboxRequest(path, { method, body }, false);
+  }
+  const payload = await response.json().catch(() => null);
+  return { response, payload };
+}
+
+function aadhaarFromXml(xml) {
+  const text = String(xml || "");
+  const attr = (name) => {
+    const match = text.match(new RegExp(`\\b${name}\\s*=\\s*"([^"]+)"`, "i"))
+      || text.match(new RegExp(`\\b${name}\\s*=\\s*'([^']+)'`, "i"));
+    return String(match?.[1] || "").trim();
+  };
+  const name = attr("name");
+  const dob = attr("dob");
+  const last4 = attr("uid").replace(/\D/g, "").slice(-4);
+  if (!name) return null;
+  return { name, last4, dob };
 }
 
 function surepassFailure(payload, fallback, response) {
@@ -238,14 +345,48 @@ async function pullSurepassDigilockerStatus(clientId) {
 
 async function startDigilockerSession({ userId, fullName, phone }) {
   const provider = activeKycProvider();
-  if (!provider) {
+  if (!provider || (provider === "sandbox" && !sandboxConfigured())) {
     throw providerError(
-      "DigiLocker is not configured. Add SUREPASS_TOKEN or Digio credentials on the server.",
+      "DigiLocker is not configured. Add SANDBOX_API_KEY and SANDBOX_API_SECRET on the server.",
       503
     );
   }
   await ensureProviderKycIdentity();
   const sessionId = crypto.randomBytes(16).toString("hex");
+
+  if (provider === "sandbox") {
+    const phoneDigits = String(phone || "").replace(/\D/g, "").slice(-10);
+    const body = {
+      "@entity": "in.co.sandbox.kyc.digilocker.session.request",
+      flow: "signin",
+      redirect_url: sandboxRedirectUrl(),
+      doc_types: ["aadhaar"],
+      purpose: "Provider registration",
+      requestor_name: "CropVibe"
+    };
+    if (/^[6-9]\d{9}$/.test(phoneDigits)) {
+      body.options = { verified_mobile: phoneDigits };
+    }
+    const { response, payload } = await sandboxRequest("/kyc/digilocker/sessions/init", {
+      method: "POST",
+      body
+    });
+    const data = payload?.data || {};
+    const clientId = String(data.session_id || "").trim();
+    const gatewayUrl = String(data.authorization_url || "").trim();
+    if (!response.ok || !clientId || !gatewayUrl.startsWith("https://")) {
+      throw providerError(payload?.message || "Could not start DigiLocker.", response.status === 503 ? 503 : 422);
+    }
+    await query(
+      `
+      INSERT INTO provider_kyc_digilocker_sessions (id, user_id, provider, client_id, gateway_token, expires_at)
+      VALUES ($1, $2, 'sandbox', $3, '', NOW() + INTERVAL '20 minutes')
+      `,
+      [sessionId, userId, clientId]
+    );
+    await setDigilockerKycStatus(userId, sessionId, "pending", "Waiting for DigiLocker sign-in.");
+    return { sessionId, provider: "sandbox", gatewayUrl };
+  }
 
   if (provider === "surepass") {
     const { response, payload } = await surepassRequest("/api/v1/digilocker/initialize", {
@@ -328,6 +469,43 @@ async function latestDigilockerSession(userId, sessionId) {
   return rows.rows[0] || null;
 }
 
+async function pullSandboxDigilockerStatus(sessionId) {
+  const { response, payload } = await sandboxRequest(
+    `/kyc/digilocker/sessions/${encodeURIComponent(sessionId)}/status`
+  );
+  if (!response.ok) {
+    if (response.status === 404) {
+      return { state: "failed", message: payload?.message || "DigiLocker session was not found." };
+    }
+    return { state: "pending" };
+  }
+  const raw = String(payload?.data?.status || "").toLowerCase();
+  if (["failed", "failure", "denied", "rejected", "expired", "error"].includes(raw)) {
+    return { state: "failed", message: payload?.message || "DigiLocker verification failed." };
+  }
+  if (["succeeded", "success", "completed", "verified"].includes(raw)) return { state: "verified" };
+  return { state: "pending" };
+}
+
+async function pullSandboxAadhaar(sessionId) {
+  const { response, payload } = await sandboxRequest(
+    `/kyc/digilocker/sessions/${encodeURIComponent(sessionId)}/documents/aadhaar`
+  );
+  if (!response.ok) return null;
+  const files = Array.isArray(payload?.data?.files) ? payload.data.files : [];
+  const url = String(files[0]?.url || "").trim();
+  if (!url.startsWith("https://")) return null;
+  let xmlResponse;
+  try {
+    xmlResponse = await fetch(url, { signal: AbortSignal.timeout(25000) });
+  } catch {
+    return null;
+  }
+  if (!xmlResponse.ok) return null;
+  const xml = await xmlResponse.text();
+  return aadhaarFromXml(xml);
+}
+
 async function pullSurepassAadhaar(clientId) {
   const posted = await surepassRequest("/api/v1/digilocker/download-aadhaar", { client_id: clientId });
   if (posted.response.ok && posted.payload?.success !== false) {
@@ -383,6 +561,16 @@ async function completeDigilockerSession({ userId, sessionId }) {
       };
     }
   }
+  if (session.provider === "sandbox" && session.status !== "verified") {
+    const remote = await pullSandboxDigilockerStatus(session.clientId);
+    if (remote.state === "failed") {
+      await setDigilockerKycStatus(userId, session.id, "failed", remote.message);
+      return { status: "failed", message: remote.message };
+    }
+    if (remote.state !== "verified") {
+      return { status: "pending", message: "Waiting for DigiLocker sign-in." };
+    }
+  }
   if (session.provider === "surepass" && session.status !== "verified") {
     const remote = await pullSurepassDigilockerStatus(session.clientId);
     if (remote.state === "failed") {
@@ -394,9 +582,11 @@ async function completeDigilockerSession({ userId, sessionId }) {
     }
   }
   const profile =
-    session.provider === "digio"
-      ? await pullDigioAadhaar(session.clientId)
-      : await pullSurepassAadhaar(session.clientId);
+    session.provider === "sandbox"
+      ? await pullSandboxAadhaar(session.clientId)
+      : session.provider === "digio"
+        ? await pullDigioAadhaar(session.clientId)
+        : await pullSurepassAadhaar(session.clientId);
   if (!profile?.name) {
     return { status: "pending", message: "Waiting for DigiLocker sign-in." };
   }
@@ -482,12 +672,33 @@ async function verifyPanNumber({ userId, panNumber, fullName, dob }) {
     throw providerError("Verify Aadhaar with DigiLocker before PAN.", 400);
   }
   const provider = activeKycProvider();
-  if (!provider) throw providerError("PAN verification is not configured.", 503);
+  if (!provider || (provider === "sandbox" && !sandboxConfigured())) {
+    throw providerError("PAN verification is not configured. Add SANDBOX_API_KEY and SANDBOX_API_SECRET on the server.", 503);
+  }
 
   let panName = holderName;
   let nameMatchedByProvider = null;
   let dobMatchedByProvider = null;
-  if (provider === "surepass") {
+  if (provider === "sandbox") {
+    const [year, month, day] = isoDob.split("-");
+    const { response, payload } = await sandboxRequest("/kyc/pan/verify", {
+      method: "POST",
+      body: {
+        "@entity": "in.co.sandbox.kyc.pan_verification.request",
+        pan,
+        name_as_per_pan: holderName,
+        date_of_birth: `${day}/${month}/${year}`,
+        consent: "Y",
+        reason: "Provider onboarding identity check"
+      }
+    });
+    const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+    if (!response.ok || String(data.status || "").toLowerCase() === "invalid") {
+      throw providerError(payload?.message || data.remarks || "PAN could not be verified.", 422);
+    }
+    if (typeof data.name_as_per_pan_match === "boolean") nameMatchedByProvider = data.name_as_per_pan_match;
+    if (typeof data.date_of_birth_match === "boolean") dobMatchedByProvider = data.date_of_birth_match;
+  } else if (provider === "surepass") {
     const [year, month, day] = isoDob.split("-");
     const body = {
       id_number: pan,
@@ -571,12 +782,38 @@ async function verifyBankAccount({ userId, accountNumber, ifsc, ifscDetails = tr
     throw providerError("Verify Aadhaar with DigiLocker before the bank account.", 400);
   }
   const provider = activeKycProvider();
-  if (!provider) throw providerError("Bank verification is not configured.", 503);
+  if (!provider || (provider === "sandbox" && !sandboxConfigured())) {
+    throw providerError("Bank verification is not configured. Add SANDBOX_API_KEY and SANDBOX_API_SECRET on the server.", 503);
+  }
 
   let holderName = "";
   let bankName = "";
   let bankBranch = "";
-  if (provider === "surepass") {
+  if (provider === "sandbox") {
+    const penniless = await sandboxRequest(
+      `/bank/${encodeURIComponent(code)}/accounts/${encodeURIComponent(account)}/penniless-verify`
+    );
+    let data = penniless.payload?.data && typeof penniless.payload.data === "object" ? penniless.payload.data : {};
+    let ok = penniless.response.ok && data.account_exists !== false && String(data.name_at_bank || "").trim();
+    if (!ok) {
+      const penny = await sandboxRequest(
+        `/bank/${encodeURIComponent(code)}/accounts/${encodeURIComponent(account)}/verify`
+      );
+      data = penny.payload?.data && typeof penny.payload.data === "object" ? penny.payload.data : {};
+      if (!penny.response.ok || data.account_exists === false || !String(data.name_at_bank || "").trim()) {
+        throw providerError(penny.payload?.message || data.message || "Bank account could not be verified.", 422);
+      }
+    }
+    holderName = String(data.name_at_bank || "").trim();
+    if (includeIfscDetails) {
+      const branch = await sandboxRequest(`/bank/${encodeURIComponent(code)}`);
+      const details = branch.payload?.data && typeof branch.payload.data === "object" ? branch.payload.data : branch.payload || {};
+      if (branch.response.ok) {
+        bankName = String(details.BANK || details.bank || "").trim();
+        bankBranch = String(details.BRANCH || details.branch || "").trim();
+      }
+    }
+  } else if (provider === "surepass") {
     const body = { id_number: account, ifsc: code, ifsc_details: includeIfscDetails };
     const paths = ["/api/v1/bank-verification/pennyless", "/api/v1/bank-verification"];
     let result = null;

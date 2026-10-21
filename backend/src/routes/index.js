@@ -10631,6 +10631,14 @@ router.post("/v1/bank/resolve-account", async (req, res) => {
 
 const providerKycIdentity = require("../providerKycIdentity");
 
+router.get("/v1/provider/kyc/digilocker/done", (_req, res) => {
+  res
+    .type("html")
+    .send(
+      "<!doctype html><html><body style=\"font-family:sans-serif;padding:24px\"><h1>DigiLocker finished</h1><p>Return to CropVibe. You can close this window.</p></body></html>"
+    );
+});
+
 router.post("/v1/provider/kyc/digilocker/start", authRequired, async (req, res) => {
   try {
     const userId = Number(req.user.userId);
