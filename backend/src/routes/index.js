@@ -10635,7 +10635,7 @@ router.get("/v1/provider/kyc/digilocker/done", (_req, res) => {
   res
     .type("html")
     .send(
-      "<!doctype html><html><body style=\"font-family:sans-serif;padding:24px\"><h1>DigiLocker finished</h1><p>Return to CropVibe. You can close this window.</p></body></html>"
+      "<!doctype html><html><body style=\"font-family:sans-serif;padding:24px\"><h1>Aadhaar received</h1><p>Return to CropVibe. The app will show Aadhaar Verified.</p></body></html>"
     );
 });
 
