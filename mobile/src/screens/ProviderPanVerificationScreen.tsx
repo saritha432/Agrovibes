@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { APP_LIME } from "../theme/appColors";
 import { verifyProviderPan } from "../services/api";
-import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
+import { getProviderRegistrationDraft, updateProviderRegistrationDraft } from "../services/providerWorkflow";
 import {
   PROVIDER_CARD,
   PROVIDER_MUTED,
@@ -20,6 +20,10 @@ import {
 
 function normalizePan(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+}
+
+function gstOk(value: string) {
+  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(value.trim().toUpperCase());
 }
 
 export function ProviderPanVerificationScreen() {
@@ -36,6 +40,16 @@ export function ProviderPanVerificationScreen() {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const [match, setMatch] = useState<{ panName: string; aadhaarName: string; matched: boolean } | null>(null);
+  const [gst, setGst] = useState("");
+
+  useEffect(() => {
+    void getProviderRegistrationDraft().then((draft) => {
+      if (draft?.gstNumber) setGst(draft.gstNumber);
+      if (draft?.panMatched && draft.panName) {
+        setMatch({ panName: draft.panName, aadhaarName: draft.fullName || "", matched: true });
+      }
+    });
+  }, []);
 
   const panOk = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan);
   const dobOk = /^\d{4}-\d{2}-\d{2}$/.test(dob) || /^\d{2}\/\d{2}\/\d{4}$/.test(dob);
@@ -69,7 +83,7 @@ export function ProviderPanVerificationScreen() {
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={3} />
+      <ProviderStepBar currentStep={3} registrationType="business" />
 
       <ScrollView
         style={pf.scroll}
@@ -77,8 +91,8 @@ export function ProviderPanVerificationScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>PAN Verification</Text>
-        <Text style={styles.sub}>Enter PAN → API verification → Match identity</Text>
+        <Text style={styles.title}>PAN or GST</Text>
+        <Text style={styles.sub}>Verify PAN, or enter a GST number. Bank details are not required.</Text>
 
         <Text style={pf.fieldLabel}>PAN Number</Text>
         <TextInput
@@ -149,13 +163,31 @@ export function ProviderPanVerificationScreen() {
           </View>
         ) : null}
 
+        <Text style={pf.fieldLabel}>GST Number</Text>
+        <TextInput
+          style={pf.input}
+          value={gst}
+          onChangeText={(value) => setGst(value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 15))}
+          placeholder="22AAAAA0000A1Z5"
+          placeholderTextColor={PROVIDER_MUTED}
+          autoCapitalize="characters"
+          maxLength={15}
+        />
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
 
       <ProviderContinueButton
-        disabled={!match?.matched}
+        disabled={!match?.matched && !gstOk(gst)}
         onPress={() => {
-          navigation.navigate("ProviderBankDetails", { track, registrationType });
+          const nextGst = gst.trim().toUpperCase();
+          if (nextGst && !gstOk(nextGst)) {
+            setError("Enter a valid GST number, or leave it blank when PAN is verified.");
+            return;
+          }
+          void updateProviderRegistrationDraft({ gstNumber: nextGst }).then(() => {
+            navigation.navigate("ProviderVerification", { track, registrationType });
+          });
         }}
       />
     </SafeAreaView>

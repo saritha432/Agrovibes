@@ -8,7 +8,6 @@ import {
   fetchProviderKycStatus,
   startProviderDigilocker,
   submitProviderKyc,
-  verifyProviderBankAccount,
   verifyProviderPan
 } from "../../api/providerKyc";
 import { SettingsIconBack } from "../../components/settings/SettingsIcons";
@@ -22,7 +21,7 @@ import {
 } from "./providerDraft";
 import "./JoinProviderPage.css";
 
-type Step = "intro" | "terms" | "role" | "type" | "details" | "aadhaar" | "pan" | "bank" | "review" | "awaiting" | "done";
+type Step = "intro" | "terms" | "role" | "type" | "details" | "aadhaar" | "pan" | "review" | "awaiting" | "done";
 
 const TERMS = [
   {
@@ -50,7 +49,7 @@ const TERMS = [
       "Equipment details and condition",
       "Rental pricing",
       "Availability schedule",
-      "DigiLocker Aadhaar, PAN matched to that identity, and a verified bank account"
+      "DigiLocker Aadhaar for individuals. Businesses also add PAN or GST."
     ]
   }
 ];
@@ -61,6 +60,10 @@ function isValidEmail(value: string) {
 
 function normalizePan(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+}
+
+function gstOk(value: string) {
+  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(value.trim().toUpperCase());
 }
 
 export function JoinProviderPage() {
@@ -81,7 +84,6 @@ export function JoinProviderPage() {
   const [kycStatus, setKycStatus] = useState<"idle" | "pending" | "verified" | "failed">(
     readProviderDraft().digilockerVerified ? "verified" : "idle"
   );
-  const [ifscDetails, setIfscDetails] = useState(true);
   const [panFullName, setPanFullName] = useState(readProviderDraft().aadhaarName || readProviderDraft().fullName);
   const [panDob, setPanDob] = useState("");
   const [panMatch, setPanMatch] = useState<{ panName: string; aadhaarName: string; matched: boolean } | null>(
@@ -90,6 +92,7 @@ export function JoinProviderPage() {
       : null
   );
   const pollRef = useRef<number | null>(null);
+  const sessionRef = useRef("");
 
   useEffect(() => {
     writeProviderDraft(draft);
@@ -123,10 +126,36 @@ export function JoinProviderPage() {
   }, [token]);
 
   useEffect(() => {
+    const onDone = (event: MessageEvent) => {
+      if (event.data?.type !== "cropvibe-digilocker-done" || !token || !sessionRef.current) return;
+      void fetchProviderDigilockerResult(token, sessionRef.current)
+        .then((next) => {
+          if (next.status === "verified" && next.name) {
+            if (pollRef.current) window.clearInterval(pollRef.current);
+            setKycStatus("verified");
+            setError("");
+            patch({
+              kycProvider: "sandbox",
+              digilockerVerified: true,
+              aadhaarName: next.name,
+              aadhaarMasked: next.maskedAadhaar || "",
+              panMatched: false,
+              panName: "",
+              bankVerified: false,
+              holderName: ""
+            });
+          } else {
+            setError(next.message || "Waiting for DigiLocker to share Aadhaar.");
+          }
+        })
+        .catch((err) => setError(err instanceof Error ? err.message : "Could not read DigiLocker result."));
+    };
+    window.addEventListener("message", onDone);
     return () => {
+      window.removeEventListener("message", onDone);
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
-  }, []);
+  }, [token]);
 
   const patch = (next: Partial<ProviderJoinDraft>) => {
     setDraft((current) => ({ ...current, ...next }));
@@ -143,8 +172,7 @@ export function JoinProviderPage() {
     else if (step === "details") setStep("type");
     else if (step === "aadhaar") setStep("details");
     else if (step === "pan") setStep("aadhaar");
-    else if (step === "bank") setStep("pan");
-    else if (step === "review" || step === "awaiting") setStep("bank");
+    else if (step === "review" || step === "awaiting") setStep(draft.registrationType === "business" ? "pan" : "aadhaar");
     else navigate("/settings");
   };
 
@@ -166,8 +194,6 @@ export function JoinProviderPage() {
       draft.state.trim().length > 0 &&
       emailOk;
   const panOk = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.panNumber);
-  const ifscOk = /^[A-Z]{4}0[A-Z0-9]{6}$/.test(draft.ifsc);
-  const accountOk = draft.accountNumber.replace(/\D/g, "").length >= 6;
 
   const startDigilocker = async () => {
     if (!token || busy || draft.digilockerVerified) return;
@@ -180,6 +206,7 @@ export function JoinProviderPage() {
         phone: draft.phone
       });
       setKycStatus("pending");
+      sessionRef.current = started.sessionId;
       setGatewayUrl(started.gatewayUrl);
       const popup = window.open(started.gatewayUrl, "cropvibe-digilocker", "width=480,height=760");
       if (!popup) {
@@ -196,9 +223,15 @@ export function JoinProviderPage() {
               setError(next.message || "DigiLocker verification failed.");
               return;
             }
+            if (next.status !== "verified" || !next.name) {
+              setKycStatus("pending");
+              setError(next.message || "Waiting for DigiLocker to share Aadhaar.");
+              return;
+            }
             if (next.status === "verified" && next.name) {
               if (pollRef.current) window.clearInterval(pollRef.current);
               setKycStatus("verified");
+              setError("");
               patch({
                 kycProvider: "sandbox",
                 digilockerVerified: true,
@@ -250,44 +283,6 @@ export function JoinProviderPage() {
     }
   };
 
-  const verifyBank = async () => {
-    if (!token || !accountOk || !ifscOk || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const address = [draft.street, draft.village, draft.district, draft.state].filter(Boolean).join(", ");
-      const result = await verifyProviderBankAccount(token, {
-        accountNumber: draft.accountNumber.replace(/\D/g, ""),
-        ifsc: draft.ifsc,
-        ifscDetails,
-        applicantName: draft.fullName || "Provider",
-        role: draft.track,
-        registrationType: draft.registrationType,
-        businessName: draft.businessName || undefined,
-        gstNumber: draft.gstNumber || undefined,
-        email: draft.email || undefined,
-        phone: draft.phone || undefined,
-        address: address || undefined
-      });
-      patch({
-        holderName: result.holderName,
-        bankName: result.bankName || draft.bankName,
-        bankBranch: result.bankBranch || draft.bankBranch,
-        bankVerified: result.matched
-      });
-      if (!result.matched) setError("Account holder name does not match the Aadhaar name.");
-      else if (result.submitted) {
-        setApproval("pending");
-        setStep("awaiting");
-      }
-    } catch (err) {
-      patch({ bankVerified: false, holderName: "" });
-      setError(err instanceof Error ? err.message : "Could not verify the bank account.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const addEquipment = async () => {
     if (!token || equipName.trim().length < 2 || busy) return;
     setBusy(true);
@@ -310,8 +305,16 @@ export function JoinProviderPage() {
 
   const submit = async () => {
     if (!token || busy) return;
-    if (!draft.digilockerVerified || !draft.panMatched || !draft.bankVerified || !draft.panNumber) {
-      setError("Complete DigiLocker, PAN match, and bank verification before submitting.");
+    if (!draft.digilockerVerified) {
+      setError("Verify Aadhaar with DigiLocker before submitting.");
+      return;
+    }
+    if (draft.gstNumber.trim() && !gstOk(draft.gstNumber)) {
+      setError("Enter a valid GST number.");
+      return;
+    }
+    if (isBusiness && !draft.panMatched && !gstOk(draft.gstNumber)) {
+      setError("A business needs a verified PAN or a GST number.");
       return;
     }
     setBusy(true);
@@ -322,10 +325,12 @@ export function JoinProviderPage() {
         applicantName: draft.fullName || "Provider",
         role: draft.track,
         registrationType: draft.registrationType,
-        documentSummary: "DigiLocker Aadhaar, PAN, and bank verified",
+        documentSummary: isBusiness
+          ? `DigiLocker Aadhaar${draft.panMatched ? ", PAN" : ""}${gstOk(draft.gstNumber) ? ", GST" : ""}`
+          : "DigiLocker Aadhaar",
         documents: [],
         businessName: draft.businessName || undefined,
-        gstNumber: draft.gstNumber || undefined,
+        gstNumber: gstOk(draft.gstNumber) ? draft.gstNumber.trim().toUpperCase() : undefined,
         email: draft.email || undefined,
         phone: draft.phone || undefined,
         address: address || undefined,
@@ -359,7 +364,7 @@ export function JoinProviderPage() {
             <p className="join-kicker">Rent It. Service It. Earn</p>
             <h2>Become a Provider</h2>
             <p>
-              Basic details, DigiLocker Aadhaar, PAN match, then bank account verification. Admin reviews the
+              Individuals verify with DigiLocker Aadhaar. Businesses also add PAN or GST. Admin reviews the
               application after you submit.
             </p>
             <button type="button" className="join-btn" onClick={() => setStep("terms")}>
@@ -445,8 +450,8 @@ export function JoinProviderPage() {
             <p className="join-sub">Are you registering as an individual or as a business / company?</p>
             {(
               [
-                ["individual", "Individual", "Basic details, DigiLocker Aadhaar, PAN, then bank verification."],
-                ["business", "Business / Company", "Business details, DigiLocker Aadhaar, PAN, then bank verification."]
+                ["individual", "Individual", "Basic details, then DigiLocker Aadhaar."],
+                ["business", "Business / Company", "Business details, DigiLocker Aadhaar, then PAN or GST."]
               ] as const
             ).map(([id, title, subtitle]) => (
               <button
@@ -557,7 +562,7 @@ export function JoinProviderPage() {
             </div>
             <div className="aadhaar-card__step">
               <strong>Aadhaar Verification</strong>
-              <span>Step 1 of 3</span>
+              <span>{isBusiness ? "Step 1 of 2" : "Step 1 of 1"}</span>
             </div>
             <div className="aadhaar-track">
               <div />
@@ -586,9 +591,9 @@ export function JoinProviderPage() {
               type="button"
               className="aadhaar-next-btn"
               disabled={!draft.digilockerVerified}
-              onClick={() => setStep("pan")}
+              onClick={() => setStep(isBusiness ? "pan" : "review")}
             >
-              Next: PAN and Bank Account Verification
+              {isBusiness ? "Next: PAN or GST" : "Next: Submit for review"}
             </button>
             {gatewayUrl && !draft.digilockerVerified ? (
               <a className="aadhaar-link" href={gatewayUrl} target="_blank" rel="noreferrer">
@@ -600,8 +605,8 @@ export function JoinProviderPage() {
 
         {step === "pan" ? (
           <section className="pan-card">
-            <h2>PAN Verify</h2>
-            <p className="pan-step">Step 2 of 3. Match the PAN, name, and date of birth.</p>
+            <h2>PAN or GST</h2>
+            <p className="pan-step">Step 2 of 2. Verify PAN, or enter a GST number.</p>
             <label className="pan-label" htmlFor="pan-number">
               PAN Number
             </label>
@@ -654,77 +659,29 @@ export function JoinProviderPage() {
                   : "PAN name or date of birth does not match Aadhaar."}
               </p>
             ) : null}
-            <button
-              type="button"
-              className="pan-continue"
-              disabled={!draft.panMatched}
-              onClick={() => setStep("bank")}
-            >
-              Continue
-            </button>
-          </section>
-        ) : null}
-
-        {step === "bank" ? (
-          <section className="pan-card">
-            <h2>Bank Account</h2>
-            <p className="pan-step">Step 3 of 3. Request parameters</p>
-            <label className="pan-label" htmlFor="bank-id">
-              ID Number
+            <label className="pan-label" htmlFor="gst-number">
+              GST Number
             </label>
             <input
-              id="bank-id"
+              id="gst-number"
               className="pan-input"
-              inputMode="numeric"
-              value={draft.accountNumber}
+              value={draft.gstNumber}
+              maxLength={15}
               onChange={(event) =>
-                patch({ accountNumber: event.target.value.replace(/\D/g, ""), bankVerified: false, holderName: "" })
+                patch({ gstNumber: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 15) })
               }
             />
-            <label className="pan-label" htmlFor="bank-ifsc">
-              IFSC
-            </label>
-            <input
-              id="bank-ifsc"
-              className="pan-input"
-              value={draft.ifsc}
-              maxLength={11}
-              onChange={(event) => {
-                const ifsc = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
-                patch({ ifsc, bankVerified: false, holderName: "" });
-              }}
-            />
-            <label className="pan-check">
-              <input
-                type="checkbox"
-                checked={ifscDetails}
-                onChange={(event) => setIfscDetails(event.target.checked)}
-              />
-              IFSC Details
-            </label>
-            <div className="pan-actions">
-              <button
-                type="button"
-                className="pan-submit"
-                disabled={!accountOk || !ifscOk || busy}
-                onClick={() => void verifyBank()}
-              >
-                {busy ? "Submitting…" : "Submit"}
-              </button>
-            </div>
-            {draft.holderName ? (
-              <p className={draft.bankVerified ? "pan-ok" : "pan-bad"}>
-                {draft.bankVerified
-                  ? `Account holder ${draft.holderName} matches Aadhaar.`
-                  : `Account holder ${draft.holderName} does not match Aadhaar.`}
-                {draft.bankName ? ` ${draft.bankName}${draft.bankBranch ? `, ${draft.bankBranch}` : ""}` : ""}
-              </p>
-            ) : null}
             <button
               type="button"
               className="pan-continue"
-              disabled={!draft.bankVerified}
-              onClick={() => setStep("review")}
+              disabled={(!draft.panMatched && !gstOk(draft.gstNumber)) || Boolean(draft.gstNumber.trim() && !gstOk(draft.gstNumber))}
+              onClick={() => {
+                if (draft.gstNumber.trim() && !gstOk(draft.gstNumber)) {
+                  setError("Enter a valid GST number, or leave it blank when PAN is verified.");
+                  return;
+                }
+                setStep("review");
+              }}
             >
               Continue
             </button>
@@ -742,10 +699,10 @@ export function JoinProviderPage() {
             </h2>
             <p>
               {approval === "approved"
-                ? "Admin approved the verified bank account. You can add equipment now."
+                ? "Admin approved this application. You can add equipment now."
                 : approval === "rejected"
-                  ? "Admin rejected this application. Verify the bank account again to send a new one."
-                  : "The verified bank account is in the admin KYC panel. After approval you can add equipment."}
+                  ? "Admin rejected this application. Verify Aadhaar again. A business also needs PAN or GST."
+                  : "This application is in the admin KYC panel. After approval you can add equipment."}
             </p>
             {approval === "approved" ? (
               <>
@@ -798,8 +755,9 @@ export function JoinProviderPage() {
           <section className="join-card">
             <h2>Identity checks complete</h2>
             <p>
-              DigiLocker Aadhaar, PAN, and the bank account holder are verified. Submit to send this application for
-              admin review.
+              {isBusiness
+                ? "Aadhaar and the business PAN or GST are ready. Submit to send this application for admin review."
+                : "Aadhaar is verified. Submit to send this application for admin review."}
             </p>
             <button type="button" className="join-btn" disabled={busy} onClick={() => void submit()}>
               {busy ? "Submitting…" : "Submit For Approval"}

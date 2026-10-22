@@ -150,7 +150,7 @@ export function ProviderKycVerificationScreen() {
 
           <View style={styles.stepRow}>
             <Text style={styles.stepTitle}>Aadhaar Verification</Text>
-            <Text style={styles.stepCount}>Step 1 of 3</Text>
+            <Text style={styles.stepCount}>{registrationType === "business" ? "Step 1 of 2" : "Step 1 of 1"}</Text>
           </View>
           <View style={styles.track}>
             <View style={[styles.trackFill, aadhaarDone && styles.trackFillDone]} />
@@ -201,12 +201,15 @@ export function ProviderKycVerificationScreen() {
             style={styles.outcomeRow}
             disabled={!aadhaarDone}
             onPress={() => {
-              navigation.navigate("ProviderPanVerification", { track, registrationType });
+              navigation.navigate(registrationType === "business" ? "ProviderPanVerification" : "ProviderVerification", {
+                track,
+                registrationType
+              });
             }}
           >
             <Ionicons name="ellipse-outline" size={18} color="#9aa0a6" />
             <Text style={[styles.outcomeText, aadhaarDone && styles.outcomeLink]}>
-              Next: PAN and Bank Account Verification
+              {registrationType === "business" ? "Next: PAN or GST" : "Next: Submit for review"}
             </Text>
           </Pressable>
 

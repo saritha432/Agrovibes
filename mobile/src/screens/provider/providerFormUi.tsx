@@ -9,22 +9,15 @@ export const PROVIDER_TEXT = APP_TEXT;
 export const PROVIDER_MUTED = APP_TEXT_MUTED;
 export const PROVIDER_DIVIDER = "rgba(255,255,255,0.08)";
 
-export const PROVIDER_STEPS = [
-  { id: 1, label: "Basic Details", sub: "Name and address" },
-  { id: 2, label: "DigiLocker", sub: "Aadhaar" },
-  { id: 3, label: "PAN", sub: "Match identity" },
-  { id: 4, label: "Bank Account", sub: "Verify holder" }
-] as const;
-
-/** Show current step ±1 to match compact App Store-style step chips. */
-export function visibleProviderSteps(currentStep: number) {
-  const ids =
-    currentStep <= 2
-      ? [1, 2, 3]
-      : currentStep === 3
-        ? [2, 3, 4]
-        : [2, 3, 4];
-  return PROVIDER_STEPS.filter((s) => ids.includes(s.id));
+export function providerSteps(registrationType: "individual" | "business" = "individual") {
+  const steps = [
+    { id: 1, label: "Basic Details", sub: "Name and address" },
+    { id: 2, label: "Aadhaar", sub: "DigiLocker" }
+  ];
+  if (registrationType === "business") {
+    steps.push({ id: 3, label: "PAN / GST", sub: "Business" });
+  }
+  return steps;
 }
 
 export function ProviderFormHeader({
@@ -45,8 +38,14 @@ export function ProviderFormHeader({
   );
 }
 
-export function ProviderStepBar({ currentStep }: { currentStep: number }) {
-  const steps = visibleProviderSteps(currentStep);
+export function ProviderStepBar({
+  currentStep,
+  registrationType = "individual"
+}: {
+  currentStep: number;
+  registrationType?: "individual" | "business";
+}) {
+  const steps = providerSteps(registrationType);
   return (
     <View style={ui.stepBar}>
       {steps.map((step, index) => {

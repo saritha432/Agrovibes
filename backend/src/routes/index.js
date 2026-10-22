@@ -10631,12 +10631,27 @@ router.post("/v1/bank/resolve-account", async (req, res) => {
 
 const providerKycIdentity = require("../providerKycIdentity");
 
-router.get("/v1/provider/kyc/digilocker/done", (_req, res) => {
-  res
-    .type("html")
-    .send(
-      "<!doctype html><html><body style=\"font-family:sans-serif;padding:24px\"><h1>Aadhaar received</h1><p>Return to CropVibe. The app will show Aadhaar Verified.</p></body></html>"
-    );
+router.get("/v1/provider/kyc/digilocker/done", async (req, res) => {
+  try {
+    await providerKycIdentity.acceptDigilockerRedirect({
+      code: req.query.code,
+      state: req.query.state
+    });
+  } catch (error) {
+    console.warn("[kyc] digilocker return failed:", error?.message || error);
+  }
+  res.type("html").send(`<!doctype html>
+<html>
+<body style="font-family:sans-serif;padding:24px">
+<h1>Aadhaar received</h1>
+<p>Return to the CropVibe tab. It will change to Aadhaar Verified.</p>
+<script>
+try {
+  if (window.opener) window.opener.postMessage({ type: "cropvibe-digilocker-done" }, "*");
+} catch (e) {}
+</script>
+</body>
+</html>`);
 });
 
 router.post("/v1/provider/kyc/digilocker/start", authRequired, async (req, res) => {
@@ -11003,16 +11018,24 @@ router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
     const priority = ["High", "Medium", "Low"].includes(priorityRaw) ? priorityRaw : "Medium";
 
     if (documents.length === 0) {
-      const identity = await providerKycIdentity.getCompletedProviderKycIdentity(userId);
+      const identity = await providerKycIdentity.getRegistrationIdentity(userId);
       if (!identity) {
         res.status(400).json({
-          message: "Complete DigiLocker Aadhaar, PAN match, and bank verification before submitting."
+          message: "Verify Aadhaar with DigiLocker before submitting."
+        });
+        return;
+      }
+      if (registrationType === "business" && !identity.panMatched && !gstNumber) {
+        res.status(400).json({
+          message: "A business needs a verified PAN or a GST number."
         });
         return;
       }
       const last4 = String(identity.aadhaarLast4 || "").replace(/\D/g, "").slice(-4);
-      documentSummary = `DigiLocker Aadhaar verified${last4 ? ` (ending ${last4})` : ""}, PAN ${identity.panNumber} matched, bank holder verified`
-        .slice(0, 500);
+      const parts = [`DigiLocker Aadhaar verified${last4 ? ` (ending ${last4})` : ""}`];
+      if (identity.panMatched && identity.panNumber) parts.push(`PAN ${identity.panNumber} matched`);
+      if (gstNumber) parts.push(`GST ${gstNumber}`);
+      documentSummary = parts.join(", ").slice(0, 500);
     }
 
     await query(
