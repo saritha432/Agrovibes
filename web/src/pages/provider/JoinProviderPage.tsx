@@ -200,6 +200,7 @@ export function JoinProviderPage() {
               if (pollRef.current) window.clearInterval(pollRef.current);
               setKycStatus("verified");
               patch({
+                kycProvider: "sandbox",
                 digilockerVerified: true,
                 aadhaarName: next.name,
                 aadhaarMasked: next.maskedAadhaar || "",
