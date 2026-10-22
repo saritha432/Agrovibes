@@ -6,7 +6,10 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
 import { APP_LIME } from "../theme/appColors";
-import { submitProviderRegistrationForApproval } from "../services/providerWorkflow";
+import {
+  getProviderRegistrationDraft,
+  submitProviderRegistrationForApproval
+} from "../services/providerWorkflow";
 import {
   PROVIDER_CARD,
   PROVIDER_MUTED,
@@ -21,6 +24,13 @@ export function ProviderVerificationScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { token } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  const [isBusiness, setIsBusiness] = useState(false);
+
+  React.useEffect(() => {
+    void getProviderRegistrationDraft().then((draft) => {
+      setIsBusiness(draft?.registrationType === "business");
+    });
+  }, []);
 
   const goToProviderDashboard = () => {
     navigation.dispatch(
@@ -61,7 +71,7 @@ export function ProviderVerificationScreen() {
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={4} />
+      <ProviderStepBar currentStep={isBusiness ? 3 : 2} registrationType={isBusiness ? "business" : "individual"} />
 
       <ScrollView style={pf.scroll} contentContainerStyle={pf.content}>
         <Text style={styles.title}>Verification</Text>
@@ -71,8 +81,9 @@ export function ProviderVerificationScreen() {
           <Ionicons name="shield-checkmark-outline" size={36} color={APP_LIME} />
           <Text style={styles.cardTitle}>Identity checks complete</Text>
           <Text style={styles.cardBody}>
-            DigiLocker Aadhaar, PAN, and the bank account holder are verified. Submit to send this
-            application for admin review.
+            {isBusiness
+              ? "Aadhaar and the business PAN or GST are ready. Submit to send this application for admin review."
+              : "Aadhaar is verified. Submit to send this application for admin review."}
           </Text>
         </View>
       </ScrollView>

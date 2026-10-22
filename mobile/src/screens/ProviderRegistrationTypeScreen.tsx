@@ -15,12 +15,12 @@ const TYPE_OPTIONS: Array<{ id: ProviderRegistrationType; title: string; subtitl
   {
     id: "individual",
     title: "Individual",
-    subtitle: "Basic details, DigiLocker Aadhaar, PAN, then bank verification."
+    subtitle: "Basic details, then DigiLocker Aadhaar."
   },
   {
     id: "business",
     title: "Business / Company",
-    subtitle: "Business details, DigiLocker Aadhaar, PAN, then bank verification."
+    subtitle: "Business details, DigiLocker Aadhaar, then PAN or GST."
   }
 ];
 

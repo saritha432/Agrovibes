@@ -47,7 +47,7 @@ const PAGE_ONE: RuleSection[] = [
 
 const PAGE_TWO_EXTRA = [
   "• Availability schedule",
-  "• DigiLocker Aadhaar, PAN matched to that identity, and a verified bank account",
+  "• Individual: DigiLocker Aadhaar. Business: DigiLocker Aadhaar plus PAN or GST.",
   "I agree to the Rental Provider Terms & Conditions, confirm that the information provided is accurate, and accept responsibility for the safety and condition of the listed equipment and services."
 ];
 

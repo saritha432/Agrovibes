@@ -53,7 +53,7 @@ export function ProviderListingScreen() {
             </Text>
             <Text style={styles.pendingSub}>
               {registrationStatus === "rejected"
-                ? "Admin rejected your KYC. Repeat DigiLocker, PAN, and bank verification, then resubmit."
+                ? "Admin rejected your KYC. Verify Aadhaar again. A business also needs PAN or GST."
                 : "Admin review is required before your listings go live to customers."}
             </Text>
           </View>

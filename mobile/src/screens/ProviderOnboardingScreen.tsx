@@ -90,7 +90,7 @@ const PROCESS_STEPS = [
   {
     icon: "shield-checkmark-outline" as const,
     title: "Verify",
-    body: "Basic details, DigiLocker Aadhaar, PAN match, then bank account verification."
+    body: "Individuals verify with DigiLocker Aadhaar. Businesses also add PAN or GST."
   },
   {
     icon: "document-text-outline" as const,
@@ -108,7 +108,7 @@ const VERIFY_CARDS = [
   {
     icon: "grid-outline" as const,
     title: "Machinery owners need government ID and equipment proof",
-    body: "Individuals submit government ID and bank details. Businesses add registration certificates. Photos of your equipment help farmers trust the listing."
+    body: "Individuals verify with DigiLocker Aadhaar. Businesses also add PAN or GST. Photos of your equipment help farmers trust the listing."
   },
   {
     icon: "shield-checkmark-outline" as const,

@@ -74,7 +74,7 @@ export function ProviderPersonalDetailsScreen() {
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={1} />
+      <ProviderStepBar currentStep={1} registrationType={registrationType} />
 
       <ScrollView
         style={pf.scroll}

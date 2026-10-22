@@ -490,7 +490,7 @@ async function latestDigilockerSession(userId, sessionId) {
   await ensureProviderKycIdentity();
   const rows = await query(
     `
-    SELECT id, user_id AS "userId", provider, client_id AS "clientId", status
+    SELECT id, user_id AS "userId", provider, client_id AS "clientId", gateway_token AS "gatewayToken", status
     FROM provider_kyc_digilocker_sessions
     WHERE user_id = $1
       AND ($2::text = '' OR id = $2)
@@ -521,6 +521,46 @@ async function pullSandboxDigilockerStatus(sessionId) {
   return { state: "pending" };
 }
 
+async function acceptDigilockerRedirect({ code, state }) {
+  const authCode = String(code || "").trim();
+  if (!authCode) return;
+  await ensureProviderKycIdentity();
+  const parts = String(state || "")
+    .trim()
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const sandboxSessionId = parts.find((part) => /^[0-9a-f-]{16,}$/i.test(part) && part.includes("-")) || parts[1] || "";
+  if (!sandboxSessionId) return;
+  await query(
+    `
+    UPDATE provider_kyc_digilocker_sessions
+    SET gateway_token = 'returned'
+    WHERE provider = 'sandbox' AND client_id = $1
+    `,
+    [sandboxSessionId]
+  );
+}
+
+function profileDob(value) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+async function pullSandboxProfile(sessionId) {
+  const { response, payload } = await sandboxRequest(
+    `/kyc/digilocker/sessions/${encodeURIComponent(sessionId)}/user/profile`
+  );
+  if (!response.ok) return null;
+  const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+  const name = String(data.name || "").trim();
+  if (!name) return null;
+  return { name, last4: "", dob: profileDob(data.date_of_birth) };
+}
+
 async function pullSandboxAadhaar(sessionId) {
   const { response, payload } = await sandboxRequest(
     `/kyc/digilocker/sessions/${encodeURIComponent(sessionId)}/documents/aadhaar`
@@ -535,9 +575,9 @@ async function pullSandboxAadhaar(sessionId) {
   } catch {
     return null;
   }
-  if (!xmlResponse.ok) return null;
+  if (!xmlResponse.ok) return pullSandboxProfile(sessionId);
   const xml = await xmlResponse.text();
-  return aadhaarFromXml(xml);
+  return aadhaarFromXml(xml) || pullSandboxProfile(sessionId);
 }
 
 async function pullSurepassAadhaar(clientId) {
@@ -601,10 +641,10 @@ async function completeDigilockerSession({ userId, sessionId }) {
       await setDigilockerKycStatus(userId, session.id, "failed", remote.message);
       return { status: "failed", message: remote.message };
     }
-    if (remote.state !== "verified") {
+    if (remote.state !== "verified" && session.gatewayToken !== "returned") {
       return {
         status: "pending",
-        message: "DigiLocker has not shared Aadhaar yet. Stay on that page until it returns to CropVibe."
+        message: "DigiLocker has not shared Aadhaar yet. Finish the consent page, then return to this tab."
       };
     }
   }
@@ -912,6 +952,25 @@ async function verifyBankAccount({ userId, accountNumber, ifsc, ifscDetails = tr
   };
 }
 
+async function getRegistrationIdentity(userId) {
+  await ensureProviderKycIdentity();
+  const rows = await query(
+    `
+    SELECT
+      aadhaar_name AS "aadhaarName",
+      aadhaar_last4 AS "aadhaarLast4",
+      pan_number AS "panNumber",
+      pan_matched AS "panMatched"
+    FROM provider_kyc_identity
+    WHERE user_id = $1
+      AND aadhaar_verified_at > NOW() - INTERVAL '24 hours'
+    LIMIT 1
+    `,
+    [userId]
+  );
+  return rows.rows[0] || null;
+}
+
 async function getCompletedProviderKycIdentity(userId) {
   await ensureProviderKycIdentity();
   const rows = await query(
@@ -940,9 +999,11 @@ module.exports = {
   activeKycProvider,
   namesMatch,
   normalizePan,
+  acceptDigilockerRedirect,
   startDigilockerSession,
   completeDigilockerSession,
   verifyPanNumber,
   verifyBankAccount,
+  getRegistrationIdentity,
   getCompletedProviderKycIdentity
 };

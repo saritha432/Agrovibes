@@ -255,8 +255,17 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
   const state = await readState();
   const draft = state.registrationDraft;
   const panNumber = String(draft?.panNumber || "").trim().toUpperCase();
-  if (!draft?.digilockerVerified || !draft?.panMatched || !draft?.bankVerified || !panNumber) {
-    throw new Error("Complete DigiLocker, PAN match, and bank verification before submitting.");
+  const gstRaw = String(draft?.gstNumber || "").trim().toUpperCase();
+  const gstValid = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstRaw);
+  const isBusiness = draft?.registrationType === "business";
+  if (!draft?.digilockerVerified) {
+    throw new Error("Verify Aadhaar with DigiLocker before submitting.");
+  }
+  if (gstRaw && !gstValid) {
+    throw new Error("Enter a valid GST number.");
+  }
+  if (isBusiness && !draft?.panMatched && !gstValid) {
+    throw new Error("A business needs a verified PAN or a GST number.");
   }
   if (!token) {
     throw new Error("Please sign in again, then submit for review.");
@@ -269,10 +278,12 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
     applicantName: draft?.fullName || "Provider",
     role: draft?.track || "rental",
     registrationType: draft?.registrationType || "individual",
-    documentSummary: "DigiLocker Aadhaar, PAN, and bank verified",
+    documentSummary: isBusiness
+      ? `DigiLocker Aadhaar${draft?.panMatched ? ", PAN" : ""}${gstValid ? ", GST" : ""}`
+      : "DigiLocker Aadhaar",
     documents: [],
     businessName: draft?.businessName || undefined,
-    gstNumber: draft?.gstNumber || undefined,
+    gstNumber: gstValid ? gstRaw : undefined,
     email: draft?.email || undefined,
     phone: draft?.phone || undefined,
     address: address || undefined,
