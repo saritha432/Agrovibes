@@ -23,6 +23,8 @@ export function ProviderKycVerificationScreen() {
   const [kycStatus, setKycStatus] = useState<"idle" | "pending" | "verified" | "failed">("idle");
   const [result, setResult] = useState<{ name: string; maskedAadhaar: string; dob: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sessionRef = useRef("");
+  const webRef = useRef<WebView>(null);
 
   useEffect(() => {
     void (async () => {
@@ -61,9 +63,14 @@ export function ProviderKycVerificationScreen() {
       }
       if (next.status !== "verified" || !next.name) {
         setKycStatus("pending");
+        setError(
+          next.message ||
+            "DigiLocker has not shared Aadhaar yet. Stay on that page until it closes by itself."
+        );
         return;
       }
       stopPolling();
+      setError("");
       setGatewayUrl("");
       setKycStatus("verified");
       setResult({
@@ -100,6 +107,7 @@ export function ProviderKycVerificationScreen() {
         phone: draft?.phone
       });
       setKycStatus("pending");
+      sessionRef.current = started.sessionId;
       setGatewayUrl(started.gatewayUrl);
       stopPolling();
       pollRef.current = setInterval(() => {
@@ -110,6 +118,14 @@ export function ProviderKycVerificationScreen() {
     } finally {
       setStarting(false);
     }
+  };
+
+  const returnedFromDigilocker = (url: string) => {
+    if (!url) return;
+    const finished = url.includes("/provider/kyc/digilocker/done") || /[?&]code=/.test(url);
+    if (!finished) return;
+    setGatewayUrl("");
+    void readResult(sessionRef.current);
   };
 
   const badge = kycStatus === "failed" ? "Failed" : "Pending";
@@ -207,6 +223,7 @@ export function ProviderKycVerificationScreen() {
             <Pressable
               onPress={() => {
                 setGatewayUrl("");
+                void readResult(sessionRef.current);
               }}
               hitSlop={12}
             >
@@ -217,13 +234,30 @@ export function ProviderKycVerificationScreen() {
           </View>
           {gatewayUrl ? (
             <WebView
+              ref={webRef}
               source={{ uri: gatewayUrl }}
               style={styles.web}
               thirdPartyCookiesEnabled
               sharedCookiesEnabled
               javaScriptEnabled
               domStorageEnabled
-              setSupportMultipleWindows={false}
+              setSupportMultipleWindows
+              originWhitelist={["*"]}
+              userAgent="Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+              onNavigationStateChange={(nav) => returnedFromDigilocker(nav.url)}
+              onShouldStartLoadWithRequest={(request) => {
+                returnedFromDigilocker(request.url);
+                return true;
+              }}
+              onOpenWindow={(event) => {
+                const url = event.nativeEvent.targetUrl;
+                if (!url) return;
+                if (url.includes("/provider/kyc/digilocker/done") || /[?&]code=/.test(url)) {
+                  returnedFromDigilocker(url);
+                  return;
+                }
+                webRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
+              }}
             />
           ) : null}
         </SafeAreaView>

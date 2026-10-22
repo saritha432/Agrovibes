@@ -17,10 +17,16 @@ function surepassToken() {
 
 let sandboxTokenCache = { token: "", expiresAt: 0 };
 
+function sandboxEnvValue(name) {
+  return String(process.env[name] || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
+}
+
 function sandboxCredentials() {
   return {
-    key: String(process.env.SANDBOX_API_KEY || "").trim(),
-    secret: String(process.env.SANDBOX_API_SECRET || "").trim()
+    key: sandboxEnvValue("SANDBOX_API_KEY"),
+    secret: sandboxEnvValue("SANDBOX_API_SECRET")
   };
 }
 
@@ -30,11 +36,12 @@ function sandboxConfigured() {
 }
 
 function sandboxBase() {
-  const configured = String(process.env.SANDBOX_API_BASE_URL || process.env.SANDBOX_BASE_URL || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (configured) return configured;
-  const env = String(process.env.SANDBOX_ENV || "").trim().toLowerCase();
+  const { key } = sandboxCredentials();
+  if (key.startsWith("key_live_")) return "https://api.sandbox.co.in";
+  if (key.startsWith("key_test_")) return "https://test-api.sandbox.co.in";
+  const configured = sandboxEnvValue("SANDBOX_API_BASE_URL") || sandboxEnvValue("SANDBOX_BASE_URL");
+  if (configured) return configured.replace(/\/$/, "");
+  const env = sandboxEnvValue("SANDBOX_ENV").toLowerCase();
   if (env === "production" || env === "prod" || env === "live") return "https://api.sandbox.co.in";
   return "https://test-api.sandbox.co.in";
 }
@@ -174,6 +181,15 @@ async function sandboxAccessToken(forceRefresh = false) {
   if (!key || !secret) {
     throw providerError("DigiLocker is not configured. Add SANDBOX_API_KEY and SANDBOX_API_SECRET on the server.", 503);
   }
+  if (key.startsWith("key_live_") && !secret.startsWith("secret_live_")) {
+    throw providerError(
+      "The live API key needs its live secret. In Sandbox, regenerate the live key, then save both the new key and the new secret on the server.",
+      503
+    );
+  }
+  if (key.startsWith("key_test_") && secret.startsWith("secret_live_")) {
+    throw providerError("The test API key needs its test secret, not the live secret.", 503);
+  }
   let response;
   try {
     response = await fetch(`${sandboxBase()}/authenticate`, {
@@ -191,7 +207,14 @@ async function sandboxAccessToken(forceRefresh = false) {
   const payload = await response.json().catch(() => null);
   const token = String(payload?.data?.access_token || "").trim();
   if (!response.ok || !token) {
-    throw providerError(payload?.message || "Sandbox login failed. Check the API key and secret.", 503);
+    const message = String(payload?.message || "");
+    if (/bad credentials|unauthorized|invalid api key/i.test(message)) {
+      throw providerError(
+        "Sandbox rejected this key and secret. Use the live key with the live secret on https://api.sandbox.co.in, then restart the server.",
+        503
+      );
+    }
+    throw providerError(message || "Sandbox login failed. Check the API key and secret.", 503);
   }
   sandboxTokenCache = { token, expiresAt: Date.now() + 23 * 60 * 60 * 1000 };
   return token;
@@ -223,6 +246,17 @@ async function sandboxRequest(path, { method = "GET", body } = {}, retry = true)
   }
   const payload = await response.json().catch(() => null);
   return { response, payload };
+}
+
+function sandboxError(payload, fallback) {
+  const message = String(payload?.message || "").trim();
+  if (/does not match any saved example/i.test(message)) {
+    return providerError(
+      "The Sandbox test key cannot open a real DigiLocker session. On the server, use the live API key and set SANDBOX_BASE_URL to https://api.sandbox.co.in.",
+      422
+    );
+  }
+  return providerError(message || fallback, 422);
 }
 
 function aadhaarFromXml(xml) {
@@ -375,7 +409,7 @@ async function startDigilockerSession({ userId, fullName, phone }) {
     const clientId = String(data.session_id || "").trim();
     const gatewayUrl = String(data.authorization_url || "").trim();
     if (!response.ok || !clientId || !gatewayUrl.startsWith("https://")) {
-      throw providerError(payload?.message || "Could not start DigiLocker.", response.status === 503 ? 503 : 422);
+      throw sandboxError(payload, "Could not start DigiLocker.");
     }
     await query(
       `
@@ -568,7 +602,10 @@ async function completeDigilockerSession({ userId, sessionId }) {
       return { status: "failed", message: remote.message };
     }
     if (remote.state !== "verified") {
-      return { status: "pending", message: "Waiting for DigiLocker sign-in." };
+      return {
+        status: "pending",
+        message: "DigiLocker has not shared Aadhaar yet. Stay on that page until it returns to CropVibe."
+      };
     }
   }
   if (session.provider === "surepass" && session.status !== "verified") {

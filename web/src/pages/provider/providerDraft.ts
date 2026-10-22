@@ -14,6 +14,7 @@ export type ProviderJoinDraft = {
   state: string;
   gstNumber: string;
   yearsExperience: string;
+  kycProvider?: string;
   digilockerVerified: boolean;
   aadhaarName: string;
   aadhaarMasked: string;
@@ -63,7 +64,19 @@ export function readProviderDraft(): ProviderJoinDraft {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY_PROVIDER_DRAFT;
-    return { ...EMPTY_PROVIDER_DRAFT, ...(JSON.parse(raw) as Partial<ProviderJoinDraft>) };
+    const saved = { ...EMPTY_PROVIDER_DRAFT, ...(JSON.parse(raw) as Partial<ProviderJoinDraft>) };
+    if (saved.kycProvider === "sandbox") return saved;
+    return {
+      ...saved,
+      digilockerVerified: false,
+      aadhaarName: "",
+      aadhaarMasked: "",
+      panNumber: "",
+      panName: "",
+      panMatched: false,
+      bankVerified: false,
+      holderName: ""
+    };
   } catch {
     return EMPTY_PROVIDER_DRAFT;
   }
