@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetchProviderKycStatus, submitProviderKyc } from "./api";
+import { fetchProviderKycStatus, submitProviderKyc, submitProviderListing } from "./api";
 
 export type ProviderApprovalStatus = "not_submitted" | "pending" | "approved" | "rejected";
 export type ListingApprovalStatus = "pending" | "approved" | "rejected";
@@ -315,16 +315,25 @@ export async function submitListingForApproval(input: {
   title: string;
   category: string;
   channel: string;
+  token?: string | null;
 }): Promise<string> {
+  if (!input.token) {
+    throw new Error("Please sign in again, then submit the listing.");
+  }
+  const created = await submitProviderListing(input.token, {
+    title: input.title,
+    category: input.category,
+    channel: input.channel
+  });
   let state = await readState();
-  const listingId = makeId("listing");
+  const listingId = String(created.listing?.id || makeId("listing"));
   const listing: ProviderListingRecord = {
     id: listingId,
     title: input.title,
     category: input.category,
     channel: input.channel,
     status: "pending",
-    createdAt: new Date().toISOString()
+    createdAt: created.listing?.createdAt || new Date().toISOString()
   };
   state = {
     ...state,

@@ -22,8 +22,14 @@ function registrationTypeLabel(value?: string | null) {
   return String(value || "").toLowerCase() === "business" ? "Business / Company" : "Individual";
 }
 
+const LOGIN_NOTICE_KEY = "cropvibe_admin_login_notice";
+
+function isExpiredAdminSession(message: string) {
+  return /invalid auth token|session expired|missing auth token/i.test(message);
+}
+
 export function KycVerificationPage() {
-  const { token } = useAuth();
+  const { token, signOut } = useAuth();
   const [rows, setRows] = useState<AdminKycRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,12 +56,21 @@ export function KycVerificationPage() {
       const data = await fetchAdminKyc(token);
       setRows(data.submissions || []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load KYC submissions");
+      const message = e instanceof Error ? e.message : "Failed to load KYC submissions";
+      if (isExpiredAdminSession(message)) {
+        sessionStorage.setItem(
+          LOGIN_NOTICE_KEY,
+          "Your admin login expired. Log in again to see provider requests."
+        );
+        signOut();
+        return;
+      }
+      setError(message);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, signOut]);
 
   useEffect(() => {
     void load();
@@ -109,6 +124,12 @@ export function KycVerificationPage() {
                 <tr>
                   <td colSpan={6} className="kyc-empty">
                     Loading KYC submissions…
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan={6} className="kyc-empty">
+                    Provider requests could not be loaded.
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
