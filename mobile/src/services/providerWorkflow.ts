@@ -393,6 +393,40 @@ export async function markProviderRegistrationApprovedLocally(): Promise<void> {
   await writeState(state);
 }
 
+export async function uploadLocalListings(token?: string | null): Promise<ProviderListingRecord[]> {
+  const state = await readState();
+  if (!token) return state.listings;
+  let listings = [...state.listings];
+  let changed = false;
+  for (let index = 0; index < listings.length; index += 1) {
+    const row = listings[index];
+    if (/^\d+$/.test(String(row.id))) continue;
+    try {
+      const created = await submitProviderListing(token, {
+        title: row.title,
+        category: row.category,
+        channel: row.channel
+      });
+      listings[index] = {
+        ...row,
+        id: String(created.listing?.id || row.id),
+        createdAt: created.listing?.createdAt || row.createdAt,
+        status: "pending"
+      };
+      changed = true;
+    } catch {
+      // Keep the phone copy until the server accepts it.
+    }
+  }
+  if (changed) {
+    const latest = await readState();
+    await writeState({ ...latest, listings });
+  }
+  const remote = await syncProviderListingsFromApi(token);
+  if (remote.length) return remote;
+  return (await readState()).listings;
+}
+
 export async function syncProviderListingsFromApi(token?: string | null): Promise<ProviderListingRecord[]> {
   const state = await readState();
   if (!token) return state.listings;

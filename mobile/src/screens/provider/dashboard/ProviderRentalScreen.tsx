@@ -17,7 +17,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import {
   getProviderBookings,
   getProviderListings,
-  syncProviderListingsFromApi,
+  uploadLocalListings,
   type ProviderListingRecord
 } from "../../../services/providerWorkflow";
 
@@ -470,7 +470,7 @@ export function ProviderRentalScreen() {
     useCallback(() => {
       let mounted = true;
       const load = async () => {
-        const storedListings = await syncProviderListingsFromApi(token).catch(() => getProviderListings());
+        const storedListings = await uploadLocalListings(token).catch(() => getProviderListings());
         const rentalListings = storedListings.filter((row) => row.channel !== "Services" && row.channel !== "Educators");
         const storedBookings = await getProviderBookings();
         if (!mounted) return;
