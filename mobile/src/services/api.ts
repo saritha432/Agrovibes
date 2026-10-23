@@ -918,6 +918,19 @@ export async function verifyProviderKycOtp(token: string, aadhaar: string, code:
   })) as { success: boolean; aadhaarLast4: string };
 }
 
+export async function fetchProviderListings(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token)) as {
+    listings: Array<{
+      id: number;
+      title: string;
+      category: string;
+      channel: string;
+      status: string;
+      createdAt: string;
+    }>;
+  };
+}
+
 export async function submitProviderListing(
   token: string,
   payload: { title: string; category: string; channel: string }

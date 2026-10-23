@@ -1,33 +1,43 @@
 import React, { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { ProviderChromeHeader } from "./ProviderChrome";
 import { useAuth } from "../../../auth/AuthContext";
-import { APP_LIME, APP_TEXT_MUTED } from "../../../theme/appColors";
+import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
 import {
-  getProviderRegistrationStatus,
-  processAdminApprovals,
+  getProviderListings,
+  syncProviderListingsFromApi,
   syncProviderRegistrationFromApi,
-  type ProviderApprovalStatus
+  type ProviderApprovalStatus,
+  type ProviderListingRecord
 } from "../../../services/providerWorkflow";
 
 const BG = "#303132";
+const CARD = "#373838";
+
+function listingStatusLabel(status: ProviderListingRecord["status"]) {
+  if (status === "approved") return "Approved";
+  if (status === "rejected") return "Rejected";
+  return "Waiting for admin approval";
+}
 
 export function ProviderListingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { token } = useAuth();
   const [registrationStatus, setRegistrationStatus] = useState<ProviderApprovalStatus>("not_submitted");
+  const [listings, setListings] = useState<ProviderListingRecord[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       const load = async () => {
-        await processAdminApprovals();
         const synced = await syncProviderRegistrationFromApi(token);
-        const status = synced || (await getProviderRegistrationStatus());
-        if (active) setRegistrationStatus(status);
+        const nextListings = await syncProviderListingsFromApi(token).catch(() => getProviderListings());
+        if (!active) return;
+        setRegistrationStatus(synced);
+        setListings(nextListings);
       };
       void load();
       return () => {
@@ -39,7 +49,7 @@ export function ProviderListingScreen() {
   return (
     <View style={styles.screen}>
       <ProviderChromeHeader />
-      <View style={styles.body}>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Your listings</Text>
         <Text style={styles.sub}>Create a rental, service, store, or educator listing.</Text>
         {registrationStatus !== "approved" ? (
@@ -58,6 +68,15 @@ export function ProviderListingScreen() {
             </Text>
           </View>
         ) : null}
+        {listings.map((listing) => (
+          <View key={listing.id} style={styles.listingCard}>
+            <Text style={styles.listingTitle}>{listing.title}</Text>
+            <Text style={styles.listingMeta}>
+              {listing.category} · {listing.channel}
+            </Text>
+            <Text style={styles.listingStatus}>{listingStatusLabel(listing.status)}</Text>
+          </View>
+        ))}
         <Pressable
           style={styles.cta}
           onPress={() => navigation.navigate("ProviderNewListing")}
@@ -66,7 +85,7 @@ export function ProviderListingScreen() {
           <Ionicons name="add" size={22} color="#000" />
           <Text style={styles.ctaText}>New Listing</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -74,11 +93,10 @@ export function ProviderListingScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG },
   body: {
-    flex: 1,
     alignItems: "center",
-    justifyContent: "center",
     paddingHorizontal: 28,
-    paddingBottom: 100
+    paddingTop: 28,
+    paddingBottom: 120
   },
   title: { color: APP_LIME, fontSize: 22, fontWeight: "800" },
   sub: {
@@ -101,6 +119,17 @@ const styles = StyleSheet.create({
   },
   pendingTitle: { color: APP_LIME, fontSize: 13, fontWeight: "700", marginBottom: 4 },
   pendingSub: { color: APP_TEXT_MUTED, fontSize: 12, lineHeight: 17 },
+  listingCard: {
+    width: "100%",
+    maxWidth: 398,
+    backgroundColor: CARD,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12
+  },
+  listingTitle: { color: APP_TEXT, fontSize: 16, fontWeight: "800" },
+  listingMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 4 },
+  listingStatus: { color: APP_LIME, fontSize: 12, fontWeight: "700", marginTop: 8 },
   cta: {
     flexDirection: "row",
     alignItems: "center",

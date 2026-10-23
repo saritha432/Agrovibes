@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   Image,
   ImageSourcePropType,
@@ -9,11 +9,17 @@ import {
   View
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { ProviderChromeHeader } from "./ProviderChrome";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
-import { getProviderBookings, processAdminApprovals } from "../../../services/providerWorkflow";
+import { useAuth } from "../../../auth/AuthContext";
+import {
+  getProviderBookings,
+  getProviderListings,
+  syncProviderListingsFromApi,
+  type ProviderListingRecord
+} from "../../../services/providerWorkflow";
 
 const BG = "#303132";
 const CARD = "#373838";
@@ -41,7 +47,7 @@ const RENTAL_TABS: Array<{
 ];
 
 const LISTING_TYPE_OPTIONS = ["All", "Equipment", "Machinery", "Drivers", "Labors", "Land", "Warehouse"] as const;
-const STATUS_OPTIONS = ["All", "Available", "Booked", "Under Maintenance", "Inactive"] as const;
+const STATUS_OPTIONS = ["All", "Available", "Waiting for approval", "Booked", "Under Maintenance", "Inactive"] as const;
 const LOCATION_OPTIONS = ["All", "Hyderabad", "Vijayawada", "Guntur", "Warangal"] as const;
 
 const INVENTORY_FILTER_CONFIG: Array<FilterConfigItem<InventoryFilterKey>> = [
@@ -59,92 +65,38 @@ const BOOKING_FILTER_CONFIG: Array<FilterConfigItem<BookingFilterKey>> = [
   { key: "location", label: "Location", options: LOCATION_OPTIONS }
 ];
 
-const RENTAL_BOOKINGS = [
-  {
-    id: "b1",
-    title: "AquaVeer 5HP Turbo Submersible Pump",
-    category: "Tools & Hand Equipment",
-    location: "Location Name",
-    bookingType: "Equipment",
-    status: "Pending",
-    badge: "Available",
-    customerName: "Ravi Kumar",
-    customerPhone: "+91 98765 43210",
-    bookingDate: "12 Aug 2026",
-    startTime: "09:00 AM",
-    endTime: "05:00 PM",
-    duration: "1 Day",
-    pickupLocation: "Village Road, Guntur District",
-    requestedOn: "10 Aug 2026, 6:42 PM",
-    notes: "Need pump for irrigation on 2-acre paddy field. Please confirm delivery timing."
-  },
-  {
-    id: "b2",
-    title: "AquaVeer 5HP Turbo Submersible Pump",
-    category: "Tools & Hand Equipment",
-    location: "Hyderabad",
-    bookingType: "Equipment",
-    status: "Pending",
-    badge: "Available",
-    customerName: "Srinivas Reddy",
-    customerPhone: "+91 91234 56789",
-    bookingDate: "14 Aug 2026",
-    startTime: "07:30 AM",
-    endTime: "12:30 PM",
-    duration: "Half Day",
-    pickupLocation: "Shamshabad, Hyderabad",
-    requestedOn: "11 Aug 2026, 10:15 AM",
-    notes: "Pickup preferred before 8 AM if possible."
-  }
-] as const;
+type Listing = {
+  id: string;
+  title: string;
+  category: string;
+  location: string;
+  status: string;
+  listingType: string;
+  description: string;
+  expandedIntro: string;
+  equipmentDetails: string[];
+  conditions: string[];
+  pricing: string[];
+};
 
-const INVENTORY_LISTINGS = [
-  {
-    id: "1",
-    title: "AquaVeer 5HP Turbo Submersible Pump",
-    category: "Tools & Hand Equipment",
-    location: "Location Name",
-    status: "Available",
-    listingType: "Equipment",
-    description:
-      "This equipment is in good condition and ready for immediate use. It has been regularly serviced and is suitable for daily operations. Ideal for farmers and contractors looking for reliable performance.",
-    expandedIntro:
-      "Here's a full specification sheet for aquaVeer 5hp turbo submersible pump, filled out against the crop vibe 'add equipment' listing fields from the doc:",
-    equipmentDetails: [
-      "Equipment Type: Pump",
-      "Fuel / Power Source: Petrol",
-      "Tank/Reservoir Capacity: 20 Liters",
-      "Power Output: 50 HP",
-      "Usage Guidance Available: Yes! Instructional Material Included"
-    ],
-    conditions: ["All Functions Work Smoothly", "complete with all accessories"],
-    pricing: ["Rate: ₹ 2,323/Day", "Service Area: 25 Km"]
-  },
-  {
-    id: "2",
-    title: "AquaVeer 5HP Turbo Submersible Pump",
-    category: "Tools & Hand Equipment",
-    location: "Hyderabad",
-    status: "Available",
-    listingType: "Equipment",
-    description:
-      "This equipment is in good condition and ready for immediate use. It has been regularly serviced and is suitable for daily operations. Ideal for farmers and contractors looking for reliable performance.",
-    expandedIntro:
-      "Here's a full specification sheet for aquaVeer 5hp turbo submersible pump, filled out against the crop vibe 'add equipment' listing fields from the doc:",
-    equipmentDetails: [
-      "Equipment Type: Pump",
-      "Fuel / Power Source: Petrol",
-      "Tank/Reservoir Capacity: 20 Liters",
-      "Power Output: 50 HP",
-      "Usage Guidance Available: Yes! Instructional Material Included"
-    ],
-    conditions: ["All Functions Work Smoothly", "complete with all accessories"],
-    pricing: ["Rate: ₹ 2,323/Day", "Service Area: 25 Km"]
-  }
-] as const;
-
-type Listing = (typeof INVENTORY_LISTINGS)[number];
-type Booking = (typeof RENTAL_BOOKINGS)[number];
+type Booking = {
+  id: string;
+  title: string;
+  category: string;
+  location: string;
+  bookingType: string;
+  status: string;
+  badge: string;
+  customerName: string;
+  customerPhone: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  duration: string;
+  pickupLocation: string;
+  requestedOn: string;
+  notes: string;
+};
 type InventoryFilters = Record<InventoryFilterKey, string>;
 type BookingFilters = Record<BookingFilterKey, string>;
 
@@ -400,7 +352,34 @@ function matchesBookingFilters(booking: Booking, filters: BookingFilters) {
   return true;
 }
 
-function InventoryTab() {
+function listingTypeFor(category: string) {
+  const text = category.toLowerCase();
+  if (text.includes("driver")) return "Drivers";
+  if (text.includes("labo")) return "Labors";
+  if (text.includes("land")) return "Land";
+  if (text.includes("warehouse")) return "Warehouse";
+  if (text.includes("machin")) return "Machinery";
+  return "Equipment";
+}
+
+function toInventoryListing(row: ProviderListingRecord): Listing {
+  const status = row.status === "approved" ? "Available" : row.status === "rejected" ? "Inactive" : "Waiting for approval";
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    location: "Your listing",
+    status,
+    listingType: listingTypeFor(row.category),
+    description: `${row.title} is ${status.toLowerCase()}.`,
+    expandedIntro: `${row.title} · ${row.channel}`,
+    equipmentDetails: [`Category: ${row.category}`, `Channel: ${row.channel}`],
+    conditions: [],
+    pricing: [`Status: ${status}`]
+  };
+}
+
+function InventoryTab({ listings }: { listings: Listing[] }) {
   const [filters, setFilters] = useState<InventoryFilters>({
     listingType: "All",
     status: "All",
@@ -408,7 +387,7 @@ function InventoryTab() {
   });
   const [openFilter, setOpenFilter] = useState<InventoryFilterKey | null>(null);
 
-  const visibleListings = INVENTORY_LISTINGS.filter((listing) => matchesInventoryFilters(listing, filters));
+  const visibleListings = listings.filter((listing) => matchesInventoryFilters(listing, filters));
 
   return (
     <ScrollView
@@ -427,9 +406,11 @@ function InventoryTab() {
           setOpenFilter(null);
         }}
       />
-      {visibleListings.map((listing) => (
-        <InventoryListingCard key={listing.id} listing={listing} />
-      ))}
+      {visibleListings.length === 0 ? (
+        <Text style={styles.placeholderSub}>Your rental listings will appear here after you publish one.</Text>
+      ) : (
+        visibleListings.map((listing) => <InventoryListingCard key={listing.id} listing={listing} />)
+      )}
     </ScrollView>
   );
 }
@@ -461,9 +442,11 @@ function BookingsTab({ bookings }: { bookings: Booking[] }) {
           setOpenFilter(null);
         }}
       />
-      {visibleBookings.map((booking) => (
-        <BookingCard key={booking.id} booking={booking} />
-      ))}
+      {visibleBookings.length === 0 ? (
+        <Text style={styles.placeholderSub}>Customer bookings will appear here.</Text>
+      ) : (
+        visibleBookings.map((booking) => <BookingCard key={booking.id} booking={booking} />)
+      )}
     </ScrollView>
   );
 }
@@ -478,29 +461,54 @@ function RentalPlaceholderTab({ title, subtitle }: { title: string; subtitle: st
 }
 
 export function ProviderRentalScreen() {
+  const { token } = useAuth();
   const [activeTab, setActiveTab] = useState<RentalTab>("inventory");
-  const [liveBookings, setLiveBookings] = useState<Booking[]>(RENTAL_BOOKINGS as unknown as Booking[]);
+  const [inventory, setInventory] = useState<Listing[]>([]);
+  const [liveBookings, setLiveBookings] = useState<Booking[]>([]);
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      await processAdminApprovals();
-      const storedBookings = await getProviderBookings();
-      if (!mounted || storedBookings.length === 0) return;
-      setLiveBookings(storedBookings as unknown as Booking[]);
-    };
-    void load();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      const load = async () => {
+        const storedListings = await syncProviderListingsFromApi(token).catch(() => getProviderListings());
+        const rentalListings = storedListings.filter((row) => row.channel !== "Services" && row.channel !== "Educators");
+        const storedBookings = await getProviderBookings();
+        if (!mounted) return;
+        setInventory(rentalListings.map(toInventoryListing));
+        setLiveBookings(
+          storedBookings.map((booking) => ({
+            id: booking.id,
+            title: booking.listingTitle,
+            category: "Booking",
+            location: booking.pickupLocation,
+            bookingType: "Equipment",
+            status: "Pending",
+            badge: "Pending",
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone,
+            bookingDate: booking.bookingDate,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            duration: booking.duration,
+            pickupLocation: booking.pickupLocation,
+            requestedOn: booking.createdAt,
+            notes: booking.notes || ""
+          }))
+        );
+      };
+      void load();
+      return () => {
+        mounted = false;
+      };
+    }, [token])
+  );
 
   return (
     <View style={styles.screen}>
       <ProviderChromeHeader />
       <RentalTabBar active={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "inventory" ? <InventoryTab /> : null}
+      {activeTab === "inventory" ? <InventoryTab listings={inventory} /> : null}
       {activeTab === "bookings" ? <BookingsTab bookings={liveBookings} /> : null}
       {activeTab === "payments" ? (
         <RentalPlaceholderTab title="Payments" subtitle="Earnings and payout history will appear here." />

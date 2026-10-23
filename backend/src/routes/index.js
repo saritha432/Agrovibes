@@ -11311,6 +11311,30 @@ router.post("/v1/provider/listings", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/provider/listings", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    await ensureProviderListingsTable();
+    const result = await query(
+      `
+      SELECT id, title, category, channel, status, created_at AS "createdAt"
+      FROM provider_listings
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100
+      `,
+      [userId]
+    );
+    res.json({ listings: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load listings", error: error?.message || String(error) });
+  }
+});
+
 router.get("/v1/admin/listings", authRequired, requireRole("admin"), async (req, res) => {
   try {
     await ensureProviderListingsTable();
