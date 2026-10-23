@@ -311,7 +311,7 @@ function pickAadhaarProfile(payload) {
     data.aadhaar ||
     data.details ||
     data;
-  const name = String(profile.full_name || profile.name || profile.fullName || "").trim();
+  const name = String(profile.full_name || profile.name || profile.fullName || profile.name_on_card || "").trim();
   const masked = String(profile.masked_aadhaar || profile.aadhaar_number || profile.uid || "");
   const last4 = masked.replace(/\D/g, "").slice(-4);
   const dob = String(profile.dob || profile.date_of_birth || profile.dateOfBirth || "").trim();
@@ -367,12 +367,18 @@ async function pullSurepassDigilockerStatus(clientId) {
       message: String(data.error_description || data.error || data.message || payload?.message || "DigiLocker verification failed.")
     };
   }
-  const verified =
+  const documentStatus = String(
+    data?.documents?.aadhaar?.status || data.aadhaar_status || data.document_status || ""
+  ).toLowerCase();
+  const completed =
     data.completed === true ||
-    data.success === true ||
-    raw === "success" ||
-    raw === "completed" ||
-    raw === "verified";
+    data.completed === "true" ||
+    data.aadhaar_linked === true ||
+    data.success === true;
+  const verified =
+    completed ||
+    ["success", "completed", "verified", "authenticated", "approved", "done"].includes(raw) ||
+    ["success", "completed", "verified"].includes(documentStatus);
   if (verified) return { state: "verified" };
   return { state: "pending" };
 }
@@ -423,11 +429,13 @@ async function startDigilockerSession({ userId, fullName, phone }) {
   }
 
   if (provider === "surepass") {
+    const redirectUrl = `${sandboxRedirectUrl()}?session=${encodeURIComponent(sessionId)}`;
     const { response, payload } = await surepassRequest("/api/v1/digilocker/initialize", {
       data: {
         signup_flow: true,
         skip_main_screen: false,
-        auth_type: "app"
+        redirect_url: redirectUrl,
+        redirection_url: redirectUrl
       }
     });
     const data = payload?.data || {};
@@ -521,10 +529,32 @@ async function pullSandboxDigilockerStatus(sessionId) {
   return { state: "pending" };
 }
 
-async function acceptDigilockerRedirect({ code, state }) {
+async function acceptDigilockerRedirect({ code, state, clientId, sessionId }) {
+  await ensureProviderKycIdentity();
+  const ourSessionId = String(sessionId || "").trim();
+  if (ourSessionId) {
+    await query(
+      `
+      UPDATE provider_kyc_digilocker_sessions
+      SET gateway_token = 'returned'
+      WHERE id = $1
+      `,
+      [ourSessionId]
+    );
+  }
+  const surepassClientId = String(clientId || "").trim();
+  if (surepassClientId) {
+    await query(
+      `
+      UPDATE provider_kyc_digilocker_sessions
+      SET gateway_token = 'returned'
+      WHERE client_id = $1
+      `,
+      [surepassClientId]
+    );
+  }
   const authCode = String(code || "").trim();
   if (!authCode) return;
-  await ensureProviderKycIdentity();
   const parts = String(state || "")
     .trim()
     .split("|")
@@ -654,7 +684,7 @@ async function completeDigilockerSession({ userId, sessionId }) {
       await setDigilockerKycStatus(userId, session.id, "failed", remote.message);
       return { status: "failed", message: remote.message };
     }
-    if (remote.state === "pending") {
+    if (remote.state === "pending" && session.gatewayToken !== "returned") {
       return { status: "pending", message: "Waiting for DigiLocker sign-in." };
     }
   }

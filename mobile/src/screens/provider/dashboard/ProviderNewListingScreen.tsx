@@ -1299,11 +1299,20 @@ export function ProviderNewListingScreen() {
     }
     const listingTitle = equipmentName.trim() || selectedAssetMeta?.title || "Untitled listing";
     const listingCategory = selectedAssetMeta?.title || (isService ? "Service" : "Rental");
-    await submitListingForApproval({
-      title: listingTitle,
-      category: listingCategory,
-      channel
-    });
+    try {
+      await submitListingForApproval({
+        title: listingTitle,
+        category: listingCategory,
+        channel,
+        token
+      });
+    } catch (error) {
+      Alert.alert(
+        "Could not submit listing",
+        error instanceof Error ? error.message : "The listing was not sent to admin."
+      );
+      return;
+    }
     Alert.alert(
       "Listing submitted",
       isSoilTesting

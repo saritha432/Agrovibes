@@ -10635,7 +10635,9 @@ router.get("/v1/provider/kyc/digilocker/done", async (req, res) => {
   try {
     await providerKycIdentity.acceptDigilockerRedirect({
       code: req.query.code,
-      state: req.query.state
+      state: req.query.state,
+      clientId: req.query.client_id || req.query.clientId,
+      sessionId: req.query.session
     });
   } catch (error) {
     console.warn("[kyc] digilocker return failed:", error?.message || error);
@@ -11240,6 +11242,171 @@ router.post("/v1/provider/equipment", authRequired, async (req, res) => {
     res.status(201).json({ equipment: inserted.rows[0] });
   } catch (error) {
     res.status(500).json({ message: "Failed to add equipment", error: error?.message || String(error) });
+  }
+});
+
+async function ensureProviderListingsTable() {
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS provider_listings (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'Equipment',
+      channel TEXT NOT NULL DEFAULT 'Rental',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ
+    )
+    `
+  );
+}
+
+function adminListingCategory(channel) {
+  const value = String(channel || "").trim().toLowerCase();
+  if (value === "services" || value === "service") return "Services";
+  if (value === "educators" || value === "education") return "Education";
+  return "Products";
+}
+
+function adminListingStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  if (value === "approved") return "Approved";
+  if (value === "unpublished") return "Unpublished";
+  return "Pending";
+}
+
+router.post("/v1/provider/listings", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    if (!(await requireApprovedProvider(userId))) {
+      res.status(403).json({ message: "Admin must approve your provider registration before listings can be submitted." });
+      return;
+    }
+    const title = String(req.body?.title || "").trim().slice(0, 160);
+    const category = String(req.body?.category || "Equipment").trim().slice(0, 80) || "Equipment";
+    const channelRaw = String(req.body?.channel || "Rental").trim();
+    const channel = ["Store", "Rental", "Services", "Educators"].includes(channelRaw) ? channelRaw : "Rental";
+    if (title.length < 2) {
+      res.status(400).json({ message: "Enter the listing name." });
+      return;
+    }
+    await ensureProviderListingsTable();
+    const inserted = await query(
+      `
+      INSERT INTO provider_listings (user_id, title, category, channel, status)
+      VALUES ($1, $2, $3, $4, 'pending')
+      RETURNING id, title, category, channel, status, created_at AS "createdAt"
+      `,
+      [userId, title, category, channel]
+    );
+    res.status(201).json({ listing: inserted.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to submit listing", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/provider/listings", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    await ensureProviderListingsTable();
+    const result = await query(
+      `
+      SELECT id, title, category, channel, status, created_at AS "createdAt"
+      FROM provider_listings
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100
+      `,
+      [userId]
+    );
+    res.json({ listings: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load listings", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/admin/listings", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    await ensureProviderListingsTable();
+    const result = await query(
+      `
+      SELECT
+        l.id,
+        l.title,
+        l.category,
+        l.channel,
+        l.status,
+        l.created_at AS "submitted",
+        u.full_name AS "submitterName",
+        u.email AS "submitterEmail",
+        u.avatar_url AS "submitterAvatarUrl"
+      FROM provider_listings l
+      LEFT JOIN learn_users u ON u.id = l.user_id
+      ORDER BY
+        CASE WHEN l.status = 'pending' THEN 0 ELSE 1 END,
+        l.created_at DESC
+      LIMIT 200
+      `
+    );
+    res.json({
+      listings: result.rows.map((row) => ({
+        id: row.id,
+        category: adminListingCategory(row.channel),
+        title: row.title,
+        subtitle: row.category || row.channel,
+        submitterName: row.submitterName || "Provider",
+        submitterEmail: row.submitterEmail || "",
+        submitterAvatarUrl: row.submitterAvatarUrl || null,
+        date: row.submitted ? new Date(row.submitted).toISOString() : null,
+        flags: 0,
+        status: adminListingStatus(row.status)
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load listings", error: error?.message || String(error) });
+  }
+});
+
+router.post("/v1/admin/listings/:id/respond", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    const listingId = Number(req.params.id);
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    if (!Number.isFinite(listingId) || listingId <= 0) {
+      res.status(400).json({ message: "Invalid listing" });
+      return;
+    }
+    if (action !== "approve" && action !== "unpublish") {
+      res.status(400).json({ message: "Choose approve or unpublish." });
+      return;
+    }
+    const status = action === "approve" ? "approved" : "unpublished";
+    await ensureProviderListingsTable();
+    const updated = await query(
+      `
+      UPDATE provider_listings
+      SET status = $2, reviewed_at = NOW()
+      WHERE id = $1
+      RETURNING id, status
+      `,
+      [listingId, status]
+    );
+    if (!updated.rows[0]) {
+      res.status(404).json({ message: "Listing not found" });
+      return;
+    }
+    res.json({ listing: { id: listingId, status: adminListingStatus(status) } });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update listing", error: error?.message || String(error) });
   }
 });
 

@@ -1,28 +1,51 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminLayout } from "../components/AdminLayout";
+import { useAuth } from "../auth/AuthContext";
+import { fetchAdminListings, respondAdminListing, type AdminListingRow } from "../api/listings";
 import "./ListingsPage.css";
 
-type ListingStatus = "Pending" | "Approved" | "Unpublished";
-type ListingCategory = "Products" | "Services" | "Education";
-
-type ListingRow = {
-  id: string;
-  category: ListingCategory;
-  title: string;
-  subtitle: string;
-  submitterName: string;
-  submitterEmail: string;
-  submitterAvatarUrl?: string | null;
-  date: string;
-  flags: number;
-  status: ListingStatus;
-};
+type ListingRow = AdminListingRow;
 
 const PAGE_SIZE = 10;
 
+function formatSubmitted(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 export function ListingsPage() {
+  const { token } = useAuth();
   const [rows, setRows] = useState<ListingRow[]>([]);
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    if (!token || token.startsWith("local-admin-")) {
+      setError("Log in with the admin account to load listings.");
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchAdminListings(token);
+      setRows(data.listings || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load listings");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageRows = useMemo(() => {
@@ -30,8 +53,18 @@ export function ListingsPage() {
     return rows.slice(start, start + PAGE_SIZE);
   }, [page, rows]);
 
-  const setStatus = (id: string, status: ListingStatus) => {
-    setRows((prev) => prev.map((row) => (row.id === id ? { ...row, status } : row)));
+  const setStatus = async (id: number, action: "approve" | "unpublish") => {
+    if (!token || token.startsWith("local-admin-")) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      await respondAdminListing(token, id, action);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update listing");
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const pageItems = useMemo(() => {
@@ -71,7 +104,19 @@ export function ListingsPage() {
               </tr>
             </thead>
             <tbody>
-              {pageRows.length === 0 ? (
+              {error ? (
+                <tr>
+                  <td colSpan={6} className="listings-empty">
+                    {error}
+                  </td>
+                </tr>
+              ) : loading ? (
+                <tr>
+                  <td colSpan={6} className="listings-empty">
+                    Loading listings…
+                  </td>
+                </tr>
+              ) : pageRows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="listings-empty">
                     No listings found.
@@ -100,7 +145,7 @@ export function ListingsPage() {
                         </span>
                       </div>
                     </td>
-                    <td>{row.date}</td>
+                    <td>{formatSubmitted(row.date)}</td>
                     <td>
                       {row.flags > 0 ? (
                         <span className="listings-flag">{row.flags}</span>
@@ -118,16 +163,16 @@ export function ListingsPage() {
                         <button
                           type="button"
                           className="listings-btn listings-btn--approve"
-                          disabled={row.status === "Approved"}
-                          onClick={() => setStatus(row.id, "Approved")}
+                          disabled={row.status === "Approved" || busyId === row.id}
+                          onClick={() => void setStatus(row.id, "approve")}
                         >
                           Approve
                         </button>
                         <button
                           type="button"
                           className="listings-btn listings-btn--unpublish"
-                          disabled={row.status === "Unpublished"}
-                          onClick={() => setStatus(row.id, "Unpublished")}
+                          disabled={row.status === "Unpublished" || busyId === row.id}
+                          onClick={() => void setStatus(row.id, "unpublish")}
                         >
                           Unpublish
                         </button>

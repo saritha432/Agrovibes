@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetchProviderKycStatus, submitProviderKyc } from "./api";
+import { fetchProviderKycStatus, fetchProviderListings, submitProviderKyc, submitProviderListing } from "./api";
 
 export type ProviderApprovalStatus = "not_submitted" | "pending" | "approved" | "rejected";
 export type ListingApprovalStatus = "pending" | "approved" | "rejected";
@@ -180,12 +180,10 @@ export async function syncProviderRegistrationFromApi(token?: string | null): Pr
   try {
     const remote = await fetchProviderKycStatus(token);
     const remoteStatus = String(remote.status || "not_submitted").toLowerCase();
-    let nextStatus: ProviderApprovalStatus = state.registrationStatus;
-    if (remoteStatus === "pending" || remoteStatus === "approved" || remoteStatus === "rejected") {
-      nextStatus = remoteStatus;
-    } else if (remoteStatus === "not_submitted") {
-      nextStatus = state.registrationStatus === "pending" ? "pending" : "not_submitted";
-    }
+    const nextStatus: ProviderApprovalStatus =
+      remoteStatus === "pending" || remoteStatus === "approved" || remoteStatus === "rejected"
+        ? remoteStatus
+        : "not_submitted";
     if (nextStatus !== state.registrationStatus) {
       let next = { ...state, registrationStatus: nextStatus };
       if (nextStatus === "approved") {
@@ -315,16 +313,25 @@ export async function submitListingForApproval(input: {
   title: string;
   category: string;
   channel: string;
+  token?: string | null;
 }): Promise<string> {
+  if (!input.token) {
+    throw new Error("Please sign in again, then submit the listing.");
+  }
+  const created = await submitProviderListing(input.token, {
+    title: input.title,
+    category: input.category,
+    channel: input.channel
+  });
   let state = await readState();
-  const listingId = makeId("listing");
+  const listingId = String(created.listing?.id || makeId("listing"));
   const listing: ProviderListingRecord = {
     id: listingId,
     title: input.title,
     category: input.category,
     channel: input.channel,
     status: "pending",
-    createdAt: new Date().toISOString()
+    createdAt: created.listing?.createdAt || new Date().toISOString()
   };
   state = {
     ...state,
@@ -384,6 +391,27 @@ export async function markProviderRegistrationApprovedLocally(): Promise<void> {
     "Admin approved your profile. You can now start your business."
   );
   await writeState(state);
+}
+
+export async function syncProviderListingsFromApi(token?: string | null): Promise<ProviderListingRecord[]> {
+  const state = await readState();
+  if (!token) return state.listings;
+  try {
+    const remote = await fetchProviderListings(token);
+    const listings: ProviderListingRecord[] = (remote.listings || []).map((row) => ({
+      id: String(row.id),
+      title: row.title,
+      category: row.category,
+      channel: row.channel,
+      status: row.status === "approved" ? "approved" : row.status === "rejected" ? "rejected" : "pending",
+      createdAt: row.createdAt
+    }));
+    if (!listings.length && state.listings.length) return state.listings;
+    await writeState({ ...state, listings });
+    return listings;
+  } catch {
+    return state.listings;
+  }
 }
 
 export async function getProviderListings(): Promise<ProviderListingRecord[]> {

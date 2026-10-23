@@ -63,10 +63,7 @@ export function ProviderKycVerificationScreen() {
       }
       if (next.status !== "verified" || !next.name) {
         setKycStatus("pending");
-        setError(
-          next.message ||
-            "DigiLocker has not shared Aadhaar yet. Stay on that page until it closes by itself."
-        );
+        setError(next.message || "Confirming Aadhaar from DigiLocker. This page updates by itself.");
         return;
       }
       stopPolling();
@@ -120,15 +117,16 @@ export function ProviderKycVerificationScreen() {
     }
   };
 
-  const returnedFromDigilocker = (url: string) => {
-    if (!url) return;
-    const finished = url.includes("/provider/kyc/digilocker/done") || /[?&]code=/.test(url);
-    if (!finished) return;
+  const digilockerFinished = (url: string) =>
+    url.includes("/provider/kyc/digilocker/done") || /[?&](code|status)=(success|completed)/i.test(url);
+
+  const finishDigilocker = (url: string) => {
+    if (!digilockerFinished(url)) return;
     setGatewayUrl("");
     void readResult(sessionRef.current);
   };
 
-  const badge = kycStatus === "failed" ? "Failed" : "Pending";
+  const badge = kycStatus === "verified" ? "Verified" : kycStatus === "failed" ? "Failed" : "Pending";
   const aadhaarDone = Boolean(result);
 
   return (
@@ -143,8 +141,22 @@ export function ProviderKycVerificationScreen() {
         <View style={styles.card}>
           <View style={styles.cardHead}>
             <Text style={styles.cardTitle}>Provider Verification</Text>
-            <View style={[styles.badge, kycStatus === "failed" && styles.badgeFailed]}>
-              <Text style={[styles.badgeText, kycStatus === "failed" && styles.badgeTextFailed]}>{badge}</Text>
+            <View
+              style={[
+                styles.badge,
+                kycStatus === "failed" && styles.badgeFailed,
+                kycStatus === "verified" && styles.badgeVerified
+              ]}
+            >
+              <Text
+                style={[
+                  styles.badgeText,
+                  kycStatus === "failed" && styles.badgeTextFailed,
+                  kycStatus === "verified" && styles.badgeTextVerified
+                ]}
+              >
+                {badge}
+              </Text>
             </View>
           </View>
 
@@ -175,7 +187,7 @@ export function ProviderKycVerificationScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.primaryBtnText}>
-                {aadhaarDone ? "Aadhaar Verified" : "Verify with DigiLocker"}
+                {aadhaarDone ? "Aadhaar Verified" : kycStatus === "pending" ? "Checking Aadhaar…" : "Verify with DigiLocker"}
               </Text>
             )}
           </Pressable>
@@ -220,7 +232,14 @@ export function ProviderKycVerificationScreen() {
         </View>
       </ScrollView>
 
-      <Modal visible={Boolean(gatewayUrl)} animationType="slide" onRequestClose={() => setGatewayUrl("")}>
+      <Modal
+        visible={Boolean(gatewayUrl)}
+        animationType="slide"
+        onRequestClose={() => {
+          setGatewayUrl("");
+          void readResult(sessionRef.current);
+        }}
+      >
         <SafeAreaView style={styles.modal}>
           <View style={styles.modalBar}>
             <Pressable
@@ -247,16 +266,16 @@ export function ProviderKycVerificationScreen() {
               setSupportMultipleWindows
               originWhitelist={["*"]}
               userAgent="Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-              onNavigationStateChange={(nav) => returnedFromDigilocker(nav.url)}
-              onShouldStartLoadWithRequest={(request) => {
-                returnedFromDigilocker(request.url);
-                return true;
+              onLoadEnd={(event) => finishDigilocker(event.nativeEvent.url)}
+              onNavigationStateChange={(nav) => {
+                if (!nav.loading) finishDigilocker(nav.url);
               }}
+              onShouldStartLoadWithRequest={() => true}
               onOpenWindow={(event) => {
                 const url = event.nativeEvent.targetUrl;
                 if (!url) return;
-                if (url.includes("/provider/kyc/digilocker/done") || /[?&]code=/.test(url)) {
-                  returnedFromDigilocker(url);
+                if (digilockerFinished(url)) {
+                  finishDigilocker(url);
                   return;
                 }
                 webRef.current?.injectJavaScript(`window.location.href = ${JSON.stringify(url)}; true;`);
@@ -293,8 +312,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4
   },
   badgeFailed: { backgroundColor: "#fde2e2" },
+  badgeVerified: { backgroundColor: "#dcfce7" },
   badgeText: { color: "#c56a1a", fontSize: 12, fontWeight: "700" },
   badgeTextFailed: { color: "#c24141" },
+  badgeTextVerified: { color: GREEN },
   stepRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   stepTitle: { color: "#1a1a1a", fontSize: 15, fontWeight: "700" },
   stepCount: { color: "#8b9198", fontSize: 12 },

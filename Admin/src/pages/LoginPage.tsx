@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { adminLogin } from "../api/auth";
 import { useAuth } from "../auth/AuthContext";
@@ -11,6 +11,13 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const notice = sessionStorage.getItem("cropvibe_admin_login_notice");
+    if (!notice) return;
+    sessionStorage.removeItem("cropvibe_admin_login_notice");
+    setError(notice);
+  }, []);
 
   if (!loading && token) return <Navigate to="/" replace />;
 
