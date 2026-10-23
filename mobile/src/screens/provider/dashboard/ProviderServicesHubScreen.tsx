@@ -6,7 +6,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
 import {
   getProviderListings,
-  syncProviderListingsFromApi,
+  uploadLocalListings,
   type ProviderListingRecord
 } from "../../../services/providerWorkflow";
 
@@ -21,7 +21,7 @@ export function ProviderServicesHubScreen() {
     useCallback(() => {
       let active = true;
       const load = async () => {
-        const rows = await syncProviderListingsFromApi(token).catch(() => getProviderListings());
+        const rows = await uploadLocalListings(token).catch(() => getProviderListings());
         if (!active) return;
         setListings(rows.filter((row) => row.channel === "Services"));
       };

@@ -8,7 +8,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
 import {
   getProviderListings,
-  syncProviderListingsFromApi,
+  uploadLocalListings,
   syncProviderRegistrationFromApi,
   type ProviderApprovalStatus,
   type ProviderListingRecord
@@ -34,7 +34,7 @@ export function ProviderListingScreen() {
       let active = true;
       const load = async () => {
         const synced = await syncProviderRegistrationFromApi(token);
-        const nextListings = await syncProviderListingsFromApi(token).catch(() => getProviderListings());
+        const nextListings = await uploadLocalListings(token).catch(() => getProviderListings());
         if (!active) return;
         setRegistrationStatus(synced);
         setListings(nextListings);

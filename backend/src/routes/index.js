@@ -11284,10 +11284,6 @@ router.post("/v1/provider/listings", authRequired, async (req, res) => {
       res.status(401).json({ message: "Invalid auth session" });
       return;
     }
-    if (!(await requireApprovedProvider(userId))) {
-      res.status(403).json({ message: "Admin must approve your provider registration before listings can be submitted." });
-      return;
-    }
     const title = String(req.body?.title || "").trim().slice(0, 160);
     const category = String(req.body?.category || "Equipment").trim().slice(0, 80) || "Equipment";
     const channelRaw = String(req.body?.channel || "Rental").trim();
