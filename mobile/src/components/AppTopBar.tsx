@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
-import { navigateToPlantHealth, navigateToWeather } from "../navigation/navigationRef";
+import { navigateToPlantHealth, navigateToUserSearch, navigateToWeather } from "../navigation/navigationRef";
 import { APP_BLACK, APP_DARK_BG, APP_LIME, APP_TEXT } from "../theme/appColors";
 import { useTopChromeInset } from "../theme/topChromeInset";
 
@@ -36,6 +36,9 @@ export function AppTopBar() {
           </Pressable>
           <Pressable style={styles.iconBadge} onPress={navigateToWeather} accessibilityLabel="Weather">
             <Ionicons name="partly-sunny-outline" size={26} color={APP_TEXT} />
+          </Pressable>
+          <Pressable style={styles.iconBadge} onPress={navigateToUserSearch} accessibilityLabel="Search">
+            <Ionicons name="search-outline" size={24} color={APP_TEXT} />
           </Pressable>
           <Pressable style={styles.iconBadge} onPress={openNotificationSheet} accessibilityLabel="Notifications">
             <Image source={require("../../assets/notifications.png")} style={styles.notificationIcon} resizeMode="contain" />

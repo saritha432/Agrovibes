@@ -146,6 +146,33 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen
+        name="DiscoverSearch"
+        getComponent={() => require("../screens/UserSearchScreen").UserSearchScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#121212" }
+        }}
+      />
+      <Stack.Screen
+        name="RentalBooking"
+        getComponent={() => require("../screens/rental/RentalBookingScreen").RentalBookingScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#262626" }
+        }}
+      />
+      <Stack.Screen
+        name="RentalCategory"
+        getComponent={() => require("../screens/rental/RentalCategoryScreen").RentalCategoryScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#262626" }
+        }}
+      />
+      <Stack.Screen
         name="Weather"
         getComponent={() => require("../screens/WeatherScreen").WeatherScreen}
         options={{

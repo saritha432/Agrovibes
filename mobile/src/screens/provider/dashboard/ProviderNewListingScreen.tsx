@@ -1304,6 +1304,7 @@ export function ProviderNewListingScreen() {
         title: listingTitle,
         category: listingCategory,
         channel,
+        imageUri: photos[0]?.uri,
         token
       });
     } catch (error) {

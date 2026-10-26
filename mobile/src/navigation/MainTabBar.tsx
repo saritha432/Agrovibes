@@ -29,10 +29,6 @@ const BRAND_ACCENT = APP_LIME;
 const TAB_ICON_SIZE = 24;
 
 const BOTTOM_TAB_ICONS = {
-  search: {
-    active: require("../../assets/bottom-icons/search-active.svg"),
-    inactive: require("../../assets/bottom-icons/search.svg")
-  },
   messages: {
     active: require("../../assets/bottom-icons/chat-active.svg"),
     inactive: require("../../assets/bottom-icons/chat.svg")
@@ -299,11 +295,15 @@ export function MainTabBar({ state, navigation, onCreatePress, createFocused = f
         <TabSlot
           focused={searchFocused}
           onPress={() => pressRoute("Search")}
-          accessibilityLabel="Discover"
-          label="Discover"
+          accessibilityLabel="Rentals"
+          label="Rentals"
           dimmed={isAccountDeactivated}
         >
-          <TabSvgIcon focused={searchFocused} icons={BOTTOM_TAB_ICONS.search} fallbackName="search-outline" />
+          <Ionicons
+            name={searchFocused ? "construct" : "construct-outline"}
+            size={TAB_ICON_SIZE}
+            color={searchFocused ? BRAND_ACCENT : MUTED}
+          />
         </TabSlot>
 
         <TabSlot

@@ -6,6 +6,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
 import {
   getProviderListings,
+  listingStatusText,
   uploadLocalListings,
   type ProviderListingRecord
 } from "../../../services/providerWorkflow";
@@ -43,9 +44,7 @@ export function ProviderServicesHubScreen() {
             <View key={listing.id} style={styles.card}>
               <Text style={styles.title}>{listing.title}</Text>
               <Text style={styles.meta}>{listing.category}</Text>
-              <Text style={styles.status}>
-                {listing.status === "approved" ? "Approved" : "Waiting for admin approval"}
-              </Text>
+              <Text style={styles.status}>{listingStatusText(listing)}</Text>
             </View>
           ))}
         </ScrollView>

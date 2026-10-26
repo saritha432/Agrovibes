@@ -13,7 +13,7 @@ import {
   useWindowDimensions
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +27,7 @@ import { formatDisplayName, resolvePersonDisplayName } from "../localization/fee
 import { useLanguage } from "../localization/LanguageContext";
 import type { AppLanguage } from "../localization/LanguageContext";
 import { navigateToMyProfile, navigateToPublicProfile } from "../navigation/navigationRef";
-import { useAndroidTabBackToHome } from "../navigation/useAndroidScreenBack";
+import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import {
   fetchHomePostsPage,
   fetchUsers,
@@ -258,7 +258,8 @@ function HighlightedQueryText({
 
 export function UserSearchScreen() {
   const { t, language } = useLanguage();
-  useAndroidTabBackToHome();
+  const navigation = useNavigation();
+  useAndroidNestedStackBack();
   const { token, user } = useAuth();
   const isAccountDeactivated = useIsAccountDeactivated();
   const { width } = useWindowDimensions();
@@ -778,6 +779,15 @@ export function UserSearchScreen() {
     <SafeAreaView style={styles.root} edges={["top"]}>
       <DeactivatedChromeWrap>
       <View style={styles.searchHeaderRow}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={8}
+          style={styles.backBtn}
+        >
+          <Ionicons name="chevron-back" size={26} color={TEXT} />
+        </Pressable>
         <View style={styles.searchWrap}>
           <Ionicons name="search" size={18} color={SEARCH_ICON} />
           <TextInput
@@ -878,9 +888,16 @@ const styles = StyleSheet.create({
   searchHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 12,
+    marginHorizontal: 8,
     marginTop: 8,
-    marginBottom: 6
+    marginBottom: 6,
+    gap: 4
+  },
+  backBtn: {
+    width: 36,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center"
   },
   searchWrap: {
     flex: 1,

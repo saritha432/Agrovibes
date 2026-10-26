@@ -8,6 +8,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
 import {
   getProviderListings,
+  listingStatusText,
   uploadLocalListings,
   syncProviderRegistrationFromApi,
   type ProviderApprovalStatus,
@@ -16,12 +17,6 @@ import {
 
 const BG = "#303132";
 const CARD = "#373838";
-
-function listingStatusLabel(status: ProviderListingRecord["status"]) {
-  if (status === "approved") return "Approved";
-  if (status === "rejected") return "Rejected";
-  return "Waiting for admin approval";
-}
 
 export function ProviderListingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
@@ -74,7 +69,7 @@ export function ProviderListingScreen() {
             <Text style={styles.listingMeta}>
               {listing.category} · {listing.channel}
             </Text>
-            <Text style={styles.listingStatus}>{listingStatusLabel(listing.status)}</Text>
+            <Text style={styles.listingStatus}>{listingStatusText(listing)}</Text>
           </View>
         ))}
         <Pressable

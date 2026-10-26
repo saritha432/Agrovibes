@@ -33,6 +33,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavSection[] = [
     items: [
       { to: "/users", label: "Users", icon: "/sidebar-icons/users.png" },
       { to: "/listings", label: "Listings", icon: "/sidebar-icons/listings.png" },
+      { to: "/bookings", label: "Bookings", icon: "/sidebar-icons/bookings.png" },
       { to: "/settlements", label: "Settlements", icon: "/sidebar-icons/settlements.png" }
     ]
   },
