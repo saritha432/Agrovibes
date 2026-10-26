@@ -120,7 +120,7 @@ export function SettingsMenuPage() {
             icon={<SettingsIconStore />}
             title="Open provider dashboard"
             subtitle="Overview, rental, listings, and services"
-            to="/provider/join"
+            to="/provider"
             showDivider={false}
           />
         </SettingsSection>

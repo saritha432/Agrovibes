@@ -706,6 +706,9 @@ export function JoinProviderPage() {
             </p>
             {approval === "approved" ? (
               <>
+                <button type="button" className="join-btn" onClick={() => navigate("/provider")}>
+                  Open provider dashboard
+                </button>
                 <label className="pan-label" htmlFor="equip-name">
                   Equipment name
                 </label>
