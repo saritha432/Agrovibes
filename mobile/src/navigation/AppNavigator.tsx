@@ -143,7 +143,7 @@ export function AppNavigator() {
           {/* Defer non-Home tabs until first visit — avoids parsing Search/Market/Chat/etc at cold start. */}
           <Tab.Screen
             name="Search"
-            getComponent={() => require("../screens/UserSearchScreen").UserSearchScreen}
+            getComponent={() => require("../screens/rental/RentalBookingsPortalScreen").RentalBookingsPortalScreen}
           />
           <Tab.Screen
             name="Market"

@@ -55,6 +55,10 @@ export type ProviderListingRecord = {
   status: ListingApprovalStatus;
   createdAt: string;
   approvedAt?: string;
+  /** Local photo. The listings API does not store images. */
+  imageUri?: string;
+  /** Set when this phone copy has not been inserted into provider_listings. */
+  serverError?: string;
 };
 
 export type ProviderBookingRecord = {
@@ -100,6 +104,33 @@ const DEFAULT_STATE: ProviderWorkflowState = {
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isServerListingId(id: unknown): boolean {
+  return /^\d+$/.test(String(id ?? ""));
+}
+
+function uploadFailureMessage(error: unknown): string {
+  const err = error as { message?: string; payload?: { error?: string } };
+  const message = error instanceof Error ? error.message : "Could not reach the server.";
+  const detail = typeof err?.payload?.error === "string" ? err.payload.error.trim() : "";
+  if (detail && !message.includes(detail)) return `${message} (${detail})`;
+  return message;
+}
+
+export function listingReachedServer(listing: Pick<ProviderListingRecord, "id">): boolean {
+  return isServerListingId(listing.id);
+}
+
+export function listingStatusText(listing: ProviderListingRecord): string {
+  if (!isServerListingId(listing.id)) {
+    return listing.serverError
+      ? `Not sent to admin. ${listing.serverError}`
+      : "Saved on this phone only. It is not in the admin list yet.";
+  }
+  if (listing.status === "approved") return "Approved";
+  if (listing.status === "rejected") return "Rejected";
+  return "Waiting for admin approval";
 }
 
 async function readState(): Promise<ProviderWorkflowState> {
@@ -313,6 +344,7 @@ export async function submitListingForApproval(input: {
   title: string;
   category: string;
   channel: string;
+  imageUri?: string;
   token?: string | null;
 }): Promise<string> {
   if (!input.token) {
@@ -323,14 +355,19 @@ export async function submitListingForApproval(input: {
     category: input.category,
     channel: input.channel
   });
+  const serverId = Number(created?.listing?.id);
+  if (!Number.isFinite(serverId) || serverId <= 0) {
+    throw new Error("The server did not save this listing.");
+  }
   let state = await readState();
-  const listingId = String(created.listing?.id || makeId("listing"));
+  const listingId = String(serverId);
   const listing: ProviderListingRecord = {
     id: listingId,
     title: input.title,
     category: input.category,
     channel: input.channel,
     status: "pending",
+    imageUri: input.imageUri,
     createdAt: created.listing?.createdAt || new Date().toISOString()
   };
   state = {
@@ -395,27 +432,42 @@ export async function markProviderRegistrationApprovedLocally(): Promise<void> {
 
 export async function uploadLocalListings(token?: string | null): Promise<ProviderListingRecord[]> {
   const state = await readState();
-  if (!token) return state.listings;
+  if (!token) {
+    return state.listings.map((row) =>
+      isServerListingId(row.id)
+        ? row
+        : { ...row, serverError: "Sign in again so this listing can be sent to admin." }
+    );
+  }
   let listings = [...state.listings];
   let changed = false;
   for (let index = 0; index < listings.length; index += 1) {
     const row = listings[index];
-    if (/^\d+$/.test(String(row.id))) continue;
+    if (isServerListingId(row.id)) continue;
     try {
       const created = await submitProviderListing(token, {
         title: row.title,
         category: row.category,
         channel: row.channel
       });
+      const serverId = Number(created?.listing?.id);
+      if (!Number.isFinite(serverId) || serverId <= 0) {
+        throw new Error("The server did not save this listing.");
+      }
       listings[index] = {
         ...row,
-        id: String(created.listing?.id || row.id),
+        id: String(serverId),
         createdAt: created.listing?.createdAt || row.createdAt,
-        status: "pending"
+        status: "pending",
+        serverError: undefined
       };
       changed = true;
-    } catch {
-      // Keep the phone copy until the server accepts it.
+    } catch (error) {
+      const serverError = uploadFailureMessage(error);
+      if (row.serverError !== serverError) {
+        listings[index] = { ...row, serverError };
+        changed = true;
+      }
     }
   }
   if (changed) {
@@ -423,8 +475,10 @@ export async function uploadLocalListings(token?: string | null): Promise<Provid
     await writeState({ ...latest, listings });
   }
   const remote = await syncProviderListingsFromApi(token);
-  if (remote.length) return remote;
-  return (await readState()).listings;
+  const localOnly = (await readState()).listings.filter((row) => !isServerListingId(row.id));
+  if (!remote.length) return (await readState()).listings;
+  const remoteIds = new Set(remote.map((row) => row.id));
+  return [...remote.filter((row) => isServerListingId(row.id)), ...localOnly.filter((row) => !remoteIds.has(row.id))];
 }
 
 export async function syncProviderListingsFromApi(token?: string | null): Promise<ProviderListingRecord[]> {
@@ -432,15 +486,20 @@ export async function syncProviderListingsFromApi(token?: string | null): Promis
   if (!token) return state.listings;
   try {
     const remote = await fetchProviderListings(token);
-    const listings: ProviderListingRecord[] = (remote.listings || []).map((row) => ({
+    const imageById = new Map(state.listings.filter((row) => row.imageUri).map((row) => [row.id, row.imageUri]));
+    const imageByTitle = new Map(state.listings.filter((row) => row.imageUri).map((row) => [row.title, row.imageUri]));
+    const remoteRows: ProviderListingRecord[] = (remote.listings || []).map((row) => ({
       id: String(row.id),
       title: row.title,
       category: row.category,
       channel: row.channel,
       status: row.status === "approved" ? "approved" : row.status === "rejected" ? "rejected" : "pending",
+      imageUri: imageById.get(String(row.id)) || imageByTitle.get(row.title),
       createdAt: row.createdAt
     }));
-    if (!listings.length && state.listings.length) return state.listings;
+    const localOnly = state.listings.filter((row) => !isServerListingId(row.id));
+    if (!remoteRows.length && state.listings.length) return state.listings;
+    const listings = [...remoteRows, ...localOnly];
     await writeState({ ...state, listings });
     return listings;
   } catch {
@@ -454,8 +513,30 @@ export async function getProviderListings(): Promise<ProviderListingRecord[]> {
 }
 
 export async function getProviderBookings(): Promise<ProviderBookingRecord[]> {
+  const { getCustomerRentalBookings } = await import("../screens/rental/customerRentalBookings");
+  const customerBookings = await getCustomerRentalBookings();
   const state = await readState();
-  return state.bookings;
+  const known = new Set(state.bookings.map((booking) => `${booking.listingTitle}|${booking.bookingDate}`));
+  const imported: ProviderBookingRecord[] = customerBookings
+    .filter((booking) => !known.has(`${booking.title}|${booking.date}`))
+    .map((booking) => ({
+      id: booking.id,
+      listingId: booking.listingId,
+      listingTitle: booking.title,
+      customerName: "Customer",
+      customerPhone: "",
+      bookingDate: booking.date,
+      startTime: "",
+      endTime: "",
+      duration: "",
+      pickupLocation: booking.location,
+      notes: booking.note,
+      createdAt: booking.createdAt
+    }));
+  if (!imported.length) return state.bookings;
+  const bookings = [...imported, ...state.bookings];
+  await writeState({ ...state, bookings });
+  return bookings;
 }
 
 export async function addCustomerBooking(input: Omit<ProviderBookingRecord, "id" | "createdAt">): Promise<void> {

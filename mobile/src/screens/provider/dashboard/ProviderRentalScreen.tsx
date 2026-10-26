@@ -20,6 +20,31 @@ import {
   uploadLocalListings,
   type ProviderListingRecord
 } from "../../../services/providerWorkflow";
+import { uploadCustomerBookings } from "../../rental/customerRentalBookings";
+
+const COVER_TRACTOR = require("../../../../assets/market/tractor-rental.png");
+const COVER_EQUIPMENT = require("../../../../assets/market/new-equiptment.png");
+const COVER_USED = require("../../../../assets/market/used-refurbished.png");
+const COVER_DRONE = require("../../../../assets/market/drone-spraying.png");
+const COVER_OPERATOR = require("../../../../assets/market/make_your_operator.png");
+const COVER_CREW = require("../../../../assets/market/Book _a_ service.png");
+const COVER_SOIL = require("../../../../assets/market/soiltest-kit.png");
+const COVER_CROP = require("../../../../assets/market/crop.png");
+const COVER_STORE = require("../../../../assets/market/greenhouse.png");
+
+function coverFor(title: string, category: string, imageUri?: string): ImageSourcePropType {
+  if (imageUri) return { uri: imageUri };
+  const text = `${title} ${category}`.toLowerCase();
+  if (text.includes("drone")) return COVER_DRONE;
+  if (text.includes("driver") || text.includes("operator")) return COVER_OPERATOR;
+  if (text.includes("labo") || text.includes("crew")) return COVER_CREW;
+  if (text.includes("soil")) return COVER_SOIL;
+  if (text.includes("transplant") || text.includes("paddy") || text.includes("land")) return COVER_CROP;
+  if (text.includes("warehouse") || text.includes("storage")) return COVER_STORE;
+  if (text.includes("used")) return COVER_USED;
+  if (text.includes("tool") || text.includes("equipment") || text.includes("rotavat")) return COVER_EQUIPMENT;
+  return COVER_TRACTOR;
+}
 
 const BG = "#303132";
 const CARD = "#373838";
@@ -73,6 +98,7 @@ type Listing = {
   status: string;
   listingType: string;
   description: string;
+  imageUri?: string;
   expandedIntro: string;
   equipmentDetails: string[];
   conditions: string[];
@@ -96,6 +122,7 @@ type Booking = {
   pickupLocation: string;
   requestedOn: string;
   notes: string;
+  imageUri?: string;
 };
 type InventoryFilters = Record<InventoryFilterKey, string>;
 type BookingFilters = Record<BookingFilterKey, string>;
@@ -251,7 +278,11 @@ function InventoryListingCard({ listing }: { listing: Listing }) {
   return (
     <View style={styles.card}>
       <View style={styles.cardHero}>
-        <View style={styles.cardHeroPlaceholder} />
+        <Image
+          source={coverFor(listing.title, listing.category, listing.imageUri)}
+          style={styles.cardHeroImage}
+          resizeMode="cover"
+        />
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>{listing.status}</Text>
         </View>
@@ -297,7 +328,11 @@ function BookingCard({ booking }: { booking: Booking }) {
   return (
     <View style={styles.card}>
       <View style={styles.cardHero}>
-        <View style={styles.cardHeroPlaceholder} />
+        <Image
+          source={coverFor(booking.title, booking.category, booking.imageUri)}
+          style={styles.cardHeroImage}
+          resizeMode="cover"
+        />
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>{booking.badge}</Text>
         </View>
@@ -312,10 +347,12 @@ function BookingCard({ booking }: { booking: Booking }) {
       <View style={styles.customerBlock}>
         <Text style={styles.customerBlockTitle}>Customer Details</Text>
         <CustomerDetailRow label="Name" value={booking.customerName} />
-        <CustomerDetailRow label="Phone" value={booking.customerPhone} />
+        {booking.customerPhone ? <CustomerDetailRow label="Phone" value={booking.customerPhone} /> : null}
         <CustomerDetailRow label="Booking Date" value={booking.bookingDate} />
-        <CustomerDetailRow label="Timing" value={`${booking.startTime} – ${booking.endTime}`} />
-        <CustomerDetailRow label="Duration" value={booking.duration} />
+        {booking.startTime ? (
+          <CustomerDetailRow label="Timing" value={`${booking.startTime} – ${booking.endTime}`} />
+        ) : null}
+        {booking.duration ? <CustomerDetailRow label="Duration" value={booking.duration} /> : null}
         <CustomerDetailRow label="Pickup / Site" value={booking.pickupLocation} />
         <CustomerDetailRow label="Requested On" value={booking.requestedOn} />
         {booking.notes ? (
@@ -363,7 +400,14 @@ function listingTypeFor(category: string) {
 }
 
 function toInventoryListing(row: ProviderListingRecord): Listing {
-  const status = row.status === "approved" ? "Available" : row.status === "rejected" ? "Inactive" : "Waiting for approval";
+  const onServer = /^\d+$/.test(String(row.id));
+  const status = !onServer
+    ? "Not sent to admin"
+    : row.status === "approved"
+      ? "Available"
+      : row.status === "rejected"
+        ? "Inactive"
+        : "Waiting for approval";
   return {
     id: row.id,
     title: row.title,
@@ -372,6 +416,7 @@ function toInventoryListing(row: ProviderListingRecord): Listing {
     status,
     listingType: listingTypeFor(row.category),
     description: `${row.title} is ${status.toLowerCase()}.`,
+    imageUri: row.imageUri,
     expandedIntro: `${row.title} · ${row.channel}`,
     equipmentDetails: [`Category: ${row.category}`, `Channel: ${row.channel}`],
     conditions: [],
@@ -470,30 +515,37 @@ export function ProviderRentalScreen() {
     useCallback(() => {
       let mounted = true;
       const load = async () => {
+        await uploadCustomerBookings(token).catch(() => undefined);
         const storedListings = await uploadLocalListings(token).catch(() => getProviderListings());
         const rentalListings = storedListings.filter((row) => row.channel !== "Services" && row.channel !== "Educators");
         const storedBookings = await getProviderBookings();
         if (!mounted) return;
         setInventory(rentalListings.map(toInventoryListing));
         setLiveBookings(
-          storedBookings.map((booking) => ({
-            id: booking.id,
-            title: booking.listingTitle,
-            category: "Booking",
-            location: booking.pickupLocation,
-            bookingType: "Equipment",
-            status: "Pending",
-            badge: "Pending",
-            customerName: booking.customerName,
-            customerPhone: booking.customerPhone,
-            bookingDate: booking.bookingDate,
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-            duration: booking.duration,
-            pickupLocation: booking.pickupLocation,
-            requestedOn: booking.createdAt,
-            notes: booking.notes || ""
-          }))
+          storedBookings.map((booking) => {
+            const match = rentalListings.find((row) =>
+              booking.listingTitle.toLowerCase().includes(row.title.toLowerCase())
+            );
+            return {
+              id: booking.id,
+              title: booking.listingTitle,
+              category: match?.category || "Booking",
+              location: booking.pickupLocation,
+              bookingType: listingTypeFor(match?.category || booking.listingTitle),
+              status: "Pending",
+              badge: "Pending",
+              customerName: booking.customerName,
+              customerPhone: booking.customerPhone,
+              bookingDate: booking.bookingDate,
+              startTime: booking.startTime,
+              endTime: booking.endTime,
+              duration: booking.duration,
+              pickupLocation: booking.pickupLocation,
+              requestedOn: booking.createdAt,
+              notes: booking.notes || "",
+              imageUri: match?.imageUri
+            };
+          })
         );
       };
       void load();
@@ -665,7 +717,7 @@ const styles = StyleSheet.create({
     position: "relative",
     marginBottom: 12
   },
-  cardHeroPlaceholder: {
+  cardHeroImage: {
     width: "100%",
     height: 160,
     borderRadius: 10,

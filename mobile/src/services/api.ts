@@ -918,6 +918,20 @@ export async function verifyProviderKycOtp(token: string, aadhaar: string, code:
   })) as { success: boolean; aadhaarLast4: string };
 }
 
+export async function fetchRentalListings(token?: string | null) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/rentals/listings`, token ?? null)) as {
+    listings: Array<{
+      id: number;
+      title: string;
+      category: string;
+      channel: string;
+      status: string;
+      createdAt: string;
+      providerName: string;
+    }>;
+  };
+}
+
 export async function fetchProviderListings(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token)) as {
     listings: Array<{
@@ -929,6 +943,17 @@ export async function fetchProviderListings(token: string) {
       createdAt: string;
     }>;
   };
+}
+
+export async function submitRentalBooking(
+  token: string,
+  payload: { listingId: string; title: string; category: string; location: string; date: string; note: string }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/rentals/bookings`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { booking: { id: number } };
 }
 
 export async function submitProviderListing(

@@ -7,6 +7,7 @@ import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { KycVerificationPage } from "./pages/KycVerificationPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ListingsPage } from "./pages/ListingsPage";
+import { BookingsPage } from "./pages/BookingsPage";
 import { SettlementsPage } from "./pages/SettlementsPage";
 import { DisputesPage } from "./pages/DisputesPage";
 import { TicketsPage } from "./pages/TicketsPage";
@@ -68,6 +69,14 @@ export default function App() {
         element={
           <Protected>
             <ListingsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/bookings"
+        element={
+          <Protected>
+            <BookingsPage />
           </Protected>
         }
       />

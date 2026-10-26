@@ -37,6 +37,9 @@ export type RootStackParamList = {
   InstructorStudio: undefined;
   EditProfile: undefined;
   Weather: undefined;
+  DiscoverSearch: undefined;
+  RentalCategory: { categoryId: string; location: string };
+  RentalBooking: { listingId: string; title: string; category: string; location: string };
   PlantHealth: undefined;
   PlantHealthScan: { plantId?: number; plantName?: string; photoRequests?: string[] } | undefined;
   PlantHealthResult: { scanId: number };

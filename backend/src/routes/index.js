@@ -11307,6 +11307,38 @@ router.post("/v1/provider/listings", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/rentals/listings", authOptional, async (req, res) => {
+  try {
+    const viewerId = Number(req.user?.userId);
+    const userId = Number.isFinite(viewerId) && viewerId > 0 ? viewerId : 0;
+    await ensureProviderListingsTable();
+    const result = await query(
+      `
+      SELECT
+        l.id,
+        l.title,
+        l.category,
+        l.channel,
+        l.status,
+        l.created_at AS "createdAt",
+        COALESCE(u.full_name, 'Provider') AS "providerName"
+      FROM provider_listings l
+      LEFT JOIN learn_users u ON u.id = l.user_id
+      WHERE l.channel IN ('Rental', 'Services')
+        AND l.status <> 'unpublished'
+        AND l.status <> 'rejected'
+        AND (l.status = 'approved' OR l.user_id = $1)
+      ORDER BY l.created_at DESC
+      LIMIT 100
+      `,
+      [userId]
+    );
+    res.json({ listings: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load rentals", error: error?.message || String(error) });
+  }
+});
+
 router.get("/v1/provider/listings", authRequired, async (req, res) => {
   try {
     const userId = Number(req.user.userId);
@@ -11370,6 +11402,101 @@ router.get("/v1/admin/listings", authRequired, requireRole("admin"), async (req,
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to load listings", error: error?.message || String(error) });
+  }
+});
+
+async function ensureRentalBookingsTable() {
+  await ensureLearnUsersTable();
+  await query(
+    `
+    CREATE TABLE IF NOT EXISTS rental_bookings (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES learn_users(id) ON DELETE CASCADE,
+      listing_id TEXT,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
+      location TEXT NOT NULL DEFAULT '',
+      booking_date TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `
+  );
+}
+
+router.post("/v1/rentals/bookings", authRequired, async (req, res) => {
+  try {
+    const userId = Number(req.user.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      res.status(401).json({ message: "Invalid auth session" });
+      return;
+    }
+    const title = String(req.body?.title || "").trim().slice(0, 180);
+    const category = String(req.body?.category || "").trim().slice(0, 80);
+    const location = String(req.body?.location || "").trim().slice(0, 80);
+    const bookingDate = String(req.body?.date || req.body?.bookingDate || "").trim().slice(0, 40);
+    const note = String(req.body?.note || "").trim().slice(0, 500);
+    const listingId = String(req.body?.listingId || "").trim().slice(0, 80);
+    if (title.length < 2 || bookingDate.length < 4) {
+      res.status(400).json({ message: "A booking needs an item and a date." });
+      return;
+    }
+    await ensureRentalBookingsTable();
+    const inserted = await query(
+      `
+      INSERT INTO rental_bookings (user_id, listing_id, title, category, location, booking_date, note, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+      RETURNING id, title, category, location, booking_date AS "date", note, status, created_at AS "createdAt"
+      `,
+      [userId, listingId || null, title, category, location, bookingDate, note]
+    );
+    res.status(201).json({ booking: inserted.rows[0] });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to save booking", error: error?.message || String(error) });
+  }
+});
+
+router.get("/v1/admin/bookings", authRequired, requireRole("admin"), async (req, res) => {
+  try {
+    await ensureRentalBookingsTable();
+    const result = await query(
+      `
+      SELECT
+        b.id,
+        b.title,
+        b.category,
+        b.location,
+        b.booking_date AS "date",
+        b.note,
+        b.status,
+        b.created_at AS "createdAt",
+        u.full_name AS "customerName",
+        u.email AS "customerEmail",
+        u.phone AS "customerPhone"
+      FROM rental_bookings b
+      LEFT JOIN learn_users u ON u.id = b.user_id
+      ORDER BY b.created_at DESC
+      LIMIT 200
+      `
+    );
+    res.json({
+      bookings: result.rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        category: row.category || "Rental",
+        location: row.location || "",
+        date: row.date || "",
+        note: row.note || "",
+        status: String(row.status || "pending").toLowerCase() === "approved" ? "Approved" : "Pending",
+        createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : null,
+        customerName: row.customerName || "Customer",
+        customerEmail: row.customerEmail || "",
+        customerPhone: row.customerPhone || ""
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load bookings", error: error?.message || String(error) });
   }
 });
 
