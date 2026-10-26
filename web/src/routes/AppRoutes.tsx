@@ -26,6 +26,13 @@ import { ContactSupportPage } from "../pages/ContactSupportPage";
 import { TermsOfUse } from "../pages/TermsOfUse";
 import { AdminReportsPage } from "../pages/AdminReportsPage";
 import { JoinProviderPage } from "../pages/provider/JoinProviderPage";
+import { ProviderDashboard } from "../pages/provider/ProviderDashboard";
+import { ProviderOverviewPage } from "../pages/provider/ProviderOverviewPage";
+import { ProviderRentalPage } from "../pages/provider/ProviderRentalPage";
+import { ProviderListingsPage } from "../pages/provider/ProviderListingsPage";
+import { ProviderNewListingPage } from "../pages/provider/ProviderNewListingPage";
+import { ProviderServicesPage } from "../pages/provider/ProviderServicesPage";
+import { ProviderProfilePage } from "../pages/provider/ProviderProfilePage";
 
 function ProtectedLayout() {
   const { token, loading } = useAuth();
@@ -89,6 +96,14 @@ export function AppRoutes() {
         <Route path="profile/edit" element={<EditProfilePage />} />
         <Route path="settings" element={<SettingsMenuPage />} />
         <Route path="provider/join" element={<JoinProviderPage />} />
+        <Route path="provider" element={<ProviderDashboard />}>
+          <Route index element={<ProviderOverviewPage />} />
+          <Route path="rental" element={<ProviderRentalPage />} />
+          <Route path="listings" element={<ProviderListingsPage />} />
+          <Route path="listings/new" element={<ProviderNewListingPage />} />
+          <Route path="services" element={<ProviderServicesPage />} />
+          <Route path="profile" element={<ProviderProfilePage />} />
+        </Route>
         <Route path="settings/account" element={<AccountCenterPage />} />
         <Route path="settings/about" element={<AboutSettingsPage />} />
         <Route

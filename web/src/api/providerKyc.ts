@@ -68,6 +68,51 @@ export async function verifyProviderBankAccount(
   };
 }
 
+export type ProviderListing = {
+  id: number;
+  title: string;
+  category: string;
+  channel: string;
+  status: string;
+  createdAt: string;
+};
+
+export async function fetchProviderListings(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token)) as {
+    listings: ProviderListing[];
+  };
+}
+
+export async function submitProviderListing(
+  token: string,
+  payload: { title: string; category: string; channel: string }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { listing: ProviderListing };
+}
+
+export type ProviderBooking = {
+  id: number;
+  title: string;
+  category: string;
+  location: string;
+  date: string;
+  note: string;
+  status: string;
+  createdAt: string;
+  customerName: string;
+  customerPhone: string;
+};
+
+export async function fetchProviderBookings(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/bookings`, token)) as {
+    bookings: ProviderBooking[];
+  };
+}
+
 export async function fetchProviderKycStatus(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/kyc/status`, token)) as {
     status: "not_submitted" | "pending" | "approved" | "rejected" | string;

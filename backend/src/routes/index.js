@@ -11457,6 +11457,34 @@ router.post("/v1/rentals/bookings", authRequired, async (req, res) => {
   }
 });
 
+router.get("/v1/provider/bookings", authRequired, async (req, res) => {
+  try {
+    await ensureRentalBookingsTable();
+    const result = await query(
+      `
+      SELECT
+        b.id,
+        b.title,
+        b.category,
+        b.location,
+        b.booking_date AS "date",
+        b.note,
+        b.status,
+        b.created_at AS "createdAt",
+        u.full_name AS "customerName",
+        u.phone AS "customerPhone"
+      FROM rental_bookings b
+      LEFT JOIN learn_users u ON u.id = b.user_id
+      ORDER BY b.created_at DESC
+      LIMIT 200
+      `
+    );
+    res.json({ bookings: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load bookings", error: error?.message || String(error) });
+  }
+});
+
 router.get("/v1/admin/bookings", authRequired, requireRole("admin"), async (req, res) => {
   try {
     await ensureRentalBookingsTable();
