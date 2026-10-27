@@ -21,6 +21,8 @@ type Props = {
   label: string;
   lat?: number | null;
   lng?: number | null;
+  /** current jumps to GPS. manual opens search so the pin can be placed by hand. */
+  mode?: "auto" | "current" | "manual";
   onClose: () => void;
   onSelect: (value: PickedMapLocation) => void;
 };
@@ -41,7 +43,13 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;");
 }
 
-function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng?: number | null) {
+function buildPickerHtml(
+  apiKey: string,
+  label: string,
+  lat?: number | null,
+  lng?: number | null,
+  mode: "auto" | "current" | "manual" = "auto"
+) {
   const saved = hasSavedMapCoords(lat, lng);
   const startLat = saved ? Number(lat) : FALLBACK_LAT;
   const startLng = saved ? Number(lng) : FALLBACK_LNG;
@@ -191,7 +199,12 @@ function buildPickerHtml(apiKey: string, label: string, lat?: number | null, lng
           if (e.key === "Enter") { e.preventDefault(); searchPlace(); }
         });
         document.getElementById("me").onclick = requestDeviceLocation;
-        if (hasSaved) {
+        var pickMode = ${JSON.stringify(mode)};
+        if (pickMode === "current") requestDeviceLocation();
+        else if (pickMode === "manual") {
+          setHint("Search for the place, or drop the pin on the map.");
+          try { document.getElementById("q").focus(); } catch (_e) {}
+        } else if (hasSaved) {
           setPicked(picked);
         } else {
           requestDeviceLocation();
@@ -210,7 +223,12 @@ function embedSrc(lat: number, lng: number, zoom: number) {
   return `https://maps.google.com/maps?q=${lat},${lng}&z=${zoom}&output=embed`;
 }
 
-function buildEmbedPickerHtml(label: string, lat?: number | null, lng?: number | null) {
+function buildEmbedPickerHtml(
+  label: string,
+  lat?: number | null,
+  lng?: number | null,
+  mode: "auto" | "current" | "manual" = "auto"
+) {
   const saved = hasSavedMapCoords(lat, lng);
   const startLat = saved ? Number(lat) : FALLBACK_LAT;
   const startLng = saved ? Number(lng) : FALLBACK_LNG;
@@ -318,7 +336,12 @@ function buildEmbedPickerHtml(label: string, lat?: number | null, lng?: number |
       if (e.key === "Enter") { e.preventDefault(); searchPlace(); }
     });
     document.getElementById("me").onclick = requestDeviceLocation;
-    if (hasSaved) setPicked(picked);
+    var pickMode = ${JSON.stringify(mode)};
+    if (pickMode === "current") requestDeviceLocation();
+    else if (pickMode === "manual") {
+      setHint("Search for the place, or drop the pin on the map.");
+      try { document.getElementById("q").focus(); } catch (_e) {}
+    } else if (hasSaved) setPicked(picked);
     else requestDeviceLocation();
   </script>
 </body>
@@ -327,7 +350,7 @@ function buildEmbedPickerHtml(label: string, lat?: number | null, lng?: number |
 
 const MAPS_WEBVIEW_ORIGINS = ["https://www.cropvibe.com/", "https://cropvibe.com/"];
 
-export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSelect }: Props) {
+export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto", onClose, onSelect }: Props) {
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
   const saved = hasSavedMapCoords(lat, lng);
@@ -376,9 +399,9 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, onClose, onSe
   }, [open, token, apiKey, lat, lng]);
 
   const html = useMemo(() => {
-    if (useEmbed || !resolvedKey) return buildEmbedPickerHtml(label, lat, lng);
-    return buildPickerHtml(resolvedKey, label, lat, lng);
-  }, [useEmbed, resolvedKey, label, lat, lng]);
+    if (useEmbed || !resolvedKey) return buildEmbedPickerHtml(label, lat, lng, mode);
+    return buildPickerHtml(resolvedKey, label, lat, lng, mode);
+  }, [useEmbed, resolvedKey, label, lat, lng, mode]);
 
   const baseUrl = MAPS_WEBVIEW_ORIGINS[Math.min(originIndex, MAPS_WEBVIEW_ORIGINS.length - 1)];
 

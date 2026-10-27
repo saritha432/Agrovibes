@@ -6,17 +6,31 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
-import { navigateToRentalBooking, navigateToRentalCategory } from "../../navigation/navigationRef";
+import { navigateToRentalCart, navigateToRentalCategory } from "../../navigation/navigationRef";
 import { useAndroidNestedStackBack } from "../../navigation/useAndroidScreenBack";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON_LIME } from "../../theme/appColors";
 import { RENTAL_CATEGORIES, rentalCategoryById } from "./rentalCategories";
 import { catalogForCategory, RENTAL_CATALOG_SUBS, type RentalCatalogItem, type RentalCatalogSub } from "./rentalCatalog";
+import { addRentalCartLine } from "./rentalCart";
 
 const BACK_ICON = require("../../../assets/market/back-icon.png");
 const SIDE_CARD_W = 74;
 const SIDE_CARD_H = 88;
 const SIDEBAR_W = 16 + SIDE_CARD_W + 10;
 const TILE_BG = "#303132";
+
+function rememberCartItem(item: RentalCatalogItem, categoryTitle: string) {
+  return addRentalCartLine({
+    listingId: item.id,
+    title: item.title,
+    category: categoryTitle,
+    option: item.options[0] || item.unitLabel,
+    quantity: 1,
+    unitPrice: item.price,
+    unitLabel: item.unitLabel,
+    mrp: item.mrp
+  });
+}
 
 function rupee(n: number) {
   return "\u20B9" + Math.round(n).toLocaleString("en-IN");
@@ -71,14 +85,17 @@ export function RentalCategoryScreen() {
     const chosen = option || item.options[0] || item.unitLabel;
     const count = Math.max(quantity, 1);
     setSelected(null);
-    navigateToRentalBooking(
-      {
-        id: item.id,
-        title: `${item.title} · ${chosen} × ${count}`,
-        category: category?.title || item.title
-      },
-      location
-    );
+    navigateToRentalCart({
+      listingId: item.id,
+      title: item.title,
+      category: category?.title || item.title,
+      location,
+      option: chosen,
+      quantity: count,
+      unitPrice: item.price,
+      unitLabel: item.unitLabel,
+      mrp: item.mrp
+    });
   };
 
   return (
@@ -128,11 +145,27 @@ export function RentalCategoryScreen() {
             {rows.map((row) => (
               <View key={row.id} style={styles.gridRow}>
                 <View style={{ width: cardWidth }}>
-                  <RentalCard item={row.left} onOpen={() => openItem(row.left, 0)} onAdd={() => openItem(row.left, 1)} />
+                  <RentalCard
+                    item={row.left}
+                    onOpen={() => openItem(row.left, 0)}
+                    onAdd={() => {
+                      if (category) void rememberCartItem(row.left, category.title);
+                      openItem(row.left, 1);
+                    }}
+                  />
                 </View>
                 {row.right ? (
                   <View style={{ width: cardWidth }}>
-                    <RentalCard item={row.right} onOpen={() => openItem(row.right!, 0)} onAdd={() => openItem(row.right!, 1)} />
+                    <RentalCard
+                      item={row.right}
+                      onOpen={() => {
+                        if (row.right) openItem(row.right, 0);
+                      }}
+                      onAdd={() => {
+                        if (row.right && category) void rememberCartItem(row.right, category.title);
+                        if (row.right) openItem(row.right, 1);
+                      }}
+                    />
                   </View>
                 ) : null}
               </View>
@@ -352,7 +385,7 @@ function RentalSheet({
                 <Text style={styles.offerValue}>{item.discountPct > 0 ? `${rupee(item.mrp - item.price)} OFF` : "Available"}</Text>
               </View>
               <Pressable style={styles.bookBtn} onPress={onBook}>
-                <Text style={styles.bookText}>Book now</Text>
+                <Text style={styles.bookText}>View Cart</Text>
                 <Text style={styles.bookCount}>
                   {Math.max(count, 1)} {Math.max(count, 1) === 1 ? item.unitLabel.toLowerCase() : `${item.unitLabel.toLowerCase()}s`}
                 </Text>

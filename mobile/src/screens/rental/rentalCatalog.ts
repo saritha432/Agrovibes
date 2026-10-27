@@ -332,3 +332,7 @@ export const RENTAL_CATALOG: RentalCatalogItem[] = [
 export function catalogForCategory(categoryId: string): RentalCatalogItem[] {
   return RENTAL_CATALOG.filter((item) => item.categoryId === categoryId);
 }
+
+export function catalogItemById(id: string): RentalCatalogItem | undefined {
+  return RENTAL_CATALOG.find((item) => item.id === id);
+}

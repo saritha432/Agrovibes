@@ -155,6 +155,15 @@ export function RootNavigator() {
         }}
       />
       <Stack.Screen
+        name="RentalCart"
+        getComponent={() => require("../screens/rental/RentalCartScreen").RentalCartScreen}
+        options={{
+          headerShown: false,
+          animation: "slide_from_right",
+          contentStyle: { backgroundColor: "#262626" }
+        }}
+      />
+      <Stack.Screen
         name="RentalBooking"
         getComponent={() => require("../screens/rental/RentalBookingScreen").RentalBookingScreen}
         options={{
