@@ -29,7 +29,7 @@ export const RENTAL_CATEGORIES: RentalCategory[] = [
   },
   {
     id: "drone",
-    title: "Drone spray",
+    title: "Drone Services",
     blurb: "Certified pilots for crop spraying and field scouting.",
     icon: "airplane-outline",
     wash: "#1e2c33"
@@ -43,14 +43,14 @@ export const RENTAL_CATEGORIES: RentalCategory[] = [
   },
   {
     id: "labour",
-    title: "Manual Labour",
+    title: "Farm Labour",
     blurb: "Field crews for sowing, weeding, and harvest.",
     icon: "people-outline",
     wash: "#2c261e"
   },
   {
     id: "soil",
-    title: "Soil Testing & Analysis",
+    title: "Soil & Crop Care",
     blurb: "Sample pickup and a nutrient report for the next season.",
     icon: "flask-outline",
     wash: "#1e2a28"

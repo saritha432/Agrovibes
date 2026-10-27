@@ -1,43 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useState } from "react";
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import type { ImageSourcePropType } from "react-native";
-import { AppTopBar } from "../../components/AppTopBar";
+import { LinearGradient } from "expo-linear-gradient";
+import React, { useCallback, useMemo, useState } from "react";
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { LocationMapPicker } from "../../components/LocationMapPicker";
 import { navigateToRentalCart, navigateToRentalCategory } from "../../navigation/navigationRef";
 import { useAndroidTabBackToHome } from "../../navigation/useAndroidScreenBack";
 import { useAuth } from "../../auth/AuthContext";
-import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON_LIME } from "../../theme/appColors";
+import { APP_LIME, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON_LIME } from "../../theme/appColors";
+import { useTopChromeInset } from "../../theme/topChromeInset";
 import { uploadCustomerBookings } from "./customerRentalBookings";
 import { RENTAL_CATEGORIES } from "./rentalCategories";
 import { RENTAL_CATALOG_SUBS } from "./rentalCatalog";
 import { getRentalCart, type RentalCartLine } from "./rentalCart";
 
-const BANNERS: Array<{ id: string; title: string; subtitle: string; image: ImageSourcePropType }> = [
-  {
-    id: "machinery",
-    title: "Book a tractor",
-    subtitle: "Machinery for the day",
-    image: RENTAL_CATALOG_SUBS.machinery[0].image
-  },
-  {
-    id: "drone",
-    title: "Drone spray",
-    subtitle: "A pilot for your field",
-    image: RENTAL_CATALOG_SUBS.drone[0].image
-  },
-  {
-    id: "drivers",
-    title: "Hire an operator",
-    subtitle: "Drivers ready for the shift",
-    image: RENTAL_CATALOG_SUBS.drivers[0].image
-  }
-];
+const FEATURED = ["machinery", "drone", "labour", "soil"];
+const LOGO = require("../../../assets/crop vibe.png");
+const HERO_ART = RENTAL_CATALOG_SUBS.machinery[0].image;
 
 export function RentalBookingsPortalScreen() {
   useAndroidTabBackToHome();
   const { token } = useAuth();
+  const topInset = useTopChromeInset();
   const { width } = useWindowDimensions();
   const [location, setLocation] = useState("Add location");
   const [locationLat, setLocationLat] = useState<number | null>(null);
@@ -45,8 +29,8 @@ export function RentalBookingsPortalScreen() {
   const [locationOpen, setLocationOpen] = useState(false);
   const [mapMode, setMapMode] = useState<"current" | "manual" | null>(null);
   const [cart, setCart] = useState<RentalCartLine[]>([]);
-  const tileWidth = Math.floor((Math.min(width, 520) - 40 - 12) / 2);
-  const bannerWidth = Math.min(width, 520) - 72;
+  const [query, setQuery] = useState("");
+  const tileWidth = Math.floor((Math.min(width, 520) - 32 - 12) / 2);
 
   useFocusEffect(
     useCallback(() => {
@@ -61,80 +45,104 @@ export function RentalBookingsPortalScreen() {
     }, [token])
   );
 
+  const categories = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    const source = needle
+      ? RENTAL_CATEGORIES.filter((item) => `${item.title} ${item.blurb}`.toLowerCase().includes(needle))
+      : RENTAL_CATEGORIES.filter((item) => FEATURED.includes(item.id));
+    return [...source].sort((a, b) => {
+      const rank = (id: string) => {
+        const index = FEATURED.indexOf(id);
+        return index === -1 ? FEATURED.length : index;
+      };
+      return rank(a.id) - rank(b.id);
+    });
+  }, [query]);
+
+  const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
+
   return (
     <View style={styles.screen}>
-      <AppTopBar />
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <View style={styles.locationBar}>
-          <Pressable
-            style={styles.locationBtn}
-            onPress={() => setLocationOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`Location ${location}`}
-          >
-            <Text style={styles.locationKicker}>Location</Text>
-            <Text style={styles.locationHint}>Current location or add it on the map</Text>
-            <View style={styles.locationRow}>
-              <Ionicons name="location-sharp" size={16} color={APP_LIME} />
-              <Text style={styles.locationValue} numberOfLines={1}>
-                {location}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color={APP_TEXT} />
-            </View>
-          </Pressable>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: topInset + 8 }]} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
           <Pressable style={styles.cartBtn} onPress={() => navigateToRentalCart(location)} accessibilityLabel="Cart">
-            <Ionicons name="cart-outline" size={24} color={APP_TEXT} />
-            {cart.length > 0 ? (
+            <Ionicons name="cart-outline" size={26} color={APP_TEXT} />
+            {cartCount > 0 ? (
               <View style={styles.cartBadge}>
-                <Text style={styles.cartBadgeText}>{cart.reduce((sum, line) => sum + line.quantity, 0)}</Text>
+                <Text style={styles.cartBadgeText}>{cartCount}</Text>
               </View>
             ) : null}
           </Pressable>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bannerRow}>
-          {BANNERS.map((banner) => (
-            <Pressable
-              key={banner.id}
-              style={[styles.banner, { width: bannerWidth }]}
-              onPress={() => navigateToRentalCategory(banner.id, location)}
-            >
-              <View style={styles.bannerText}>
-                <Text style={styles.bannerKicker}>Rental bookings</Text>
-                <Text style={styles.bannerTitle}>{banner.title}</Text>
-                <Text style={styles.bannerSub}>{banner.subtitle}</Text>
-              </View>
-              <Image source={banner.image} style={styles.bannerArt} resizeMode="cover" />
+        <Pressable
+          style={styles.locationBtn}
+          onPress={() => setLocationOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Location ${location}`}
+        >
+          <Text style={styles.locationKicker}>Your location</Text>
+          <View style={styles.locationRow}>
+            <Ionicons name="location-sharp" size={16} color={APP_LIME} />
+            <Text style={styles.locationValue} numberOfLines={1}>
+              {location}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={APP_TEXT_MUTED} />
+          </View>
+        </Pressable>
+
+        <View style={styles.hero}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroKicker}>Rental bookings</Text>
+            <Text style={styles.heroTitle}>Ready for your next big job?</Text>
+            <Text style={styles.heroSub}>Find the right machinery for your farm.</Text>
+            <Pressable style={styles.heroBtn} onPress={() => navigateToRentalCategory("machinery", location)}>
+              <Text style={styles.heroBtnText}>Explore rentals</Text>
+              <Ionicons name="arrow-forward" size={14} color="#f4fff4" />
             </Pressable>
-          ))}
-        </ScrollView>
+          </View>
+          <Image source={HERO_ART} style={styles.heroArt} resizeMode="contain" />
+        </View>
+
+        <Text style={styles.ask}>What do you need today?</Text>
+        <View style={styles.search}>
+          <Ionicons name="search" size={18} color="#8d8d8d" />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search tractors, drones, labour..."
+            placeholderTextColor="#8d8d8d"
+            style={styles.searchInput}
+            returnKeyType="search"
+          />
+        </View>
 
         <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>Top categories</Text>
+          <Text style={styles.sectionTitle}>Explore categories</Text>
           <Pressable onPress={() => navigateToRentalCategory("all", location)} hitSlop={8}>
-            <Text style={styles.viewAll}>View all</Text>
+            <Text style={styles.viewAll}>View all →</Text>
           </Pressable>
         </View>
 
+        {categories.length === 0 ? <Text style={styles.empty}>No rentals match that search.</Text> : null}
         <View style={styles.grid}>
-          {RENTAL_CATEGORIES.map((item) => (
-            <Pressable
-              key={item.id}
-              style={[styles.tile, { width: tileWidth }]}
-              onPress={() => navigateToRentalCategory(item.id, location)}
-              accessibilityRole="button"
-              accessibilityLabel={item.title}
-            >
-              <View style={[styles.tileArt, { backgroundColor: item.wash }]}>
-                {RENTAL_CATALOG_SUBS[item.id]?.[0] ? (
-                  <Image source={RENTAL_CATALOG_SUBS[item.id][0].image} style={styles.tileImage} resizeMode="cover" />
-                ) : (
-                  <Ionicons name={item.icon} size={42} color={APP_LIME} />
-                )}
-              </View>
-              <Text style={styles.tileLabel}>{item.title}</Text>
-            </Pressable>
-          ))}
+          {categories.map((item) => {
+            const photo = RENTAL_CATALOG_SUBS[item.id]?.[0]?.image;
+            return (
+              <Pressable
+                key={item.id}
+                style={[styles.tile, { width: tileWidth }]}
+                onPress={() => navigateToRentalCategory(item.id, location)}
+                accessibilityRole="button"
+                accessibilityLabel={item.title}
+              >
+                {photo ? <Image source={photo} style={styles.tileImage} resizeMode="cover" /> : <View style={styles.tileImage} />}
+                <LinearGradient colors={["transparent", "rgba(0,0,0,0.72)"]} style={styles.tileShade} />
+                <Text style={styles.tileLabel}>{item.title}</Text>
+              </Pressable>
+            );
+          })}
         </View>
       </ScrollView>
 
@@ -184,14 +192,14 @@ export function RentalBookingsPortalScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: APP_BLACK },
-  body: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28 },
-  locationBar: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 },
-  locationBtn: { flex: 1 },
+  screen: { flex: 1, backgroundColor: "#121212" },
+  body: { paddingHorizontal: 16, paddingBottom: 28 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
+  logo: { width: 132, height: 28 },
   cartBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   cartBadge: {
     position: "absolute",
-    top: 0,
+    top: 2,
     right: 0,
     minWidth: 16,
     height: 16,
@@ -202,82 +210,65 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3
   },
   cartBadgeText: { color: APP_TEXT_ON_LIME, fontSize: 10, fontWeight: "800" },
-  bannerRow: { gap: 10, paddingBottom: 18 },
-  banner: {
-    height: 132,
-    borderRadius: 16,
-    backgroundColor: "#EDEDED",
+  locationBtn: { marginBottom: 14 },
+  locationKicker: {
+    color: APP_TEXT_MUTED,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginBottom: 4
+  },
+  locationRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  locationValue: { color: APP_TEXT, fontSize: 16, fontWeight: "800", maxWidth: 260 },
+  hero: {
+    minHeight: 168,
+    borderRadius: 18,
+    backgroundColor: "#143322",
     overflow: "hidden",
     flexDirection: "row",
-    alignItems: "center"
+    alignItems: "center",
+    marginBottom: 20,
+    paddingLeft: 16
   },
-  bannerText: { flex: 1, paddingLeft: 14 },
-  bannerKicker: { color: "#3a3a3a", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
-  bannerTitle: { color: APP_BLACK, fontSize: 18, fontWeight: "800", marginTop: 4 },
-  bannerSub: { color: "#3a3a3a", fontSize: 12, marginTop: 4 },
-  bannerArt: { width: 120, height: "100%" },
-  cartEmpty: { color: APP_TEXT_MUTED, paddingVertical: 12 },
-  cartLine: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12 },
-  cartLineBody: { flex: 1 },
-  cartLineTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
-  cartLineMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 2 },
-  locationKicker: { color: APP_TEXT, fontSize: 13, fontWeight: "800", marginBottom: 2 },
-  locationHint: { color: APP_TEXT_MUTED, fontSize: 12, marginBottom: 2 },
-  locationRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  locationValue: { color: APP_TEXT, fontSize: 16, fontWeight: "800", maxWidth: 240 },
-  requestPlace: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 },
-  hero: {
-    backgroundColor: APP_SURFACE,
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 22,
-    borderWidth: 1,
-    borderColor: "rgba(201,255,53,0.28)"
-  },
-  heroKicker: { color: APP_LIME, fontSize: 12, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase" },
-  heroTitle: { color: APP_TEXT, fontSize: 24, fontWeight: "800", marginTop: 8, lineHeight: 30 },
-  heroSub: { color: APP_TEXT_MUTED, fontSize: 14, lineHeight: 20, marginTop: 8 },
-  sectionHead: {
+  heroCopy: { flex: 1, paddingVertical: 16, zIndex: 1 },
+  heroKicker: { color: "#d7e7c8", fontSize: 11, fontWeight: "800", letterSpacing: 0.5, textTransform: "uppercase" },
+  heroTitle: { color: "#f4fff4", fontSize: 22, fontWeight: "800", marginTop: 8, lineHeight: 26 },
+  heroSub: { color: "#d7e7c8", fontSize: 13, marginTop: 6, lineHeight: 18 },
+  heroBtn: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12
+    gap: 6,
+    marginTop: 12,
+    backgroundColor: "#2f6b45",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
-  listingsBlock: { marginBottom: 18 },
-  listingsTitle: { color: APP_TEXT, fontSize: 20, fontWeight: "800", marginBottom: 12 },
-  sectionTitle: { color: APP_TEXT, fontSize: 20, fontWeight: "800" },
-  viewAll: { color: APP_LIME, fontSize: 14, fontWeight: "700" },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  tile: { marginBottom: 4 },
-  tileArt: {
-    height: 132,
-    borderRadius: 16,
+  heroBtnText: { color: "#f4fff4", fontSize: 13, fontWeight: "800" },
+  heroArt: { width: 132, height: 150, marginRight: 4 },
+  ask: { color: APP_TEXT, fontSize: 16, fontWeight: "800", marginBottom: 10 },
+  search: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden"
+    gap: 8,
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 18
   },
-  tileImage: { width: "100%", height: "100%" },
-  tileLabel: {
-    color: APP_TEXT,
-    fontSize: 14,
-    fontWeight: "700",
-    textAlign: "center",
-    marginTop: 8,
-    lineHeight: 18
-  },
-  requestCard: {
-    backgroundColor: APP_SURFACE,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10
-  },
-  requestTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
-  requestMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 4 },
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "flex-end"
-  },
+  searchInput: { flex: 1, color: "#1a1a1a", fontSize: 15, paddingVertical: 12 },
+  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  sectionTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800" },
+  viewAll: { color: APP_LIME, fontSize: 14, fontWeight: "700" },
+  empty: { color: APP_TEXT_MUTED, marginBottom: 12 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  tile: { height: 156, borderRadius: 16, overflow: "hidden", backgroundColor: "#1c1c1c", justifyContent: "flex-end" },
+  tileImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
+  tileShade: { position: "absolute", left: 0, right: 0, bottom: 0, height: 72 },
+  tileLabel: { color: "#ffffff", fontSize: 15, fontWeight: "800", paddingHorizontal: 12, paddingBottom: 12 },
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
   sheet: {
     backgroundColor: "#1c1c1c",
     borderTopLeftRadius: 18,
@@ -295,6 +286,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.08)"
   },
-  sheetLabel: { color: APP_TEXT, fontSize: 16 },
-  sheetLabelOn: { color: APP_LIME, fontWeight: "700" }
+  sheetLabel: { color: APP_TEXT, fontSize: 16 }
 });
