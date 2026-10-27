@@ -1,8 +1,10 @@
 import React, { useState } from "react";
-import { ScrollView, Text, TextInput } from "react-native";
+import { Alert, ScrollView, Text, TextInput } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../auth/AuthContext";
+import { confirmProviderPhone, sendPhoneOtp } from "../services/api";
 import {
   PROVIDER_MUTED,
   ProviderContinueButton,
@@ -34,12 +36,18 @@ export function ProviderPersonalDetailsScreen() {
   const [stateName, setStateName] = useState("");
   const [gstNumber, setGstNumber] = useState("");
   const [yearsExperience, setYearsExperience] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { token } = useAuth();
 
   const emailOk = !email.trim() || isValidEmail(email);
   const canContinue = isBusiness
     ? businessName.trim().length > 1 &&
       fullName.trim().length > 1 &&
       phone.trim().length >= 10 &&
+      phoneVerified &&
       isValidEmail(email) &&
       street.trim().length > 0 &&
       village.trim().length > 0 &&
@@ -48,10 +56,49 @@ export function ProviderPersonalDetailsScreen() {
       emailOk
     : fullName.trim().length > 1 &&
       phone.trim().length >= 10 &&
+      phoneVerified &&
       village.trim().length > 0 &&
       district.trim().length > 0 &&
       stateName.trim().length > 0 &&
       emailOk;
+
+  const sendOtp = async () => {
+    const digits = phone.replace(/\D/g, "").slice(-10);
+    if (digits.length < 10) {
+      Alert.alert("Mobile number", "Enter a 10-digit mobile number first.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await sendPhoneOtp({ phone: digits });
+      setOtpSent(true);
+      Alert.alert("OTP sent", "Enter the 6-digit code sent to this mobile.");
+    } catch (error) {
+      Alert.alert("Could not send OTP", error instanceof Error ? error.message : "Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const checkOtp = async () => {
+    if (!token) {
+      Alert.alert("Sign in", "Sign in again, then verify the mobile number.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await confirmProviderPhone(token, { phone: phone.replace(/\D/g, "").slice(-10), code: otp });
+      if (!result.verified) {
+        Alert.alert("OTP", "That code was not accepted.");
+        return;
+      }
+      setPhoneVerified(true);
+    } catch (error) {
+      Alert.alert("OTP", error instanceof Error ? error.message : "That code was not accepted.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onContinue = () => {
     void updateProviderRegistrationDraft({
@@ -59,6 +106,7 @@ export function ProviderPersonalDetailsScreen() {
       registrationType,
       fullName: fullName.trim(),
       phone: phone.trim(),
+      phoneOtpVerified: true,
       email: email.trim().toLowerCase(),
       businessName: isBusiness ? businessName.trim() : "",
       street: isBusiness ? street.trim() : "",
@@ -105,7 +153,10 @@ export function ProviderPersonalDetailsScreen() {
             <TextInput
               style={pf.input}
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(value) => {
+                setPhone(value);
+                setPhoneVerified(false);
+              }}
               placeholder="Mobile Number *"
               placeholderTextColor={PROVIDER_MUTED}
               keyboardType="phone-pad"
@@ -182,7 +233,10 @@ export function ProviderPersonalDetailsScreen() {
             <TextInput
               style={pf.input}
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(value) => {
+                setPhone(value);
+                setPhoneVerified(false);
+              }}
               placeholder="Mobile Number *"
               placeholderTextColor={PROVIDER_MUTED}
               keyboardType="phone-pad"
@@ -224,6 +278,24 @@ export function ProviderPersonalDetailsScreen() {
             />
           </>
         )}
+        <Text style={[pf.sectionTitle, { marginTop: 16 }]}>Mobile OTP</Text>
+        <Text style={pf.sectionSub}>
+          {phoneVerified ? "This mobile is verified." : otpSent ? "Enter the code, then verify." : "Send a code to the mobile number above."}
+        </Text>
+        <TextInput
+          style={pf.input}
+          value={otp}
+          onChangeText={setOtp}
+          placeholder="6-digit OTP"
+          placeholderTextColor={PROVIDER_MUTED}
+          keyboardType="number-pad"
+          maxLength={6}
+        />
+        <ProviderContinueButton
+          label={busy ? "Please wait…" : phoneVerified ? "Mobile verified" : otpSent ? "Verify OTP" : "Send OTP"}
+          disabled={busy || phoneVerified}
+          onPress={() => void (otpSent ? checkOtp() : sendOtp())}
+        />
       </ScrollView>
 
       <ProviderContinueButton disabled={!canContinue} onPress={onContinue} />

@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { useCreateModal } from "../../context/CreateModalContext";
 import { useNotificationPanel } from "../../context/NotificationPanelContext";
@@ -76,10 +76,122 @@ function NavIcon({ name }: { name: NavIconName }) {
   }
 }
 
+const PROVIDER_NAV = [
+  { to: "/provider", label: "Overview", end: true, icon: "overview" },
+  { to: "/provider/rental", label: "Rentals", end: false, icon: "rentals" },
+  { to: "/provider/listings/new", label: "Create", end: true, icon: "create" },
+  { to: "/provider/listings", label: "Listing", end: true, icon: "listing" },
+  { to: "/provider/services", label: "Services", end: false, icon: "services" },
+  { to: "/provider/profile", label: "Profile", end: false, icon: "profile" }
+] as const;
+
+function ProviderIcon({ name }: { name: (typeof PROVIDER_NAV)[number]["icon"] }) {
+  switch (name) {
+    case "overview":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M4.5 4.5h6.5v6.5H4.5V4.5Zm8.5 0h6.5v6.5H13V4.5ZM4.5 13h6.5v6.5H4.5V13Zm8.5 0h6.5v6.5H13V13Z" />
+        </svg>
+      );
+    case "rentals":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M4 16.5h16M6.5 16.5v-4h11v4M8 12.5 10 8h4l2 4.5" />
+          <path d="M7.5 16.5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6Zm9 0a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6Z" />
+        </svg>
+      );
+    case "create":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+      );
+    case "listing":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M8 7h11M8 12h11M8 17h11M5 7h.01M5 12h.01M5 17h.01" />
+        </svg>
+      );
+    case "services":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M14.5 6.5a3.5 3.5 0 0 1 5 5L11 20l-4.2 1.2L8 17l6.5-10.5Z" />
+          <path d="m13.2 8 2.8 2.8" />
+        </svg>
+      );
+    case "profile":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M12 13.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4Zm0 1.8c-4.7 0-8.2 2.3-8.2 4.8v.2h16.4v-.2c0-2.5-3.5-4.8-8.2-4.8Z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+function ProviderSidebar() {
+  const { signOut } = useAuth();
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar__inner">
+        <NavLink to="/" className="sidebar__logo" title="Cropvibe feed">
+          <img src="/cropvibefavicon.png" alt="" className="sidebar__logo-icon" />
+          <img src="/logo-wordmark.png" alt="Cropvibe" className="sidebar__logo-wordmark" />
+        </NavLink>
+
+        <nav className="sidebar__nav" aria-label="Provider">
+          {PROVIDER_NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              title={item.label}
+              className={({ isActive }) => `sidebar__link${isActive ? " sidebar__link--active" : ""}`}
+            >
+              <span className="sidebar__icon-wrap">
+                <span className="sidebar__icon">
+                  <ProviderIcon name={item.icon} />
+                </span>
+              </span>
+              <span className="sidebar__label">{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="sidebar__footer">
+          <NavLink to="/" className="sidebar__link" title="Cropvibe feed">
+            <span className="sidebar__icon-wrap">
+              <span className="sidebar__icon">
+                <NavIcon name="home" />
+              </span>
+            </span>
+            <span className="sidebar__label">Cropvibe</span>
+          </NavLink>
+          <button type="button" className="sidebar__more-btn" onClick={signOut} title="Log out">
+            <span className="sidebar__icon" aria-hidden>
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="5" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="12" cy="19" r="1.5" />
+              </svg>
+            </span>
+            <span className="sidebar__label">Log out</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 export function Sidebar() {
+  const { pathname } = useLocation();
   const { user, signOut } = useAuth();
   const { openCreate } = useCreateModal();
   const { messageUnreadCount, notificationUnreadCount } = useNotificationPanel();
+  const providerDashboard = pathname === "/provider" || (pathname.startsWith("/provider/") && !pathname.startsWith("/provider/join"));
+  if (providerDashboard) return <ProviderSidebar />;
 
   return (
     <aside className="sidebar">

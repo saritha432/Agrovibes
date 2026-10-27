@@ -11,7 +11,7 @@ import { useAndroidNestedStackBack } from "../../navigation/useAndroidScreenBack
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON_LIME } from "../../theme/appColors";
 import { RENTAL_CATEGORIES, rentalCategoryById } from "./rentalCategories";
 import { catalogForCategory, RENTAL_CATALOG_SUBS, type RentalCatalogItem, type RentalCatalogSub } from "./rentalCatalog";
-import { addRentalCartLine } from "./rentalCart";
+import { addRentalCartLine, setRentalCartLine } from "./rentalCart";
 
 const BACK_ICON = require("../../../assets/market/back-icon.png");
 const SIDE_CARD_W = 74;
@@ -84,17 +84,18 @@ export function RentalCategoryScreen() {
     const item = selected;
     const chosen = option || item.options[0] || item.unitLabel;
     const count = Math.max(quantity, 1);
-    setSelected(null);
-    navigateToRentalCart({
+    void setRentalCartLine({
       listingId: item.id,
       title: item.title,
       category: category?.title || item.title,
-      location,
       option: chosen,
       quantity: count,
       unitPrice: item.price,
       unitLabel: item.unitLabel,
       mrp: item.mrp
+    }).then(() => {
+      setSelected(null);
+      navigateToRentalCart(location);
     });
   };
 

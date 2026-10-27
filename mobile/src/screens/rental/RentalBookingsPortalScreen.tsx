@@ -12,7 +12,7 @@ import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON
 import { uploadCustomerBookings } from "./customerRentalBookings";
 import { RENTAL_CATEGORIES } from "./rentalCategories";
 import { RENTAL_CATALOG_SUBS } from "./rentalCatalog";
-import { getRentalCart, removeRentalCartLine, type RentalCartLine } from "./rentalCart";
+import { getRentalCart, type RentalCartLine } from "./rentalCart";
 
 const BANNERS: Array<{ id: string; title: string; subtitle: string; image: ImageSourcePropType }> = [
   {
@@ -45,7 +45,6 @@ export function RentalBookingsPortalScreen() {
   const [locationOpen, setLocationOpen] = useState(false);
   const [mapMode, setMapMode] = useState<"current" | "manual" | null>(null);
   const [cart, setCart] = useState<RentalCartLine[]>([]);
-  const [cartOpen, setCartOpen] = useState(false);
   const tileWidth = Math.floor((Math.min(width, 520) - 40 - 12) / 2);
   const bannerWidth = Math.min(width, 520) - 72;
 
@@ -83,7 +82,7 @@ export function RentalBookingsPortalScreen() {
               <Ionicons name="chevron-down" size={16} color={APP_TEXT} />
             </View>
           </Pressable>
-          <Pressable style={styles.cartBtn} onPress={() => setCartOpen(true)} accessibilityLabel="Cart">
+          <Pressable style={styles.cartBtn} onPress={() => navigateToRentalCart(location)} accessibilityLabel="Cart">
             <Ionicons name="cart-outline" size={24} color={APP_TEXT} />
             {cart.length > 0 ? (
               <View style={styles.cartBadge}>
@@ -163,48 +162,6 @@ export function RentalBookingsPortalScreen() {
               <Ionicons name="map-outline" size={18} color={APP_LIME} />
               <Text style={styles.sheetLabel}>Add manually on the map</Text>
             </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
-      <Modal visible={cartOpen} transparent animationType="slide" onRequestClose={() => setCartOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setCartOpen(false)}>
-          <Pressable style={styles.sheet} onPress={() => undefined}>
-            <Text style={styles.sheetTitle}>Cart</Text>
-            {cart.length === 0 ? <Text style={styles.cartEmpty}>Your cart is empty.</Text> : null}
-            {cart.map((line) => (
-              <View key={line.listingId} style={styles.cartLine}>
-                <Pressable
-                  style={styles.cartLineBody}
-                  onPress={() => {
-                    setCartOpen(false);
-                    navigateToRentalCart({
-                      listingId: line.listingId,
-                      title: line.title,
-                      category: line.category,
-                      location,
-                      option: line.option,
-                      quantity: line.quantity,
-                      unitPrice: line.unitPrice,
-                      unitLabel: line.unitLabel,
-                      mrp: line.mrp
-                    });
-                  }}
-                >
-                  <Text style={styles.cartLineTitle}>{line.title}</Text>
-                  <Text style={styles.cartLineMeta}>
-                    {line.quantity} × {line.option}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    void removeRentalCartLine(line.listingId).then(setCart);
-                  }}
-                  accessibilityLabel="Remove"
-                >
-                  <Ionicons name="trash-outline" size={18} color={APP_TEXT_MUTED} />
-                </Pressable>
-              </View>
-            ))}
           </Pressable>
         </Pressable>
       </Modal>

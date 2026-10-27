@@ -125,6 +125,16 @@ export function RootNavigator() {
         options={{ animation: "fade" }}
       />
       <Stack.Screen
+        name="ProviderTractor"
+        getComponent={() => require("../screens/provider/dashboard/ProviderTractorScreen").ProviderTractorScreen}
+        options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: "#1a1a1a" } }}
+      />
+      <Stack.Screen
+        name="ProviderPayouts"
+        getComponent={() => require("../screens/provider/dashboard/ProviderPayoutsScreen").ProviderPayoutsScreen}
+        options={{ headerShown: false, animation: "slide_from_right", contentStyle: { backgroundColor: "#1a1a1a" } }}
+      />
+      <Stack.Screen
         name="ProviderNewListing"
         getComponent={() =>
           require("../screens/provider/dashboard/ProviderNewListingScreen").ProviderNewListingScreen

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -15,6 +15,7 @@ import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON
 import { saveCustomerRentalBooking, uploadCustomerBookings } from "./customerRentalBookings";
 import { BookingDateField } from "./BookingDateField";
 import { catalogItemById } from "./rentalCatalog";
+import { clearRentalCart, getRentalCart, updateRentalCartQuantity, type RentalCartLine } from "./rentalCart";
 
 type PayMethod = "card" | "upi" | "netbanking";
 
@@ -26,6 +27,10 @@ const METHODS: Array<{ id: PayMethod; label: string; hint: string }> = [
 
 function rupee(n: number) {
   return "\u20B9" + Math.round(n).toLocaleString("en-IN");
+}
+
+function lineKey(line: RentalCartLine) {
+  return `${line.listingId}|${line.option}`;
 }
 
 function checkoutHtml(keyId: string, orderId: string, amountPaise: number, method: PayMethod) {
@@ -92,15 +97,8 @@ export function RentalCartScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RentalCart">>();
   const { user, token } = useAuth();
-  const item = route.params;
-  const cover = catalogItemById(item.listingId);
-  const quantity = Math.max(1, Number(item.quantity) || 1);
-  const rate = Math.max(0, Number(item.unitPrice) || 0);
-  const listRate = Math.max(rate, Number(item.mrp) || 0);
-  const subtotal = rate * quantity;
-  const discount = Math.max(0, listRate * quantity - subtotal);
-  const amountPaise = Math.round(subtotal * 100);
-  const [place, setPlace] = useState(item.location);
+  const [lines, setLines] = useState<RentalCartLine[]>([]);
+  const [place, setPlace] = useState(route.params?.location && route.params.location !== "Add location" ? route.params.location : "Add location");
   const [placeLat, setPlaceLat] = useState<number | null>(null);
   const [placeLng, setPlaceLng] = useState<number | null>(null);
   const [mapMode, setMapMode] = useState<"current" | "manual" | null>(null);
@@ -112,36 +110,71 @@ export function RentalCartScreen() {
   const [keyId, setKeyId] = useState("");
   const [mock, setMock] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void getRentalCart().then((next) => {
+        if (active) setLines(next);
+      });
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
+
+  const itemTotal = lines.reduce((sum, line) => sum + line.mrp * line.quantity, 0);
+  const toPay = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+  const discount = Math.max(0, itemTotal - toPay);
+  const amountPaise = Math.round(toPay * 100);
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+
+  const changeQty = (line: RentalCartLine, nextQty: number) => {
+    void updateRentalCartQuantity(line.listingId, line.option, nextQty).then(setLines);
+  };
+
   const savePaidBooking = async (paymentId: string) => {
     const when = date.trim() || "As booked";
-    const title = `${item.title} · ${item.option} × ${quantity}`;
-    await saveCustomerRentalBooking({
-      listingId: item.listingId,
-      title,
-      category: item.category,
-      location: place,
-      date: when,
-      note: `Paid ${rupee(subtotal)} by ${method}. Ref ${paymentId}`
-    });
-    await addCustomerBooking({
-      listingId: item.listingId,
-      listingTitle: title,
-      customerName: user?.fullName?.trim() || "Customer",
-      customerPhone: user?.phone?.trim() || "",
-      bookingDate: when,
-      startTime: "",
-      endTime: "",
-      duration: item.option,
-      pickupLocation: place,
-      notes: `Paid ${rupee(subtotal)} by ${method}. Ref ${paymentId}`
-    });
+    for (const line of lines) {
+      const title = `${line.title} · ${line.option} × ${line.quantity}`;
+      const paid = line.unitPrice * line.quantity;
+      await saveCustomerRentalBooking({
+        listingId: line.listingId,
+        title,
+        category: line.category,
+        location: place,
+        date: when,
+        note: `Paid ${rupee(paid)} by ${method}. Ref ${paymentId}`
+      });
+      await addCustomerBooking({
+        listingId: line.listingId,
+        listingTitle: title,
+        customerName: user?.fullName?.trim() || "Customer",
+        customerPhone: user?.phone?.trim() || "",
+        bookingDate: when,
+        startTime: "",
+        endTime: "",
+        duration: line.option,
+        pickupLocation: place,
+        notes: `Paid ${rupee(paid)} by ${method}. Ref ${paymentId}`
+      });
+    }
     await uploadCustomerBookings(token);
+    await clearRentalCart();
+    setLines([]);
     setPhase("done");
   };
 
   const startPayment = async () => {
+    if (!lines.length) {
+      setError("Your cart is empty.");
+      return;
+    }
+    if (place.trim().length < 3 || place === "Add location") {
+      setError("Add the place where you need this.");
+      return;
+    }
     if (date.trim().length < 4) {
-      setError("Enter the date you need it.");
+      setError("Choose the date you need it.");
       return;
     }
     if (amountPaise < 100) {
@@ -153,7 +186,7 @@ export function RentalCartScreen() {
     try {
       const created = await createRazorpayOrder({
         amountPaise,
-        receipt: `rent_${item.listingId}`.slice(0, 40)
+        receipt: `rent_${lines[0].listingId}`.slice(0, 40)
       });
       setMock(Boolean(created.mock));
       setKeyId(created.keyId);
@@ -167,8 +200,15 @@ export function RentalCartScreen() {
   useEffect(() => {
     if (Platform.OS !== "web" || phase !== "paying" || mock || !orderId || !keyId) return;
     const page = globalThis as {
-      Razorpay?: new (options: Record<string, unknown>) => { open: () => void; on: (event: string, cb: (resp: { error?: { description?: string } }) => void) => void };
-      document?: { getElementById: (id: string) => unknown; createElement: (tag: string) => { id: string; src: string; async: boolean; onload: () => void }; body?: { appendChild: (node: unknown) => void } };
+      Razorpay?: new (options: Record<string, unknown>) => {
+        open: () => void;
+        on: (event: string, cb: (resp: { error?: { description?: string } }) => void) => void;
+      };
+      document?: {
+        getElementById: (id: string) => unknown;
+        createElement: (tag: string) => { id: string; src: string; async: boolean; onload: () => void };
+        body?: { appendChild: (node: unknown) => void };
+      };
     };
     const open = () => {
       if (!page.Razorpay) return;
@@ -254,33 +294,11 @@ export function RentalCartScreen() {
         <Pressable onPress={() => navigation.goBack()} hitSlop={8} accessibilityLabel="Back">
           <Ionicons name="chevron-back" size={26} color={APP_TEXT} />
         </Pressable>
-        <Text style={styles.headerTitle}>View Cart</Text>
+        <Text style={styles.headerTitle}>Cart</Text>
+        <Text style={styles.headerCount}>{itemCount ? `${itemCount} item${itemCount === 1 ? "" : "s"}` : ""}</Text>
       </View>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <View style={styles.split}>
-          <View style={styles.pricePane}>
-            <Text style={styles.paneTitle}>Pricing</Text>
-            <PriceRow label="Rate" value={`${rupee(rate)}/${item.unitLabel}`} />
-            <PriceRow label="Quantity" value={String(quantity)} />
-            <PriceRow label="Option" value={item.option} />
-            {discount > 0 ? <PriceRow label="Discount" value={`− ${rupee(discount)}`} /> : null}
-            <View style={styles.rule} />
-            <PriceRow label="To pay" value={rupee(subtotal)} strong />
-          </View>
-          <View style={styles.productPane}>
-            {cover ? <Image source={cover.image} style={styles.photo} resizeMode="cover" /> : <View style={styles.photo} />}
-            <Text style={styles.productTitle} numberOfLines={2}>
-              {item.title}
-            </Text>
-            <Text style={styles.productMeta}>{item.category}</Text>
-            <Text style={styles.productMeta}>{place}</Text>
-            <Text style={styles.productMeta}>
-              {quantity} × {item.option}
-            </Text>
-          </View>
-        </View>
-
-        <Text style={styles.paneTitle}>Location</Text>
+        <Text style={styles.paneTitle}>Deliver to</Text>
         <View style={styles.placeCard}>
           <Ionicons name="location-sharp" size={18} color={APP_LIME} />
           <Text style={styles.placeText}>{place}</Text>
@@ -294,6 +312,50 @@ export function RentalCartScreen() {
           </Pressable>
         </View>
 
+        <Text style={styles.paneTitle}>Your items</Text>
+        {lines.length === 0 ? <Text style={styles.empty}>Your cart is empty. Add a rental, then open the cart again.</Text> : null}
+        {lines.map((line) => {
+          const cover = catalogItemById(line.listingId);
+          return (
+            <View key={lineKey(line)} style={styles.item}>
+              {cover ? <Image source={cover.image} style={styles.photo} resizeMode="cover" /> : <View style={styles.photo} />}
+              <View style={styles.itemBody}>
+                <Text style={styles.itemTitle} numberOfLines={2}>
+                  {line.title}
+                </Text>
+                <Text style={styles.itemMeta}>
+                  {line.category} · {line.option}
+                </Text>
+                <View style={styles.itemFoot}>
+                  <View>
+                    <Text style={styles.itemPrice}>{rupee(line.unitPrice * line.quantity)}</Text>
+                    {line.mrp > line.unitPrice ? <Text style={styles.itemMrp}>{rupee(line.mrp * line.quantity)}</Text> : null}
+                  </View>
+                  <View style={styles.stepper}>
+                    <Pressable onPress={() => changeQty(line, line.quantity - 1)} hitSlop={8} accessibilityLabel="Decrease">
+                      <Text style={styles.stepGlyph}>−</Text>
+                    </Pressable>
+                    <Text style={styles.stepCount}>{line.quantity}</Text>
+                    <Pressable onPress={() => changeQty(line, line.quantity + 1)} hitSlop={8} accessibilityLabel="Increase">
+                      <Text style={styles.stepGlyph}>+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            </View>
+          );
+        })}
+
+        {lines.length > 0 ? (
+          <View style={styles.bill}>
+            <Text style={styles.paneTitle}>Bill details</Text>
+            <BillRow label="Item total" value={rupee(itemTotal)} />
+            {discount > 0 ? <BillRow label="Discount" value={`− ${rupee(discount)}`} /> : null}
+            <View style={styles.rule} />
+            <BillRow label="To pay" value={rupee(toPay)} strong />
+          </View>
+        ) : null}
+
         <BookingDateField value={date} onChange={setDate} />
 
         <Text style={styles.paneTitle}>Payment</Text>
@@ -304,7 +366,7 @@ export function RentalCartScreen() {
               <Ionicons name={on ? "radio-button-on" : "radio-button-off"} size={18} color={on ? APP_LIME : APP_TEXT_MUTED} />
               <View>
                 <Text style={styles.methodLabel}>{choice.label}</Text>
-                <Text style={styles.productMeta}>{choice.hint}</Text>
+                <Text style={styles.itemMeta}>{choice.hint}</Text>
               </View>
             </Pressable>
           );
@@ -315,20 +377,18 @@ export function RentalCartScreen() {
         {phase === "done" ? (
           <View style={styles.done}>
             <Ionicons name="checkmark-circle" size={28} color={APP_LIME} />
-            <Text style={styles.productTitle}>Payment received</Text>
-            <Text style={styles.productMeta}>
-              {item.title} is booked for {date.trim()} in {place}.
+            <Text style={styles.itemTitle}>Payment received</Text>
+            <Text style={styles.itemMeta}>
+              Booked for {date.trim()} in {place}.
             </Text>
           </View>
         ) : null}
 
-        {phase === "paying" && !orderId ? (
-          <ActivityIndicator color={APP_LIME} style={{ marginTop: 16 }} />
-        ) : null}
+        {phase === "paying" && !orderId ? <ActivityIndicator color={APP_LIME} style={{ marginTop: 16 }} /> : null}
 
         {phase === "paying" && orderId && mock ? (
           <View style={styles.done}>
-            <Text style={styles.productMeta}>
+            <Text style={styles.itemMeta}>
               Razorpay keys are not set on the server, so this stays in test mode. Card, UPI, and net banking open once the keys are added.
             </Text>
             <Pressable
@@ -357,18 +417,17 @@ export function RentalCartScreen() {
             />
           </View>
         ) : null}
-
-        {phase === "review" || phase === "error" ? (
-          <Pressable style={styles.payBtn} onPress={() => void startPayment()}>
-            <Text style={styles.payText}>Proceed to payment</Text>
-            <Text style={styles.payHint}>{METHODS.find((choice) => choice.id === method)?.label}</Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
+      {lines.length > 0 && (phase === "review" || phase === "error") ? (
+        <Pressable style={styles.payBar} onPress={() => void startPayment()}>
+          <Text style={styles.payText}>Proceed to pay</Text>
+          <Text style={styles.payText}>{rupee(toPay)}</Text>
+        </Pressable>
+      ) : null}
       <LocationMapPicker
         open={mapMode !== null}
         mode={mapMode || "auto"}
-        label={place}
+        label={place === "Add location" ? "" : place}
         lat={placeLat}
         lng={placeLng}
         onClose={() => setMapMode(null)}
@@ -383,11 +442,11 @@ export function RentalCartScreen() {
   );
 }
 
-function PriceRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function BillRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <View style={styles.priceRow}>
-      <Text style={styles.priceLabel}>{label}</Text>
-      <Text style={[styles.priceValue, strong ? styles.priceStrong : null]}>{value}</Text>
+    <View style={styles.billRow}>
+      <Text style={styles.billLabel}>{label}</Text>
+      <Text style={[styles.billValue, strong ? styles.billStrong : null]}>{value}</Text>
     </View>
   );
 }
@@ -395,20 +454,10 @@ function PriceRow({ label, value, strong }: { label: string; value: string; stro
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: APP_BLACK },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  headerTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800" },
-  body: { padding: 16, paddingBottom: 32 },
-  split: { flexDirection: "row", gap: 10, marginBottom: 16 },
-  pricePane: { flex: 1, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 12 },
-  productPane: { flex: 1.15, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 10 },
-  paneTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800", marginBottom: 8 },
-  priceRow: { marginBottom: 8 },
-  priceLabel: { color: APP_TEXT_MUTED, fontSize: 11, fontWeight: "700" },
-  priceValue: { color: APP_TEXT, fontSize: 13, fontWeight: "700", marginTop: 2 },
-  priceStrong: { color: APP_LIME, fontSize: 18, fontWeight: "800" },
-  rule: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginVertical: 6 },
-  photo: { width: "100%", height: 110, borderRadius: 10, backgroundColor: "#173024", marginBottom: 8 },
-  productTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
-  productMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 3 },
+  headerTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800", flex: 1 },
+  headerCount: { color: APP_TEXT_MUTED, fontSize: 13, fontWeight: "700" },
+  body: { padding: 16, paddingBottom: 28 },
+  paneTitle: { color: APP_TEXT, fontSize: 16, fontWeight: "800", marginBottom: 8 },
   placeCard: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -419,7 +468,7 @@ const styles = StyleSheet.create({
     marginBottom: 8
   },
   placeText: { color: APP_TEXT, fontSize: 14, fontWeight: "700", flex: 1 },
-  placeActions: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  placeActions: { flexDirection: "row", gap: 8, marginBottom: 18 },
   placeBtn: {
     flex: 1,
     borderWidth: 1,
@@ -429,14 +478,33 @@ const styles = StyleSheet.create({
     alignItems: "center"
   },
   placeBtnText: { color: APP_LIME, fontSize: 13, fontWeight: "800" },
-  input: {
-    backgroundColor: APP_SURFACE,
-    color: APP_TEXT,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 16
+  empty: { color: APP_TEXT_MUTED, marginBottom: 16, lineHeight: 20 },
+  item: { flexDirection: "row", gap: 12, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 10, marginBottom: 10 },
+  photo: { width: 84, height: 84, borderRadius: 10, backgroundColor: "#173024" },
+  itemBody: { flex: 1 },
+  itemTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
+  itemMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 3 },
+  itemFoot: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  itemPrice: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
+  itemMrp: { color: APP_TEXT_MUTED, fontSize: 12, textDecorationLine: "line-through", marginTop: 2 },
+  stepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderColor: APP_LIME,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
+  stepGlyph: { color: APP_LIME, fontSize: 18, fontWeight: "800" },
+  stepCount: { color: APP_TEXT, fontSize: 14, fontWeight: "800", minWidth: 12, textAlign: "center" },
+  bill: { backgroundColor: APP_SURFACE, borderRadius: 14, padding: 12, marginTop: 6, marginBottom: 16 },
+  billRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
+  billLabel: { color: APP_TEXT_MUTED, fontSize: 13 },
+  billValue: { color: APP_TEXT, fontSize: 13, fontWeight: "700" },
+  billStrong: { color: APP_LIME, fontSize: 16, fontWeight: "800" },
+  rule: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginBottom: 8 },
   method: {
     flexDirection: "row",
     alignItems: "center",
@@ -451,15 +519,25 @@ const styles = StyleSheet.create({
   methodOn: { borderColor: APP_LIME },
   methodLabel: { color: APP_TEXT, fontSize: 14, fontWeight: "800" },
   error: { color: "#ffb4b4", marginTop: 8 },
+  payBar: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: APP_LIME,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  payText: { color: APP_TEXT_ON_LIME, fontSize: 16, fontWeight: "800" },
+  done: { marginTop: 14, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 14 },
+  gateway: { height: 460, marginTop: 12, borderRadius: 12, overflow: "hidden", backgroundColor: "#111" },
   payBtn: {
     marginTop: 14,
     backgroundColor: APP_LIME,
     borderRadius: 24,
     alignItems: "center",
     paddingVertical: 12
-  },
-  payText: { color: APP_TEXT_ON_LIME, fontSize: 16, fontWeight: "800" },
-  payHint: { color: APP_TEXT_ON_LIME, fontSize: 12, fontWeight: "600" },
-  done: { marginTop: 14, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 14 },
-  gateway: { height: 460, marginTop: 12, borderRadius: 12, overflow: "hidden", backgroundColor: "#111" }
+  }
 });

@@ -34,23 +34,15 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   ProviderMain: undefined;
   ProviderNewListing: undefined;
+  ProviderTractor: undefined;
+  ProviderPayouts: undefined;
   InstructorStudio: undefined;
   EditProfile: undefined;
   Weather: undefined;
   DiscoverSearch: undefined;
   RentalCategory: { categoryId: string; location: string };
   RentalBooking: { listingId: string; title: string; category: string; location: string };
-  RentalCart: {
-    listingId: string;
-    title: string;
-    category: string;
-    location: string;
-    option: string;
-    quantity: number;
-    unitPrice: number;
-    unitLabel: string;
-    mrp: number;
-  };
+  RentalCart: { location?: string } | undefined;
   PlantHealth: undefined;
   PlantHealthScan: { plantId?: number; plantName?: string; photoRequests?: string[] } | undefined;
   PlantHealthResult: { scanId: number };

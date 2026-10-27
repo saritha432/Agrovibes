@@ -6,6 +6,7 @@ export type ProviderJoinDraft = {
   registrationType: ProviderRegistrationType;
   fullName: string;
   phone: string;
+  phoneOtpVerified: boolean;
   email: string;
   businessName: string;
   street: string;
@@ -37,6 +38,7 @@ export const EMPTY_PROVIDER_DRAFT: ProviderJoinDraft = {
   registrationType: "individual",
   fullName: "",
   phone: "",
+  phoneOtpVerified: false,
   email: "",
   businessName: "",
   street: "",

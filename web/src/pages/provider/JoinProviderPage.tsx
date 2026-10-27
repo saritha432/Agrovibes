@@ -7,9 +7,11 @@ import {
   fetchProviderEquipment,
   fetchProviderKycStatus,
   startProviderDigilocker,
+  confirmProviderPhone,
   submitProviderKyc,
   verifyProviderPan
 } from "../../api/providerKyc";
+import { sendPhoneOtp } from "../../api/auth";
 import { SettingsIconBack } from "../../components/settings/SettingsIcons";
 import "../settings/SettingsMenuPage.css";
 import {
@@ -81,6 +83,8 @@ export function JoinProviderPage() {
   const [gatewayUrl, setGatewayUrl] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
   const [kycStatus, setKycStatus] = useState<"idle" | "pending" | "verified" | "failed">(
     readProviderDraft().digilockerVerified ? "verified" : "idle"
   );
@@ -182,6 +186,7 @@ export function JoinProviderPage() {
     ? draft.businessName.trim().length > 1 &&
       draft.fullName.trim().length > 1 &&
       draft.phone.trim().length >= 10 &&
+      draft.phoneOtpVerified &&
       isValidEmail(draft.email) &&
       draft.street.trim().length > 0 &&
       draft.village.trim().length > 0 &&
@@ -189,11 +194,51 @@ export function JoinProviderPage() {
       draft.state.trim().length > 0
     : draft.fullName.trim().length > 1 &&
       draft.phone.trim().length >= 10 &&
+      draft.phoneOtpVerified &&
       draft.village.trim().length > 0 &&
       draft.district.trim().length > 0 &&
       draft.state.trim().length > 0 &&
       emailOk;
   const panOk = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.panNumber);
+
+  const sendOtp = async () => {
+    const digits = draft.phone.replace(/\D/g, "").slice(-10);
+    if (digits.length < 10) {
+      setError("Enter a 10-digit mobile number first.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await sendPhoneOtp({ phone: digits });
+      setOtpSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send OTP.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const checkOtp = async () => {
+    if (!token) {
+      setError("Sign in again, then verify the mobile number.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await confirmProviderPhone(token, { phone: draft.phone.replace(/\D/g, "").slice(-10), code: otp });
+      if (!result.verified) {
+        setError("That code was not accepted.");
+        return;
+      }
+      patch({ phoneOtpVerified: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That code was not accepted.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const startDigilocker = async () => {
     if (!token || busy || draft.digilockerVerified) return;
@@ -335,7 +380,7 @@ export function JoinProviderPage() {
         phone: draft.phone || undefined,
         address: address || undefined,
         priority: "Medium",
-        otpVerified: true,
+        otpVerified: draft.phoneOtpVerified,
         panNumber: draft.panNumber
       });
       setStep("done");
@@ -494,8 +539,17 @@ export function JoinProviderPage() {
               className="join-input"
               placeholder="Mobile Number *"
               value={draft.phone}
-              onChange={(event) => patch({ phone: event.target.value })}
+              onChange={(event) => patch({ phone: event.target.value, phoneOtpVerified: false })}
             />
+            <input
+              className="join-input"
+              placeholder="6-digit OTP"
+              value={otp}
+              onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+            />
+            <button type="button" className="join-btn" disabled={busy || draft.phoneOtpVerified} onClick={() => void (otpSent ? checkOtp() : sendOtp())}>
+              {draft.phoneOtpVerified ? "Mobile verified" : otpSent ? "Verify OTP" : "Send OTP"}
+            </button>
             <input
               className="join-input"
               placeholder={isBusiness ? "Email Address *" : "Email Address (optional)"}

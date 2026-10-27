@@ -177,13 +177,21 @@ export function ProviderBankDetailsScreen() {
       accountNumber: accountDigits,
       ifsc: ifscCode
     });
+    if (route.params?.purpose === "payouts") {
+      navigation.navigate("ProviderPayouts");
+      return;
+    }
     navigation.navigate("ProviderVerification", { track, registrationType });
   };
 
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      <ProviderStepBar currentStep={4} />
+      {route.params?.purpose === "payouts" ? (
+        <Text style={[pf.sectionTitle, { paddingHorizontal: 16, paddingTop: 8 }]}>Activate online bookings</Text>
+      ) : (
+        <ProviderStepBar currentStep={4} />
+      )}
 
       <ScrollView
         style={pf.scroll}
