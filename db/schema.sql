@@ -219,3 +219,16 @@ CREATE INDEX IF NOT EXISTS idx_learn_enrollments_user ON learn_enrollments(user_
 CREATE INDEX IF NOT EXISTS idx_learn_progress_user_course ON learn_progress(user_id, course_id);
 CREATE INDEX IF NOT EXISTS idx_home_posts_created ON home_posts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_home_stories_created ON home_stories(created_at DESC);
+
+-- Account-based cart (source of truth for authenticated users)
+CREATE TABLE IF NOT EXISTS user_cart_items (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  cart_kind TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  quantity INTEGER NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_cart_items_user_kind_key ON user_cart_items (user_id, cart_kind, item_key);
+CREATE INDEX IF NOT EXISTS user_cart_items_user_idx ON user_cart_items (user_id, cart_kind, updated_at DESC);

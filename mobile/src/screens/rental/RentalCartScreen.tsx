@@ -2,7 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { RentalText as Text, rentalType } from "./rentalTypography";
 import { WebView } from "react-native-webview";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../auth/AuthContext";
@@ -15,7 +16,9 @@ import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON
 import { saveCustomerRentalBooking, uploadCustomerBookings } from "./customerRentalBookings";
 import { BookingDateField } from "./BookingDateField";
 import { catalogItemById } from "./rentalCatalog";
-import { clearRentalCart, getRentalCart, updateRentalCartQuantity, type RentalCartLine } from "./rentalCart";
+import { useUserLocation } from "../../location/UserLocationContext";
+import { useRentalCart } from "./RentalCartContext";
+import { RENTAL_CART_MAX_QTY, rentalLineKey, type RentalCartLine } from "./rentalCart";
 
 type PayMethod = "card" | "upi" | "netbanking";
 
@@ -30,7 +33,7 @@ function rupee(n: number) {
 }
 
 function lineKey(line: RentalCartLine) {
-  return `${line.listingId}|${line.option}`;
+  return rentalLineKey(line.listingId, line.option);
 }
 
 function checkoutHtml(keyId: string, orderId: string, amountPaise: number, method: PayMethod) {
@@ -97,10 +100,12 @@ export function RentalCartScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RentalCart">>();
   const { user, token } = useAuth();
-  const [lines, setLines] = useState<RentalCartLine[]>([]);
-  const [place, setPlace] = useState(route.params?.location && route.params.location !== "Add location" ? route.params.location : "Add location");
-  const [placeLat, setPlaceLat] = useState<number | null>(null);
-  const [placeLng, setPlaceLng] = useState<number | null>(null);
+  const { lines, setQuantity, clearCart, refreshFromServer } = useRentalCart();
+  const { label: savedLabel, lat: savedLat, lng: savedLng, saveLocation } = useUserLocation();
+  const routePlace = route.params?.location && route.params.location !== "Add location" ? route.params.location : "";
+  const [place, setPlace] = useState(routePlace || savedLabel);
+  const [placeLat, setPlaceLat] = useState<number | null>(savedLat);
+  const [placeLng, setPlaceLng] = useState<number | null>(savedLng);
   const [mapMode, setMapMode] = useState<"current" | "manual" | null>(null);
   const [method, setMethod] = useState<PayMethod>("upi");
   const [date, setDate] = useState("");
@@ -112,15 +117,17 @@ export function RentalCartScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      void getRentalCart().then((next) => {
-        if (active) setLines(next);
-      });
-      return () => {
-        active = false;
-      };
-    }, [])
+      void refreshFromServer();
+    }, [refreshFromServer])
   );
+
+  useEffect(() => {
+    if ((!place || place === "Add location") && savedLabel && savedLabel !== "Add location") {
+      setPlace(savedLabel);
+      setPlaceLat(savedLat);
+      setPlaceLng(savedLng);
+    }
+  }, [place, savedLabel, savedLat, savedLng]);
 
   const itemTotal = lines.reduce((sum, line) => sum + line.mrp * line.quantity, 0);
   const toPay = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
@@ -129,7 +136,7 @@ export function RentalCartScreen() {
   const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
 
   const changeQty = (line: RentalCartLine, nextQty: number) => {
-    void updateRentalCartQuantity(line.listingId, line.option, nextQty).then(setLines);
+    setQuantity(line.listingId, line.option, nextQty);
   };
 
   const savePaidBooking = async (paymentId: string) => {
@@ -159,8 +166,7 @@ export function RentalCartScreen() {
       });
     }
     await uploadCustomerBookings(token);
-    await clearRentalCart();
-    setLines([]);
+    await clearCart();
     setPhase("done");
   };
 
@@ -336,7 +342,12 @@ export function RentalCartScreen() {
                       <Text style={styles.stepGlyph}>−</Text>
                     </Pressable>
                     <Text style={styles.stepCount}>{line.quantity}</Text>
-                    <Pressable onPress={() => changeQty(line, line.quantity + 1)} hitSlop={8} accessibilityLabel="Increase">
+                    <Pressable
+                      onPress={() => changeQty(line, Math.min(RENTAL_CART_MAX_QTY, line.quantity + 1))}
+                      hitSlop={8}
+                      accessibilityLabel="Increase"
+                      disabled={line.quantity >= RENTAL_CART_MAX_QTY}
+                    >
                       <Text style={styles.stepGlyph}>+</Text>
                     </Pressable>
                   </View>
@@ -435,6 +446,7 @@ export function RentalCartScreen() {
           setPlace(value.label);
           setPlaceLat(value.lat);
           setPlaceLng(value.lng);
+          void saveLocation({ label: value.label, lat: value.lat, lng: value.lng }).catch(() => undefined);
           setMapMode(null);
         }}
       />
@@ -454,10 +466,10 @@ function BillRow({ label, value, strong }: { label: string; value: string; stron
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: APP_BLACK },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  headerTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800", flex: 1 },
-  headerCount: { color: APP_TEXT_MUTED, fontSize: 13, fontWeight: "700" },
+  headerTitle: { color: APP_TEXT, flex: 1, ...rentalType(18, "800") },
+  headerCount: { color: APP_TEXT_MUTED, ...rentalType(13, "700") },
   body: { padding: 16, paddingBottom: 28 },
-  paneTitle: { color: APP_TEXT, fontSize: 16, fontWeight: "800", marginBottom: 8 },
+  paneTitle: { color: APP_TEXT, marginBottom: 8, ...rentalType(16, "800") },
   placeCard: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -467,7 +479,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8
   },
-  placeText: { color: APP_TEXT, fontSize: 14, fontWeight: "700", flex: 1 },
+  placeText: { color: APP_TEXT, flex: 1, ...rentalType(14, "700") },
   placeActions: { flexDirection: "row", gap: 8, marginBottom: 18 },
   placeBtn: {
     flex: 1,
@@ -477,16 +489,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center"
   },
-  placeBtnText: { color: APP_LIME, fontSize: 13, fontWeight: "800" },
+  placeBtnText: { color: APP_LIME, ...rentalType(13, "800") },
   empty: { color: APP_TEXT_MUTED, marginBottom: 16, lineHeight: 20 },
   item: { flexDirection: "row", gap: 12, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 10, marginBottom: 10 },
   photo: { width: 84, height: 84, borderRadius: 10, backgroundColor: "#173024" },
   itemBody: { flex: 1 },
-  itemTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
-  itemMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 3 },
+  itemTitle: { color: APP_TEXT, ...rentalType(15, "800") },
+  itemMeta: { color: APP_TEXT_MUTED, marginTop: 3, ...rentalType(12, "400") },
   itemFoot: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
-  itemPrice: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
-  itemMrp: { color: APP_TEXT_MUTED, fontSize: 12, textDecorationLine: "line-through", marginTop: 2 },
+  itemPrice: { color: APP_TEXT, ...rentalType(15, "800") },
+  itemMrp: { color: APP_TEXT_MUTED, textDecorationLine: "line-through", marginTop: 2, ...rentalType(12, "400") },
   stepper: {
     flexDirection: "row",
     alignItems: "center",
@@ -497,13 +509,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4
   },
-  stepGlyph: { color: APP_LIME, fontSize: 18, fontWeight: "800" },
-  stepCount: { color: APP_TEXT, fontSize: 14, fontWeight: "800", minWidth: 12, textAlign: "center" },
+  stepGlyph: { color: APP_LIME, ...rentalType(18, "800") },
+  stepCount: { color: APP_TEXT, minWidth: 12, textAlign: "center", ...rentalType(14, "800") },
   bill: { backgroundColor: APP_SURFACE, borderRadius: 14, padding: 12, marginTop: 6, marginBottom: 16 },
   billRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
-  billLabel: { color: APP_TEXT_MUTED, fontSize: 13 },
-  billValue: { color: APP_TEXT, fontSize: 13, fontWeight: "700" },
-  billStrong: { color: APP_LIME, fontSize: 16, fontWeight: "800" },
+  billLabel: { color: APP_TEXT_MUTED, ...rentalType(13, "400") },
+  billValue: { color: APP_TEXT, ...rentalType(13, "700") },
+  billStrong: { color: APP_LIME, ...rentalType(16, "800") },
   rule: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginBottom: 8 },
   method: {
     flexDirection: "row",
@@ -517,7 +529,7 @@ const styles = StyleSheet.create({
     borderColor: "transparent"
   },
   methodOn: { borderColor: APP_LIME },
-  methodLabel: { color: APP_TEXT, fontSize: 14, fontWeight: "800" },
+  methodLabel: { color: APP_TEXT, ...rentalType(14, "800") },
   error: { color: "#ffb4b4", marginTop: 8 },
   payBar: {
     marginHorizontal: 16,
@@ -530,7 +542,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between"
   },
-  payText: { color: APP_TEXT_ON_LIME, fontSize: 16, fontWeight: "800" },
+  payText: { color: APP_TEXT_ON_LIME, ...rentalType(16, "800") },
   done: { marginTop: 14, backgroundColor: APP_SURFACE, borderRadius: 14, padding: 14 },
   gateway: { height: 460, marginTop: 12, borderRadius: 12, overflow: "hidden", backgroundColor: "#111" },
   payBtn: {

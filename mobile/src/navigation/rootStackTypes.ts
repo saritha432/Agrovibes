@@ -34,8 +34,6 @@ export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   ProviderMain: undefined;
   ProviderNewListing: undefined;
-  ProviderTractor: undefined;
-  ProviderPayouts: undefined;
   InstructorStudio: undefined;
   EditProfile: undefined;
   Weather: undefined;

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -10,11 +10,12 @@ import {
   View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { CheckoutBill, MarketStackParamList } from "../navigation/MarketStackNavigator";
 import { useAndroidNestedStackBack } from "../navigation/useAndroidScreenBack";
 import { useCart } from "../cart/CartContext";
+import { AccountLocationChip } from "../location/AccountLocationChip";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { navigateToWeather } from "../navigation/navigationRef";
 import { APP_LIME } from "../theme/appColors";
@@ -87,13 +88,19 @@ export function CartScreen() {
   useAndroidNestedStackBack();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const { items, itemCount, setQuantity, removeLine } = useCart();
+  const { items, itemCount, setQuantity, removeLine, refreshFromServer } = useCart();
   const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
 
   const [couponInput, setCouponInput] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<{ discount: number; label: string } | null>(null);
   const [couponHint, setCouponHint] = useState("");
   const [useWallet, setUseWallet] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshFromServer();
+    }, [refreshFromServer])
+  );
 
   const subtotal = useMemo(() => items.reduce((s, l) => s + l.unitPrice * l.quantity, 0), [items]);
 
@@ -129,11 +136,7 @@ export function CartScreen() {
       <View style={styles.topBar}>
         <View style={styles.locationRow}>
           <View style={styles.logoDot} />
-          <View style={styles.locationChip}>
-            <Ionicons name="location-outline" size={14} color="#1f2c29" />
-            <Text style={styles.locationText}>Nashik, MH</Text>
-            <Ionicons name="chevron-down" size={14} color="#1f2c29" />
-          </View>
+          <AccountLocationChip />
         </View>
         <View style={styles.topIcons}>
           <Pressable style={styles.iconBtn}>
@@ -192,7 +195,7 @@ export function CartScreen() {
             {items.map((line) => {
               const lineTotal = line.unitPrice * line.quantity;
               return (
-                <View key={line.listingId} style={styles.lineCard}>
+                <View key={line.id} style={styles.lineCard}>
                   <View style={styles.lineThumb}>
                     <Ionicons name="leaf-outline" size={28} color={TEAL} />
                   </View>
@@ -208,7 +211,7 @@ export function CartScreen() {
                       <View style={styles.qtyPill}>
                         <Pressable
                           style={styles.qtyPillSide}
-                          onPress={() => setQuantity(line.listingId, line.quantity - 1)}
+                          onPress={() => setQuantity(line.id, line.quantity - 1)}
                           hitSlop={6}
                         >
                           <Text style={styles.qtyPillGlyph}>−</Text>
@@ -216,7 +219,8 @@ export function CartScreen() {
                         <Text style={styles.qtyPillCount}>{line.quantity}</Text>
                         <Pressable
                           style={styles.qtyPillSide}
-                          onPress={() => setQuantity(line.listingId, line.quantity + 1)}
+                          onPress={() => setQuantity(line.id, line.quantity + 1, line.maxQuantity)}
+                          disabled={line.maxQuantity != null && line.quantity >= line.maxQuantity}
                           hitSlop={6}
                         >
                           <Text style={styles.qtyPillGlyph}>+</Text>
@@ -224,7 +228,7 @@ export function CartScreen() {
                       </View>
                       <Text style={styles.lineTotal}>{rupee(lineTotal)}</Text>
                     </View>
-                    <Pressable style={styles.removeBtn} onPress={() => removeLine(line.listingId)} hitSlop={8}>
+                    <Pressable style={styles.removeBtn} onPress={() => removeLine(line.id)} hitSlop={8}>
                       <Text style={styles.removeText}>Remove</Text>
                     </Pressable>
                   </View>

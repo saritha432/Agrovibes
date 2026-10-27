@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { RentalText as Text, rentalType } from "./rentalTypography";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED } from "../../theme/appColors";
 import type { BookableRental } from "./rentalCategories";
 
@@ -40,13 +41,13 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   body: { flex: 1 },
-  title: { color: APP_TEXT, fontSize: 16, fontWeight: "800" },
-  meta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 2 },
+  title: { color: APP_TEXT, ...rentalType(16, "800") },
+  meta: { color: APP_TEXT_MUTED, marginTop: 2, ...rentalType(12, "400") },
   check: {
     backgroundColor: APP_LIME,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6
   },
-  checkText: { color: APP_BLACK, fontSize: 12, fontWeight: "800" }
+  checkText: { color: APP_BLACK, ...rentalType(12, "800") }
 });

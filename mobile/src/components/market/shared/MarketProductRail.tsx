@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { catalogCartId, useCart } from "../../../cart/CartContext";
+import { CartQtyControl } from "../../../cart/CartQtyControl";
 import { APP_BLACK, APP_LIME, APP_TEXT, APP_TEXT_MUTED } from "../../../theme/appColors";
 import type { ProductRailItem } from "../all/marketAllConfig";
 
@@ -23,16 +25,32 @@ function formatReviews(count: string | number): string {
 }
 
 function ProductRailCard({ product, onPress }: { product: ProductRailItem; onPress: () => void }) {
+  const { addItem, getQuantity, setQuantity } = useCart();
   const [sizeIndex, setSizeIndex] = useState(0);
   const sizes = product.sizes?.length ? product.sizes : ["500 ml"];
+  const variant = sizes[sizeIndex] ?? sizes[0];
+  const cartId = catalogCartId(product.id, variant);
+  const qty = getQuantity(cartId);
+  const cartItem = {
+    id: cartId,
+    cropName: product.title,
+    vendor: variant,
+    unitPrice: product.price,
+    unitLabel: product.unitPrice || `/ ${variant}`
+  };
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
       <View style={styles.imageBox}>
         <Ionicons name="image-outline" size={28} color={APP_TEXT_MUTED} />
-        <Pressable style={styles.addBtn} hitSlop={6} onPress={(e) => e.stopPropagation()}>
-          <Ionicons name="add" size={18} color={APP_BLACK} />
-        </Pressable>
+        <CartQtyControl
+          variant="lime"
+          overlay
+          quantity={qty}
+          onAdd={() => addItem(cartItem)}
+          onIncrease={() => addItem(cartItem)}
+          onDecrease={() => setQuantity(cartId, qty - 1)}
+        />
       </View>
 
       <View style={styles.ratingRow}>

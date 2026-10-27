@@ -3,34 +3,24 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useState } from "react";
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Image, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from "react-native";
+import { RentalText as Text, rentalType } from "./rentalTypography";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { CartQtyControl } from "../../cart/CartQtyControl";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
 import { navigateToRentalCart, navigateToRentalCategory } from "../../navigation/navigationRef";
 import { useAndroidNestedStackBack } from "../../navigation/useAndroidScreenBack";
 import { APP_BLACK, APP_LIME, APP_SURFACE, APP_TEXT, APP_TEXT_MUTED, APP_TEXT_ON_LIME } from "../../theme/appColors";
+import { useRentalCart } from "./RentalCartContext";
 import { RENTAL_CATEGORIES, rentalCategoryById } from "./rentalCategories";
 import { catalogForCategory, RENTAL_CATALOG_SUBS, type RentalCatalogItem, type RentalCatalogSub } from "./rentalCatalog";
-import { addRentalCartLine, setRentalCartLine } from "./rentalCart";
+import { RENTAL_CART_MAX_QTY } from "./rentalCart";
 
 const BACK_ICON = require("../../../assets/market/back-icon.png");
 const SIDE_CARD_W = 74;
 const SIDE_CARD_H = 88;
 const SIDEBAR_W = 16 + SIDE_CARD_W + 10;
 const TILE_BG = "#303132";
-
-function rememberCartItem(item: RentalCatalogItem, categoryTitle: string) {
-  return addRentalCartLine({
-    listingId: item.id,
-    title: item.title,
-    category: categoryTitle,
-    option: item.options[0] || item.unitLabel,
-    quantity: 1,
-    unitPrice: item.price,
-    unitLabel: item.unitLabel,
-    mrp: item.mrp
-  });
-}
 
 function rupee(n: number) {
   return "\u20B9" + Math.round(n).toLocaleString("en-IN");
@@ -44,6 +34,8 @@ export function RentalCategoryScreen() {
   useAndroidNestedStackBack();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RentalCategory">>();
+  const insets = useSafeAreaInsets();
+  const { itemCount, subtotal, addItem, getQuantity } = useRentalCart();
   const location = route.params?.location || "Telangana";
   const category = rentalCategoryById(route.params?.categoryId || "");
   const { width } = useWindowDimensions();
@@ -51,7 +43,6 @@ export function RentalCategoryScreen() {
   const [activeSub, setActiveSub] = useState(subs[0]?.id ?? "");
   const [selected, setSelected] = useState<RentalCatalogItem | null>(null);
   const [option, setOption] = useState("");
-  const [quantity, setQuantity] = useState(0);
 
   useEffect(() => {
     setActiveSub(subs[0]?.id ?? "");
@@ -73,30 +64,20 @@ export function RentalCategoryScreen() {
     return pairs;
   }, [items]);
 
-  const openItem = (item: RentalCatalogItem, startQty: number) => {
+  const openItem = (item: RentalCatalogItem, chosenOption?: string) => {
     setSelected(item);
-    setOption(item.options[0] ?? "");
-    setQuantity(startQty);
+    setOption(chosenOption || item.options[0] || item.unitLabel);
   };
 
-  const bookSelected = () => {
-    if (!selected) return;
-    const item = selected;
-    const chosen = option || item.options[0] || item.unitLabel;
-    const count = Math.max(quantity, 1);
-    void setRentalCartLine({
-      listingId: item.id,
-      title: item.title,
-      category: category?.title || item.title,
-      option: chosen,
-      quantity: count,
-      unitPrice: item.price,
-      unitLabel: item.unitLabel,
-      mrp: item.mrp
-    }).then(() => {
+  const goToCart = () => {
+    if (selected) {
+      const chosen = option || selected.options[0] || selected.unitLabel;
+      if (getQuantity(selected.id, chosen) <= 0) {
+        addItem(selected, category?.title || selected.title, chosen);
+      }
       setSelected(null);
-      navigateToRentalCart(location);
-    });
+    }
+    navigateToRentalCart(location);
   };
 
   return (
@@ -108,6 +89,14 @@ export function RentalCategoryScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {category ? category.title : "All rentals"}
         </Text>
+        <Pressable style={styles.cartBtn} onPress={() => navigateToRentalCart(location)} accessibilityLabel="Cart">
+          <Ionicons name="cart-outline" size={24} color={APP_TEXT} />
+          {itemCount > 0 ? (
+            <View style={styles.cartBadge}>
+              <Text style={styles.cartBadgeText}>{itemCount > 99 ? "99+" : itemCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
 
       {!category ? (
@@ -133,14 +122,17 @@ export function RentalCategoryScreen() {
               <SideItem key={sub.id} sub={sub} active={sub.id === activeSub} onPress={() => setActiveSub(sub.id)} />
             ))}
           </ScrollView>
-          <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={[styles.grid, { paddingBottom: itemCount > 0 ? 96 : 28 }]}
+            showsVerticalScrollIndicator={false}
+          >
             <RentalBanner
               title={category.title}
               location={location}
               image={subs.find((sub) => sub.id === activeSub)?.image ?? subs[0]?.image}
               width={mainWidth - 16}
               onPress={() => {
-                if (items[0]) openItem(items[0], 1);
+                if (items[0]) openItem(items[0]);
               }}
             />
             {rows.map((row) => (
@@ -148,23 +140,17 @@ export function RentalCategoryScreen() {
                 <View style={{ width: cardWidth }}>
                   <RentalCard
                     item={row.left}
-                    onOpen={() => openItem(row.left, 0)}
-                    onAdd={() => {
-                      if (category) void rememberCartItem(row.left, category.title);
-                      openItem(row.left, 1);
-                    }}
+                    categoryTitle={category.title}
+                    onOpen={(chosen) => openItem(row.left, chosen)}
                   />
                 </View>
                 {row.right ? (
                   <View style={{ width: cardWidth }}>
                     <RentalCard
                       item={row.right}
-                      onOpen={() => {
-                        if (row.right) openItem(row.right, 0);
-                      }}
-                      onAdd={() => {
-                        if (row.right && category) void rememberCartItem(row.right, category.title);
-                        if (row.right) openItem(row.right, 1);
+                      categoryTitle={category.title}
+                      onOpen={(chosen) => {
+                        if (row.right) openItem(row.right, chosen);
                       }}
                     />
                   </View>
@@ -180,12 +166,28 @@ export function RentalCategoryScreen() {
         location={location}
         categoryTitle={category?.title ?? ""}
         option={option}
-        quantity={quantity}
         onClose={() => setSelected(null)}
         onOption={setOption}
-        onChangeQty={setQuantity}
-        onBook={bookSelected}
+        onBook={goToCart}
       />
+      {itemCount > 0 ? (
+        <Pressable
+          style={[styles.viewCartBar, { marginBottom: Math.max(insets.bottom, 12) }]}
+          onPress={() => navigateToRentalCart(location)}
+          accessibilityLabel="View Cart"
+        >
+          <View>
+            <Text style={styles.viewCartCount}>
+              {itemCount} {itemCount === 1 ? "item" : "items"}
+            </Text>
+            <Text style={styles.viewCartTotal}>{rupee(subtotal)}</Text>
+          </View>
+          <View style={styles.viewCartCta}>
+            <Text style={styles.viewCartCtaText}>View Cart</Text>
+            <Ionicons name="chevron-forward" size={16} color={APP_TEXT_ON_LIME} />
+          </View>
+        </Pressable>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -241,22 +243,30 @@ function RentalBanner({
 
 function RentalCard({
   item,
-  onOpen,
-  onAdd
+  categoryTitle,
+  onOpen
 }: {
   item: RentalCatalogItem;
-  onOpen: () => void;
-  onAdd: () => void;
+  categoryTitle: string;
+  onOpen: (option: string) => void;
 }) {
+  const { addItem, getQuantity, setQuantity } = useRentalCart();
   const [choice, setChoice] = useState(item.options[0] ?? "");
+  const qty = getQuantity(item.id, choice);
 
   return (
-    <Pressable style={styles.card} onPress={onOpen}>
+    <Pressable style={styles.card} onPress={() => onOpen(choice)}>
       <View style={styles.media}>
         <Image source={item.image} style={styles.mediaImage} resizeMode="cover" />
-        <Pressable style={styles.addBtn} onPress={onAdd} accessibilityLabel="Add">
-          <Ionicons name="add" size={22} color={APP_TEXT_ON_LIME} />
-        </Pressable>
+        <CartQtyControl
+          variant="lime"
+          overlay
+          quantity={qty}
+          increaseDisabled={qty >= RENTAL_CART_MAX_QTY}
+          onAdd={() => addItem(item, categoryTitle, choice)}
+          onIncrease={() => addItem(item, categoryTitle, choice)}
+          onDecrease={() => setQuantity(item.id, choice, qty - 1, item, categoryTitle)}
+        />
       </View>
       <View style={styles.ratingRow}>
         <Ionicons name="star" size={12} color={APP_LIME} />
@@ -304,23 +314,20 @@ function RentalSheet({
   location,
   categoryTitle,
   option,
-  quantity,
   onClose,
   onOption,
-  onChangeQty,
   onBook
 }: {
   item: RentalCatalogItem | null;
   location: string;
   categoryTitle: string;
   option: string;
-  quantity: number;
   onClose: () => void;
   onOption: (value: string) => void;
-  onChangeQty: (value: number) => void;
   onBook: () => void;
 }) {
-  const count = Math.max(quantity, 0);
+  const { addItem, getQuantity, setQuantity } = useRentalCart();
+  const count = item ? getQuantity(item.id, option || item.options[0] || item.unitLabel) : 0;
   return (
     <Modal visible={!!item} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.sheetBackdrop}>
@@ -364,21 +371,18 @@ function RentalSheet({
                   </View>
                   <Text style={styles.unit}>{unitPrice(item)}</Text>
                 </View>
-                {count > 0 ? (
-                  <View style={styles.stepper}>
-                    <Pressable onPress={() => onChangeQty(count - 1)} hitSlop={8}>
-                      <Text style={styles.stepGlyph}>−</Text>
-                    </Pressable>
-                    <Text style={styles.stepCount}>{count}</Text>
-                    <Pressable onPress={() => onChangeQty(count + 1)} hitSlop={8}>
-                      <Text style={styles.stepGlyph}>+</Text>
-                    </Pressable>
-                  </View>
-                ) : (
-                  <Pressable style={styles.sheetAdd} onPress={() => onChangeQty(1)}>
-                    <Text style={styles.sheetAddText}>Add</Text>
-                  </Pressable>
-                )}
+                {item ? (
+                  <CartQtyControl
+                    variant="lime"
+                    addAppearance="label"
+                    quantity={count}
+                    increaseDisabled={count >= RENTAL_CART_MAX_QTY}
+                    onAdd={() => addItem(item, categoryTitle, option)}
+                    onIncrease={() => addItem(item, categoryTitle, option)}
+                    onDecrease={() => setQuantity(item.id, option, count - 1, item, categoryTitle)}
+                    style={styles.sheetQty}
+                  />
+                ) : null}
               </View>
               <View style={styles.offerRow}>
                 <Ionicons name="pricetag" size={16} color={APP_LIME} />
@@ -403,7 +407,21 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: APP_BLACK },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
   backIcon: { width: 28, height: 28 },
-  headerTitle: { color: APP_TEXT, fontSize: 16, fontWeight: "700", flex: 1 },
+  headerTitle: { color: APP_TEXT, flex: 1, ...rentalType(16, "700") },
+  cartBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  cartBadge: {
+    position: "absolute",
+    top: 2,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3
+  },
+  cartBadgeText: { color: APP_TEXT_ON_LIME, ...rentalType(10, "800") },
   allList: { padding: 16, paddingBottom: 32 },
   allRow: {
     flexDirection: "row",
@@ -416,8 +434,8 @@ const styles = StyleSheet.create({
   },
   allImage: { width: 64, height: 64, borderRadius: 10 },
   allText: { flex: 1 },
-  allTitle: { color: APP_TEXT, fontSize: 15, fontWeight: "800" },
-  allBlurb: { color: APP_TEXT_MUTED, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  allTitle: { color: APP_TEXT, ...rentalType(15, "800") },
+  allBlurb: { color: APP_TEXT_MUTED, marginTop: 2, ...rentalType(12, "400", { lineHeight: 17 }) },
   body: { flex: 1, flexDirection: "row" },
   sidebar: { width: SIDEBAR_W, paddingLeft: 16, paddingTop: 8 },
   sidePress: { width: SIDE_CARD_W, marginBottom: 10 },
@@ -429,7 +447,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderBottomColor: "#C9FF35B2"
   },
-  sideLabel: { color: APP_TEXT, fontSize: 11, fontWeight: "700", textAlign: "center" },
+  sideLabel: { color: APP_TEXT, textAlign: "center", ...rentalType(11, "700") },
   sideLabelOn: { color: APP_LIME },
   sideImage: { width: 58, height: 46, marginTop: 4 },
   grid: { paddingHorizontal: 8, paddingBottom: 28 },
@@ -445,9 +463,9 @@ const styles = StyleSheet.create({
     paddingLeft: 14
   },
   bannerText: { flex: 1, zIndex: 1 },
-  bannerWelcome: { color: APP_BLACK, fontSize: 13, fontWeight: "600" },
-  bannerTitle: { color: APP_BLACK, fontSize: 18, fontWeight: "800", marginTop: 2 },
-  bannerSub: { color: "#3a3a3a", fontSize: 11, marginTop: 2 },
+  bannerWelcome: { color: APP_BLACK, ...rentalType(13, "600") },
+  bannerTitle: { color: APP_BLACK, marginTop: 2, ...rentalType(18, "800") },
+  bannerSub: { color: "#3a3a3a", marginTop: 2, ...rentalType(11, "400") },
   bannerBtn: {
     alignSelf: "flex-start",
     marginTop: 8,
@@ -456,7 +474,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6
   },
-  bannerBtnText: { color: APP_TEXT_ON_LIME, fontSize: 12, fontWeight: "800" },
+  bannerBtnText: { color: APP_TEXT_ON_LIME, ...rentalType(12, "800") },
   bannerArt: { width: 110, height: 120 },
   card: { backgroundColor: TILE_BG, borderRadius: 12, padding: 8 },
   media: { height: 110, borderRadius: 10, overflow: "hidden", marginBottom: 8, backgroundColor: "#173024" },
@@ -476,8 +494,8 @@ const styles = StyleSheet.create({
   ratingText: { color: APP_TEXT, fontSize: 10, fontWeight: "700" },
   etaDot: { color: APP_TEXT_MUTED, fontSize: 10 },
   eta: { color: APP_TEXT_MUTED, fontSize: 10, fontWeight: "600" },
-  cardTitle: { color: APP_TEXT, fontSize: 13, fontWeight: "800", marginTop: 4 },
-  cardSub: { color: APP_TEXT_MUTED, fontSize: 10, marginTop: 2 },
+  cardTitle: { color: APP_TEXT, marginTop: 4, ...rentalType(13, "800") },
+  cardSub: { color: APP_TEXT_MUTED, marginTop: 2, ...rentalType(10, "400") },
   tag: { alignSelf: "flex-start", marginTop: 6, backgroundColor: APP_LIME, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   tagText: { color: APP_TEXT_ON_LIME, fontSize: 9, fontWeight: "800" },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 8 },
@@ -488,7 +506,7 @@ const styles = StyleSheet.create({
   priceBlock: { marginTop: 8 },
   discount: { color: APP_TEXT, fontSize: 10, fontWeight: "700" },
   priceRow: { flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 2 },
-  price: { color: APP_LIME, fontSize: 16, fontWeight: "800" },
+  price: { color: APP_LIME, ...rentalType(16, "800") },
   mrp: { color: APP_TEXT_MUTED, fontSize: 11, textDecorationLine: "line-through" },
   unit: { color: APP_TEXT_MUTED, fontSize: 9, marginTop: 2 },
   sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
@@ -512,7 +530,7 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   sheetBody: { padding: 16, paddingBottom: 22 },
-  sheetTitle: { color: APP_TEXT, fontSize: 22, fontWeight: "800" },
+  sheetTitle: { color: APP_TEXT, ...rentalType(22, "800") },
   sheetSub: { color: APP_TEXT_MUTED, fontSize: 13, marginTop: 4 },
   sheetMeta: { color: APP_TEXT_MUTED, fontSize: 12, marginTop: 2 },
   sheetOptionRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 14 },
@@ -529,8 +547,23 @@ const styles = StyleSheet.create({
   },
   stepGlyph: { color: APP_LIME, fontSize: 18, fontWeight: "800" },
   stepCount: { color: APP_TEXT, fontSize: 14, fontWeight: "800", minWidth: 12, textAlign: "center" },
+  sheetQty: { marginLeft: "auto" },
   sheetAdd: { marginLeft: "auto", backgroundColor: APP_LIME, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8 },
   sheetAddText: { color: APP_TEXT_ON_LIME, fontWeight: "800" },
+  viewCartBar: {
+    marginHorizontal: 12,
+    backgroundColor: APP_LIME,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  viewCartCount: { color: APP_TEXT_ON_LIME, fontSize: 12, fontWeight: "700" },
+  viewCartTotal: { color: APP_TEXT_ON_LIME, fontSize: 16, fontWeight: "800", marginTop: 2 },
+  viewCartCta: { flexDirection: "row", alignItems: "center", gap: 4 },
+  viewCartCtaText: { color: APP_TEXT_ON_LIME, fontSize: 15, fontWeight: "800" },
   offerRow: {
     marginTop: 16,
     backgroundColor: "#242424",

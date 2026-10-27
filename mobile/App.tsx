@@ -8,6 +8,8 @@ import { navigationRef } from "./src/navigation/navigationRef";
 import { AuthProvider, useAuth } from "./src/auth/AuthContext";
 import { OnboardingProvider } from "./src/onboarding/OnboardingContext";
 import { CartProvider } from "./src/cart/CartContext";
+import { UserLocationProvider } from "./src/location/UserLocationContext";
+import { RentalCartProvider } from "./src/screens/rental/RentalCartContext";
 import { LanguageProvider } from "./src/localization/LanguageContext";
 import { PresenceProvider } from "./src/context/PresenceContext";
 import { LanguageSync } from "./src/localization/LanguageSync";
@@ -186,9 +188,13 @@ export default function App() {
           <AuthProvider>
             <PresenceProvider>
               <OnboardingProvider>
-                <CartProvider>
-                  <AppShell />
-                </CartProvider>
+                <UserLocationProvider>
+                  <CartProvider>
+                    <RentalCartProvider>
+                      <AppShell />
+                    </RentalCartProvider>
+                  </CartProvider>
+                </UserLocationProvider>
               </OnboardingProvider>
             </PresenceProvider>
           </AuthProvider>

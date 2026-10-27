@@ -7,9 +7,10 @@ import {
   Poppins_900Black
 } from "@expo-google-fonts/poppins";
 import { useFonts } from "expo-font";
-import { installAppFonts } from "../theme/setupFonts";
+import { installAppFonts, installWebPoppinsWeightAliases } from "../theme/setupFonts";
 
 let fontsInstalled = false;
+let extraAliasesInstalled = false;
 
 /**
  * Gate the app on core weights only (400–700). ExtraBold/Black load in the background
@@ -23,7 +24,7 @@ export function useAppFonts(): { ready: boolean } {
     Poppins_700Bold
   });
 
-  useFonts({
+  const [extraLoaded] = useFonts({
     Poppins_800ExtraBold,
     Poppins_900Black
   });
@@ -31,6 +32,11 @@ export function useAppFonts(): { ready: boolean } {
   if (coreLoaded && !fontsInstalled) {
     installAppFonts();
     fontsInstalled = true;
+  }
+
+  if (extraLoaded && !extraAliasesInstalled) {
+    installWebPoppinsWeightAliases();
+    extraAliasesInstalled = true;
   }
 
   return { ready: coreLoaded };

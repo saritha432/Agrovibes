@@ -2,7 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { RentalText as Text, RentalTextInput as TextInput, rentalType } from "./rentalTypography";
 import { BookingDateField } from "./BookingDateField";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
@@ -105,25 +106,25 @@ export function RentalBookingScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: APP_BLACK },
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  headerTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800" },
+  headerTitle: { color: APP_TEXT, ...rentalType(18, "800") },
   body: { paddingHorizontal: 16, paddingTop: 8 },
-  title: { color: APP_TEXT, fontSize: 24, fontWeight: "800" },
-  meta: { color: APP_LIME, fontSize: 14, fontWeight: "700", marginTop: 6, marginBottom: 18 },
-  label: { color: APP_TEXT, fontSize: 13, fontWeight: "700", marginBottom: 6 },
+  title: { color: APP_TEXT, ...rentalType(24, "800") },
+  meta: { color: APP_LIME, marginTop: 6, marginBottom: 18, ...rentalType(14, "700") },
+  label: { color: APP_TEXT, marginBottom: 6, ...rentalType(13, "700") },
   input: {
     backgroundColor: APP_SURFACE,
     color: APP_TEXT,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 15,
-    marginBottom: 14
+    marginBottom: 14,
+    ...rentalType(15, "400")
   },
   note: { minHeight: 88, textAlignVertical: "top" },
   button: { backgroundColor: APP_LIME, borderRadius: 12, alignItems: "center", paddingVertical: 14, marginTop: 4 },
   buttonOff: { opacity: 0.45 },
-  buttonText: { color: APP_BLACK, fontSize: 15, fontWeight: "800" },
+  buttonText: { color: APP_BLACK, ...rentalType(15, "800") },
   done: { backgroundColor: APP_SURFACE, borderRadius: 14, padding: 16 },
-  doneTitle: { color: APP_TEXT, fontSize: 18, fontWeight: "800", marginTop: 8 },
-  doneBody: { color: APP_TEXT_MUTED, fontSize: 14, lineHeight: 20, marginTop: 6 }
+  doneTitle: { color: APP_TEXT, marginTop: 8, ...rentalType(18, "800") },
+  doneBody: { color: APP_TEXT_MUTED, marginTop: 6, ...rentalType(14, "400", { lineHeight: 20 }) }
 });

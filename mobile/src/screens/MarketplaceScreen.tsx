@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -11,10 +11,12 @@ import {
   View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { fetchMarketplaceListings, MarketplaceListing } from "../services/api";
-import { useCart } from "../cart/CartContext";
+import { marketplaceCartId, useCart } from "../cart/CartContext";
+import { CartQtyControl } from "../cart/CartQtyControl";
+import { AccountLocationChip } from "../location/AccountLocationChip";
 import { useNotificationPanel } from "../context/NotificationPanelContext";
 import { navigateToWeather } from "../navigation/navigationRef";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
@@ -84,6 +86,10 @@ function liveDealUnit(index: number) {
   return index % 2 === 0 ? "/ 500g" : "/ kg";
 }
 
+function liveDealStock(index: number) {
+  return 3 + (index % 4);
+}
+
 function ListingCartControl({
   listing,
   index,
@@ -94,43 +100,21 @@ function ListingCartControl({
   variant: "live" | "grid";
 }) {
   const { addFromListing, setQuantity, getQuantity } = useCart();
-  const qty = getQuantity(listing.id);
-
-  if (qty === 0) {
-    return (
-      <Pressable
-        style={variant === "live" ? styles.liveAdd : styles.addCircle}
-        onPress={() => addFromListing(listing, index)}
-        accessibilityRole="button"
-        accessibilityLabel="Add to cart"
-      >
-        <Ionicons name="add" size={22} color="#fff" />
-      </Pressable>
-    );
-  }
+  const id = marketplaceCartId(listing.id);
+  const qty = getQuantity(id);
+  const maxQuantity = variant === "live" ? liveDealStock(index) : undefined;
 
   return (
-    <View style={variant === "live" ? styles.liveQtyPill : styles.gridQtyPill} accessibilityRole="adjustable">
-      <Pressable
-        style={styles.qtyPillSide}
-        onPress={() => setQuantity(listing.id, qty - 1)}
-        accessibilityRole="button"
-        accessibilityLabel="Decrease quantity"
-        hitSlop={8}
-      >
-        <Text style={styles.qtyPillGlyph}>−</Text>
-      </Pressable>
-      <Text style={styles.qtyPillCount}>{qty}</Text>
-      <Pressable
-        style={styles.qtyPillSide}
-        onPress={() => setQuantity(listing.id, qty + 1)}
-        accessibilityRole="button"
-        accessibilityLabel="Increase quantity"
-        hitSlop={8}
-      >
-        <Text style={styles.qtyPillGlyph}>+</Text>
-      </Pressable>
-    </View>
+    <CartQtyControl
+      variant="teal"
+      quantity={qty}
+      increaseDisabled={maxQuantity != null && qty >= maxQuantity}
+      overlay={variant === "live"}
+      style={variant === "live" ? styles.liveControl : undefined}
+      onAdd={() => addFromListing(listing, index, maxQuantity)}
+      onIncrease={() => setQuantity(id, qty + 1, maxQuantity)}
+      onDecrease={() => setQuantity(id, qty - 1, maxQuantity)}
+    />
   );
 }
 
@@ -138,7 +122,7 @@ export function MarketplaceScreen() {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { addFromListing, itemCount } = useCart();
+  const { itemCount, refreshFromServer } = useCart();
   const { notificationUnreadCount, openNotificationSheet } = useNotificationPanel();
 
   const [listings, setListings] = useState<MarketplaceListing[]>([]);
@@ -146,6 +130,12 @@ export function MarketplaceScreen() {
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState<MarketCategory>("All");
   const [selected, setSelected] = useState<{ item: MarketplaceListing; index: number } | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshFromServer();
+    }, [refreshFromServer])
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -182,11 +172,7 @@ export function MarketplaceScreen() {
         </Pressable>
         <View style={styles.locationRow}>
           <View style={styles.logoDot} />
-          <View style={styles.locationChip}>
-            <Ionicons name="location-outline" size={14} color="#1f2c29" />
-            <Text style={styles.locationText}>Nashik, MH</Text>
-            <Ionicons name="chevron-down" size={14} color="#1f2c29" />
-          </View>
+          <AccountLocationChip />
         </View>
         <View style={styles.topIcons}>
           <Pressable style={styles.iconBtn}>
@@ -256,8 +242,6 @@ export function MarketplaceScreen() {
       <Text style={styles.sectionLabel}>Live deals</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveRow}>
         {liveDeals.map((item, idx) => {
-          const globalIndex = listings.findIndex((l) => l.id === item.id);
-          const i = globalIndex >= 0 ? globalIndex : idx;
           return (
             <View key={item.id} style={styles.liveCard}>
               <View style={styles.liveBadges}>
@@ -265,7 +249,7 @@ export function MarketplaceScreen() {
                   <Text style={styles.livePillText}>LIVE</Text>
                 </View>
                 <View style={styles.stockPill}>
-                  <Text style={styles.stockPillText}>{3 + (idx % 4)} left</Text>
+                  <Text style={styles.stockPillText}>{liveDealStock(idx)} left</Text>
                 </View>
               </View>
               <View style={[styles.liveMedia, { backgroundColor: idx % 2 === 0 ? "#ecfdf5" : "#fff7ed" }]}>
@@ -284,7 +268,7 @@ export function MarketplaceScreen() {
               <Text style={styles.livePrice}>
                 {rupee(item.pricePerKg)} {liveDealUnit(idx)}
               </Text>
-              <ListingCartControl listing={item} index={i} variant="live" />
+              <ListingCartControl listing={item} index={idx} variant="live" />
             </View>
           );
         })}
@@ -364,7 +348,8 @@ function ProductDetail({
   onClose: () => void;
 }) {
   const { addFromListing, setQuantity, getQuantity } = useCart();
-  const qty = getQuantity(item.id);
+  const id = marketplaceCartId(item.id);
+  const qty = getQuantity(id);
   const discount = index % 2 === 0 ? "-10% OFF" : "-5%";
   const tag = item.verifiedOnly ? (index % 2 ? "Bestseller" : "Verified Store") : "Trusted Brand";
   const rating = ratingFromId(item.id);
@@ -415,29 +400,15 @@ function ProductDetail({
           <Pressable style={detailStyles.detailPrimaryBtn} onPress={onClose}>
             <Text style={detailStyles.detailPrimaryBtnText}>View Store</Text>
           </Pressable>
-          {qty === 0 ? (
-            <Pressable style={detailStyles.detailSecondaryBtn} onPress={() => addFromListing(item, index)}>
-              <Text style={detailStyles.detailSecondaryBtnText}>Add</Text>
-            </Pressable>
-          ) : (
-            <View style={detailStyles.detailQtyPill}>
-              <Pressable
-                style={detailStyles.detailQtySide}
-                onPress={() => setQuantity(item.id, qty - 1)}
-                hitSlop={8}
-              >
-                <Text style={detailStyles.detailQtyGlyph}>−</Text>
-              </Pressable>
-              <Text style={detailStyles.detailQtyCount}>{qty}</Text>
-              <Pressable
-                style={detailStyles.detailQtySide}
-                onPress={() => setQuantity(item.id, qty + 1)}
-                hitSlop={8}
-              >
-                <Text style={detailStyles.detailQtyGlyph}>+</Text>
-              </Pressable>
-            </View>
-          )}
+          <CartQtyControl
+            variant="teal"
+            addAppearance="label"
+            quantity={qty}
+            onAdd={() => addFromListing(item, index)}
+            onIncrease={() => setQuantity(id, qty + 1)}
+            onDecrease={() => setQuantity(id, qty - 1)}
+            style={qty > 0 ? detailStyles.detailQtyPill : detailStyles.detailSecondaryBtn}
+          />
         </View>
 
         <Text style={detailStyles.detailSectionTitle}>About this product</Text>
@@ -582,6 +553,10 @@ const styles = StyleSheet.create({
   liveTimerRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   liveTimer: { color: "#64748b", fontSize: 11, fontWeight: "600" },
   livePrice: { marginTop: 6, fontWeight: "900", color: "#1f2c29", fontSize: 15 },
+  liveControl: {
+    right: 10,
+    bottom: 10
+  },
   liveAdd: {
     position: "absolute",
     right: 10,

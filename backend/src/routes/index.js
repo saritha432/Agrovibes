@@ -65,6 +65,7 @@ const { searchPlaces, resolvePlace, loadForecast } = require("../weather");
 
 const router = express.Router();
 router.use(require("./plantHealth"));
+router.use(require("./userSync"));
 let homePostsTableReady = false;
 let homeStoriesTableReady = false;
 let learnCoursesTableReady = false;
@@ -335,6 +336,10 @@ async function ensureLearnUsersTable() {
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_label TEXT`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_lat DOUBLE PRECISION`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_lng DOUBLE PRECISION`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_city TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_state TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_postal TEXT`);
+  await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMPTZ`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS password_updated_at TIMESTAMPTZ`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS account_status TEXT NOT NULL DEFAULT 'active'`);
   await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false`);
@@ -1051,6 +1056,9 @@ function authUserFromRow(row) {
     locationLabel: row.locationLabel || undefined,
     locationLat: Number.isFinite(Number(row.locationLat)) ? Number(row.locationLat) : undefined,
     locationLng: Number.isFinite(Number(row.locationLng)) ? Number(row.locationLng) : undefined,
+    locationCity: row.locationCity || undefined,
+    locationState: row.locationState || undefined,
+    locationPostal: row.locationPostal || undefined,
     accountStatus: row.accountStatus || "active",
     isPrivate: Boolean(row.isPrivate)
   };
@@ -1070,6 +1078,9 @@ const authUserSelect = `
   location_label AS "locationLabel",
   location_lat AS "locationLat",
   location_lng AS "locationLng",
+  location_city AS "locationCity",
+  location_state AS "locationState",
+  location_postal AS "locationPostal",
   account_status AS "accountStatus",
   COALESCE(is_private, false) AS "isPrivate"
 `;
@@ -10656,136 +10667,6 @@ try {
 </html>`);
 });
 
-router.post("/v1/provider/phone/confirm", authRequired, async (req, res) => {
-  try {
-    const phone = normalizeIndiaPhone(req.body?.phone);
-    const code = String(req.body?.code || "").replace(/\D/g, "");
-    if (!phone || code.length !== 6) {
-      res.status(400).json({ message: "Phone and 6-digit OTP are required" });
-      return;
-    }
-    let accepted = false;
-    if (matchesStaticOtp(code)) {
-      accepted = true;
-    } else if (otpProvider() === "twilio") {
-      accepted = await verifyTwilioOtp(phone, code);
-    } else {
-      await ensurePhoneOtpTable();
-      const otpRows = await query(
-        `
-        SELECT id, otp_hash AS "otpHash"
-        FROM phone_otp_codes
-        WHERE phone = $1 AND used = false AND expires_at > NOW() AND COALESCE(channel, 'sms') <> 'kyc'
-        ORDER BY created_at DESC
-        LIMIT 1
-        `,
-        [phone]
-      );
-      const row = otpRows.rows[0];
-      accepted = Boolean(row && hashOtp(phone, code) === row.otpHash);
-      if (accepted) await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [row.id]);
-    }
-    if (!accepted) {
-      res.status(400).json({ message: "That OTP is not correct." });
-      return;
-    }
-    await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS provider_phone TEXT`);
-    await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS provider_phone_verified_at TIMESTAMPTZ`);
-    await query(
-      `UPDATE learn_users SET provider_phone = $2, provider_phone_verified_at = NOW() WHERE id = $1`,
-      [req.user.userId, phone]
-    );
-    res.json({ verified: true });
-  } catch (error) {
-    res.status(500).json({ message: "Could not verify the OTP", error: error?.message || String(error) });
-  }
-});
-
-router.post("/v1/provider/payouts/razorpay", authRequired, async (req, res) => {
-  try {
-    const holderName = String(req.body?.holderName || "").trim();
-    const accountNumber = String(req.body?.accountNumber || "").replace(/\D/g, "");
-    const ifsc = String(req.body?.ifsc || "").trim().toUpperCase();
-    const email = String(req.body?.email || req.user?.email || "").trim();
-    const phone = String(req.body?.phone || req.user?.phone || "").replace(/\D/g, "").slice(-10);
-    const businessName = String(req.body?.businessName || holderName).trim();
-    const street = String(req.body?.street || "").trim().slice(0, 120);
-    const city = String(req.body?.city || "").trim().slice(0, 60);
-    const stateName = String(req.body?.state || "").trim().toUpperCase().slice(0, 40);
-    const postalCode = String(req.body?.postalCode || "").replace(/\D/g, "").slice(0, 6);
-    if (holderName.length < 2 || accountNumber.length < 6 || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
-      res.status(400).json({ message: "Account number, IFSC, and account holder name are required." });
-      return;
-    }
-    if (phone.length !== 10 || !email.includes("@")) {
-      res.status(400).json({ message: "A mobile number and email are required before linking Razorpay." });
-      return;
-    }
-    if (!street || !city || !stateName || postalCode.length !== 6) {
-      res.status(400).json({ message: "Street, city, state, and a 6-digit PIN code are required for the Razorpay account." });
-      return;
-    }
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!keyId || !keySecret) {
-      res.status(503).json({ message: "Razorpay is not configured on this server yet." });
-      return;
-    }
-    const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
-    const headers = { Authorization: `Basic ${auth}`, "Content-Type": "application/json" };
-    const response = await fetch("https://api.razorpay.com/v2/accounts", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        email,
-        phone,
-        legal_business_name: businessName,
-        customer_facing_business_name: businessName,
-        business_type: "individual",
-        contact_name: holderName,
-        profile: {
-          category: "ecommerce",
-          subcategory: "ecommerce_marketplace",
-          addresses: {
-            registered: { street1: street, city, state: stateName, postal_code: postalCode, country: "IN" }
-          }
-        }
-      })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.id) {
-      res.status(502).json({ message: payload?.error?.description || "Razorpay could not create the linked account." });
-      return;
-    }
-    const productResponse = await fetch(`https://api.razorpay.com/v2/accounts/${payload.id}/products`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ product_name: "route", tnc_accepted: true })
-    });
-    const product = await productResponse.json().catch(() => ({}));
-    if (!productResponse.ok || !product.id) {
-      res.status(502).json({ message: product?.error?.description || "Razorpay did not enable Route for this account." });
-      return;
-    }
-    const settlementResponse = await fetch(`https://api.razorpay.com/v2/accounts/${payload.id}/products/${product.id}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({
-        settlements: { account_number: accountNumber, ifsc_code: ifsc, beneficiary_name: holderName },
-        tnc_accepted: true
-      })
-    });
-    const settlement = await settlementResponse.json().catch(() => ({}));
-    if (!settlementResponse.ok) {
-      res.status(502).json({ message: settlement?.error?.description || "Razorpay did not accept the bank account." });
-      return;
-    }
-    res.json({ linked: true, accountId: payload.id });
-  } catch (error) {
-    res.status(500).json({ message: "Could not set up Razorpay", error: error?.message || String(error) });
-  }
-});
-
 router.post("/v1/provider/kyc/digilocker/start", authRequired, async (req, res) => {
   try {
     const userId = Number(req.user.userId);
@@ -11144,19 +11025,7 @@ router.post("/v1/provider/kyc/submit", authRequired, async (req, res) => {
     }
     const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 160) || null;
     const phone = normalizeIndiaPhone(req.body?.phone) || String(req.body?.phone || "").trim().slice(0, 40) || null;
-    await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS provider_phone TEXT`);
-    await query(`ALTER TABLE learn_users ADD COLUMN IF NOT EXISTS provider_phone_verified_at TIMESTAMPTZ`);
-    const phoneProof = await query(
-      `SELECT provider_phone AS "providerPhone", provider_phone_verified_at AS "verifiedAt" FROM learn_users WHERE id = $1`,
-      [userId]
-    );
-    const proof = phoneProof.rows[0];
-    const verifiedAt = proof?.verifiedAt ? new Date(proof.verifiedAt).getTime() : 0;
-    const proofPhone = normalizeIndiaPhone(proof?.providerPhone);
-    if (!verifiedAt || Date.now() - verifiedAt > 7 * 24 * 60 * 60 * 1000 || (phone && proofPhone && normalizeIndiaPhone(phone) !== proofPhone)) {
-      res.status(400).json({ message: "Verify the mobile number with OTP before submitting." });
-      return;
-    }
+    const otpVerified = req.body?.otpVerified === true;
     const address = String(req.body?.address || "").trim().slice(0, 400) || null;
     const priorityRaw = String(req.body?.priority || "Medium").trim();
     const priority = ["High", "Medium", "Low"].includes(priorityRaw) ? priorityRaw : "Medium";
@@ -11403,7 +11272,6 @@ async function ensureProviderListingsTable() {
     )
     `
   );
-  await query(`ALTER TABLE provider_listings ADD COLUMN IF NOT EXISTS rc_number TEXT`);
 }
 
 function adminListingCategory(channel) {
@@ -11431,11 +11299,6 @@ router.post("/v1/provider/listings", authRequired, async (req, res) => {
     const category = String(req.body?.category || "Equipment").trim().slice(0, 80) || "Equipment";
     const channelRaw = String(req.body?.channel || "Rental").trim();
     const channel = ["Store", "Rental", "Services", "Educators"].includes(channelRaw) ? channelRaw : "Rental";
-    const rcNumber = String(req.body?.rcNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16) || null;
-    if (rcNumber && !/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$/.test(rcNumber)) {
-      res.status(400).json({ message: "Enter the RC number in the vehicle registration format, such as TS09AB1234." });
-      return;
-    }
     if (title.length < 2) {
       res.status(400).json({ message: "Enter the listing name." });
       return;
@@ -11443,11 +11306,11 @@ router.post("/v1/provider/listings", authRequired, async (req, res) => {
     await ensureProviderListingsTable();
     const inserted = await query(
       `
-      INSERT INTO provider_listings (user_id, title, category, channel, status, rc_number)
-      VALUES ($1, $2, $3, $4, 'pending', $5)
-      RETURNING id, title, category, channel, status, rc_number AS "rcNumber", created_at AS "createdAt"
+      INSERT INTO provider_listings (user_id, title, category, channel, status)
+      VALUES ($1, $2, $3, $4, 'pending')
+      RETURNING id, title, category, channel, status, created_at AS "createdAt"
       `,
-      [userId, title, category, channel, rcNumber]
+      [userId, title, category, channel]
     );
     res.status(201).json({ listing: inserted.rows[0] });
   } catch (error) {
@@ -11497,7 +11360,7 @@ router.get("/v1/provider/listings", authRequired, async (req, res) => {
     await ensureProviderListingsTable();
     const result = await query(
       `
-      SELECT id, title, category, channel, status, rc_number AS "rcNumber", created_at AS "createdAt"
+      SELECT id, title, category, channel, status, created_at AS "createdAt"
       FROM provider_listings
       WHERE user_id = $1
       ORDER BY created_at DESC
@@ -11522,7 +11385,6 @@ router.get("/v1/admin/listings", authRequired, requireRole("admin"), async (req,
         l.category,
         l.channel,
         l.status,
-        l.rc_number AS "rcNumber",
         l.created_at AS "submitted",
         u.full_name AS "submitterName",
         u.email AS "submitterEmail",
@@ -11540,7 +11402,7 @@ router.get("/v1/admin/listings", authRequired, requireRole("admin"), async (req,
         id: row.id,
         category: adminListingCategory(row.channel),
         title: row.title,
-        subtitle: row.rcNumber ? `${row.category || row.channel} · RC ${row.rcNumber} submitted for review` : row.category || row.channel,
+        subtitle: row.category || row.channel,
         submitterName: row.submitterName || "Provider",
         submitterEmail: row.submitterEmail || "",
         submitterAvatarUrl: row.submitterAvatarUrl || null,

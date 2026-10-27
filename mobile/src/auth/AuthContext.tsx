@@ -22,6 +22,9 @@ export interface AuthUser {
   locationLabel?: string;
   locationLat?: number;
   locationLng?: number;
+  locationCity?: string;
+  locationState?: string;
+  locationPostal?: string;
   accountStatus?: "active" | "deactivated";
   isPrivate?: boolean;
 }
@@ -164,6 +167,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         bio: data.user.bio,
         website: data.user.website,
         locationLabel: data.user.locationLabel,
+        locationLat: data.user.locationLat,
+        locationLng: data.user.locationLng,
+        locationCity: data.user.locationCity,
+        locationState: data.user.locationState,
+        locationPostal: data.user.locationPostal,
         accountStatus: data.user.accountStatus,
         isPrivate: data.user.isPrivate
       });

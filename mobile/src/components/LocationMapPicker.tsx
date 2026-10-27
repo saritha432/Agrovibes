@@ -213,12 +213,12 @@ function buildPickerHtml(
         var pickMode = ${JSON.stringify(mode)};
         if (pickMode === "current") requestDeviceLocation();
         else if (pickMode === "manual") {
-          setHint("Search for the place, or drop the pin on the map.");
+          setHint(hasSaved ? "Search to change this saved place, or tap My location." : "Search for the place, or tap My location.");
           try { document.getElementById("q").focus(); } catch (_e) {}
         } else if (hasSaved) {
           setPicked(picked);
         } else {
-          requestDeviceLocation();
+          setHint("Search for the place, or tap My location.");
         }
       } catch (_err) {
         send({ t: "maps-error" });
@@ -365,10 +365,10 @@ function buildEmbedPickerHtml(
     var pickMode = ${JSON.stringify(mode)};
     if (pickMode === "current") requestDeviceLocation();
     else if (pickMode === "manual") {
-      setHint("Search for the place, or drop the pin on the map.");
+      setHint(hasSaved ? "Search to change this saved place, or tap My location." : "Search for the place, or tap My location.");
       try { document.getElementById("q").focus(); } catch (_e) {}
     } else if (hasSaved) setPicked(picked);
-    else requestDeviceLocation();
+    else setHint("Search for the place, or tap My location.");
   </script>
 </body>
 </html>`;
@@ -403,7 +403,7 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
       setResolvedKey("");
       setOriginIndex(0);
       setUseEmbed(false);
-      setAndroidGeoReady(hasSavedMapCoords(lat, lng) || Platform.OS !== "android");
+      setAndroidGeoReady(true);
       setGeoNotice("");
       setGeoKind("");
       return;
@@ -424,7 +424,7 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
         setUseEmbed(!key);
         setConfigReady(true);
       });
-    if (hasSavedMapCoords(lat, lng) || Platform.OS !== "android") {
+    if (mode !== "current" || Platform.OS !== "android") {
       setAndroidGeoReady(true);
     } else {
       setAndroidGeoReady(false);
@@ -440,7 +440,7 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
     return () => {
       active = false;
     };
-  }, [open, token, apiKey, lat, lng]);
+  }, [open, token, apiKey, lat, lng, mode]);
 
   const html = useMemo(() => {
     if (useEmbed || !resolvedKey) return buildEmbedPickerHtml(label, lat, lng, mode);
@@ -562,7 +562,7 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
             setSupportMultipleWindows={false}
             userAgent="Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
             onLoadEnd={() => {
-              if (mode === "manual") return;
+              if (mode !== "current") return;
               webRef.current?.injectJavaScript("if (window.requestDeviceLocation) window.requestDeviceLocation(); true;");
             }}
             onMessage={(e) => onWebViewMessage(e.nativeEvent.data)}

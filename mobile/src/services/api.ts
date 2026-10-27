@@ -169,6 +169,9 @@ export interface AuthResponse {
     locationLabel?: string;
     locationLat?: number;
     locationLng?: number;
+    locationCity?: string;
+    locationState?: string;
+    locationPostal?: string;
     accountStatus?: "active" | "deactivated";
     isPrivate?: boolean;
   };
@@ -323,36 +326,6 @@ export async function authLogin(payload: {
     body: JSON.stringify(payload)
   });
   return (await parseJsonOrThrow(response)) as AuthResponse;
-}
-
-export async function confirmProviderPhone(token: string, payload: { phone: string; code: string }) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/confirm`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })) as { verified: boolean };
-}
-
-export async function createProviderRazorpayAccount(
-  token: string,
-  payload: {
-    accountNumber: string;
-    ifsc: string;
-    holderName: string;
-    email?: string;
-    phone?: string;
-    businessName?: string;
-    street?: string;
-    city?: string;
-    state?: string;
-    postalCode?: string;
-  }
-) {
-  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/payouts/razorpay`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })) as { linked: boolean; accountId?: string; message?: string };
 }
 
 export async function sendPhoneOtp(payload: { phone: string }) {
@@ -594,6 +567,87 @@ export async function updateMyProfile(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })) as AuthResponse;
+}
+
+export type SavedUserLocation = {
+  label: string | null;
+  lat: number | null;
+  lng: number | null;
+  city?: string | null;
+  state?: string | null;
+  postal?: string | null;
+  updatedAt?: string | null;
+};
+
+export type RemoteMarketCartLine = {
+  id: string;
+  cropName: string;
+  vendor: string;
+  unitPrice: number;
+  unitLabel: string;
+  quantity: number;
+  maxQuantity?: number;
+};
+
+export type RemoteRentalCartLine = {
+  listingId: string;
+  title: string;
+  category: string;
+  option: string;
+  quantity: number;
+  unitPrice: number;
+  unitLabel: string;
+  mrp: number;
+};
+
+export type RemoteUserCart = {
+  market: RemoteMarketCartLine[];
+  rental: RemoteRentalCartLine[];
+  marketUpdatedAt?: string | null;
+  rentalUpdatedAt?: string | null;
+};
+
+export async function fetchMyLocation(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/location`, token)) as { location: SavedUserLocation };
+}
+
+export async function updateMyLocation(
+  token: string,
+  payload: {
+    label: string;
+    lat?: number | null;
+    lng?: number | null;
+    city?: string | null;
+    state?: string | null;
+    postal?: string | null;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/me/location`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { location: SavedUserLocation };
+}
+
+export async function fetchMyCart(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/me/cart`, token)) as RemoteUserCart;
+}
+
+export async function saveMyCart(
+  token: string,
+  kind: "market" | "rental",
+  items: RemoteMarketCartLine[] | RemoteRentalCartLine[],
+  options?: { clientUpdatedAt?: string | null; allowEmpty?: boolean }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/me/cart/${kind}`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      items,
+      clientUpdatedAt: options?.clientUpdatedAt || undefined,
+      allowEmpty: Boolean(options?.allowEmpty)
+    })
+  })) as RemoteUserCart;
 }
 
 export async function fetchMapsConfig(token?: string | null) {
@@ -970,7 +1024,6 @@ export async function fetchProviderListings(token: string) {
       category: string;
       channel: string;
       status: string;
-      rcNumber?: string | null;
       createdAt: string;
     }>;
   };
@@ -989,7 +1042,7 @@ export async function submitRentalBooking(
 
 export async function submitProviderListing(
   token: string,
-  payload: { title: string; category: string; channel: string; rcNumber?: string }
+  payload: { title: string; category: string; channel: string }
 ) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token, {
     method: "POST",

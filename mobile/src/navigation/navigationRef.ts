@@ -73,9 +73,10 @@ export function navigateToRentalCategory(categoryId: string, location: string) {
   navigationRef.navigate("RentalCategory", { categoryId, location });
 }
 
-export function navigateToRentalCart(location?: string) {
+export function navigateToRentalCart(input?: string | { location?: string }) {
   if (!navigationRef.isReady()) return;
-  navigationRef.navigate("RentalCart", { location });
+  const params = typeof input === "string" ? { location: input } : input;
+  navigationRef.navigate("RentalCart", params);
 }
 
 export function navigateToRentalBooking(listing: { id: string; title: string; category: string }, location: string) {

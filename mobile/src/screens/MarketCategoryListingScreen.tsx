@@ -24,6 +24,8 @@ import {
   type MarketListingProduct,
   type MarketSubCategory
 } from "../components/market/listing/marketCategoryListingConfig";
+import { catalogCartId, useCart } from "../cart/CartContext";
+import { CartQtyControl } from "../cart/CartQtyControl";
 import type { MarketStackParamList } from "../navigation/MarketStackNavigator";
 import {
   APP_BLACK,
@@ -80,15 +82,31 @@ function SidebarSubCategoryItem({
 }
 
 function ProductCard({ product }: { product: MarketListingProduct }) {
+  const { addItem, getQuantity, setQuantity } = useCart();
   const [weight, setWeight] = useState(product.weights[0]);
+  const cartId = catalogCartId(product.id, weight);
+  const qty = getQuantity(cartId);
+
+  const cartItem = {
+    id: cartId,
+    cropName: product.title,
+    vendor: product.subtitle,
+    unitPrice: product.price,
+    unitLabel: `/ ${weight}`
+  };
 
   return (
     <View style={styles.productCard}>
       <View style={styles.productMedia}>
         <View style={styles.productMediaPlaceholder} />
-        <Pressable style={styles.addBtn} accessibilityLabel="Add to cart">
-          <Ionicons name="add" size={22} color={APP_TEXT_ON_LIME} />
-        </Pressable>
+        <CartQtyControl
+          variant="lime"
+          overlay
+          quantity={qty}
+          onAdd={() => addItem(cartItem)}
+          onIncrease={() => addItem(cartItem)}
+          onDecrease={() => setQuantity(cartId, qty - 1)}
+        />
       </View>
 
       <View style={styles.ratingRow}>
@@ -145,6 +163,7 @@ export function MarketCategoryListingScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
+  const { itemCount } = useCart();
   const config = useMemo(
     () => getMarketCategoryListingConfig(route.params.categoryId),
     [route.params.categoryId]
@@ -189,6 +208,14 @@ export function MarketCategoryListingScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {config.title}
         </Text>
+        <Pressable style={styles.cartBtn} onPress={() => navigation.navigate("Cart")} accessibilityLabel="Cart">
+          <Ionicons name="cart-outline" size={22} color={APP_TEXT} />
+          {itemCount > 0 ? (
+            <View style={styles.cartBadge}>
+              <Text style={styles.cartBadgeText}>{itemCount > 99 ? "99+" : itemCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
 
       <View style={styles.body}>
@@ -293,6 +320,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
     color: APP_TEXT
+  },
+  cartBtn: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  cartBadge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: APP_LIME,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3
+  },
+  cartBadgeText: {
+    color: APP_TEXT_ON_LIME,
+    fontSize: 10,
+    fontWeight: "800"
   },
   body: {
     flex: 1,
