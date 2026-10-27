@@ -325,6 +325,36 @@ export async function authLogin(payload: {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
+export async function confirmProviderPhone(token: string, payload: { phone: string; code: string }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/confirm`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { verified: boolean };
+}
+
+export async function createProviderRazorpayAccount(
+  token: string,
+  payload: {
+    accountNumber: string;
+    ifsc: string;
+    holderName: string;
+    email?: string;
+    phone?: string;
+    businessName?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/payouts/razorpay`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { linked: boolean; accountId?: string; message?: string };
+}
+
 export async function sendPhoneOtp(payload: { phone: string }) {
   warmUpServer();
   const response = await fetchAuthWithRetry(`${API_BASE_URL}/v1/auth/phone/send-otp`, {
@@ -940,6 +970,7 @@ export async function fetchProviderListings(token: string) {
       category: string;
       channel: string;
       status: string;
+      rcNumber?: string | null;
       createdAt: string;
     }>;
   };
@@ -958,7 +989,7 @@ export async function submitRentalBooking(
 
 export async function submitProviderListing(
   token: string,
-  payload: { title: string; category: string; channel: string }
+  payload: { title: string; category: string; channel: string; rcNumber?: string }
 ) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token, {
     method: "POST",

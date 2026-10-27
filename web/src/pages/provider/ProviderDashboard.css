@@ -20,33 +20,7 @@
 
 .provider-app__body {
   flex: 1;
-  padding: 12px 16px 96px;
-}
-
-.provider-app__tabs {
-  position: sticky;
-  bottom: 0;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
-  padding: 10px 8px 14px;
-  background: #262626;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.provider-app__tab {
-  color: #a8b0b8;
-  text-decoration: none;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 8px 2px;
-  border-radius: 8px;
-}
-
-.provider-app__tab.is-active {
-  color: #c9ff35;
-  background: rgba(201, 255, 53, 0.08);
+  padding: 12px 16px 24px;
 }
 
 .provider-panel h1 {
@@ -57,6 +31,41 @@
 .provider-panel p {
   color: #a8b0b8;
   line-height: 1.45;
+}
+
+.provider-step {
+  background: #373838;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.provider-step strong {
+  display: block;
+}
+
+.provider-step span {
+  color: #a8b0b8;
+  font-size: 13px;
+}
+
+.provider-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.provider-lime-btn {
+  display: inline-flex;
+  justify-content: center;
+  margin-top: 8px;
+  background: #c9ff35;
+  color: #111;
+  font-weight: 800;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-decoration: none;
 }
 
 .provider-note,

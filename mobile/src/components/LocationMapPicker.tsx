@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
-import { Modal, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Linking, Modal, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import type { WebView as WebViewType } from "react-native-webview";
 import { WebView } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
@@ -71,7 +72,8 @@ function buildPickerHtml(
     #me,#go{border:1px solid #3a3a3a;background:transparent;color:#fff;border-radius:10px;padding:10px;font-weight:700}
     #map{flex:1;min-height:240px;background:#1a1a1a}
     .bar{padding:10px 12px 16px}
-    #hint,#addr{margin:0 0 8px;font-size:13px;color:#c4c4c4}
+    #hint,#addr{margin:0 0 8px;font-size:15px;line-height:1.35;color:#ffd27a;font-weight:700}
+    #addr{color:#c4c4c4;font-weight:500;font-size:13px}
     #ok{width:100%;border:none;background:#c9ff35;color:#111;font-weight:800;border-radius:12px;padding:12px;font-size:15px}
     #ok:disabled{opacity:.45}
     .pac-container{z-index:10000}
@@ -158,25 +160,34 @@ function buildPickerHtml(
             applyPoint(loc.lat(), loc.lng(), results[0].formatted_address);
           });
         }
-        function onLocationDenied() {
-          marker.setVisible(false);
-          setPicked(null);
-          setHint("Location permission denied. Search for your place.");
-          try { document.getElementById("q").focus(); } catch (_e) {}
+        function reportGeo(code, text) {
+          setHint(text);
+          send({ t: "geo", code: code, message: text });
         }
         function requestDeviceLocation() {
           if (!navigator.geolocation) {
-            onLocationDenied();
+            reportGeo(2, "Turn on device location, then tap My location again.");
             return;
           }
           setHint("Finding your current location…");
-          navigator.geolocation.getCurrentPosition(function(pos) {
+          send({ t: "geo-wait" });
+          function success(pos) {
             setHint("");
+            send({ t: "geo-ok" });
             applyPoint(pos.coords.latitude, pos.coords.longitude);
-          }, function() {
-            onLocationDenied();
-          }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+          }
+          function fail(err) {
+            var code = err && err.code ? err.code : 2;
+            if (code === 1) reportGeo(1, "Allow location permission so Cropvibe can detect your current place.");
+            else if (code === 3) reportGeo(3, "Could not find you in time. Turn on device location, then tap My location again.");
+            else reportGeo(2, "Turn on device location to detect where you are, then tap My location again.");
+          }
+          navigator.geolocation.getCurrentPosition(success, function(err) {
+            if (err && err.code === 1) { fail(err); return; }
+            navigator.geolocation.getCurrentPosition(success, fail, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+          }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
         }
+        window.requestDeviceLocation = requestDeviceLocation;
         map.addListener("click", function(e) { if (e.latLng) { setHint(""); applyPoint(e.latLng.lat(), e.latLng.lng()); } });
         marker.addListener("dragend", function() {
           var p = marker.getPosition();
@@ -250,7 +261,8 @@ function buildEmbedPickerHtml(
     #me,#go{border:1px solid #3a3a3a;background:transparent;color:#fff;border-radius:10px;padding:10px;font-weight:700}
     #map{flex:1;min-height:240px;border:0;background:#1a1a1a}
     .bar{padding:10px 12px 16px}
-    #hint,#addr{margin:0 0 8px;font-size:13px;color:#c4c4c4}
+    #hint,#addr{margin:0 0 8px;font-size:15px;line-height:1.35;color:#ffd27a;font-weight:700}
+    #addr{color:#c4c4c4;font-weight:500;font-size:13px}
     #ok{width:100%;border:none;background:#c9ff35;color:#111;font-weight:800;border-radius:12px;padding:12px;font-size:15px}
     #ok:disabled{opacity:.45}
   </style>
@@ -303,20 +315,34 @@ function buildEmbedPickerHtml(
         setPicked({ label: nextLat.toFixed(5) + ", " + nextLng.toFixed(5), lat: nextLat, lng: nextLng });
       });
     }
-    function onLocationDenied() {
-      setPicked(null);
-      setHint("Location permission denied. Search for your place.");
-      document.getElementById("map").src = "${embedSrc(FALLBACK_LAT, FALLBACK_LNG, 5)}";
-      try { document.getElementById("q").focus(); } catch (_e) {}
+    function reportGeo(code, text) {
+      setHint(text);
+      send({ t: "geo", code: code, message: text });
     }
     function requestDeviceLocation() {
-      if (!navigator.geolocation) { onLocationDenied(); return; }
+      if (!navigator.geolocation) {
+        reportGeo(2, "Turn on device location, then tap My location again.");
+        return;
+      }
       setHint("Finding your current location…");
-      navigator.geolocation.getCurrentPosition(function(pos) {
+      send({ t: "geo-wait" });
+      function success(pos) {
         setHint("");
+        send({ t: "geo-ok" });
         showPoint(pos.coords.latitude, pos.coords.longitude);
-      }, function() { onLocationDenied(); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+      }
+      function fail(err) {
+        var code = err && err.code ? err.code : 2;
+        if (code === 1) reportGeo(1, "Allow location permission so Cropvibe can detect your current place.");
+        else if (code === 3) reportGeo(3, "Could not find you in time. Turn on device location, then tap My location again.");
+        else reportGeo(2, "Turn on device location to detect where you are, then tap My location again.");
+      }
+      navigator.geolocation.getCurrentPosition(success, function(err) {
+        if (err && err.code === 1) { fail(err); return; }
+        navigator.geolocation.getCurrentPosition(success, fail, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+      }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
     }
+    window.requestDeviceLocation = requestDeviceLocation;
     function searchPlace() {
       var q = String(document.getElementById("q").value || "").trim();
       if (!q) return;
@@ -350,15 +376,26 @@ function buildEmbedPickerHtml(
 
 const MAPS_WEBVIEW_ORIGINS = ["https://www.cropvibe.com/", "https://cropvibe.com/"];
 
+function openDeviceLocationSettings() {
+  if (Platform.OS === "android") {
+    void Linking.sendIntent("android.settings.LOCATION_SOURCE_SETTINGS").catch(() => Linking.openSettings());
+    return;
+  }
+  void Linking.openSettings();
+}
+
 export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto", onClose, onSelect }: Props) {
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
+  const webRef = useRef<WebViewType>(null);
   const saved = hasSavedMapCoords(lat, lng);
   const [androidGeoReady, setAndroidGeoReady] = useState(saved || Platform.OS !== "android");
   const [configReady, setConfigReady] = useState(false);
   const [resolvedKey, setResolvedKey] = useState("");
   const [originIndex, setOriginIndex] = useState(0);
   const [useEmbed, setUseEmbed] = useState(false);
+  const [geoNotice, setGeoNotice] = useState("");
+  const [geoKind, setGeoKind] = useState<"permission" | "services" | "">("");
 
   useEffect(() => {
     if (!open) {
@@ -367,6 +404,8 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
       setOriginIndex(0);
       setUseEmbed(false);
       setAndroidGeoReady(hasSavedMapCoords(lat, lng) || Platform.OS !== "android");
+      setGeoNotice("");
+      setGeoKind("");
       return;
     }
     let active = true;
@@ -389,8 +428,13 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
       setAndroidGeoReady(true);
     } else {
       setAndroidGeoReady(false);
-      void PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION).finally(() => {
-        if (active) setAndroidGeoReady(true);
+      void PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION).then((status) => {
+        if (!active) return;
+        if (status !== PermissionsAndroid.RESULTS.GRANTED) {
+          setGeoKind("permission");
+          setGeoNotice("Allow location permission so Cropvibe can detect your current place.");
+        }
+        setAndroidGeoReady(true);
       });
     }
     return () => {
@@ -410,6 +454,16 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
     const onMessage = (event: MessageEvent) => {
       try {
         const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (data?.t === "geo-ok") {
+          setGeoNotice("");
+          setGeoKind("");
+          return;
+        }
+        if (data?.t === "geo") {
+          setGeoNotice(data.message || "Turn on device location, then tap My location again.");
+          setGeoKind(data.code === 1 ? "permission" : "services");
+          return;
+        }
         if (data?.t === "maps-error") {
           if (originIndex < MAPS_WEBVIEW_ORIGINS.length - 1) {
             setOriginIndex((i) => i + 1);
@@ -431,7 +485,19 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
 
   const onWebViewMessage = (raw: string) => {
     try {
-      const data = JSON.parse(raw) as { t?: string; label?: string; lat?: number; lng?: number };
+      const data = JSON.parse(raw) as { t?: string; label?: string; lat?: number; lng?: number; code?: number; message?: string };
+      if (data?.t === "geo-ok" || data?.t === "geo-wait") {
+        if (data.t === "geo-ok") {
+          setGeoNotice("");
+          setGeoKind("");
+        }
+        return;
+      }
+      if (data?.t === "geo") {
+        setGeoNotice(data.message || "Turn on device location, then tap My location again.");
+        setGeoKind(data.code === 1 ? "permission" : "services");
+        return;
+      }
       if (data?.t === "maps-error") {
         if (originIndex < MAPS_WEBVIEW_ORIGINS.length - 1) {
           setOriginIndex((i) => i + 1);
@@ -460,6 +526,17 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
           <Text style={styles.title}>Select location</Text>
           <View style={styles.headBtn} />
         </View>
+        {geoNotice ? (
+          <View style={styles.notice}>
+            <Text style={styles.noticeText}>{geoNotice}</Text>
+            <Pressable
+              style={styles.noticeBtn}
+              onPress={() => (geoKind === "permission" ? void Linking.openSettings() : openDeviceLocationSettings())}
+            >
+              <Text style={styles.noticeBtnText}>{geoKind === "permission" ? "Allow permission" : "Turn on location"}</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {!showMap ? (
           <View style={styles.fallback}>
             <Text style={styles.fallbackBody}>Loading Google Maps…</Text>
@@ -472,7 +549,8 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
           })
         ) : (
           <WebView
-            key={`${useEmbed ? "embed" : "js"}-${originIndex}-${resolvedKey ? "k" : "n"}`}
+            ref={webRef}
+            key={`${useEmbed ? "embed" : "js"}-${originIndex}-${resolvedKey ? "k" : "n"}-${mode}`}
             source={{ html, baseUrl }}
             originWhitelist={["*"]}
             javaScriptEnabled
@@ -483,6 +561,10 @@ export function LocationMapPicker({ open, apiKey, label, lat, lng, mode = "auto"
             cacheEnabled={false}
             setSupportMultipleWindows={false}
             userAgent="Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+            onLoadEnd={() => {
+              if (mode === "manual") return;
+              webRef.current?.injectJavaScript("if (window.requestDeviceLocation) window.requestDeviceLocation(); true;");
+            }}
             onMessage={(e) => onWebViewMessage(e.nativeEvent.data)}
             style={styles.flex}
           />
@@ -504,6 +586,10 @@ const styles = StyleSheet.create({
   },
   headBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   title: { color: APP_TEXT, fontSize: 16, fontWeight: "800" },
+  notice: { marginHorizontal: 12, marginBottom: 8, backgroundColor: "#3a3218", borderRadius: 12, padding: 12 },
+  noticeText: { color: "#ffd27a", fontSize: 14, lineHeight: 20, fontWeight: "700" },
+  noticeBtn: { alignSelf: "flex-start", marginTop: 10, backgroundColor: "#c9ff35", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  noticeBtnText: { color: "#111", fontWeight: "800" },
   fallback: { flex: 1, justifyContent: "center", paddingHorizontal: 24 },
   fallbackBody: { color: "#c4c4c4", fontSize: 14, lineHeight: 20, textAlign: "center" }
 });

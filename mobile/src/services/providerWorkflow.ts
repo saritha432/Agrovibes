@@ -45,6 +45,8 @@ export type ProviderRegistrationDraft = {
   aadhaarMasked?: string;
   panMatched?: boolean;
   bankVerified?: boolean;
+  phoneOtpVerified?: boolean;
+  razorpayAccountId?: string;
 };
 
 export type ProviderListingRecord = {
@@ -57,6 +59,7 @@ export type ProviderListingRecord = {
   approvedAt?: string;
   /** Local photo. The listings API does not store images. */
   imageUri?: string;
+  rcNumber?: string;
   /** Set when this phone copy has not been inserted into provider_listings. */
   serverError?: string;
 };
@@ -287,6 +290,9 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
   const gstRaw = String(draft?.gstNumber || "").trim().toUpperCase();
   const gstValid = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstRaw);
   const isBusiness = draft?.registrationType === "business";
+  if (!draft?.phoneOtpVerified) {
+    throw new Error("Verify the mobile number with OTP before submitting.");
+  }
   if (!draft?.digilockerVerified) {
     throw new Error("Verify Aadhaar with DigiLocker before submitting.");
   }
@@ -317,7 +323,7 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
     phone: draft?.phone || undefined,
     address: address || undefined,
     priority: "Medium",
-    otpVerified: true,
+    otpVerified: Boolean(draft?.phoneOtpVerified),
     panNumber
   });
 
@@ -345,6 +351,7 @@ export async function submitListingForApproval(input: {
   category: string;
   channel: string;
   imageUri?: string;
+  rcNumber?: string;
   token?: string | null;
 }): Promise<string> {
   if (!input.token) {
@@ -353,7 +360,8 @@ export async function submitListingForApproval(input: {
   const created = await submitProviderListing(input.token, {
     title: input.title,
     category: input.category,
-    channel: input.channel
+    channel: input.channel,
+    rcNumber: input.rcNumber
   });
   const serverId = Number(created?.listing?.id);
   if (!Number.isFinite(serverId) || serverId <= 0) {
@@ -368,6 +376,7 @@ export async function submitListingForApproval(input: {
     channel: input.channel,
     status: "pending",
     imageUri: input.imageUri,
+    rcNumber: input.rcNumber,
     createdAt: created.listing?.createdAt || new Date().toISOString()
   };
   state = {
@@ -488,6 +497,8 @@ export async function syncProviderListingsFromApi(token?: string | null): Promis
     const remote = await fetchProviderListings(token);
     const imageById = new Map(state.listings.filter((row) => row.imageUri).map((row) => [row.id, row.imageUri]));
     const imageByTitle = new Map(state.listings.filter((row) => row.imageUri).map((row) => [row.title, row.imageUri]));
+    const rcById = new Map(state.listings.filter((row) => row.rcNumber).map((row) => [row.id, row.rcNumber]));
+    const rcByTitle = new Map(state.listings.filter((row) => row.rcNumber).map((row) => [row.title, row.rcNumber]));
     const remoteRows: ProviderListingRecord[] = (remote.listings || []).map((row) => ({
       id: String(row.id),
       title: row.title,
@@ -495,6 +506,7 @@ export async function syncProviderListingsFromApi(token?: string | null): Promis
       channel: row.channel,
       status: row.status === "approved" ? "approved" : row.status === "rejected" ? "rejected" : "pending",
       imageUri: imageById.get(String(row.id)) || imageByTitle.get(row.title),
+      rcNumber: row.rcNumber || rcById.get(String(row.id)) || rcByTitle.get(row.title),
       createdAt: row.createdAt
     }));
     const localOnly = state.listings.filter((row) => !isServerListingId(row.id));

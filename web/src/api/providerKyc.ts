@@ -74,6 +74,7 @@ export type ProviderListing = {
   category: string;
   channel: string;
   status: string;
+  rcNumber?: string | null;
   createdAt: string;
 };
 
@@ -85,7 +86,7 @@ export async function fetchProviderListings(token: string) {
 
 export async function submitProviderListing(
   token: string,
-  payload: { title: string; category: string; channel: string }
+  payload: { title: string; category: string; channel: string; rcNumber?: string }
 ) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/listings`, token, {
     method: "POST",
@@ -111,6 +112,36 @@ export async function fetchProviderBookings(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/bookings`, token)) as {
     bookings: ProviderBooking[];
   };
+}
+
+export async function confirmProviderPhone(token: string, payload: { phone: string; code: string }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/confirm`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { verified: boolean };
+}
+
+export async function createProviderRazorpayAccount(
+  token: string,
+  payload: {
+    accountNumber: string;
+    ifsc: string;
+    holderName: string;
+    email?: string;
+    phone?: string;
+    businessName?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+  }
+) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/payouts/razorpay`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })) as { linked: boolean; accountId?: string; message?: string };
 }
 
 export async function fetchProviderKycStatus(token: string) {

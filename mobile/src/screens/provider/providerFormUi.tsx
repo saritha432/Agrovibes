@@ -11,7 +11,7 @@ export const PROVIDER_DIVIDER = "rgba(255,255,255,0.08)";
 
 export function providerSteps(registrationType: "individual" | "business" = "individual") {
   const steps = [
-    { id: 1, label: "Basic Details", sub: "Name and address" },
+    { id: 1, label: "Mobile OTP", sub: "Then DigiLocker" },
     { id: 2, label: "Aadhaar", sub: "DigiLocker" }
   ];
   if (registrationType === "business") {
