@@ -40,6 +40,17 @@ export type RootStackParamList = {
   DiscoverSearch: undefined;
   RentalCategory: { categoryId: string; location: string };
   RentalBooking: { listingId: string; title: string; category: string; location: string };
+  RentalCart: {
+    listingId: string;
+    title: string;
+    category: string;
+    location: string;
+    option: string;
+    quantity: number;
+    unitPrice: number;
+    unitLabel: string;
+    mrp: number;
+  };
   PlantHealth: undefined;
   PlantHealthScan: { plantId?: number; plantName?: string; photoRequests?: string[] } | undefined;
   PlantHealthResult: { scanId: number };

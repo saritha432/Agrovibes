@@ -3,6 +3,7 @@ import { useNavigation, useRoute, type RouteProp } from "@react-navigation/nativ
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { BookingDateField } from "./BookingDateField";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { RootStackParamList } from "../../navigation/rootStackTypes";
 import { useAndroidNestedStackBack } from "../../navigation/useAndroidScreenBack";
@@ -77,14 +78,7 @@ export function RentalBookingScreen() {
           </View>
         ) : (
           <>
-            <Text style={styles.label}>Date you need it</Text>
-            <TextInput
-              value={date}
-              onChangeText={setDate}
-              placeholder="26 Oct 2026"
-              placeholderTextColor={APP_TEXT_MUTED}
-              style={styles.input}
-            />
+            <BookingDateField value={date} onChange={setDate} />
             <Text style={styles.label}>Note</Text>
             <TextInput
               value={note}

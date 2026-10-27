@@ -73,6 +73,11 @@ export function navigateToRentalCategory(categoryId: string, location: string) {
   navigationRef.navigate("RentalCategory", { categoryId, location });
 }
 
+export function navigateToRentalCart(input: RootStackParamList["RentalCart"]) {
+  if (!navigationRef.isReady()) return;
+  navigationRef.navigate("RentalCart", input);
+}
+
 export function navigateToRentalBooking(listing: { id: string; title: string; category: string }, location: string) {
   if (!navigationRef.isReady()) return;
   navigationRef.navigate("RentalBooking", {
