@@ -5,29 +5,44 @@ import {
   createProviderRazorpayAccount,
   fetchProviderKycStatus,
   fetchProviderListings,
-  submitProviderListing,
   verifyProviderBankAccount
 } from "../../api/providerKyc";
 import { readProviderDraft } from "./providerDraft";
 
-const RC_PATTERN = /^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$/;
+const BANK_KEY = "cropvibe.provider.bank.v1";
+const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+type SavedBank = {
+  holderName: string;
+  accountNumber: string;
+  ifsc: string;
+  razorpayAccountId?: string;
+};
+
+function readSavedBank(): SavedBank | null {
+  try {
+    const raw = sessionStorage.getItem(BANK_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedBank;
+    if (!parsed.accountNumber || !parsed.ifsc) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export function ProviderOverviewPage() {
   const { token } = useAuth();
   const [status, setStatus] = useState("not_submitted");
-  const [hasRc, setHasRc] = useState(false);
-  const [bankReady, setBankReady] = useState(false);
-  const [payoutReady, setPayoutReady] = useState(false);
+  const [approvedListings, setApprovedListings] = useState(0);
+  const [savedBank, setSavedBank] = useState<SavedBank | null>(() => readSavedBank());
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [tractor, setTractor] = useState("");
-  const [hp, setHp] = useState("");
-  const [rate, setRate] = useState("");
-  const [rc, setRc] = useState("");
+  const [holderName, setHolderName] = useState("");
   const [account, setAccount] = useState("");
+  const [confirmAccount, setConfirmAccount] = useState("");
   const [ifsc, setIfsc] = useState("");
   const [pin, setPin] = useState("");
-  const [holder, setHolder] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -37,7 +52,7 @@ export function ProviderOverviewPage() {
         const [kyc, listed] = await Promise.all([fetchProviderKycStatus(token), fetchProviderListings(token)]);
         if (!active) return;
         setStatus(kyc.status);
-        setHasRc((listed.listings || []).some((row) => Boolean(row.rcNumber)));
+        setApprovedListings((listed.listings || []).filter((row) => row.status === "approved").length);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Could not load provider setup.");
       }
@@ -48,62 +63,93 @@ export function ProviderOverviewPage() {
     };
   }, [token]);
 
-  const draft = readProviderDraft();
-  const submitted = status === "pending" || status === "approved" || status === "rejected";
-  const identityReady = submitted || (draft.phoneOtpVerified && draft.digilockerVerified);
-  const businessReady = submitted || draft.registrationType !== "business" || draft.panMatched || /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(draft.gstNumber);
-  const approved = status === "approved";
-  const steps = [
-    { title: "Provider registration", detail: "Mobile OTP, then DigiLocker Aadhaar.", done: identityReady },
-    { title: "Business registration", detail: draft.registrationType === "business" ? "PAN or GST, as applicable." : "Not required for an individual.", done: businessReady },
-    { title: "Admin approval", detail: approved ? "KYC approved." : status === "pending" ? "Waiting for admin review." : "Submit identity for review.", done: approved },
-    { title: "Add tractor", detail: hasRc ? "RC submitted for review." : "Tractor details and RC number.", done: hasRc },
-    { title: "Activate online bookings", detail: "Bank account, IFSC, and account holder verification.", done: bankReady },
-    { title: "Receive payments", detail: payoutReady ? "Razorpay account linked." : "Razorpay linked account, after the bank is verified.", done: payoutReady }
-  ];
+  useEffect(() => {
+    if (!savedBank) return;
+    setHolderName(savedBank.holderName);
+    setAccount(savedBank.accountNumber);
+    setConfirmAccount(savedBank.accountNumber);
+    setIfsc(savedBank.ifsc);
+  }, [savedBank]);
 
-  const saveTractor = async () => {
-    if (!token) return;
-    const rcNumber = rc.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (tractor.trim().length < 2 || !RC_PATTERN.test(rcNumber)) {
-      setError("Enter the tractor name and a registration number such as TS09AB1234.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await submitProviderListing(token, {
-        title: tractor.trim(),
-        category: [hp.trim() ? `Tractor ${hp.trim()} HP` : "Tractor", rate.trim() ? `Rs ${rate.trim()}/day` : ""].filter(Boolean).join(" · "),
-        channel: "Rental",
-        rcNumber
-      });
-      setHasRc(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add the tractor.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const approved = status === "approved";
+  const bankReady = Boolean(savedBank?.accountNumber);
+  const payoutReady = Boolean(savedBank?.razorpayAccountId);
+  const bookingsOn = approved && bankReady && payoutReady && approvedListings > 0;
+  const accountDigits = account.replace(/\D/g, "");
+  const confirmDigits = confirmAccount.replace(/\D/g, "");
+  const ifscCode = ifsc.toUpperCase();
+  const formReady =
+    holderName.trim().length > 1 &&
+    accountDigits.length >= 6 &&
+    accountDigits === confirmDigits &&
+    IFSC_PATTERN.test(ifscCode);
 
   const verifyBank = async () => {
     if (!token) return;
+    if (accountDigits !== confirmDigits) {
+      setError("The account numbers do not match.");
+      return;
+    }
+    if (!IFSC_PATTERN.test(ifscCode)) {
+      setError("Enter an 11-character IFSC, such as SBIN0001234.");
+      return;
+    }
+    const draft = readProviderDraft();
     setBusy(true);
     setError("");
     try {
       const result = await verifyProviderBankAccount(token, {
-        accountNumber: account.replace(/\D/g, ""),
-        ifsc: ifsc.toUpperCase(),
-        applicantName: draft.fullName || "Provider",
+        accountNumber: accountDigits,
+        ifsc: ifscCode,
+        applicantName: holderName.trim(),
         phone: draft.phone
       });
       if (!result.matched) {
-        setError(`Bank name is ${result.holderName}. It does not match ${result.aadhaarName}.`);
-        setBankReady(false);
+        setError(`The bank account is in the name of ${result.holderName}. It does not match the verified Aadhaar name${result.aadhaarName ? `, ${result.aadhaarName}` : ""}.`);
         return;
       }
-      setHolder(result.holderName);
-      setBankReady(true);
+      const typed = holderName.trim().toLowerCase();
+      const returned = result.holderName.trim().toLowerCase();
+      if (typed && returned && !returned.includes(typed) && !typed.includes(returned)) {
+        setError(`Bank records show ${result.holderName}. Enter that name, then verify again.`);
+        return;
+      }
+      const next: SavedBank = {
+        holderName: result.holderName,
+        accountNumber: accountDigits,
+        ifsc: ifscCode,
+        razorpayAccountId: savedBank?.razorpayAccountId
+      };
+      const street = draft.street || draft.village;
+      const city = draft.district || draft.village;
+      if (draft.email && street && city && draft.state && pin.replace(/\D/g, "").length === 6) {
+        const linked = await createProviderRazorpayAccount(token, {
+          accountNumber: accountDigits,
+          ifsc: ifscCode,
+          holderName: result.holderName,
+          email: draft.email,
+          phone: draft.phone,
+          businessName: draft.businessName || draft.fullName || result.holderName,
+          street,
+          city,
+          state: draft.state,
+          postalCode: pin.replace(/\D/g, "")
+        });
+        if (!linked.linked || !linked.accountId) {
+          sessionStorage.setItem(BANK_KEY, JSON.stringify(next));
+          setSavedBank(next);
+          setError(linked.message || "The bank account was verified. Razorpay did not link an account yet.");
+          return;
+        }
+        next.razorpayAccountId = linked.accountId;
+      } else if (!next.razorpayAccountId) {
+        sessionStorage.setItem(BANK_KEY, JSON.stringify(next));
+        setSavedBank(next);
+        setError("Bank account verified. Add the 6-digit PIN from your address so Razorpay can finish onboarding.");
+        return;
+      }
+      sessionStorage.setItem(BANK_KEY, JSON.stringify(next));
+      setSavedBank(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not verify the bank account.");
     } finally {
@@ -111,78 +157,91 @@ export function ProviderOverviewPage() {
     }
   };
 
-  const linkRazorpay = async () => {
-    if (!token) return;
-    const street = draft.street || draft.village;
-    const city = draft.district || draft.village;
-    if (!draft.email || !street || !city || !draft.state || pin.replace(/\D/g, "").length !== 6) {
-      setError("Email, address, and a 6-digit PIN code are required. Razorpay is not linked until it accepts them.");
-      return;
+  const steps = [
+    {
+      title: "Provider Registration",
+      detail: "Individual / Business → DigiLocker → Admin approval",
+      done: approved,
+      state: approved ? "done" : status === "pending" ? "open" : "open"
+    },
+    {
+      title: "Provider Dashboard Unlocked",
+      detail: "Provider can add tractors and other equipment",
+      done: approved,
+      state: approved ? "done" : "locked"
+    },
+    {
+      title: "Add Bank Account (One Time)",
+      detail: payoutReady ? "Bank verified and Razorpay account linked." : bankReady ? "Bank verified. Razorpay onboarding is still open." : "Verify bank details and complete Razorpay onboarding",
+      done: payoutReady,
+      state: !approved ? "locked" : payoutReady ? "done" : "open"
+    },
+    {
+      title: "Online Bookings Enabled",
+      detail: bookingsOn ? "For approved equipment with availability" : "For approved equipment, after the bank and Razorpay checks succeed",
+      done: bookingsOn,
+      state: bookingsOn ? "done" : "locked"
     }
-    setBusy(true);
-    setError("");
-    try {
-      const result = await createProviderRazorpayAccount(token, {
-        accountNumber: account.replace(/\D/g, ""),
-        ifsc: ifsc.toUpperCase(),
-        holderName: holder || draft.fullName,
-        email: draft.email,
-        phone: draft.phone,
-        businessName: draft.businessName || draft.fullName,
-        street,
-        city,
-        state: draft.state,
-        postalCode: pin.replace(/\D/g, "")
-      });
-      if (!result.linked || !result.accountId) {
-        setError(result.message || "Razorpay did not link an account.");
-        return;
-      }
-      setPayoutReady(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Razorpay is not ready.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  ];
 
   return (
-    <section className="provider-panel">
-      <h1>Provider setup</h1>
-      <p>Finish each step in order. A later step stays closed until the one before it is done.</p>
-      {error ? <p className="provider-error">{error}</p> : null}
-      {steps.map((step, index) => {
-        const locked = steps.slice(0, index).some((item) => !item.done);
-        return (
-          <div className="provider-step" key={step.title}>
-            <strong>{locked ? "Locked" : step.done ? "Done" : "Open"} · {step.title}</strong>
-            <span>{locked ? "Complete the previous step first." : step.detail}</span>
-          </div>
-        );
-      })}
-      {!identityReady || !businessReady || !approved ? <Link className="provider-lime-btn" to="/provider/join">Continue registration</Link> : null}
-      {approved && !hasRc ? (
-        <form className="provider-form" onSubmit={(event) => { event.preventDefault(); void saveTractor(); }}>
-          <input value={tractor} onChange={(event) => setTractor(event.target.value)} placeholder="Tractor name" />
-          <input value={hp} onChange={(event) => setHp(event.target.value)} placeholder="HP" />
-          <input value={rate} onChange={(event) => setRate(event.target.value)} placeholder="Daily rate" />
-          <input value={rc} onChange={(event) => setRc(event.target.value.toUpperCase())} placeholder="RC number" />
-          <button className="provider-lime-btn" type="submit" disabled={busy}>Submit RC for review</button>
+    <section className="provider-flow">
+      {steps.map((step, index) => (
+        <div key={step.title}>
+          <article className={`provider-flow__card${step.done ? " is-done" : ""}`}>
+            <strong>{step.done ? "✓ " : ""}{step.title}</strong>
+            <span>{step.detail}</span>
+          </article>
+          {index < steps.length - 1 ? <div className="provider-flow__arrow" aria-hidden>↓</div> : null}
+        </div>
+      ))}
+
+      {!approved ? (
+        <Link className="provider-flow__link" to="/provider/join">
+          {status === "pending" ? "Registration is with admin" : "Continue registration"}
+        </Link>
+      ) : (
+        <Link className="provider-flow__link" to="/provider/listings/new">
+          Add tractor or equipment
+        </Link>
+      )}
+
+      {approved && !payoutReady ? (
+        <form
+          className="provider-bank"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void verifyBank();
+          }}
+        >
+          <h2>Add Bank Account</h2>
+          <label>
+            Account Holder Name
+            <input value={holderName} onChange={(event) => setHolderName(event.target.value)} placeholder="Name as per bank records" />
+          </label>
+          <label>
+            Bank Account Number
+            <input value={account} onChange={(event) => setAccount(event.target.value.replace(/[^\d]/g, ""))} placeholder="Enter account number" inputMode="numeric" />
+          </label>
+          <label>
+            Confirm Account Number
+            <input value={confirmAccount} onChange={(event) => setConfirmAccount(event.target.value.replace(/[^\d]/g, ""))} placeholder="Re-enter account number" inputMode="numeric" />
+          </label>
+          <label>
+            IFSC Code
+            <input value={ifsc} onChange={(event) => setIfsc(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))} placeholder="e.g. SBIN0001234" />
+          </label>
+          <label>
+            PIN code
+            <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit PIN for Razorpay" inputMode="numeric" />
+          </label>
+          {error ? <p className="provider-bank__error">{error}</p> : null}
+          <button type="submit" disabled={busy || !formReady}>
+            {busy ? "Verifying…" : "Verify & Save Bank Account"}
+          </button>
         </form>
       ) : null}
-      {approved && hasRc && !bankReady ? (
-        <form className="provider-form" onSubmit={(event) => { event.preventDefault(); void verifyBank(); }}>
-          <input value={account} onChange={(event) => setAccount(event.target.value)} placeholder="Account number" />
-          <input value={ifsc} onChange={(event) => setIfsc(event.target.value.toUpperCase())} placeholder="IFSC" maxLength={11} />
-          <button className="provider-lime-btn" type="submit" disabled={busy}>Verify account holder</button>
-        </form>
-      ) : null}
-      {bankReady && !payoutReady ? (
-        <form className="provider-form" onSubmit={(event) => { event.preventDefault(); void linkRazorpay(); }}>
-          <input value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="PIN code" />
-          <button className="provider-lime-btn" type="submit" disabled={busy}>Set up Razorpay account</button>
-        </form>
-      ) : null}
+      {approved && payoutReady && error ? <p className="provider-bank__error">{error}</p> : null}
     </section>
   );
 }
