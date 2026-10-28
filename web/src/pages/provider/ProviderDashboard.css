@@ -23,6 +23,110 @@
   padding: 12px 16px 24px;
 }
 
+.provider-flow {
+  display: grid;
+  gap: 0;
+  max-width: 560px;
+}
+
+.provider-flow__card {
+  background: #f7f7f5;
+  color: #1c1c1c;
+  border: 1px solid #e6e6e4;
+  border-radius: 14px;
+  padding: 18px 16px;
+  text-align: center;
+}
+
+.provider-flow__card strong {
+  display: block;
+  font-size: 16px;
+}
+
+.provider-flow__card span {
+  display: block;
+  margin-top: 6px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.provider-flow__card.is-done {
+  background: #eef8ef;
+  border-color: #d7efd9;
+}
+
+.provider-flow__arrow {
+  text-align: center;
+  color: #98a2b3;
+  padding: 8px 0;
+}
+
+.provider-flow__link {
+  display: inline-flex;
+  justify-content: center;
+  margin: 14px auto 0;
+  background: #c9ff35;
+  color: #111;
+  font-weight: 800;
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.provider-bank {
+  margin-top: 18px;
+  background: #fff;
+  color: #1c1c1c;
+  border: 1px solid #e6e6e4;
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.provider-bank h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.provider-bank label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.provider-bank input {
+  background: #fff;
+  color: #1c1c1c;
+  border: 1px solid #e4e4e7;
+  border-radius: 999px;
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 500;
+}
+
+.provider-bank button {
+  border: 0;
+  border-radius: 999px;
+  background: #d9d9d9;
+  color: #6b7280;
+  font-weight: 800;
+  padding: 12px 14px;
+}
+
+.provider-bank button:not(:disabled) {
+  background: #c9ff35;
+  color: #111;
+  cursor: pointer;
+}
+
+.provider-bank__error {
+  margin: 0;
+  color: #b42318;
+  font-size: 13px;
+}
+
 .provider-panel h1 {
   margin: 0 0 6px;
   font-size: 28px;

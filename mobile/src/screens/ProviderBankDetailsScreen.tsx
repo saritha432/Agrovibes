@@ -36,6 +36,7 @@ export function ProviderBankDetailsScreen() {
 
   const [holderName, setHolderName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
+  const [confirmAccount, setConfirmAccount] = useState("");
   const [ifsc, setIfsc] = useState("");
   const [bankName, setBankName] = useState("");
   const [bankBranch, setBankBranch] = useState("");
@@ -47,7 +48,9 @@ export function ProviderBankDetailsScreen() {
   const [bankVerified, setBankVerified] = useState(false);
   const ifscTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const payouts = route.params?.purpose === "payouts";
   const accountDigits = accountNumber.replace(/\D/g, "");
+  const confirmDigits = confirmAccount.replace(/\D/g, "");
   const ifscCode = ifsc.trim().toUpperCase();
   const ifscFormatOk = /^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscCode);
 
@@ -114,20 +117,27 @@ export function ProviderBankDetailsScreen() {
         phone: draft?.phone,
         address
       });
-      setHolderName(result.holderName);
-      setBankVerified(result.matched);
+      const typed = holderName.trim().toLowerCase();
+      const returned = String(result.holderName || "").trim().toLowerCase();
+      const nameAgrees = !payouts || !typed || !returned || returned.includes(typed) || typed.includes(returned);
+      const accepted = result.matched && nameAgrees;
+      setHolderName(result.holderName || holderName);
+      setBankVerified(accepted);
       setNameHint(
-        result.matched
+        accepted
           ? "Account holder matches the Aadhaar name."
-          : `Bank name is ${result.holderName}. It does not match ${result.aadhaarName}.`
+          : !nameAgrees
+            ? `Bank records show ${result.holderName}. Enter that name, then verify again.`
+            : `Bank name is ${result.holderName}. It does not match ${result.aadhaarName}.`
       );
-      if (result.matched) {
+      if (accepted) {
         await updateProviderRegistrationDraft({
-          holderName: result.holderName,
+          holderName: result.holderName || holderName.trim(),
           accountNumber: accountDigits,
           ifsc: ifscCode,
           bankVerified: true
         });
+        if (payouts) navigation.navigate("ProviderPayouts");
       }
     } catch (error) {
       setBankVerified(false);
@@ -135,7 +145,7 @@ export function ProviderBankDetailsScreen() {
     } finally {
       setNameLoading(false);
     }
-  }, [accountDigits, ifscCode, ifscFormatOk, nameLoading, token]);
+  }, [accountDigits, holderName, ifscCode, ifscFormatOk, nameLoading, navigation, payouts, token]);
 
   useEffect(() => {
     if (ifscTimer.current) clearTimeout(ifscTimer.current);
@@ -187,8 +197,8 @@ export function ProviderBankDetailsScreen() {
   return (
     <SafeAreaView style={pf.screen} edges={["top", "bottom"]}>
       <ProviderFormHeader onBack={() => navigation.goBack()} />
-      {route.params?.purpose === "payouts" ? (
-        <Text style={[pf.sectionTitle, { paddingHorizontal: 16, paddingTop: 8 }]}>Activate online bookings</Text>
+      {payouts ? (
+        <Text style={[pf.sectionTitle, { paddingHorizontal: 16, paddingTop: 8 }]}>Add Bank Account</Text>
       ) : (
         <ProviderStepBar currentStep={4} />
       )}
@@ -199,8 +209,23 @@ export function ProviderBankDetailsScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={pf.sectionTitle}>Bank Account Verification</Text>
-        <Text style={pf.sectionSub}>Account number + IFSC → Verify account holder</Text>
+        <Text style={pf.sectionTitle}>{payouts ? "Add Bank Account" : "Bank Account Verification"}</Text>
+        <Text style={pf.sectionSub}>
+          {payouts ? "One-time account number, IFSC, and the name on the bank account." : "Account number + IFSC → Verify account holder"}
+        </Text>
+        {payouts ? (
+          <TextInput
+            style={pf.input}
+            value={holderName}
+            onChangeText={(value) => {
+              setHolderName(value);
+              setBankVerified(false);
+            }}
+            placeholder="Account holder name"
+            placeholderTextColor={PROVIDER_MUTED}
+            autoCapitalize="words"
+          />
+        ) : null}
 
         <TextInput
           style={pf.input}
@@ -255,15 +280,36 @@ export function ProviderBankDetailsScreen() {
             setBankVerified(false);
             setNameHint(null);
           }}
-          placeholder="Account Number *"
+          placeholder="Bank account number"
           placeholderTextColor={PROVIDER_MUTED}
           keyboardType="number-pad"
         />
+        {payouts ? (
+          <TextInput
+            style={pf.input}
+            value={confirmAccount}
+            onChangeText={(value) => {
+              setConfirmAccount(value);
+              setBankVerified(false);
+            }}
+            placeholder="Confirm account number"
+            placeholderTextColor={PROVIDER_MUTED}
+            keyboardType="number-pad"
+          />
+        ) : null}
 
         <Pressable
           style={[styles.verifyBtn, (accountDigits.length < 6 || !ifscFormatOk || nameLoading) && styles.verifyBtnDisabled]}
           disabled={accountDigits.length < 6 || !ifscFormatOk || nameLoading}
           onPress={() => {
+            if (payouts && accountDigits !== confirmDigits) {
+              setNameHint("The account numbers do not match.");
+              return;
+            }
+            if (payouts && holderName.trim().length < 2) {
+              setNameHint("Enter the account holder name as it appears on the bank account.");
+              return;
+            }
             void verifyAccount();
           }}
         >
@@ -276,7 +322,7 @@ export function ProviderBankDetailsScreen() {
                 (accountDigits.length < 6 || !ifscFormatOk || nameLoading) && styles.verifyBtnTextDisabled
               ]}
             >
-              Verify account holder
+              {payouts ? "Verify & Save Bank Account" : "Verify account holder"}
             </Text>
           )}
         </Pressable>
@@ -297,7 +343,7 @@ export function ProviderBankDetailsScreen() {
         {continueHint ? <Text style={styles.errorText}>{continueHint}</Text> : null}
       </ScrollView>
 
-      <ProviderContinueButton disabled={!canContinue} onPress={onContinue} />
+      {payouts ? null : <ProviderContinueButton disabled={!canContinue} onPress={onContinue} />}
     </SafeAreaView>
   );
 }

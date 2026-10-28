@@ -26,7 +26,7 @@ export function ProviderOverviewScreen() {
   const { token } = useAuth();
   const [status, setStatus] = useState<ProviderApprovalStatus>("not_submitted");
   const [draft, setDraft] = useState<ProviderRegistrationDraft | null>(null);
-  const [hasRc, setHasRc] = useState(false);
+  const [approvedEquipment, setApprovedEquipment] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -40,7 +40,7 @@ export function ProviderOverviewScreen() {
         if (!active) return;
         setStatus(nextStatus);
         setDraft(nextDraft);
-        setHasRc(listings.some((row) => Boolean(row.rcNumber)));
+        setApprovedEquipment(listings.filter((row) => row.status === "approved").length);
       };
       void load();
       return () => {
@@ -49,7 +49,6 @@ export function ProviderOverviewScreen() {
     }, [token])
   );
 
-  const identityReady = Boolean(draft?.phoneOtpVerified && draft?.digilockerVerified);
   const businessReady = draft?.registrationType !== "business" || Boolean(draft?.panMatched || draft?.gstNumber);
   const approved = status === "approved";
   const bankReady = Boolean(draft?.bankVerified);
@@ -77,42 +76,30 @@ export function ProviderOverviewScreen() {
     navigation.navigate("ProviderVerification", { track: draft.track, registrationType: draft.registrationType });
   };
 
+  const bookingsOn = approved && bankReady && payoutReady && approvedEquipment > 0;
   const steps: Step[] = [
     {
-      title: "Provider registration",
-      detail: "Mobile OTP, then DigiLocker Aadhaar.",
-      done: identityReady,
-      action: identityReady ? undefined : openRegistration
-    },
-    {
-      title: "Business registration",
-      detail: draft?.registrationType === "business" ? "PAN or GST, as applicable." : "Not required for an individual.",
-      done: businessReady,
-      action: draft?.registrationType === "business" && !businessReady ? openRegistration : undefined
-    },
-    {
-      title: "Admin approval",
-      detail: status === "approved" ? "KYC approved." : status === "rejected" ? "KYC was rejected." : status === "pending" ? "Waiting for admin review." : "Submit identity for review.",
+      title: "Provider Registration",
+      detail: "Individual / Business, then DigiLocker, then admin approval.",
       done: approved,
-      action: !approved && identityReady && businessReady ? openRegistration : undefined
+      action: approved ? undefined : openRegistration
     },
     {
-      title: "Add tractor",
-      detail: hasRc ? "RC submitted for review." : "Tractor details and RC number.",
-      done: hasRc,
-      action: approved && !hasRc ? () => navigation.navigate("ProviderTractor") : undefined
+      title: "Provider Dashboard Unlocked",
+      detail: "Add tractors and other equipment.",
+      done: approved,
+      action: approved ? () => navigation.navigate("ProviderNewListing") : undefined
     },
     {
-      title: "Activate online bookings",
-      detail: "Bank account, IFSC, and account holder verification.",
-      done: bankReady,
-      action: approved && hasRc && !bankReady ? () => navigation.navigate("ProviderBankDetails", { purpose: "payouts" }) : undefined
-    },
-    {
-      title: "Receive payments",
-      detail: payoutReady ? "Razorpay account linked." : "Razorpay linked account, after the bank is verified.",
+      title: "Add Bank Account (One Time)",
+      detail: payoutReady ? "Bank verified and Razorpay account linked." : "Account number, IFSC, and account holder name.",
       done: payoutReady,
-      action: bankReady && !payoutReady ? () => navigation.navigate("ProviderPayouts") : undefined
+      action: !approved ? undefined : !bankReady ? () => navigation.navigate("ProviderBankDetails", { purpose: "payouts" }) : !payoutReady ? () => navigation.navigate("ProviderPayouts") : undefined
+    },
+    {
+      title: "Online Bookings Enabled",
+      detail: bookingsOn ? "Approved equipment can be booked online." : "Turns on after the bank, Razorpay, and equipment approval succeed.",
+      done: bookingsOn
     }
   ];
 
@@ -121,7 +108,7 @@ export function ProviderOverviewScreen() {
       <ProviderChromeHeader />
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.title}>Provider setup</Text>
-        <Text style={styles.sub}>Finish each step in order. A later step stays closed until the one before it is done.</Text>
+        <Text style={styles.sub}>Registration, then the dashboard. The bank account is added once on this dashboard.</Text>
         {steps.map((step, index) => {
           const locked = steps.slice(0, index).some((item) => !item.done);
           return (
