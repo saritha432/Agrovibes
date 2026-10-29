@@ -1614,17 +1614,33 @@ function staticOtpCode() {
   return "525252";
 }
 
+function msg91AuthKey() {
+  return String(process.env.MSG91_AUTH_KEY || "").trim();
+}
+
+function msg91WidgetId() {
+  return String(process.env.MSG91_WIDGET_ID || "").trim();
+}
+
+function isMsg91WidgetConfigured() {
+  return Boolean(msg91AuthKey() && msg91WidgetId());
+}
+
 function isStaticOtpEnabled() {
   const disabled = String(process.env.STATIC_OTP_DISABLED || "").trim().toLowerCase();
   if (disabled === "true" || disabled === "1" || disabled === "yes") return false;
   // Twilio Verify takes over as soon as SID + token + service are present.
   if (isTwilioVerifyConfigured()) return false;
+  // A configured MSG91 widget sends a real OTP. Do not accept the static code instead.
+  if (isMsg91WidgetConfigured()) return false;
   return true;
 }
 
 function msg91Mode() {
   const mode = String(process.env.MSG91_API_MODE || "").trim().toLowerCase();
-  return mode === "widget" ? "widget" : "sendotp";
+  if (mode === "sendotp") return "sendotp";
+  if (mode === "widget" || isMsg91WidgetConfigured()) return "widget";
+  return "sendotp";
 }
 
 function matchesStaticOtp(code) {
@@ -1725,14 +1741,29 @@ async function verifyTwilioOtp(phone, code) {
   return String(payload?.status || "").toLowerCase() === "approved";
 }
 
-async function sendSmsOtp(phone, otp) {
-  const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
+async function verifyMsg91WidgetOtp(reqId, code) {
+  const authKey = msg91AuthKey();
+  const widgetId = msg91WidgetId();
+  if (!authKey || !widgetId || !reqId) return false;
+  const response = await fetch("https://control.msg91.com/api/v5/widget/verifyOtp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", authkey: authKey },
+    body: JSON.stringify({ widgetId, reqId: String(reqId), otp: String(code) })
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) return false;
+  const type = String(payload?.type || payload?.status || "success").toLowerCase();
+  return type === "success";
+}
+
+async function sendSmsOtp(phone, otp, options = {}) {
+  const authKey = msg91AuthKey();
   const templateId = String(process.env.MSG91_TEMPLATE_ID || "").trim();
   const senderId = String(process.env.MSG91_SENDER_ID || "").trim();
   const msg91FlowId = String(process.env.MSG91_FLOW_ID || "").trim();
-  const widgetId = String(process.env.MSG91_WIDGET_ID || "").trim();
+  const widgetId = msg91WidgetId();
   const digitsPhone = phoneDigitsOnly(phone);
-  const mode = msg91Mode();
+  const mode = options.forceWidget ? "widget" : msg91Mode();
 
   if (!authKey || (mode === "sendotp" && !templateId) || (mode === "widget" && !widgetId)) {
     if (allowDevOtpFallback()) {
@@ -1749,15 +1780,10 @@ async function sendSmsOtp(phone, otp) {
   }
 
   try {
-    const url = mode === "widget" ? "https://api.msg91.com/api/v5/widget/sendOtp" : "https://api.msg91.com/api/v5/otp";
+    const url = mode === "widget" ? "https://control.msg91.com/api/v5/widget/sendOtp" : "https://api.msg91.com/api/v5/otp";
     const requestPayload =
       mode === "widget"
-        ? {
-            widgetId,
-            tokenAuth: authKey,
-            identifier: digitsPhone,
-            ...(otp ? { otp } : {})
-          }
+        ? { widgetId, identifier: String(phone).startsWith("+") ? String(phone) : `+${digitsPhone}` }
         : {
             template_id: templateId,
             mobile: digitsPhone,
@@ -1767,25 +1793,32 @@ async function sendSmsOtp(phone, otp) {
           };
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(mode === "widget" ? { token: authKey } : { authkey: authKey })
-      },
+      headers: { "Content-Type": "application/json", authkey: authKey },
       body: JSON.stringify(requestPayload)
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) {
+    const resultType = String(payload?.type || "").toLowerCase();
+    if (!response.ok || resultType === "error") {
       const message =
         payload?.message ||
         payload?.error ||
         payload?.errors?.[0]?.message ||
-        payload?.type ||
         "Failed to send OTP";
       throw new Error(message);
     }
+    const providerRequestId = String(
+      payload?.reqId ||
+        payload?.request_id ||
+        payload?.requestId ||
+        (mode === "widget" && resultType === "success" ? payload?.message : "") ||
+        ""
+    );
+    if (mode === "widget" && !providerRequestId) {
+      throw new Error(payload?.message || "MSG91 did not return an OTP request id.");
+    }
     return {
       channel: "sms",
-      providerRequestId: String(payload?.request_id || payload?.requestId || payload?.reqId || ""),
+      providerRequestId,
       providerStatus: String(payload?.type || payload?.status || "accepted"),
       providerMessage: String(payload?.message || payload?.details || "")
     };
@@ -3643,12 +3676,17 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
   try {
     const provider = otpProvider();
     const phone = normalizeIndiaPhone(req.body?.phone);
+    const providerOtp = String(req.body?.purpose || "").trim().toLowerCase() === "provider";
     if (!phone) {
       res.status(400).json({ message: "Enter a valid phone number" });
       return;
     }
+    if (providerOtp && !isMsg91WidgetConfigured()) {
+      res.status(503).json({ message: "MSG91 widget OTP is not configured on this server." });
+      return;
+    }
 
-    if (isStaticOtpEnabled()) {
+    if (isStaticOtpEnabled() && !providerOtp) {
       res.json({
         success: true,
         phone,
@@ -3684,9 +3722,14 @@ router.post("/v1/auth/phone/send-otp", async (req, res) => {
       return;
     }
 
-    const otp = provider === "twilio" ? "" : randomOtp6();
-    const otpHash = hashOtp(phone, otp || `twilio:${Date.now()}`);
-    const sent = provider === "twilio" ? await sendTwilioVerifyOtp(phone) : await sendSmsOtp(phone, otp);
+    const useMsg91Widget = providerOtp || (provider !== "twilio" && msg91Mode() === "widget");
+    const otp = useMsg91Widget || provider === "twilio" ? "" : randomOtp6();
+    const otpHash = hashOtp(phone, otp || `${useMsg91Widget ? "msg91" : "twilio"}:${Date.now()}`);
+    const sent = useMsg91Widget
+      ? await sendSmsOtp(phone, "", { forceWidget: true })
+      : provider === "twilio"
+        ? await sendTwilioVerifyOtp(phone)
+        : await sendSmsOtp(phone, otp);
 
     try {
       await query(
@@ -3787,25 +3830,7 @@ router.post("/v1/auth/phone/verify-otp", async (req, res) => {
     } else if (provider === "twilio") {
       isValidOtp = await verifyTwilioOtp(phone, code);
     } else if (msg91Mode() === "widget" && otpRow?.providerRequestId) {
-      const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
-      const widgetId = String(process.env.MSG91_WIDGET_ID || "").trim();
-      try {
-        const verifyResponse = await fetch("https://api.msg91.com/api/v5/widget/verifyOtp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", token: authKey },
-          body: JSON.stringify({
-            widgetId,
-            tokenAuth: authKey,
-            reqId: otpRow.providerRequestId,
-            otp: code
-          })
-        });
-        if (verifyResponse.ok) {
-          isValidOtp = true;
-        }
-      } catch (_e) {
-        isValidOtp = false;
-      }
+      isValidOtp = await verifyMsg91WidgetOtp(otpRow.providerRequestId, code);
     } else {
       const otpHash = hashOtp(phone, code);
       isValidOtp = otpHash === otpRow.otpHash;
@@ -3970,23 +3995,7 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
     if (provider === "twilio") {
       isValidOtp = await verifyTwilioOtp(phone, code);
     } else if (msg91Mode() === "widget" && otpRow?.providerRequestId) {
-      const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
-      const widgetId = String(process.env.MSG91_WIDGET_ID || "").trim();
-      try {
-        const verifyResponse = await fetch("https://api.msg91.com/api/v5/widget/verifyOtp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", token: authKey },
-          body: JSON.stringify({
-            widgetId,
-            tokenAuth: authKey,
-            reqId: otpRow.providerRequestId,
-            otp: code
-          })
-        });
-        isValidOtp = verifyResponse.ok;
-      } catch (_e) {
-        isValidOtp = false;
-      }
+      isValidOtp = await verifyMsg91WidgetOtp(otpRow.providerRequestId, code);
     } else {
       const otpHash = hashOtp(phone, code);
       isValidOtp = otpRow && otpHash === otpRow.otpHash;
@@ -10656,6 +10665,32 @@ try {
 </html>`);
 });
 
+router.post("/v1/provider/phone/send", authRequired, async (req, res) => {
+  try {
+    if (!isMsg91WidgetConfigured()) {
+      res.status(503).json({ message: "MSG91 widget OTP is not configured on this server." });
+      return;
+    }
+    const phone = normalizeIndiaPhone(req.body?.phone);
+    if (!phone) {
+      res.status(400).json({ message: "Enter a valid phone number" });
+      return;
+    }
+    const sent = await sendSmsOtp(phone, "", { forceWidget: true });
+    await ensurePhoneOtpTable();
+    await query(
+      `
+      INSERT INTO phone_otp_codes (phone, otp_hash, expires_at, attempts, used, channel, provider_request_id, provider_status, provider_message)
+      VALUES ($1, $2, NOW() + INTERVAL '10 minutes', 0, false, $3, $4, $5, $6)
+      `,
+      [phone, hashOtp(phone, `msg91:${sent.providerRequestId}`), sent.channel, sent.providerRequestId || null, sent.providerStatus || null, sent.providerMessage || null]
+    );
+    res.json({ success: true, phone, provider: "msg91", channel: sent.channel });
+  } catch (error) {
+    res.status(502).json({ message: error?.message || "Could not send the OTP" });
+  }
+});
+
 router.post("/v1/provider/phone/confirm", authRequired, async (req, res) => {
   try {
     const phone = normalizeIndiaPhone(req.body?.phone);
@@ -10665,7 +10700,23 @@ router.post("/v1/provider/phone/confirm", authRequired, async (req, res) => {
       return;
     }
     let accepted = false;
-    if (matchesStaticOtp(code)) {
+    let otpRowId = null;
+    if (isMsg91WidgetConfigured()) {
+      await ensurePhoneOtpTable();
+      const otpRows = await query(
+        `
+        SELECT id, provider_request_id AS "providerRequestId"
+        FROM phone_otp_codes
+        WHERE phone = $1 AND used = false AND expires_at > NOW() AND COALESCE(channel, 'sms') <> 'kyc'
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
+        [phone]
+      );
+      const row = otpRows.rows[0];
+      accepted = Boolean(row?.providerRequestId) && (await verifyMsg91WidgetOtp(row.providerRequestId, code));
+      if (accepted) otpRowId = row.id;
+    } else if (matchesStaticOtp(code)) {
       accepted = true;
     } else if (otpProvider() === "twilio") {
       accepted = await verifyTwilioOtp(phone, code);
@@ -10683,8 +10734,9 @@ router.post("/v1/provider/phone/confirm", authRequired, async (req, res) => {
       );
       const row = otpRows.rows[0];
       accepted = Boolean(row && hashOtp(phone, code) === row.otpHash);
-      if (accepted) await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [row.id]);
+      if (accepted) otpRowId = row.id;
     }
+    if (accepted && otpRowId) await query(`UPDATE phone_otp_codes SET used = true WHERE id = $1`, [otpRowId]);
     if (!accepted) {
       res.status(400).json({ message: "That OTP is not correct." });
       return;
@@ -11072,23 +11124,7 @@ router.post("/v1/provider/kyc/verify-otp", authRequired, async (req, res) => {
         normalizeIndiaPhone(req.body?.notifyPhone);
       isValidOtp = smsPhone ? await verifyTwilioOtp(smsPhone, code) : false;
     } else if (msg91Mode() === "widget" && otpRow?.providerRequestId) {
-      const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
-      const widgetId = String(process.env.MSG91_WIDGET_ID || "").trim();
-      try {
-        const verifyResponse = await fetch("https://api.msg91.com/api/v5/widget/verifyOtp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", token: authKey },
-          body: JSON.stringify({
-            widgetId,
-            tokenAuth: authKey,
-            reqId: otpRow.providerRequestId,
-            otp: code
-          })
-        });
-        isValidOtp = verifyResponse.ok;
-      } catch (_e) {
-        isValidOtp = false;
-      }
+      isValidOtp = await verifyMsg91WidgetOtp(otpRow.providerRequestId, code);
     } else if (otpRow) {
       isValidOtp = hashOtp(otpKey, code) === otpRow.otpHash;
     }

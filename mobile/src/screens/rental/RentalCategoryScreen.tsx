@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useState } from "react";
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -134,15 +133,6 @@ export function RentalCategoryScreen() {
             ))}
           </ScrollView>
           <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
-            <RentalBanner
-              title={category.title}
-              location={location}
-              image={subs.find((sub) => sub.id === activeSub)?.image ?? subs[0]?.image}
-              width={mainWidth - 16}
-              onPress={() => {
-                if (items[0]) openItem(items[0], 1);
-              }}
-            />
             {rows.map((row) => (
               <View key={row.id} style={styles.gridRow}>
                 <View style={{ width: cardWidth }}>
@@ -200,42 +190,6 @@ function SideItem({ sub, active, onPress }: { sub: RentalCatalogSub; active: boo
         <Image source={sub.image} style={styles.sideImage} resizeMode="contain" />
       </View>
     </Pressable>
-  );
-}
-
-function RentalBanner({
-  title,
-  location,
-  image,
-  width,
-  onPress
-}: {
-  title: string;
-  location: string;
-  image?: RentalCatalogSub["image"];
-  width: number;
-  onPress: () => void;
-}) {
-  return (
-    <View style={[styles.banner, { width }]}>
-      <LinearGradient
-        colors={["rgba(201, 255, 53, 0.28)", "transparent"]}
-        start={{ x: 1, y: 0 }}
-        end={{ x: 0.2, y: 0.9 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={styles.bannerText}>
-        <Text style={styles.bannerWelcome}>Welcome</Text>
-        <Text style={styles.bannerTitle} numberOfLines={2}>
-          {title}
-        </Text>
-        <Text style={styles.bannerSub}>Book it in {location}</Text>
-        <Pressable style={styles.bannerBtn} onPress={onPress}>
-          <Text style={styles.bannerBtnText}>Book now</Text>
-        </Pressable>
-      </View>
-      {image ? <Image source={image} style={styles.bannerArt} resizeMode="contain" /> : null}
-    </View>
   );
 }
 
@@ -434,30 +388,6 @@ const styles = StyleSheet.create({
   sideImage: { width: 58, height: 46, marginTop: 4 },
   grid: { paddingHorizontal: 8, paddingBottom: 28 },
   gridRow: { flexDirection: "row", justifyContent: "space-between", gap: 8, marginBottom: 8 },
-  banner: {
-    minHeight: 132,
-    borderRadius: 18,
-    backgroundColor: "#EDEDED",
-    overflow: "hidden",
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-    paddingLeft: 14
-  },
-  bannerText: { flex: 1, zIndex: 1 },
-  bannerWelcome: { color: APP_BLACK, fontSize: 13, fontWeight: "600" },
-  bannerTitle: { color: APP_BLACK, fontSize: 18, fontWeight: "800", marginTop: 2 },
-  bannerSub: { color: "#3a3a3a", fontSize: 11, marginTop: 2 },
-  bannerBtn: {
-    alignSelf: "flex-start",
-    marginTop: 8,
-    backgroundColor: APP_LIME,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6
-  },
-  bannerBtnText: { color: APP_TEXT_ON_LIME, fontSize: 12, fontWeight: "800" },
-  bannerArt: { width: 110, height: 120 },
   card: { backgroundColor: TILE_BG, borderRadius: 12, padding: 8 },
   media: { height: 110, borderRadius: 10, overflow: "hidden", marginBottom: 8, backgroundColor: "#173024" },
   mediaImage: { width: "100%", height: "100%" },
