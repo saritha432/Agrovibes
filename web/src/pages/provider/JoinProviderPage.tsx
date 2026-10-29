@@ -8,10 +8,10 @@ import {
   fetchProviderKycStatus,
   startProviderDigilocker,
   confirmProviderPhone,
+  sendProviderPhoneOtp,
   submitProviderKyc,
   verifyProviderPan
 } from "../../api/providerKyc";
-import { sendPhoneOtp } from "../../api/auth";
 import { SettingsIconBack } from "../../components/settings/SettingsIcons";
 import "../settings/SettingsMenuPage.css";
 import {
@@ -203,6 +203,10 @@ export function JoinProviderPage() {
 
   const sendOtp = async () => {
     const digits = draft.phone.replace(/\D/g, "").slice(-10);
+    if (!token) {
+      setError("Sign in again, then verify the mobile number.");
+      return;
+    }
     if (digits.length < 10) {
       setError("Enter a 10-digit mobile number first.");
       return;
@@ -210,7 +214,7 @@ export function JoinProviderPage() {
     setBusy(true);
     setError("");
     try {
-      await sendPhoneOtp({ phone: digits });
+      await sendProviderPhoneOtp(token, { phone: digits });
       setOtpSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send OTP.");

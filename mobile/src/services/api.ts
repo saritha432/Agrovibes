@@ -325,6 +325,14 @@ export async function authLogin(payload: {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
+export async function sendProviderPhoneOtp(token: string, payload: { phone: string }) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/phone/send-otp`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, purpose: "provider" })
+  })) as { success: boolean; phone: string; provider?: string; channel?: string };
+}
+
 export async function confirmProviderPhone(token: string, payload: { phone: string; code: string }) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/confirm`, token, {
     method: "POST",

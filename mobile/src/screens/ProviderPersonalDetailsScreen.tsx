@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { confirmProviderPhone, sendPhoneOtp } from "../services/api";
+import { confirmProviderPhone, sendProviderPhoneOtp } from "../services/api";
 import {
   PROVIDER_MUTED,
   ProviderContinueButton,
@@ -68,9 +68,13 @@ export function ProviderPersonalDetailsScreen() {
       Alert.alert("Mobile number", "Enter a 10-digit mobile number first.");
       return;
     }
+    if (!token) {
+      Alert.alert("Sign in", "Sign in again, then verify the mobile number.");
+      return;
+    }
     setBusy(true);
     try {
-      await sendPhoneOtp({ phone: digits });
+      await sendProviderPhoneOtp(token, { phone: digits });
       setOtpSent(true);
       Alert.alert("OTP sent", "Enter the 6-digit code sent to this mobile.");
     } catch (error) {
