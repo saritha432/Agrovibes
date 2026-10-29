@@ -1,5 +1,24 @@
 import { API_BASE_URL, fetchWithAuth, fetchWithRetry, parseJsonOrThrow } from "./client";
 
+export async function fetchLocationStates() {
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/locations/states`, { method: "GET" });
+  return (await parseJsonOrThrow(response)) as { states: { code: string; name: string }[] };
+}
+
+export async function fetchLocationDistricts(state: string) {
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/v1/locations/districts?state=${encodeURIComponent(state)}`,
+    { method: "GET" }
+  );
+  return (await parseJsonOrThrow(response)) as { districts: string[] };
+}
+
+export async function fetchLocationCities(state: string, district: string) {
+  const params = new URLSearchParams({ state, district });
+  const response = await fetchWithRetry(`${API_BASE_URL}/v1/locations/cities?${params.toString()}`, { method: "GET" });
+  return (await parseJsonOrThrow(response)) as { cities: string[] };
+}
+
 export async function startProviderDigilocker(
   token: string,
   payload: { fullName?: string; phone?: string }

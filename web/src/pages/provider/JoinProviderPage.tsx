@@ -22,6 +22,7 @@ import {
   type ProviderTrack
 } from "./providerDraft";
 import "./JoinProviderPage.css";
+import { AddressDetailsFields } from "./AddressDetailsFields";
 
 type Step = "intro" | "terms" | "role" | "type" | "details" | "aadhaar" | "pan" | "review" | "awaiting" | "done";
 
@@ -191,13 +192,16 @@ export function JoinProviderPage() {
       draft.street.trim().length > 0 &&
       draft.village.trim().length > 0 &&
       draft.district.trim().length > 0 &&
-      draft.state.trim().length > 0
+      draft.state.trim().length > 0 &&
+      draft.pinCode.length === 6
     : draft.fullName.trim().length > 1 &&
       draft.phone.trim().length >= 10 &&
       draft.phoneOtpVerified &&
+      draft.street.trim().length > 0 &&
       draft.village.trim().length > 0 &&
       draft.district.trim().length > 0 &&
       draft.state.trim().length > 0 &&
+      draft.pinCode.length === 6 &&
       emailOk;
   const panOk = /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.panNumber);
 
@@ -539,54 +543,52 @@ export function JoinProviderPage() {
               value={draft.fullName}
               onChange={(event) => patch({ fullName: event.target.value })}
             />
-            <input
-              className="join-input"
-              placeholder="Mobile Number *"
-              value={draft.phone}
-              onChange={(event) => patch({ phone: event.target.value, phoneOtpVerified: false })}
-            />
-            <input
-              className="join-input"
-              placeholder="6-digit OTP"
-              value={otp}
-              onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
-            />
-            <button type="button" className="join-btn" disabled={busy || draft.phoneOtpVerified} onClick={() => void (otpSent ? checkOtp() : sendOtp())}>
-              {draft.phoneOtpVerified ? "Mobile verified" : otpSent ? "Verify OTP" : "Send OTP"}
-            </button>
+            <div className="join-phone-row">
+              <input
+                className="join-input"
+                placeholder="Mobile Number *"
+                value={draft.phone}
+                onChange={(event) => {
+                  patch({ phone: event.target.value, phoneOtpVerified: false });
+                  setOtpSent(false);
+                  setOtp("");
+                }}
+              />
+              <button
+                type="button"
+                className="join-otp-btn"
+                disabled={busy || draft.phoneOtpVerified || (otpSent && otp.length === 6 ? false : draft.phone.replace(/\D/g, "").length < 10)}
+                onClick={() => void (otpSent && otp.length === 6 ? checkOtp() : sendOtp())}
+              >
+                {draft.phoneOtpVerified ? "Verified" : busy ? (otpSent && otp.length === 6 ? "Verifying…" : "Sending…") : otpSent && otp.length === 6 ? "Verify OTP" : "Get OTP"}
+              </button>
+            </div>
+            {otpSent && !draft.phoneOtpVerified ? (
+              <input
+                className="join-input"
+                placeholder="Enter 6-digit OTP"
+                value={otp}
+                inputMode="numeric"
+                onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
+            ) : null}
             <input
               className="join-input"
               placeholder={isBusiness ? "Email Address *" : "Email Address (optional)"}
               value={draft.email}
               onChange={(event) => patch({ email: event.target.value })}
             />
-            {isBusiness ? (
-              <input
-                className="join-input"
-                placeholder="Street / House No. *"
-                value={draft.street}
-                onChange={(event) => patch({ street: event.target.value })}
-              />
-            ) : (
-              <h3 className="join-location">Location</h3>
-            )}
-            <input
-              className="join-input"
-              placeholder="Village / Town *"
-              value={draft.village}
-              onChange={(event) => patch({ village: event.target.value })}
-            />
-            <input
-              className="join-input"
-              placeholder="District *"
-              value={draft.district}
-              onChange={(event) => patch({ district: event.target.value })}
-            />
-            <input
-              className="join-input"
-              placeholder="State *"
-              value={draft.state}
-              onChange={(event) => patch({ state: event.target.value })}
+            <AddressDetailsFields
+              address={draft.street}
+              stateName={draft.state}
+              district={draft.district}
+              city={draft.village}
+              pinCode={draft.pinCode}
+              onChangeAddress={(street) => patch({ street })}
+              onChangeState={(state) => patch({ state, district: "", village: "" })}
+              onChangeDistrict={(district) => patch({ district, village: "" })}
+              onChangeCity={(village) => patch({ village })}
+              onChangePin={(pinCode) => patch({ pinCode })}
             />
             {isBusiness ? (
               <>

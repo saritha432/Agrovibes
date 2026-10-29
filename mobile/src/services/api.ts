@@ -325,6 +325,22 @@ export async function authLogin(payload: {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
+export async function fetchLocationStates() {
+  const response = await fetch(`${API_BASE_URL}/v1/locations/states`);
+  return (await parseJsonOrThrow(response)) as { states: { code: string; name: string }[] };
+}
+
+export async function fetchLocationDistricts(state: string) {
+  const response = await fetch(`${API_BASE_URL}/v1/locations/districts?state=${encodeURIComponent(state)}`);
+  return (await parseJsonOrThrow(response)) as { districts: string[] };
+}
+
+export async function fetchLocationCities(state: string, district: string) {
+  const params = new URLSearchParams({ state, district });
+  const response = await fetch(`${API_BASE_URL}/v1/locations/cities?${params.toString()}`);
+  return (await parseJsonOrThrow(response)) as { cities: string[] };
+}
+
 export async function fetchProviderMsg91Widget(token: string) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/widget`, token)) as {
     widgetId: string;

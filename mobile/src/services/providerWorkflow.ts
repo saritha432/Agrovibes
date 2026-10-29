@@ -24,6 +24,7 @@ export type ProviderRegistrationDraft = {
   village: string;
   district: string;
   state: string;
+  pinCode?: string;
   gstNumber: string;
   yearsExperience: string;
   holderName?: string;
@@ -259,6 +260,7 @@ export async function updateProviderRegistrationDraft(
     village: "",
     district: "",
     state: "",
+    pinCode: "",
     gstNumber: "",
     yearsExperience: "",
     documentLabels: [],
@@ -306,7 +308,7 @@ export async function submitProviderRegistrationForApproval(token?: string | nul
     throw new Error("Please sign in again, then submit for review.");
   }
 
-  const address = [draft?.street, draft?.village, draft?.district, draft?.state]
+  const address = [draft?.street, draft?.village, draft?.district, draft?.state, draft?.pinCode]
     .filter(Boolean)
     .join(", ");
   await submitProviderKyc(token, {
