@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthContext";
-import { confirmProviderPhone, sendProviderPhoneOtp } from "../services/api";
+import { sendProviderOtpWithMsg91, verifyProviderOtpWithMsg91 } from "../services/msg91Widget";
 import {
   PROVIDER_MUTED,
   ProviderContinueButton,
@@ -38,6 +38,7 @@ export function ProviderPersonalDetailsScreen() {
   const [yearsExperience, setYearsExperience] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
+  const [otpReqId, setOtpReqId] = useState("");
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [busy, setBusy] = useState(false);
   const { token } = useAuth();
@@ -74,7 +75,13 @@ export function ProviderPersonalDetailsScreen() {
     }
     setBusy(true);
     try {
-      await sendProviderPhoneOtp(token, { phone: digits });
+      const sent = await sendProviderOtpWithMsg91(token, digits);
+      if (sent.verified) {
+        setPhoneVerified(true);
+        setOtpSent(true);
+        return;
+      }
+      setOtpReqId(sent.reqId);
       setOtpSent(true);
       Alert.alert("OTP sent", "Enter the 6-digit code sent to this mobile.");
     } catch (error) {
@@ -91,11 +98,11 @@ export function ProviderPersonalDetailsScreen() {
     }
     setBusy(true);
     try {
-      const result = await confirmProviderPhone(token, { phone: phone.replace(/\D/g, "").slice(-10), code: otp });
-      if (!result.verified) {
-        Alert.alert("OTP", "That code was not accepted.");
+      if (!otpReqId) {
+        Alert.alert("OTP", "Send a new code, then enter it.");
         return;
       }
+      await verifyProviderOtpWithMsg91(token, phone.replace(/\D/g, "").slice(-10), otpReqId, otp);
       setPhoneVerified(true);
     } catch (error) {
       Alert.alert("OTP", error instanceof Error ? error.message : "That code was not accepted.");
@@ -160,6 +167,8 @@ export function ProviderPersonalDetailsScreen() {
               onChangeText={(value) => {
                 setPhone(value);
                 setPhoneVerified(false);
+                setOtpSent(false);
+                setOtpReqId("");
               }}
               placeholder="Mobile Number *"
               placeholderTextColor={PROVIDER_MUTED}
@@ -240,6 +249,8 @@ export function ProviderPersonalDetailsScreen() {
               onChangeText={(value) => {
                 setPhone(value);
                 setPhoneVerified(false);
+                setOtpSent(false);
+                setOtpReqId("");
               }}
               placeholder="Mobile Number *"
               placeholderTextColor={PROVIDER_MUTED}
