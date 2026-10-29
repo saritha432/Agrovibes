@@ -4098,6 +4098,31 @@ router.post("/v1/auth/phone/reset-password", async (req, res) => {
   }
 });
 
+const { listStates, listDistricts, listCities } = require("../indiaLocations");
+
+router.get("/v1/locations/states", (_req, res) => {
+  res.json({ states: listStates() });
+});
+
+router.get("/v1/locations/districts", (req, res) => {
+  const state = String(req.query.state || "").trim();
+  if (!state) {
+    res.status(400).json({ message: "Choose a state first." });
+    return;
+  }
+  res.json({ districts: listDistricts(state) });
+});
+
+router.get("/v1/locations/cities", (req, res) => {
+  const state = String(req.query.state || "").trim();
+  const district = String(req.query.district || "").trim();
+  if (!state || !district) {
+    res.status(400).json({ message: "Choose a state and district first." });
+    return;
+  }
+  res.json({ cities: listCities(state, district) });
+});
+
 router.get("/v1/places/maps-config", authRequired, mapsConfigHandler);
 
 router.get("/v1/weather/places", authRequired, async (req, res) => {

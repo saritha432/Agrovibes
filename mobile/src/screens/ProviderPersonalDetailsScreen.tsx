@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert, ScrollView, Text, TextInput } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -13,6 +13,86 @@ import {
   providerFormStyles as pf
 } from "./provider/providerFormUi";
 import { updateProviderRegistrationDraft } from "../services/providerWorkflow";
+import { AddressDetailsFields } from "./provider/AddressDetailsFields";
+import { APP_LIME } from "../theme/appColors";
+
+function MobileOtpActions({
+  phone,
+  phoneDigits,
+  otp,
+  otpSent,
+  phoneVerified,
+  otpError,
+  busy,
+  onChangePhone,
+  onChangeOtp,
+  onGetOtp,
+  onVerify
+}: {
+  phone: string;
+  phoneDigits: string;
+  otp: string;
+  otpSent: boolean;
+  phoneVerified: boolean;
+  otpError: string;
+  busy: boolean;
+  onChangePhone: (value: string) => void;
+  onChangeOtp: (value: string) => void;
+  onGetOtp: () => void;
+  onVerify: () => void;
+}) {
+  const readyToVerify = otpSent && otp.length === 6 && !phoneVerified;
+  const canPress = phoneVerified ? false : readyToVerify ? !busy : phoneDigits.length === 10 && !busy;
+  const sideLabel = phoneVerified
+    ? "Verified"
+    : busy
+      ? readyToVerify
+        ? "Verifying…"
+        : "Sending…"
+      : readyToVerify
+        ? "Verify OTP"
+        : "Get OTP";
+  return (
+    <View style={otpUi.wrap}>
+      <View style={otpUi.phoneRow}>
+        <TextInput
+          style={[pf.input, otpUi.phoneInput]}
+          value={phone}
+          onChangeText={onChangePhone}
+          placeholder="Mobile Number *"
+          placeholderTextColor={PROVIDER_MUTED}
+          keyboardType="phone-pad"
+          maxLength={14}
+          editable={!phoneVerified}
+        />
+        {phoneVerified ? (
+          <Text style={otpUi.verified}>Verified</Text>
+        ) : (
+          <Pressable
+            style={[otpUi.getBtn, !canPress && otpUi.btnOff]}
+            onPress={readyToVerify ? onVerify : onGetOtp}
+            disabled={!canPress}
+            accessibilityRole="button"
+          >
+            <Text style={[otpUi.getBtnText, !canPress && otpUi.btnTextOff]}>{sideLabel}</Text>
+          </Pressable>
+        )}
+      </View>
+      {otpSent && !phoneVerified ? (
+        <TextInput
+          style={otpUi.otpInput}
+          value={otp}
+          onChangeText={onChangeOtp}
+          placeholder="Enter 6-digit OTP"
+          placeholderTextColor={PROVIDER_MUTED}
+          keyboardType="number-pad"
+          maxLength={6}
+        />
+      ) : null}
+      {otpError ? <Text style={otpUi.error}>{otpError}</Text> : null}
+    </View>
+  );
+}
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -34,13 +114,16 @@ export function ProviderPersonalDetailsScreen() {
   const [village, setVillage] = useState("");
   const [district, setDistrict] = useState("");
   const [stateName, setStateName] = useState("");
+  const [pinCode, setPinCode] = useState("");
   const [gstNumber, setGstNumber] = useState("");
   const [yearsExperience, setYearsExperience] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [otpReqId, setOtpReqId] = useState("");
   const [phoneVerified, setPhoneVerified] = useState(false);
+  const [otpError, setOtpError] = useState("");
   const [busy, setBusy] = useState(false);
+  const phoneDigits = phone.replace(/\D/g, "").slice(-10);
   const { token } = useAuth();
 
   const emailOk = !email.trim() || isValidEmail(email);
@@ -54,38 +137,51 @@ export function ProviderPersonalDetailsScreen() {
       village.trim().length > 0 &&
       district.trim().length > 0 &&
       stateName.trim().length > 0 &&
+      pinCode.length === 6 &&
       emailOk
     : fullName.trim().length > 1 &&
       phone.trim().length >= 10 &&
       phoneVerified &&
+      street.trim().length > 0 &&
       village.trim().length > 0 &&
       district.trim().length > 0 &&
       stateName.trim().length > 0 &&
+      pinCode.length === 6 &&
       emailOk;
 
+  const onPhoneChange = (value: string) => {
+    setPhone(value);
+    setPhoneVerified(false);
+    setOtpSent(false);
+    setOtpReqId("");
+    setOtp("");
+    setOtpError("");
+  };
+
   const sendOtp = async () => {
-    const digits = phone.replace(/\D/g, "").slice(-10);
-    if (digits.length < 10) {
-      Alert.alert("Mobile number", "Enter a 10-digit mobile number first.");
+    if (phoneDigits.length < 10) {
+      setOtpError("Enter a 10-digit mobile number first.");
       return;
     }
     if (!token) {
-      Alert.alert("Sign in", "Sign in again, then verify the mobile number.");
+      setOtpError("Sign in again, then verify the mobile number.");
       return;
     }
     setBusy(true);
+    setOtpError("");
     try {
-      const sent = await sendProviderOtpWithMsg91(token, digits);
+      const sent = await sendProviderOtpWithMsg91(token, phoneDigits);
       if (sent.verified) {
         setPhoneVerified(true);
         setOtpSent(true);
         return;
       }
       setOtpReqId(sent.reqId);
+      setOtp("");
       setOtpSent(true);
-      Alert.alert("OTP sent", "Enter the 6-digit code sent to this mobile.");
     } catch (error) {
-      Alert.alert("Could not send OTP", error instanceof Error ? error.message : "Try again.");
+      setOtpSent(false);
+      setOtpError(error instanceof Error ? error.message : "Could not send the OTP.");
     } finally {
       setBusy(false);
     }
@@ -93,19 +189,25 @@ export function ProviderPersonalDetailsScreen() {
 
   const checkOtp = async () => {
     if (!token) {
-      Alert.alert("Sign in", "Sign in again, then verify the mobile number.");
+      setOtpError("Sign in again, then verify the mobile number.");
+      return;
+    }
+    if (!otpReqId) {
+      setOtpError("Tap Get OTP, then enter the code.");
+      return;
+    }
+    if (otp.replace(/\D/g, "").length !== 6) {
+      setOtpError("Enter the 6-digit OTP.");
       return;
     }
     setBusy(true);
+    setOtpError("");
     try {
-      if (!otpReqId) {
-        Alert.alert("OTP", "Send a new code, then enter it.");
-        return;
-      }
-      await verifyProviderOtpWithMsg91(token, phone.replace(/\D/g, "").slice(-10), otpReqId, otp);
+      await verifyProviderOtpWithMsg91(token, phoneDigits, otpReqId, otp.replace(/\D/g, ""));
       setPhoneVerified(true);
     } catch (error) {
-      Alert.alert("OTP", error instanceof Error ? error.message : "That code was not accepted.");
+      setPhoneVerified(false);
+      setOtpError(error instanceof Error ? error.message : "That code was not accepted.");
     } finally {
       setBusy(false);
     }
@@ -120,10 +222,11 @@ export function ProviderPersonalDetailsScreen() {
       phoneOtpVerified: true,
       email: email.trim().toLowerCase(),
       businessName: isBusiness ? businessName.trim() : "",
-      street: isBusiness ? street.trim() : "",
+      street: street.trim(),
       village: village.trim(),
       district: district.trim(),
       state: stateName.trim(),
+      pinCode,
       gstNumber: isBusiness ? gstNumber.trim().toUpperCase() : "",
       yearsExperience: isBusiness ? yearsExperience.trim() : ""
     });
@@ -161,18 +264,21 @@ export function ProviderPersonalDetailsScreen() {
               placeholderTextColor={PROVIDER_MUTED}
               autoCapitalize="words"
             />
-            <TextInput
-              style={pf.input}
-              value={phone}
-              onChangeText={(value) => {
-                setPhone(value);
-                setPhoneVerified(false);
-                setOtpSent(false);
-                setOtpReqId("");
+            <MobileOtpActions
+              phone={phone}
+              phoneDigits={phoneDigits}
+              otp={otp}
+              otpSent={otpSent}
+              phoneVerified={phoneVerified}
+              otpError={otpError}
+              busy={busy}
+              onChangePhone={onPhoneChange}
+              onChangeOtp={(value) => {
+                setOtp(value.replace(/\D/g, "").slice(0, 6));
+                setOtpError("");
               }}
-              placeholder="Mobile Number *"
-              placeholderTextColor={PROVIDER_MUTED}
-              keyboardType="phone-pad"
+              onGetOtp={() => void sendOtp()}
+              onVerify={() => void checkOtp()}
             />
             <TextInput
               style={pf.input}
@@ -184,34 +290,17 @@ export function ProviderPersonalDetailsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <TextInput
-              style={pf.input}
-              value={street}
-              onChangeText={setStreet}
-              placeholder="Street / House No. *"
-              placeholderTextColor={PROVIDER_MUTED}
-            />
-            <TextInput
-              style={pf.input}
-              value={village}
-              onChangeText={setVillage}
-              placeholder="Village / Town *"
-              placeholderTextColor={PROVIDER_MUTED}
-            />
-            <TextInput
-              style={pf.input}
-              value={district}
-              onChangeText={setDistrict}
-              placeholder="District *"
-              placeholderTextColor={PROVIDER_MUTED}
-            />
-            <TextInput
-              style={pf.input}
-              value={stateName}
-              onChangeText={setStateName}
-              placeholder="State *"
-              placeholderTextColor={PROVIDER_MUTED}
-              autoCapitalize="words"
+            <AddressDetailsFields
+              address={street}
+              stateName={stateName}
+              district={district}
+              city={village}
+              pinCode={pinCode}
+              onChangeAddress={setStreet}
+              onChangeState={setStateName}
+              onChangeDistrict={setDistrict}
+              onChangeCity={setVillage}
+              onChangePin={setPinCode}
             />
             <TextInput
               style={pf.input}
@@ -243,18 +332,21 @@ export function ProviderPersonalDetailsScreen() {
               placeholderTextColor={PROVIDER_MUTED}
               autoCapitalize="words"
             />
-            <TextInput
-              style={pf.input}
-              value={phone}
-              onChangeText={(value) => {
-                setPhone(value);
-                setPhoneVerified(false);
-                setOtpSent(false);
-                setOtpReqId("");
+            <MobileOtpActions
+              phone={phone}
+              phoneDigits={phoneDigits}
+              otp={otp}
+              otpSent={otpSent}
+              phoneVerified={phoneVerified}
+              otpError={otpError}
+              busy={busy}
+              onChangePhone={onPhoneChange}
+              onChangeOtp={(value) => {
+                setOtp(value.replace(/\D/g, "").slice(0, 6));
+                setOtpError("");
               }}
-              placeholder="Mobile Number *"
-              placeholderTextColor={PROVIDER_MUTED}
-              keyboardType="phone-pad"
+              onGetOtp={() => void sendOtp()}
+              onVerify={() => void checkOtp()}
             />
             <TextInput
               style={pf.input}
@@ -267,53 +359,63 @@ export function ProviderPersonalDetailsScreen() {
               autoCorrect={false}
             />
 
-            <Text style={[pf.sectionTitle, { marginTop: 14, fontSize: 18 }]}>Location</Text>
-
-            <TextInput
-              style={pf.input}
-              value={village}
-              onChangeText={setVillage}
-              placeholder="Village / Town *"
-              placeholderTextColor={PROVIDER_MUTED}
-            />
-            <TextInput
-              style={pf.input}
-              value={district}
-              onChangeText={setDistrict}
-              placeholder="District *"
-              placeholderTextColor={PROVIDER_MUTED}
-            />
-            <TextInput
-              style={pf.input}
-              value={stateName}
-              onChangeText={setStateName}
-              placeholder="State *"
-              placeholderTextColor={PROVIDER_MUTED}
-              autoCapitalize="words"
+            <AddressDetailsFields
+              address={street}
+              stateName={stateName}
+              district={district}
+              city={village}
+              pinCode={pinCode}
+              onChangeAddress={setStreet}
+              onChangeState={setStateName}
+              onChangeDistrict={setDistrict}
+              onChangeCity={setVillage}
+              onChangePin={setPinCode}
             />
           </>
         )}
-        <Text style={[pf.sectionTitle, { marginTop: 16 }]}>Mobile OTP</Text>
-        <Text style={pf.sectionSub}>
-          {phoneVerified ? "This mobile is verified." : otpSent ? "Enter the code, then verify." : "Send a code to the mobile number above."}
-        </Text>
-        <TextInput
-          style={pf.input}
-          value={otp}
-          onChangeText={setOtp}
-          placeholder="6-digit OTP"
-          placeholderTextColor={PROVIDER_MUTED}
-          keyboardType="number-pad"
-          maxLength={6}
-        />
-        <ProviderContinueButton
-          label={busy ? "Please wait…" : phoneVerified ? "Mobile verified" : otpSent ? "Verify OTP" : "Send OTP"}
-          disabled={busy || phoneVerified}
-          onPress={() => void (otpSent ? checkOtp() : sendOtp())}
-        />
       </ScrollView>
 
       <ProviderContinueButton disabled={!canContinue} onPress={onContinue} />
     </SafeAreaView>
   );
 }
+
+const otpUi = StyleSheet.create({
+  wrap: { marginBottom: 8 },
+  phoneRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  phoneInput: { flex: 1, marginBottom: 0 },
+  getBtn: {
+    backgroundColor: APP_LIME,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  getBtnText: { color: "#000", fontSize: 14, fontWeight: "800" },
+  otpInput: {
+    backgroundColor: "#2b2c2e",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    color: "#f8fafc",
+    fontSize: 18,
+    letterSpacing: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    marginBottom: 10
+  },
+  verifyBtn: {
+    alignSelf: "flex-start",
+    backgroundColor: APP_LIME,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginBottom: 8
+  },
+  verifyBtnText: { color: "#000", fontSize: 14, fontWeight: "800" },
+  btnOff: { backgroundColor: "#3a3a3a" },
+  btnTextOff: { color: "#888" },
+  verified: { color: APP_LIME, fontSize: 14, fontWeight: "800", paddingHorizontal: 4 },
+  error: { color: "#ff8a80", fontSize: 13, marginBottom: 8 }
+});

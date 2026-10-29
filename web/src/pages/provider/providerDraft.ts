@@ -13,6 +13,7 @@ export type ProviderJoinDraft = {
   village: string;
   district: string;
   state: string;
+  pinCode: string;
   gstNumber: string;
   yearsExperience: string;
   kycProvider?: string;
@@ -45,6 +46,7 @@ export const EMPTY_PROVIDER_DRAFT: ProviderJoinDraft = {
   village: "",
   district: "",
   state: "",
+  pinCode: "",
   gstNumber: "",
   yearsExperience: "",
   digilockerVerified: false,

@@ -72,6 +72,37 @@
   color: #c9ff35;
 }
 
+.join-phone-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.join-phone-row .join-input {
+  flex: 1;
+  margin-bottom: 10px;
+}
+
+.join-otp-btn {
+  flex: 0 0 auto;
+  min-height: 46px;
+  margin-bottom: 10px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: #c9ff35;
+  color: #262626;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.join-otp-btn:disabled {
+  background: #3a3a3a;
+  color: #888;
+  cursor: not-allowed;
+}
+
 .join-input {
   width: 100%;
   box-sizing: border-box;
@@ -82,6 +113,19 @@
   color: #f8fafc;
   padding: 13px 14px;
   font-size: 14px;
+}
+
+.join-label {
+  display: block;
+  margin-bottom: 10px;
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.join-label .join-input {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .join-location {

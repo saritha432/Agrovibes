@@ -1,5 +1,6 @@
-import { OTPWidget } from "@msg91comm/sendotp-react-native";
 import { confirmProviderPhone, fetchProviderMsg91Widget } from "./api";
+
+const WIDGET_API = "https://control.msg91.com/api/v5/widget";
 
 type Msg91Result = {
   type?: string;
@@ -16,15 +17,24 @@ function assertMsg91Ok(result: Msg91Result | undefined, fallback: string) {
   return result;
 }
 
-async function readyWidget(token: string) {
-  const config = await fetchProviderMsg91Widget(token);
-  await OTPWidget.initializeWidget(config.widgetId, config.tokenAuth);
+async function postWidget(path: string, body: Record<string, string>, fallback: string) {
+  const response = await fetch(`${WIDGET_API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body)
+  });
+  const payload = (await response.json().catch(() => null)) as Msg91Result | null;
+  if (!response.ok) {
+    throw new Error(String(payload?.message || fallback));
+  }
+  return assertMsg91Ok(payload || undefined, fallback);
 }
 
 export async function sendProviderOtpWithMsg91(token: string, phoneDigits: string) {
-  await readyWidget(token);
-  const result = assertMsg91Ok(
-    (await OTPWidget.sendOTP({ identifier: `91${phoneDigits}` })) as Msg91Result | undefined,
+  const config = await fetchProviderMsg91Widget(token);
+  const result = await postWidget(
+    "/sendOtpMobile",
+    { widgetId: config.widgetId, tokenAuth: config.tokenAuth, identifier: `91${phoneDigits}` },
     "Could not send the OTP."
   );
   const accessToken = String(result["access-token"] || "").trim();
@@ -38,9 +48,10 @@ export async function sendProviderOtpWithMsg91(token: string, phoneDigits: strin
 }
 
 export async function verifyProviderOtpWithMsg91(token: string, phoneDigits: string, reqId: string, otp: string) {
-  await readyWidget(token);
-  const result = assertMsg91Ok(
-    (await OTPWidget.verifyOTP({ reqId, otp })) as Msg91Result | undefined,
+  const config = await fetchProviderMsg91Widget(token);
+  const result = await postWidget(
+    "/verifyOtp",
+    { widgetId: config.widgetId, tokenAuth: config.tokenAuth, reqId, otp },
     "That code was not accepted."
   );
   const accessToken = String(result["access-token"] || result.message || "").trim();
