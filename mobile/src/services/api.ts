@@ -325,6 +325,13 @@ export async function authLogin(payload: {
   return (await parseJsonOrThrow(response)) as AuthResponse;
 }
 
+export async function fetchProviderMsg91Widget(token: string) {
+  return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/widget`, token)) as {
+    widgetId: string;
+    tokenAuth: string;
+  };
+}
+
 export async function sendProviderPhoneOtp(token: string, payload: { phone: string }) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/auth/phone/send-otp`, token, {
     method: "POST",
@@ -333,7 +340,10 @@ export async function sendProviderPhoneOtp(token: string, payload: { phone: stri
   })) as { success: boolean; phone: string; provider?: string; channel?: string };
 }
 
-export async function confirmProviderPhone(token: string, payload: { phone: string; code: string }) {
+export async function confirmProviderPhone(
+  token: string,
+  payload: { phone: string; code?: string; accessToken?: string }
+) {
   return (await fetchWithAuth(`${API_BASE_URL}/v1/provider/phone/confirm`, token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

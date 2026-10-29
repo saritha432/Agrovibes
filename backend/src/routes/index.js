@@ -1632,6 +1632,10 @@ function msg91WidgetId() {
   return msg91EnvValue("MSG91_WIDGET_ID", "MSG91_WIDGETID");
 }
 
+function msg91WidgetToken() {
+  return msg91EnvValue("MSG91_WIDGET_TOKEN", "MSG91_TOKEN_AUTH");
+}
+
 function isMsg91WidgetConfigured() {
   return Boolean(msg91AuthKey() && msg91WidgetId());
 }
@@ -1751,6 +1755,22 @@ async function verifyTwilioOtp(phone, code) {
   return String(payload?.status || "").toLowerCase() === "approved";
 }
 
+async function verifyMsg91AccessToken(accessToken) {
+  const authKey = msg91AuthKey();
+  if (!authKey || !accessToken) return "";
+  const response = await fetch("https://control.msg91.com/api/v5/widget/verifyAccessToken", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", authkey: authKey },
+    body: JSON.stringify({ "access-token": accessToken })
+  });
+  const payload = await response.json().catch(() => null);
+  const type = String(payload?.type || "").toLowerCase();
+  if (!response.ok || type === "error") {
+    throw new Error(String(payload?.message || "MSG91 did not accept this OTP."));
+  }
+  return String(payload?.message || "");
+}
+
 async function verifyMsg91WidgetOtp(reqId, code) {
   const authKey = msg91AuthKey();
   const widgetId = msg91WidgetId();
@@ -1766,40 +1786,42 @@ async function verifyMsg91WidgetOtp(reqId, code) {
   return type === "success";
 }
 
-async function sendMsg91WidgetOtp(phone, authKey, widgetId) {
-  const digitsPhone = phoneDigitsOnly(phone);
-  const identifiers = [...new Set([digitsPhone, digitsPhone.slice(-10), phone.startsWith("+") ? phone : `+${digitsPhone}`].filter(Boolean))];
-  const urls = ["https://control.msg91.com/api/v5/widget/sendOtp", "https://api.msg91.com/api/v5/widget/sendOtp"];
-  let lastMessage = "Failed to send OTP";
-  for (const url of urls) {
-    for (const identifier of identifiers) {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json", authkey: authKey },
-        body: JSON.stringify({ widgetId, identifier })
-      });
-      const payload = await response.json().catch(() => null);
-      const resultType = String(payload?.type || "").toLowerCase();
-      if (response.ok && resultType !== "error") {
-        const providerRequestId = String(
-          payload?.reqId || payload?.request_id || payload?.requestId || (resultType === "success" ? payload?.message : "") || ""
-        );
-        if (!providerRequestId) {
-          throw new Error("MSG91 did not return an OTP request id.");
-        }
-        return {
-          channel: "sms",
-          providerRequestId,
-          providerStatus: String(payload?.type || payload?.status || "accepted"),
-          providerMessage: "OTP sent"
-        };
-      }
-      lastMessage = String(payload?.message || payload?.error || payload?.errors?.[0]?.message || lastMessage);
-      const retryable = response.status === 400 || response.status === 404 || /invalid request/i.test(lastMessage);
-      if (!retryable) throw new Error(lastMessage);
-    }
+function msg91SendError(payload, fallback) {
+  const message = String(payload?.message || payload?.error || payload?.errors?.[0]?.message || fallback || "Failed to send OTP");
+  const code = String(payload?.code || "");
+  if (/invalid request/i.test(message)) {
+    return "MSG91 blocked this OTP. In the OTP widget, set Country-wise restriction to Allow all. On the auth key, turn off IP security or allow the CropVibe server IP.";
   }
-  throw new Error(lastMessage);
+  if (/authentication|authkey|ip/i.test(message) || code === "201") {
+    return "MSG91 rejected the auth key. Check MSG91_AUTH_KEY, and allow the CropVibe server IP on that key.";
+  }
+  return message;
+}
+
+async function sendMsg91WidgetOtp(phone, authKey, widgetId) {
+  const identifier = phoneDigitsOnly(phone);
+  const response = await fetch("https://control.msg91.com/api/v5/widget/sendOtp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", authkey: authKey },
+    body: JSON.stringify({ widgetId, identifier })
+  });
+  const payload = await response.json().catch(() => null);
+  const resultType = String(payload?.type || "").toLowerCase();
+  if (!response.ok || resultType === "error") {
+    throw new Error(msg91SendError(payload, "Failed to send OTP"));
+  }
+  const providerRequestId = String(
+    payload?.reqId || payload?.request_id || payload?.requestId || (resultType === "success" ? payload?.message : "") || ""
+  );
+  if (!providerRequestId) {
+    throw new Error("MSG91 did not return an OTP request id.");
+  }
+  return {
+    channel: "sms",
+    providerRequestId,
+    providerStatus: String(payload?.type || payload?.status || "accepted"),
+    providerMessage: "OTP sent"
+  };
 }
 
 async function sendSmsOtp(phone, otp, options = {}) {
@@ -10709,6 +10731,18 @@ try {
 </html>`);
 });
 
+router.get("/v1/provider/phone/widget", authRequired, async (req, res) => {
+  const widgetId = msg91WidgetId();
+  const tokenAuth = msg91WidgetToken();
+  if (!widgetId || !tokenAuth) {
+    res.status(503).json({
+      message: "Add MSG91_WIDGET_ID and MSG91_WIDGET_TOKEN on the server. Use the OTP widget token, not the account auth key."
+    });
+    return;
+  }
+  res.json({ widgetId, tokenAuth });
+});
+
 router.post("/v1/provider/phone/send", authRequired, async (req, res) => {
   try {
     if (!isMsg91WidgetConfigured()) {
@@ -10739,13 +10773,17 @@ router.post("/v1/provider/phone/confirm", authRequired, async (req, res) => {
   try {
     const phone = normalizeIndiaPhone(req.body?.phone);
     const code = String(req.body?.code || "").replace(/\D/g, "");
-    if (!phone || code.length !== 6) {
+    const accessToken = String(req.body?.accessToken || "").trim();
+    if (!phone || (!accessToken && code.length !== 6)) {
       res.status(400).json({ message: "Phone and 6-digit OTP are required" });
       return;
     }
     let accepted = false;
     let otpRowId = null;
-    if (isMsg91WidgetConfigured()) {
+    if (accessToken) {
+      const verifiedIdentifier = await verifyMsg91AccessToken(accessToken);
+      accepted = phoneDigitsOnly(verifiedIdentifier).slice(-10) === phoneDigitsOnly(phone).slice(-10);
+    } else if (isMsg91WidgetConfigured()) {
       await ensurePhoneOtpTable();
       const otpRows = await query(
         `
@@ -10793,7 +10831,9 @@ router.post("/v1/provider/phone/confirm", authRequired, async (req, res) => {
     );
     res.json({ verified: true });
   } catch (error) {
-    res.status(500).json({ message: "Could not verify the OTP", error: error?.message || String(error) });
+    const detail = String(error?.message || "");
+    const safe = detail.length > 0 && !/sql|syntax|relation|column/i.test(detail);
+    res.status(safe ? 400 : 500).json({ message: safe ? detail : "Could not verify the OTP" });
   }
 });
 
