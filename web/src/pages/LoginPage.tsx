@@ -20,7 +20,6 @@ export function LoginPage() {
   const [successText, setSuccessText] = useState(
     resetState?.resetOk ? "Password reset successfully. Log in with your new password." : ""
   );
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -54,10 +53,6 @@ export function LoginPage() {
         setError("Name is required.");
         return;
       }
-      if (!email.trim()) {
-        setError("Email is required.");
-        return;
-      }
       const normalizedPhone = normalizePhoneInput(phone);
       if (!normalizedPhone) {
         setError("Enter a valid 10-digit mobile number.");
@@ -71,7 +66,6 @@ export function LoginPage() {
         mode === "login"
           ? await authLogin({ identifier: normalizedLoginPhone!, password: password.trim() })
           : await authRegister({
-              email: email.trim().toLowerCase(),
               password: password.trim(),
               fullName: fullName.trim(),
               phone: normalizePhoneInput(phone)!,
@@ -116,17 +110,6 @@ export function LoginPage() {
                   onChange={(e) => setPhone(e.target.value)}
                   required
                   autoComplete="tel"
-                />
-              </label>
-              <label className="login-form__label">
-                Email
-                <input
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
                 />
               </label>
             </>
