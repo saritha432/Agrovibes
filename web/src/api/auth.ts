@@ -19,7 +19,7 @@ export async function authLogin(payload: {
 }
 
 export async function authRegister(payload: {
-  email: string;
+  email?: string;
   password: string;
   fullName: string;
   username?: string;

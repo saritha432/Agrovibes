@@ -3567,6 +3567,35 @@ router.post("/v1/auth/register", async (req, res) => {
       return;
     }
 
+    const existing = await query(
+      `
+      SELECT ${authUserSelect}, password_hash AS "passwordHash"
+      FROM learn_users
+      WHERE phone = $1
+         OR RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '[^0-9]', '', 'g'), 10) = $2
+         OR LOWER(TRIM(email)) = $2
+         OR LOWER(TRIM(email)) = $3
+      LIMIT 1
+      `,
+      [normalizedPhone, phoneDigits, `${phoneDigits}@phone.agrovibes`]
+    );
+    const existingRow = existing.rows[0];
+    if (existingRow) {
+      if (String(existingRow.accountStatus || "active").toLowerCase() === "deleted") {
+        res.status(403).json({ message: "This account was deleted. Please create a new account." });
+        return;
+      }
+      const samePassword = await bcrypt.compare(String(password), String(existingRow.passwordHash));
+      if (!samePassword) {
+        res.status(409).json({ message: "This mobile number is already registered. Log in with the same password." });
+        return;
+      }
+      const user = authUserFromRow(existingRow);
+      const token = await issueAuthToken(user, req, req.body?.deviceInfo || req.body);
+      res.json({ token, user });
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(String(password), 10);
     const result = await query(
       `
